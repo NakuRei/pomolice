@@ -26,3 +26,5 @@ dist-ssr
 # Project Specific
 /docs/
 .claude/
+.cspell/
+*.code-workspace
