@@ -1,2 +1,2 @@
-npm run test -- --no-watch
+npm run test
 cd src-tauri/ && cargo test

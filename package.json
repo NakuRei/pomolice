@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "prepare": "husky",
-    "test": "vitest",
+    "test": "vitest --no-watch",
+    "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage"
   },
