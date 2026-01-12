@@ -2,25 +2,19 @@ import { useTimerStore, TimerStatus } from '../../store/timerStore';
 
 /**
  * TimerControls Component
- * Provides start/stop buttons for timer control
+ * Provides start button for timer control
  *
- * Phase 1: Basic start and stop functionality (stop is allowed for development)
- * Phase 2+: Stop will be removed, only emergency stop with confirmation dialog
+ * Phase 2: Only start button shown. Stop button removed per specification.
+ * Emergency stop is available via separate component (EmergencyStopButton)
  */
 export function TimerControls() {
   const status = useTimerStore((state) => state.status);
   const start = useTimerStore((state) => state.start);
-  const stop = useTimerStore((state) => state.stop);
 
   const isIdle = status === TimerStatus.IDLE;
-  const isRunning = status === TimerStatus.RUNNING;
 
   const handleStart = () => {
     start();
-  };
-
-  const handleStop = () => {
-    stop();
   };
 
   return (
@@ -33,17 +27,6 @@ export function TimerControls() {
           aria-label="タイマーを開始"
         >
           開始
-        </button>
-      )}
-
-      {isRunning && (
-        <button
-          onClick={handleStop}
-          className="px-8 py-4 text-lg font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors"
-          data-testid="stop-button"
-          aria-label="タイマーを停止"
-        >
-          停止
         </button>
       )}
     </div>

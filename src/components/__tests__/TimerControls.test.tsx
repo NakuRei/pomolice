@@ -40,27 +40,16 @@ describe('TimerControls', () => {
       useTimerStore.getState().start();
     });
 
-    it('should render stop button when timer is running', () => {
+    it('should not render any button when timer is running', () => {
       render(<TimerControls />);
-      const stopButton = screen.getByTestId('stop-button');
-      expect(stopButton).toBeInTheDocument();
-      expect(stopButton).toHaveTextContent('停止');
+      const startButton = screen.queryByTestId('start-button');
+      expect(startButton).not.toBeInTheDocument();
     });
 
     it('should not render start button when timer is running', () => {
       render(<TimerControls />);
       const startButton = screen.queryByTestId('start-button');
       expect(startButton).not.toBeInTheDocument();
-    });
-
-    it('should stop timer when stop button is clicked', async () => {
-      const user = userEvent.setup();
-      render(<TimerControls />);
-
-      const stopButton = screen.getByTestId('stop-button');
-      await user.click(stopButton);
-
-      expect(useTimerStore.getState().status).toBe(TimerStatus.IDLE);
     });
   });
 
@@ -70,23 +59,15 @@ describe('TimerControls', () => {
       const startButton = screen.getByTestId('start-button');
       expect(startButton).toHaveAttribute('aria-label', 'タイマーを開始');
     });
-
-    it('should have aria-label on stop button', () => {
-      useTimerStore.getState().start();
-      render(<TimerControls />);
-      const stopButton = screen.getByTestId('stop-button');
-      expect(stopButton).toHaveAttribute('aria-label', 'タイマーを停止');
-    });
   });
 
   describe('State Transitions', () => {
-    it('should switch from start button to stop button after starting', async () => {
+    it('should hide start button after starting', async () => {
       const user = userEvent.setup();
       const { rerender } = render(<TimerControls />);
 
       // Initially shows start button
       expect(screen.getByTestId('start-button')).toBeInTheDocument();
-      expect(screen.queryByTestId('stop-button')).not.toBeInTheDocument();
 
       // Click start button
       await user.click(screen.getByTestId('start-button'));
@@ -94,29 +75,24 @@ describe('TimerControls', () => {
       // Rerender to reflect state change
       rerender(<TimerControls />);
 
-      // Now shows stop button
+      // Start button is hidden (no buttons shown during running)
       expect(screen.queryByTestId('start-button')).not.toBeInTheDocument();
-      expect(screen.getByTestId('stop-button')).toBeInTheDocument();
     });
 
-    it('should switch from stop button to start button after stopping', async () => {
-      const user = userEvent.setup();
-      useTimerStore.getState().start();
+    it('should show start button again after emergency stop', async () => {
       const { rerender } = render(<TimerControls />);
 
-      // Initially shows stop button
-      expect(screen.getByTestId('stop-button')).toBeInTheDocument();
+      // Start timer
+      useTimerStore.getState().start();
+      rerender(<TimerControls />);
       expect(screen.queryByTestId('start-button')).not.toBeInTheDocument();
 
-      // Click stop button
-      await user.click(screen.getByTestId('stop-button'));
-
-      // Rerender to reflect state change
+      // Emergency stop
+      useTimerStore.getState().emergencyStop();
       rerender(<TimerControls />);
 
-      // Now shows start button
+      // Start button is visible again
       expect(screen.getByTestId('start-button')).toBeInTheDocument();
-      expect(screen.queryByTestId('stop-button')).not.toBeInTheDocument();
     });
   });
 });
