@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
 import { immer } from "zustand/middleware/immer";
+import { useSettingsStore } from "./settingsStore";
 
 /**
  * Timer status constants
@@ -19,42 +20,64 @@ export type TimerStatusType = typeof TimerStatus[keyof typeof TimerStatus];
  */
 export const SessionType = {
   WORK: "work",
-  BREAK: "break",
+  SHORT_BREAK: "short_break",
+  LONG_BREAK: "long_break",
 } as const;
 
 export type SessionTypeType = typeof SessionType[keyof typeof SessionType];
 
 /**
  * Timer state interface
- * Phase 0: Basic structure for timer state management
+ * Phase 2: Extended with cycle tracking and session management
  */
 interface TimerState {
-  // Timer status: idle (not started), running (counting down), paused (not used in Phase 0)
+  // Timer status: idle (not started), running (counting down), paused (not used in Phase 1-2)
   status: TimerStatusType;
 
   // Remaining time in seconds
   remainingSeconds: number;
 
-  // Session type: work or break
+  // Session type: work, short_break, or long_break
   sessionType: SessionTypeType;
+
+  // Number of completed pomodoros (work sessions) in current cycle
+  completedPomodoros: number;
+
+  // Current cycle position (1-based, resets after long break)
+  currentCycle: number;
+
+  // Flag to show "Continue?" dialog after break completion
+  showContinueDialog: boolean;
 }
 
 /**
  * Timer actions interface
- * Phase 0: Basic actions for timer control
+ * Phase 2: Extended with session completion and cycle management
  */
 interface TimerActions {
   // Start the timer
   start: () => void;
 
-  // Stop the timer
+  // Stop the timer (Phase 1 only - will be removed in Phase 2)
   stop: () => void;
+
+  // Emergency stop (Phase 2+)
+  emergencyStop: () => void;
 
   // Reset the timer to initial state
   reset: () => void;
 
   // Tick function to decrease time by 1 second
   tick: () => void;
+
+  // Complete current session and transition to next
+  completeSession: () => void;
+
+  // Start next work session (called from continue dialog)
+  startNextSession: () => void;
+
+  // End pomodoro cycle (called from continue dialog)
+  endCycle: () => void;
 }
 
 /**
@@ -64,12 +87,26 @@ type TimerStore = TimerState & TimerActions;
 
 /**
  * Initial state for the timer
+ * Phase 2: Extended with cycle tracking
  */
 const initialState: TimerState = {
   status: TimerStatus.IDLE,
   remainingSeconds: 25 * 60, // 25 minutes in seconds
   sessionType: SessionType.WORK,
+  completedPomodoros: 0,
+  currentCycle: 0,
+  showContinueDialog: false,
 };
+
+/**
+ * Determine break type based on current cycle
+ * @param cycle - Current cycle number (1-based)
+ * @param interval - Long break interval from settings
+ * @returns "short_break" or "long_break"
+ */
+function getBreakType(cycle: number, interval: number): SessionTypeType {
+  return cycle % interval === 0 ? SessionType.LONG_BREAK : SessionType.SHORT_BREAK;
+}
 
 /**
  * Zustand store for timer state management
@@ -78,17 +115,32 @@ const initialState: TimerState = {
  */
 export const useTimerStore = create<TimerStore>()(
   devtools(
-    immer((set) => ({
+    immer((set, get) => ({
       ...initialState,
 
       start: () =>
         set((state) => {
           state.status = TimerStatus.RUNNING;
+          // Initialize cycle on first start if needed
+          if (state.currentCycle === 0) {
+            state.currentCycle = 1;
+          }
         }),
 
       stop: () =>
         set((state) => {
           state.status = TimerStatus.IDLE;
+        }),
+
+      emergencyStop: () =>
+        set((state) => {
+          // Emergency stop: invalidate session, reset to idle
+          state.status = TimerStatus.IDLE;
+          state.sessionType = SessionType.WORK;
+          state.remainingSeconds = useSettingsStore.getState().workDuration * 60;
+          state.showContinueDialog = false;
+          // Note: completedPomodoros and currentCycle are NOT reset
+          // to maintain the count, but current session is invalidated
         }),
 
       reset: () => set(initialState),
@@ -97,7 +149,73 @@ export const useTimerStore = create<TimerStore>()(
         set((state) => {
           if (state.status === TimerStatus.RUNNING && state.remainingSeconds > 0) {
             state.remainingSeconds -= 1;
+
+            // Check if session is complete
+            if (state.remainingSeconds === 0) {
+              // Session completed - trigger completeSession
+              get().completeSession();
+            }
           }
+        }),
+
+      completeSession: () =>
+        set((state) => {
+          const settings = useSettingsStore.getState();
+
+          if (state.sessionType === SessionType.WORK) {
+            // Work session completed
+            state.completedPomodoros += 1;
+
+            // Determine break type
+            const breakType = getBreakType(state.currentCycle, settings.longBreakInterval);
+            state.sessionType = breakType;
+
+            // Set break duration
+            state.remainingSeconds =
+              breakType === SessionType.LONG_BREAK
+                ? settings.longBreakDuration * 60
+                : settings.shortBreakDuration * 60;
+
+            // Auto-start break (no user interaction needed)
+            state.status = TimerStatus.RUNNING;
+
+            // TODO: Show notification "休憩時間です！" (Phase 2)
+          } else {
+            // Break session completed (short or long)
+            state.status = TimerStatus.IDLE;
+            state.showContinueDialog = true;
+
+            // If long break completed, reset cycle
+            if (state.sessionType === SessionType.LONG_BREAK) {
+              state.currentCycle = 0;
+            }
+
+            // TODO: Show notification "作業に戻りましょう！" (Phase 2)
+          }
+        }),
+
+      startNextSession: () =>
+        set((state) => {
+          const settings = useSettingsStore.getState();
+
+          // Increment cycle for next work session
+          state.currentCycle += 1;
+          state.sessionType = SessionType.WORK;
+          state.remainingSeconds = settings.workDuration * 60;
+          state.showContinueDialog = false;
+          state.status = TimerStatus.RUNNING;
+        }),
+
+      endCycle: () =>
+        set((state) => {
+          const settings = useSettingsStore.getState();
+
+          // End cycle, return to idle
+          state.status = TimerStatus.IDLE;
+          state.sessionType = SessionType.WORK;
+          state.remainingSeconds = settings.workDuration * 60;
+          state.showContinueDialog = false;
+          // Keep completedPomodoros and currentCycle for statistics
         }),
     })),
     { name: "TimerStore" }
