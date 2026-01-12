@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { useTimerStore, TimerStatus, SessionType } from "./timerStore";
+import { useTimerStore, TimerStatus, SessionType } from "../timerStore";
 
 describe("timerStore", () => {
   beforeEach(() => {

@@ -7,15 +7,21 @@ describe("App", () => {
     render(<App />);
   });
 
-  it("displays 'Hello Pomolice' message", () => {
+  it("displays 'Pomolice' title", () => {
     render(<App />);
-    const heading = screen.getByText(/Hello Pomolice/i);
+    const heading = screen.getByText(/^Pomolice$/i);
     expect(heading).toBeInTheDocument();
   });
 
-  it("renders heading with correct styling classes", () => {
+  it("renders timer display", () => {
     render(<App />);
-    const heading = screen.getByText(/Hello Pomolice/i);
-    expect(heading).toHaveClass("text-4xl", "font-bold", "text-gray-800");
+    const timerDisplay = screen.getByTestId("timer-display");
+    expect(timerDisplay).toBeInTheDocument();
+  });
+
+  it("renders start button", () => {
+    render(<App />);
+    const startButton = screen.getByTestId("start-button");
+    expect(startButton).toBeInTheDocument();
   });
 });
