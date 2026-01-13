@@ -1,11 +1,11 @@
-import { useTimerStore } from '../../store/timerStore';
+import { useTimerStore, SessionType } from '../../store/timerStore';
 import { formatTime } from '../../formatters/timeFormatter';
 
 /**
  * TimerDisplay Component
  * Displays the countdown timer in large, readable format (MM:SS)
  *
- * Phase 1: Basic timer display with session type indicator
+ * Phase 2: Updated to support work, short break, and long break sessions
  */
 export function TimerDisplay() {
   const remainingSeconds = useTimerStore((state) => state.remainingSeconds);
@@ -14,11 +14,25 @@ export function TimerDisplay() {
 
   const formattedTime = formatTime(remainingSeconds);
 
+  // Get session type display text
+  const getSessionTypeText = () => {
+    switch (sessionType) {
+      case SessionType.WORK:
+        return '作業時間';
+      case SessionType.SHORT_BREAK:
+        return '短い休憩';
+      case SessionType.LONG_BREAK:
+        return '長い休憩';
+      default:
+        return '作業時間';
+    }
+  };
+
   return (
     <div className="flex flex-col items-center justify-center space-y-4">
       {/* Session type indicator */}
       <div className="text-xl font-medium text-gray-600 uppercase tracking-wider">
-        {sessionType === 'work' ? '作業時間' : '休憩時間'}
+        {getSessionTypeText()}
       </div>
 
       {/* Large timer display */}

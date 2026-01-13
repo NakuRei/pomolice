@@ -26,10 +26,16 @@ describe('TimerDisplay', () => {
     expect(screen.getByText('作業時間')).toBeInTheDocument();
   });
 
-  it('should display break session label when session type is break', () => {
-    useTimerStore.setState({ sessionType: SessionType.BREAK });
+  it('should display short break session label', () => {
+    useTimerStore.setState({ sessionType: SessionType.SHORT_BREAK });
     render(<TimerDisplay />);
-    expect(screen.getByText('休憩時間')).toBeInTheDocument();
+    expect(screen.getByText('短い休憩')).toBeInTheDocument();
+  });
+
+  it('should display long break session label', () => {
+    useTimerStore.setState({ sessionType: SessionType.LONG_BREAK });
+    render(<TimerDisplay />);
+    expect(screen.getByText('長い休憩')).toBeInTheDocument();
   });
 
   it('should display idle status', () => {
