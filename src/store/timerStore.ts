@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { devtools } from "zustand/middleware";
 import { immer } from "zustand/middleware/immer";
 import { useSettingsStore } from "./settingsStore";
+import { notifyWorkComplete, notifyBreakComplete, notifyLongBreakComplete } from "../services/notifications";
 
 /**
  * Timer status constants
@@ -188,18 +189,26 @@ export const useTimerStore = create<TimerStore>()(
             // Auto-start break (no user interaction needed)
             state.status = TimerStatus.RUNNING;
 
-            // TODO: Show notification "休憩時間です！" (Phase 2)
+            // Show notification
+            notifyWorkComplete();
           } else {
             // Break session completed (short or long)
+            const isLongBreak = state.sessionType === SessionType.LONG_BREAK;
+
             state.status = TimerStatus.IDLE;
             state.showContinueDialog = true;
 
             // If long break completed, reset cycle
-            if (state.sessionType === SessionType.LONG_BREAK) {
+            if (isLongBreak) {
               state.currentCycle = 0;
             }
 
-            // TODO: Show notification "作業に戻りましょう！" (Phase 2)
+            // Show notification
+            if (isLongBreak) {
+              notifyLongBreakComplete();
+            } else {
+              notifyBreakComplete();
+            }
           }
         }),
 
