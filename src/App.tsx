@@ -1,5 +1,6 @@
 import { TimerDisplay, TimerControls, SessionIndicator, CycleProgress } from './components/Timer';
 import { EmergencyStopButton } from './components/EmergencyStop';
+import { ContinueDialog } from './components/ContinueDialog';
 import { useTimer } from './hooks/useTimer';
 
 function App() {
@@ -24,6 +25,9 @@ function App() {
 
         <TimerControls />
       </div>
+
+      {/* Continue dialog - shown after break completion */}
+      <ContinueDialog />
     </div>
   );
 }
