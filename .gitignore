@@ -28,3 +28,4 @@ dist-ssr
 .claude/
 .cspell/
 *.code-workspace
+/coverage/
