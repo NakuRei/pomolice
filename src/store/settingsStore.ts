@@ -29,8 +29,12 @@ interface SettingsActions {
   setLongBreakDuration: (minutes: number) => void;
   /** Set long break interval with validation */
   setLongBreakInterval: (count: number) => void;
+  /** Update multiple settings at once */
+  updateSettings: (settings: Partial<SettingsState>) => void;
   /** Reset all settings to default values */
   resetToDefaults: () => void;
+  /** Reset to defaults (alias for testing compatibility) */
+  reset: () => void;
 }
 
 /**
@@ -117,7 +121,41 @@ export const useSettingsStore = create<SettingsStore>()(
             );
           }),
 
+        updateSettings: (settings: Partial<SettingsState>) =>
+          set((state) => {
+            if (settings.workDuration !== undefined) {
+              state.workDuration = validateRange(
+                settings.workDuration,
+                VALIDATION_RULES.workDuration.min,
+                VALIDATION_RULES.workDuration.max
+              );
+            }
+            if (settings.shortBreakDuration !== undefined) {
+              state.shortBreakDuration = validateRange(
+                settings.shortBreakDuration,
+                VALIDATION_RULES.shortBreakDuration.min,
+                VALIDATION_RULES.shortBreakDuration.max
+              );
+            }
+            if (settings.longBreakDuration !== undefined) {
+              state.longBreakDuration = validateRange(
+                settings.longBreakDuration,
+                VALIDATION_RULES.longBreakDuration.min,
+                VALIDATION_RULES.longBreakDuration.max
+              );
+            }
+            if (settings.longBreakInterval !== undefined) {
+              state.longBreakInterval = validateRange(
+                settings.longBreakInterval,
+                VALIDATION_RULES.longBreakInterval.min,
+                VALIDATION_RULES.longBreakInterval.max
+              );
+            }
+          }),
+
         resetToDefaults: () => set(DEFAULT_SETTINGS),
+
+        reset: () => set(DEFAULT_SETTINGS),
       })),
       {
         name: "pomolice-settings", // localStorage key

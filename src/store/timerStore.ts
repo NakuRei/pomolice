@@ -86,12 +86,19 @@ interface TimerActions {
 type TimerStore = TimerState & TimerActions;
 
 /**
+ * Get initial remaining seconds from settings
+ */
+function getInitialRemainingSeconds(): number {
+  return useSettingsStore.getState().workDuration * 60;
+}
+
+/**
  * Initial state for the timer
  * Phase 2: Extended with cycle tracking
  */
 const initialState: TimerState = {
   status: TimerStatus.IDLE,
-  remainingSeconds: 25 * 60, // 25 minutes in seconds
+  remainingSeconds: getInitialRemainingSeconds(),
   sessionType: SessionType.WORK,
   completedPomodoros: 0,
   currentCycle: 0,
@@ -145,18 +152,20 @@ export const useTimerStore = create<TimerStore>()(
 
       reset: () => set(initialState),
 
-      tick: () =>
-        set((state) => {
-          if (state.status === TimerStatus.RUNNING && state.remainingSeconds > 0) {
-            state.remainingSeconds -= 1;
+      tick: () => {
+        const state = get();
+        if (state.status === TimerStatus.RUNNING && state.remainingSeconds > 0) {
+          set((draft) => {
+            draft.remainingSeconds -= 1;
+          });
 
-            // Check if session is complete
-            if (state.remainingSeconds === 0) {
-              // Session completed - trigger completeSession
-              get().completeSession();
-            }
+          // Check if session is complete after decrement
+          if (state.remainingSeconds === 1) {
+            // Will become 0 after this tick, so complete the session
+            get().completeSession();
           }
-        }),
+        }
+      },
 
       completeSession: () =>
         set((state) => {
@@ -221,3 +230,28 @@ export const useTimerStore = create<TimerStore>()(
     { name: "TimerStore" }
   )
 );
+
+// Subscribe to settings changes and update timer when idle
+useSettingsStore.subscribe((settings, prevSettings) => {
+  const timerState = useTimerStore.getState();
+
+  // Only update if timer is idle
+  if (timerState.status !== TimerStatus.IDLE) {
+    return;
+  }
+
+  // Update remaining seconds based on current session type
+  let newRemainingSeconds = timerState.remainingSeconds;
+
+  if (timerState.sessionType === SessionType.WORK && settings.workDuration !== prevSettings.workDuration) {
+    newRemainingSeconds = settings.workDuration * 60;
+  } else if (timerState.sessionType === SessionType.SHORT_BREAK && settings.shortBreakDuration !== prevSettings.shortBreakDuration) {
+    newRemainingSeconds = settings.shortBreakDuration * 60;
+  } else if (timerState.sessionType === SessionType.LONG_BREAK && settings.longBreakDuration !== prevSettings.longBreakDuration) {
+    newRemainingSeconds = settings.longBreakDuration * 60;
+  }
+
+  if (newRemainingSeconds !== timerState.remainingSeconds) {
+    useTimerStore.setState({ remainingSeconds: newRemainingSeconds });
+  }
+});
