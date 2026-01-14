@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { TimerDisplay, TimerControls, SessionIndicator, CycleProgress } from './components/Timer';
 import { EmergencyStopButton } from './components/EmergencyStop';
 import { ContinueDialog } from './components/ContinueDialog';
@@ -6,6 +6,7 @@ import { SettingsModal } from './components/Settings';
 import { FullscreenBreak } from './components/BreakScreen/FullscreenBreak';
 import { useTimer } from './hooks/useTimer';
 import { useTimerStore } from './store/timerStore';
+import { onInputDetected } from './services/inputMonitor';
 
 function App() {
   // Initialize timer interval management
@@ -16,6 +17,61 @@ function App() {
 
   // Phase 3: Get fullscreen break state
   const isFullscreenBreak = useTimerStore((state) => state.isFullscreenBreak);
+
+  // Phase 4: Get penalty handler
+  const handleInputDuringBreak = useTimerStore((state) => state.handleInputDuringBreak);
+
+  // Phase 4: Setup input monitoring during break with debouncing
+  useEffect(() => {
+    let cleanup: (() => void) | null = null;
+    let debounceTimeout: NodeJS.Timeout | null = null;
+    let lastPenaltyTime = 0;
+
+    const setupListener = async () => {
+      if (isFullscreenBreak) {
+        // Register input detection listener with debouncing
+        const unlisten = await onInputDetected((payload) => {
+          console.log('Input detected during break:', payload.event_type);
+
+          // Debounce: only apply penalty once per 100ms to avoid excessive resets
+          const now = Date.now();
+          if (now - lastPenaltyTime < 100) {
+            return; // Skip if within debounce window
+          }
+
+          // Clear any pending timeout
+          if (debounceTimeout) {
+            clearTimeout(debounceTimeout);
+          }
+
+          // Apply penalty after a short delay to batch rapid inputs
+          debounceTimeout = setTimeout(() => {
+            lastPenaltyTime = Date.now();
+            handleInputDuringBreak();
+            debounceTimeout = null;
+          }, 50); // 50ms delay for batching
+        });
+
+        if (unlisten) {
+          cleanup = unlisten;
+        }
+      }
+    };
+
+    setupListener().catch((error) => {
+      console.error('Failed to setup input listener:', error);
+    });
+
+    // Cleanup on unmount or when break ends
+    return () => {
+      if (debounceTimeout) {
+        clearTimeout(debounceTimeout);
+      }
+      if (cleanup) {
+        cleanup();
+      }
+    };
+  }, [isFullscreenBreak, handleInputDuringBreak]);
 
   // Phase 3: Show fullscreen break overlay when in break mode
   if (isFullscreenBreak) {

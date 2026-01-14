@@ -4,6 +4,7 @@ import { immer } from "zustand/middleware/immer";
 import { useSettingsStore } from "./settingsStore";
 import { notifyWorkComplete, notifyBreakComplete, notifyLongBreakComplete } from "../services/notifications";
 import { enterFullscreenAllMonitors, exitFullscreenAllMonitors } from "../services/windowControl";
+import { startMonitoring, stopMonitoring } from "../services/inputMonitor";
 
 /**
  * Timer status constants
@@ -32,6 +33,7 @@ export type SessionTypeType = typeof SessionType[keyof typeof SessionType];
  * Timer state interface
  * Phase 2: Extended with cycle tracking and session management
  * Phase 3: Added fullscreen break mode
+ * Phase 4: Added input monitoring and penalty system
  */
 interface TimerState {
   // Timer status: idle (not started), running (counting down), paused (not used in Phase 1-2)
@@ -54,12 +56,16 @@ interface TimerState {
 
   // Phase 3: Flag to indicate fullscreen break mode is active
   isFullscreenBreak: boolean;
+
+  // Phase 4: Number of input interactions detected during current break
+  breakInteractionCount: number;
 }
 
 /**
  * Timer actions interface
  * Phase 2: Extended with session completion and cycle management
  * Phase 3: Added break mode actions
+ * Phase 4: Added input monitoring and penalty actions
  */
 interface TimerActions {
   // Start the timer
@@ -91,6 +97,12 @@ interface TimerActions {
 
   // Phase 3: Exit fullscreen break mode
   exitBreakMode: () => Promise<void>;
+
+  // Phase 4: Reset break timer to full duration (penalty for input during break)
+  resetBreakTimer: () => void;
+
+  // Phase 4: Handle input detected during break (silent penalty)
+  handleInputDuringBreak: () => void;
 }
 
 /**
@@ -109,6 +121,7 @@ function getInitialRemainingSeconds(): number {
  * Initial state for the timer
  * Phase 2: Extended with cycle tracking
  * Phase 3: Added fullscreen break flag
+ * Phase 4: Added breakInteractionCount
  */
 const initialState: TimerState = {
   status: TimerStatus.IDLE,
@@ -118,6 +131,7 @@ const initialState: TimerState = {
   currentCycle: 0,
   showContinueDialog: false,
   isFullscreenBreak: false,
+  breakInteractionCount: 0,
 };
 
 /**
@@ -162,8 +176,14 @@ export const useTimerStore = create<TimerStore>()(
           state.remainingSeconds = useSettingsStore.getState().workDuration * 60;
           state.showContinueDialog = false;
           state.isFullscreenBreak = false; // Phase 3: Exit fullscreen if in break mode
+          state.breakInteractionCount = 0; // Phase 4: Reset interaction count
           // Note: completedPomodoros and currentCycle are NOT reset
           // to maintain the count, but current session is invalidated
+
+          // Phase 4: Stop input monitoring (bypass penalty)
+          stopMonitoring().catch((error) => {
+            console.error("Failed to stop input monitoring during emergency stop:", error);
+          });
 
           // Phase 3: Exit fullscreen mode if active (multi-monitor support)
           exitFullscreenAllMonitors().catch((error) => {
@@ -271,12 +291,17 @@ export const useTimerStore = create<TimerStore>()(
         }),
 
       // Phase 3: Enter fullscreen break mode (multi-monitor support)
+      // Phase 4: Start input monitoring
       enterBreakMode: async () => {
         try {
           await enterFullscreenAllMonitors();
           set((state) => {
             state.isFullscreenBreak = true;
+            state.breakInteractionCount = 0; // Reset interaction count for new break
           });
+
+          // Phase 4: Start input monitoring
+          await startMonitoring();
         } catch (error) {
           console.error("Failed to enter fullscreen break mode:", error);
           throw error;
@@ -284,8 +309,12 @@ export const useTimerStore = create<TimerStore>()(
       },
 
       // Phase 3: Exit fullscreen break mode (multi-monitor support)
+      // Phase 4: Stop input monitoring
       exitBreakMode: async () => {
         try {
+          // Phase 4: Stop input monitoring first
+          await stopMonitoring();
+
           await exitFullscreenAllMonitors();
           set((state) => {
             state.isFullscreenBreak = false;
@@ -294,6 +323,49 @@ export const useTimerStore = create<TimerStore>()(
           console.error("Failed to exit fullscreen break mode:", error);
           throw error;
         }
+      },
+
+      // Phase 4: Reset break timer to full duration (penalty)
+      resetBreakTimer: () =>
+        set((state) => {
+          const settings = useSettingsStore.getState();
+
+          // Only reset if currently in a break session
+          if (state.sessionType === SessionType.SHORT_BREAK) {
+            state.remainingSeconds = settings.shortBreakDuration * 60;
+          } else if (state.sessionType === SessionType.LONG_BREAK) {
+            state.remainingSeconds = settings.longBreakDuration * 60;
+          }
+        }),
+
+      // Phase 4: Handle input detected during break (silent penalty)
+      handleInputDuringBreak: () => {
+        const state = get();
+
+        // Only apply penalty if in break mode
+        if (!state.isFullscreenBreak) {
+          return;
+        }
+
+        // Only apply penalty if in break session
+        if (
+          state.sessionType !== SessionType.SHORT_BREAK &&
+          state.sessionType !== SessionType.LONG_BREAK
+        ) {
+          return;
+        }
+
+        set((draft) => {
+          // Increment interaction count
+          draft.breakInteractionCount += 1;
+        });
+
+        // Reset break timer (silent penalty - no warning message)
+        get().resetBreakTimer();
+
+        console.log(
+          `Break penalty applied (interaction #${state.breakInteractionCount + 1}): Timer reset`
+        );
       },
     })),
     { name: "TimerStore" }

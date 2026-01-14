@@ -1,9 +1,11 @@
 // Pomolice - Pomodoro Timer Application
 // Phase 2: Desktop notifications
 // Phase 3: Fullscreen break enforcement
+// Phase 4: Input monitoring and penalty system
 
 mod notifications;
 mod window_control;
+mod input_monitor;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -20,6 +22,8 @@ pub fn run() {
             window_control::restore_window,
             window_control::enter_fullscreen_all_monitors,
             window_control::exit_fullscreen_all_monitors,
+            input_monitor::start_monitoring,
+            input_monitor::stop_monitoring,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
