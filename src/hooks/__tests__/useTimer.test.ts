@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { useTimer } from '../useTimer';
-import { useTimerStore, TimerStatus } from '../../store/timerStore';
+import { useTimerStore } from '../../store/timerStore';
 
 describe('useTimer', () => {
   beforeEach(() => {
@@ -17,7 +17,6 @@ describe('useTimer', () => {
   });
 
   it('should not start interval when timer status is IDLE', () => {
-    const { tick } = useTimerStore.getState();
     const tickSpy = vi.spyOn(useTimerStore.getState(), 'tick');
 
     renderHook(() => useTimer());

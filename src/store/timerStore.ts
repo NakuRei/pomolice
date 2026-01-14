@@ -3,6 +3,7 @@ import { devtools } from "zustand/middleware";
 import { immer } from "zustand/middleware/immer";
 import { useSettingsStore } from "./settingsStore";
 import { notifyWorkComplete, notifyBreakComplete, notifyLongBreakComplete } from "../services/notifications";
+import { enterFullscreen, exitFullscreen } from "../services/windowControl";
 
 /**
  * Timer status constants
@@ -30,6 +31,7 @@ export type SessionTypeType = typeof SessionType[keyof typeof SessionType];
 /**
  * Timer state interface
  * Phase 2: Extended with cycle tracking and session management
+ * Phase 3: Added fullscreen break mode
  */
 interface TimerState {
   // Timer status: idle (not started), running (counting down), paused (not used in Phase 1-2)
@@ -49,11 +51,15 @@ interface TimerState {
 
   // Flag to show "Continue?" dialog after break completion
   showContinueDialog: boolean;
+
+  // Phase 3: Flag to indicate fullscreen break mode is active
+  isFullscreenBreak: boolean;
 }
 
 /**
  * Timer actions interface
  * Phase 2: Extended with session completion and cycle management
+ * Phase 3: Added break mode actions
  */
 interface TimerActions {
   // Start the timer
@@ -79,6 +85,12 @@ interface TimerActions {
 
   // End pomodoro cycle (called from continue dialog)
   endCycle: () => void;
+
+  // Phase 3: Enter fullscreen break mode
+  enterBreakMode: () => Promise<void>;
+
+  // Phase 3: Exit fullscreen break mode
+  exitBreakMode: () => Promise<void>;
 }
 
 /**
@@ -96,6 +108,7 @@ function getInitialRemainingSeconds(): number {
 /**
  * Initial state for the timer
  * Phase 2: Extended with cycle tracking
+ * Phase 3: Added fullscreen break flag
  */
 const initialState: TimerState = {
   status: TimerStatus.IDLE,
@@ -104,6 +117,7 @@ const initialState: TimerState = {
   completedPomodoros: 0,
   currentCycle: 0,
   showContinueDialog: false,
+  isFullscreenBreak: false,
 };
 
 /**
@@ -147,8 +161,14 @@ export const useTimerStore = create<TimerStore>()(
           state.sessionType = SessionType.WORK;
           state.remainingSeconds = useSettingsStore.getState().workDuration * 60;
           state.showContinueDialog = false;
+          state.isFullscreenBreak = false; // Phase 3: Exit fullscreen if in break mode
           // Note: completedPomodoros and currentCycle are NOT reset
           // to maintain the count, but current session is invalidated
+
+          // Phase 3: Exit fullscreen mode if active
+          exitFullscreen().catch((error) => {
+            console.error("Failed to exit fullscreen during emergency stop:", error);
+          });
         }),
 
       reset: () => set(initialState),
@@ -168,49 +188,63 @@ export const useTimerStore = create<TimerStore>()(
         }
       },
 
-      completeSession: () =>
-        set((state) => {
-          const settings = useSettingsStore.getState();
+      completeSession: () => {
+        const state = get();
+        const settings = useSettingsStore.getState();
 
-          if (state.sessionType === SessionType.WORK) {
-            // Work session completed
-            state.completedPomodoros += 1;
+        if (state.sessionType === SessionType.WORK) {
+          // Work session completed
+          set((draft) => {
+            draft.completedPomodoros += 1;
 
             // Determine break type
-            const breakType = getBreakType(state.currentCycle, settings.longBreakInterval);
-            state.sessionType = breakType;
+            const breakType = getBreakType(draft.currentCycle, settings.longBreakInterval);
+            draft.sessionType = breakType;
 
             // Set break duration
-            state.remainingSeconds =
+            draft.remainingSeconds =
               breakType === SessionType.LONG_BREAK
                 ? settings.longBreakDuration * 60
                 : settings.shortBreakDuration * 60;
 
             // Auto-start break (no user interaction needed)
-            state.status = TimerStatus.RUNNING;
+            draft.status = TimerStatus.RUNNING;
+          });
 
-            // Show notification
-            notifyWorkComplete();
-          } else {
-            // Break session completed (short or long)
-            const isLongBreak = state.sessionType === SessionType.LONG_BREAK;
+          // Show notification
+          notifyWorkComplete();
 
-            state.status = TimerStatus.IDLE;
-            state.showContinueDialog = true;
+          // Phase 3: Enter fullscreen break mode
+          get().enterBreakMode().catch((error) => {
+            console.error("Failed to enter break mode:", error);
+          });
+        } else {
+          // Break session completed (short or long)
+          const isLongBreak = state.sessionType === SessionType.LONG_BREAK;
+
+          set((draft) => {
+            draft.status = TimerStatus.IDLE;
+            draft.showContinueDialog = true;
 
             // If long break completed, reset cycle
             if (isLongBreak) {
-              state.currentCycle = 0;
+              draft.currentCycle = 0;
             }
+          });
 
-            // Show notification
-            if (isLongBreak) {
-              notifyLongBreakComplete();
-            } else {
-              notifyBreakComplete();
-            }
+          // Show notification
+          if (isLongBreak) {
+            notifyLongBreakComplete();
+          } else {
+            notifyBreakComplete();
           }
-        }),
+
+          // Phase 3: Exit fullscreen break mode
+          get().exitBreakMode().catch((error) => {
+            console.error("Failed to exit break mode:", error);
+          });
+        }
+      },
 
       startNextSession: () =>
         set((state) => {
@@ -235,6 +269,32 @@ export const useTimerStore = create<TimerStore>()(
           state.showContinueDialog = false;
           // Keep completedPomodoros and currentCycle for statistics
         }),
+
+      // Phase 3: Enter fullscreen break mode
+      enterBreakMode: async () => {
+        try {
+          await enterFullscreen();
+          set((state) => {
+            state.isFullscreenBreak = true;
+          });
+        } catch (error) {
+          console.error("Failed to enter fullscreen break mode:", error);
+          throw error;
+        }
+      },
+
+      // Phase 3: Exit fullscreen break mode
+      exitBreakMode: async () => {
+        try {
+          await exitFullscreen();
+          set((state) => {
+            state.isFullscreenBreak = false;
+          });
+        } catch (error) {
+          console.error("Failed to exit fullscreen break mode:", error);
+          throw error;
+        }
+      },
     })),
     { name: "TimerStore" }
   )

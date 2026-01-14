@@ -3,7 +3,9 @@ import { TimerDisplay, TimerControls, SessionIndicator, CycleProgress } from './
 import { EmergencyStopButton } from './components/EmergencyStop';
 import { ContinueDialog } from './components/ContinueDialog';
 import { SettingsModal } from './components/Settings';
+import { FullscreenBreak } from './components/BreakScreen/FullscreenBreak';
 import { useTimer } from './hooks/useTimer';
+import { useTimerStore } from './store/timerStore';
 
 function App() {
   // Initialize timer interval management
@@ -11,6 +13,14 @@ function App() {
 
   // Settings modal state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  // Phase 3: Get fullscreen break state
+  const isFullscreenBreak = useTimerStore((state) => state.isFullscreenBreak);
+
+  // Phase 3: Show fullscreen break overlay when in break mode
+  if (isFullscreenBreak) {
+    return <FullscreenBreak />;
+  }
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100">

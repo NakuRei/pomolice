@@ -23,7 +23,8 @@ export function DurationInput({
   testId,
 }: DurationInputProps) {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newValue = parseInt(e.target.value, 10);
+    // TEMP: Support decimals for Phase 3 testing (e.g., 0.1 min = 6 seconds)
+    const newValue = parseFloat(e.target.value);
     if (!isNaN(newValue)) {
       onChange(newValue);
     }
@@ -43,6 +44,7 @@ export function DurationInput({
           onChange={handleChange}
           min={min}
           max={max}
+          step="0.01"
           className={`flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
             isValid
               ? 'border-gray-300 focus:ring-blue-500'

@@ -19,6 +19,13 @@ global.__TAURI__ = {
   },
 };
 
+// Mock Tauri internals for v2 API
+// @ts-expect-error - Mocking Tauri internals
+global.__TAURI_INTERNALS__ = {
+  invoke: async () => Promise.resolve(),
+  convertFileSrc: (filePath: string) => filePath,
+};
+
 // Mock window.matchMedia for responsive tests
 Object.defineProperty(window, "matchMedia", {
   writable: true,

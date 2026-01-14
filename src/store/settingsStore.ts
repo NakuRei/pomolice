@@ -54,11 +54,17 @@ export const DEFAULT_SETTINGS: SettingsState = {
 
 /**
  * Validation constraints for settings
+ *
+ * DEVELOPMENT NOTE: Min values are currently set low for testing Phase 3 fullscreen breaks.
+ * TODO: Before production release, restore min values to:
+ * - workDuration: { min: 1 }
+ * - shortBreakDuration: { min: 1 }
+ * - longBreakDuration: { min: 5 }
  */
 export const VALIDATION_RULES = {
-  workDuration: { min: 1, max: 120 },
-  shortBreakDuration: { min: 1, max: 60 },
-  longBreakDuration: { min: 5, max: 60 },
+  workDuration: { min: 0.01, max: 120 },        // TEMP: 0.01 min (0.6 sec) for testing
+  shortBreakDuration: { min: 0.01, max: 60 },   // TEMP: 0.01 min (0.6 sec) for testing
+  longBreakDuration: { min: 0.01, max: 60 },    // TEMP: 0.01 min (0.6 sec) for testing
   longBreakInterval: { min: 2, max: 10 },
 } as const;
 
@@ -68,9 +74,12 @@ export const VALIDATION_RULES = {
  * @param min - Minimum allowed value
  * @param max - Maximum allowed value
  * @returns Clamped value within valid range
+ *
+ * TEMP: Removed Math.floor() to support decimal values for Phase 3 testing
+ * TODO: Restore Math.floor() before production if integer-only durations are required
  */
 function validateRange(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, Math.floor(value)));
+  return Math.max(min, Math.min(max, value));
 }
 
 /**

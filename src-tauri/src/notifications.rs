@@ -45,8 +45,6 @@ pub async fn notify_long_break_complete(app: AppHandle) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     // Note: Testing notifications requires a running Tauri app context
     // These tests verify function signatures and basic structure
 

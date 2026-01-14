@@ -153,7 +153,8 @@ describe("SettingsModal", () => {
       render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
 
       const longBreakInput = screen.getByTestId("settings-long-break-input") as HTMLInputElement;
-      fireEvent.change(longBreakInput, { target: { value: "3" } });
+      // Phase 3: Using 100 (above max of 60) instead of 3, since min is now 0.01
+      fireEvent.change(longBreakInput, { target: { value: "100" } });
 
       const saveButton = screen.getByTestId("settings-save");
       expect(saveButton).toBeDisabled();

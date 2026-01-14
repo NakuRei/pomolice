@@ -65,10 +65,10 @@ describe("settingsStore", () => {
         );
       });
 
-      it("should floor decimal values", () => {
+      it("should accept decimal values (Phase 3 testing support)", () => {
         const { setWorkDuration } = useSettingsStore.getState();
         setWorkDuration(25.7);
-        expect(useSettingsStore.getState().workDuration).toBe(25);
+        expect(useSettingsStore.getState().workDuration).toBe(25.7);
       });
     });
 
@@ -103,9 +103,9 @@ describe("settingsStore", () => {
         expect(useSettingsStore.getState().longBreakDuration).toBe(20);
       });
 
-      it("should clamp long break duration to minimum (5)", () => {
+      it("should clamp long break duration to minimum (0.01)", () => {
         const { setLongBreakDuration } = useSettingsStore.getState();
-        setLongBreakDuration(2);
+        setLongBreakDuration(0); // Below minimum
         expect(useSettingsStore.getState().longBreakDuration).toBe(
           VALIDATION_RULES.longBreakDuration.min
         );
@@ -188,9 +188,10 @@ describe("settingsStore", () => {
     });
 
     it("should export VALIDATION_RULES", () => {
-      expect(VALIDATION_RULES.workDuration).toEqual({ min: 1, max: 120 });
-      expect(VALIDATION_RULES.shortBreakDuration).toEqual({ min: 1, max: 60 });
-      expect(VALIDATION_RULES.longBreakDuration).toEqual({ min: 5, max: 60 });
+      // Phase 3: Temporarily using 0.01 min for testing (will be restored to 1/5 before production)
+      expect(VALIDATION_RULES.workDuration).toEqual({ min: 0.01, max: 120 });
+      expect(VALIDATION_RULES.shortBreakDuration).toEqual({ min: 0.01, max: 60 });
+      expect(VALIDATION_RULES.longBreakDuration).toEqual({ min: 0.01, max: 60 });
       expect(VALIDATION_RULES.longBreakInterval).toEqual({ min: 2, max: 10 });
     });
   });
