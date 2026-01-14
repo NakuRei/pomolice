@@ -65,3 +65,33 @@ export async function restoreWindow(): Promise<void> {
     throw error;
   }
 }
+
+/**
+ * Enter fullscreen mode on all monitors
+ *
+ * Creates fullscreen windows on all available monitors to prevent users
+ * from working on secondary displays during break time.
+ * The main window displays the timer, while other monitors show a simple overlay.
+ */
+export async function enterFullscreenAllMonitors(): Promise<void> {
+  try {
+    await invoke("enter_fullscreen_all_monitors");
+  } catch (error) {
+    console.error("Failed to enter fullscreen on all monitors:", error);
+    throw error;
+  }
+}
+
+/**
+ * Exit fullscreen mode on all monitors
+ *
+ * Closes all overlay windows and restores the main window to normal mode.
+ */
+export async function exitFullscreenAllMonitors(): Promise<void> {
+  try {
+    await invoke("exit_fullscreen_all_monitors");
+  } catch (error) {
+    console.error("Failed to exit fullscreen on all monitors:", error);
+    throw error;
+  }
+}

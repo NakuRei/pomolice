@@ -100,6 +100,112 @@ pub async fn restore_window<R: Runtime>(
     Ok(())
 }
 
+/// Enter fullscreen mode on all monitors
+///
+/// Creates fullscreen windows on all available monitors to prevent users
+/// from working on secondary displays during break time.
+#[tauri::command]
+pub async fn enter_fullscreen_all_monitors<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<(), String> {
+    use tauri::WebviewUrl;
+    use tauri::WebviewWindowBuilder;
+
+    // Get main window and set it to fullscreen
+    let main_window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "Main window not found".to_string())?;
+
+    // Set main window to fullscreen and always on top
+    main_window
+        .set_fullscreen(true)
+        .map_err(|e| format!("Failed to set main window fullscreen: {}", e))?;
+
+    main_window
+        .set_always_on_top(true)
+        .map_err(|e| format!("Failed to set main window always on top: {}", e))?;
+
+    // Get all available monitors
+    let monitors = main_window
+        .available_monitors()
+        .map_err(|e| format!("Failed to get monitors: {}", e))?;
+
+    // Get the monitor where main window is currently displayed
+    let main_monitor = main_window
+        .current_monitor()
+        .map_err(|e| format!("Failed to get current monitor: {}", e))?;
+
+    // Create overlay windows for other monitors
+    for (index, monitor) in monitors.iter().enumerate() {
+        // Skip the monitor where main window is displayed
+        if let (Some(ref main_mon), Some(mon_name)) = (&main_monitor, monitor.name()) {
+            if let Some(main_name) = main_mon.name() {
+                if main_name == mon_name {
+                    continue;
+                }
+            }
+        }
+
+        let window_label = format!("break-overlay-{}", index);
+
+        // Check if window already exists
+        if app.get_webview_window(&window_label).is_some() {
+            continue;
+        }
+
+        let position = monitor.position();
+        let size = monitor.size();
+
+        // Create overlay window for this monitor
+        WebviewWindowBuilder::new(&app, &window_label, WebviewUrl::App("break-overlay.html".into()))
+            .title("Break Overlay")
+            .position(position.x as f64, position.y as f64)
+            .inner_size(size.width as f64, size.height as f64)
+            .fullscreen(true)
+            .always_on_top(true)
+            .decorations(false)
+            .resizable(false)
+            .skip_taskbar(true)
+            .build()
+            .map_err(|e| format!("Failed to create overlay window: {}", e))?;
+    }
+
+    Ok(())
+}
+
+/// Exit fullscreen mode on all monitors
+///
+/// Closes all overlay windows and restores main window to normal state.
+#[tauri::command]
+pub async fn exit_fullscreen_all_monitors<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<(), String> {
+    // Close all overlay windows
+    let windows = app.webview_windows();
+    for (label, window) in windows.iter() {
+        if label.starts_with("break-overlay-") {
+            window
+                .close()
+                .map_err(|e| format!("Failed to close overlay window: {}", e))?;
+        }
+    }
+
+    // Restore main window
+    let main_window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "Main window not found".to_string())?;
+
+    main_window
+        .set_always_on_top(false)
+        .map_err(|e| format!("Failed to disable always on top: {}", e))?;
+
+    main_window
+        .set_fullscreen(false)
+        .map_err(|e| format!("Failed to exit fullscreen: {}", e))?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     // Note: Window control tests require a running Tauri application

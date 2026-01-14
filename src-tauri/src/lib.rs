@@ -18,6 +18,8 @@ pub fn run() {
             window_control::exit_fullscreen,
             window_control::set_always_on_top,
             window_control::restore_window,
+            window_control::enter_fullscreen_all_monitors,
+            window_control::exit_fullscreen_all_monitors,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

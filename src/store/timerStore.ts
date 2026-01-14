@@ -3,7 +3,7 @@ import { devtools } from "zustand/middleware";
 import { immer } from "zustand/middleware/immer";
 import { useSettingsStore } from "./settingsStore";
 import { notifyWorkComplete, notifyBreakComplete, notifyLongBreakComplete } from "../services/notifications";
-import { enterFullscreen, exitFullscreen } from "../services/windowControl";
+import { enterFullscreenAllMonitors, exitFullscreenAllMonitors } from "../services/windowControl";
 
 /**
  * Timer status constants
@@ -165,8 +165,8 @@ export const useTimerStore = create<TimerStore>()(
           // Note: completedPomodoros and currentCycle are NOT reset
           // to maintain the count, but current session is invalidated
 
-          // Phase 3: Exit fullscreen mode if active
-          exitFullscreen().catch((error) => {
+          // Phase 3: Exit fullscreen mode if active (multi-monitor support)
+          exitFullscreenAllMonitors().catch((error) => {
             console.error("Failed to exit fullscreen during emergency stop:", error);
           });
         }),
@@ -270,10 +270,10 @@ export const useTimerStore = create<TimerStore>()(
           // Keep completedPomodoros and currentCycle for statistics
         }),
 
-      // Phase 3: Enter fullscreen break mode
+      // Phase 3: Enter fullscreen break mode (multi-monitor support)
       enterBreakMode: async () => {
         try {
-          await enterFullscreen();
+          await enterFullscreenAllMonitors();
           set((state) => {
             state.isFullscreenBreak = true;
           });
@@ -283,10 +283,10 @@ export const useTimerStore = create<TimerStore>()(
         }
       },
 
-      // Phase 3: Exit fullscreen break mode
+      // Phase 3: Exit fullscreen break mode (multi-monitor support)
       exitBreakMode: async () => {
         try {
-          await exitFullscreen();
+          await exitFullscreenAllMonitors();
           set((state) => {
             state.isFullscreenBreak = false;
           });
