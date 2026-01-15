@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { useTimerStore, SessionType } from "../../store/timerStore";
+import { useSkipFlowStore } from "../../store/skipFlowStore";
 import { formatTime } from "../../formatters/timeFormatter";
 import { MotivationalMessage } from "./MotivationalMessage";
 import { BreakStats } from "./BreakStats";
 import { SkipButton } from "./SkipButton";
+import SkipFlowModal from "../SkipFlow/SkipFlowModal";
 
 /**
  * FullscreenBreak Component
@@ -17,13 +19,13 @@ import { SkipButton } from "./SkipButton";
  * - Break statistics
  * - Small skip button (triggers simple confirmation)
  *
- * Phase 4 will add: Input monitoring and penalties
- * Phase 5 will add: Multi-step skip confirmation flow
+ * Phase 4: Input monitoring and penalties
+ * Phase 5: Multi-step skip confirmation flow (10 steps)
  */
 export function FullscreenBreak() {
   const remainingSeconds = useTimerStore((state) => state.remainingSeconds);
   const sessionType = useTimerStore((state) => state.sessionType);
-  const [showSkipConfirm, setShowSkipConfirm] = useState(false);
+  const { isActive, startSkipFlow, resetSkipFlow } = useSkipFlowStore();
 
   const formattedTime = formatTime(remainingSeconds);
 
@@ -39,23 +41,31 @@ export function FullscreenBreak() {
     }
   };
 
-  // Handle skip button click
+  // Handle skip button click - start the 10-step skip flow
   const handleSkipClick = () => {
-    setShowSkipConfirm(true);
+    startSkipFlow();
   };
 
-  // Handle skip confirmation
-  const handleConfirmSkip = () => {
-    // Phase 3: Simple skip (just end the break)
-    // Phase 5 will replace this with multi-step flow
+  // Handle skip flow completion - user completed all 10 steps
+  const handleSkipComplete = () => {
+    // User successfully completed all 10 steps, skip the break
     const timerStore = useTimerStore.getState();
-    timerStore.completeSession(); // Force complete the break
-    setShowSkipConfirm(false);
+
+    // TODO Phase 6: Record skip in statistics
+    // statisticsStore.recordBreakSkip(skipFlowStore.totalTimeSpent, skipFlowStore.stepRetries);
+
+    // Exit break mode and complete session
+    timerStore.exitBreakMode().then(() => {
+      timerStore.completeSession();
+    });
+
+    // Reset skip flow
+    resetSkipFlow();
   };
 
-  // Handle skip cancel
-  const handleCancelSkip = () => {
-    setShowSkipConfirm(false);
+  // Handle skip flow cancel - user gave up and decided to take break
+  const handleSkipCancel = () => {
+    resetSkipFlow();
   };
 
   return (
@@ -91,33 +101,12 @@ export function FullscreenBreak() {
         <SkipButton onClick={handleSkipClick} />
       </div>
 
-      {/* Skip confirmation dialog (Phase 3: simple version) */}
-      {showSkipConfirm && (
-        <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-          <div className="bg-gray-800 rounded-lg p-8 max-w-md">
-            <h2 className="text-2xl font-bold text-white mb-4">
-              休憩をスキップしますか?
-            </h2>
-            <p className="text-gray-300 mb-6">
-              休憩は健康と生産性のために重要です。
-            </p>
-            <div className="flex gap-4 justify-end">
-              <button
-                onClick={handleCancelSkip}
-                className="px-6 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"
-              >
-                キャンセル
-              </button>
-              <button
-                onClick={handleConfirmSkip}
-                className="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded transition-colors"
-                data-testid="confirm-skip-button"
-              >
-                スキップ
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* Phase 5: Multi-step skip confirmation flow (10 steps) */}
+      {isActive && (
+        <SkipFlowModal
+          onComplete={handleSkipComplete}
+          onCancel={handleSkipCancel}
+        />
       )}
     </div>
   );

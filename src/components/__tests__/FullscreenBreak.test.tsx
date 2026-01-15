@@ -115,14 +115,15 @@ describe("FullscreenBreak", () => {
       expect(skipButtonContainer).toBeInTheDocument();
     });
 
-    it("should show confirmation dialog when clicked", () => {
+    it("should show skip flow modal when clicked", () => {
       render(<FullscreenBreak />);
 
       const skipButton = screen.getByText("スキップ");
       fireEvent.click(skipButton);
 
-      expect(screen.getByText("休憩をスキップしますか?")).toBeInTheDocument();
-      expect(screen.getByText(/休憩は健康と生産性のために重要です/)).toBeInTheDocument();
+      // Phase 5: Shows 10-step skip flow instead of simple dialog
+      expect(screen.getByText(/Step/i)).toBeInTheDocument();
+      expect(screen.getByText(/Are you sure you want to skip/i)).toBeInTheDocument();
     });
   });
 
@@ -133,35 +134,18 @@ describe("FullscreenBreak", () => {
       fireEvent.click(skipButton);
     });
 
-    it("should show cancel and confirm buttons", () => {
-      expect(screen.getByText("キャンセル")).toBeInTheDocument();
-      expect(screen.getByTestId("confirm-skip-button")).toBeInTheDocument();
+    // Phase 5: Skip flow modal with 10 steps
+    it("should show skip flow progress indicator", () => {
+      expect(screen.getByText(/Step/i)).toBeInTheDocument();
+      expect(screen.getByText(/of 10/i)).toBeInTheDocument();
     });
 
-    it("should close dialog when cancel is clicked", () => {
-      const cancelButton = screen.getByText("キャンセル");
-      fireEvent.click(cancelButton);
-
-      expect(screen.queryByText("休憩をスキップしますか?")).not.toBeInTheDocument();
+    it("should show first confirmation step", () => {
+      expect(screen.getByText(/Are you sure you want to skip/i)).toBeInTheDocument();
     });
 
-    it("should complete session when confirm is clicked", () => {
-      const completeSessionSpy = vi.spyOn(
-        useTimerStore.getState(),
-        "completeSession"
-      );
-
-      const confirmButton = screen.getByTestId("confirm-skip-button");
-      fireEvent.click(confirmButton);
-
-      expect(completeSessionSpy).toHaveBeenCalled();
-    });
-
-    it("should close dialog after confirming skip", () => {
-      const confirmButton = screen.getByTestId("confirm-skip-button");
-      fireEvent.click(confirmButton);
-
-      expect(screen.queryByText("休憩をスキップしますか?")).not.toBeInTheDocument();
+    it("should have take break button", () => {
+      expect(screen.getByText(/No, Take Break/i)).toBeInTheDocument();
     });
   });
 
