@@ -362,10 +362,6 @@ export const useTimerStore = create<TimerStore>()(
 
         // Reset break timer (silent penalty - no warning message)
         get().resetBreakTimer();
-
-        console.log(
-          `Break penalty applied (interaction #${state.breakInteractionCount + 1}): Timer reset`
-        );
       },
     })),
     { name: "TimerStore" }

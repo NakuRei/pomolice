@@ -44,14 +44,11 @@ function isTauriEnvironment(): boolean {
  */
 export async function startMonitoring(): Promise<void> {
   if (!isTauriEnvironment()) {
-    console.log('Skipping input monitoring (not in Tauri environment)');
     return;
   }
 
   try {
-    console.log('Starting input monitoring...');
     await invoke('start_monitoring');
-    console.log('Input monitoring started successfully');
   } catch (error) {
     console.error('Failed to start input monitoring:', error);
     throw error;
@@ -63,14 +60,11 @@ export async function startMonitoring(): Promise<void> {
  */
 export async function stopMonitoring(): Promise<void> {
   if (!isTauriEnvironment()) {
-    console.log('Skipping stop monitoring (not in Tauri environment)');
     return;
   }
 
   try {
-    console.log('Stopping input monitoring...');
     await invoke('stop_monitoring');
-    console.log('Input monitoring stopped successfully');
   } catch (error) {
     console.error('Failed to stop input monitoring:', error);
     throw error;
@@ -85,17 +79,14 @@ export async function onInputDetected(
   callback: InputDetectedCallback
 ): Promise<UnlistenFn | null> {
   if (!isTauriEnvironment()) {
-    console.log('Skipping input detection listener (not in Tauri environment)');
     return null;
   }
 
   try {
     const unlisten = await listen<InputDetectedPayload>('input-detected', (event) => {
-      console.log('Input detected:', event.payload);
       callback(event.payload);
     });
 
-    console.log('Input detection listener registered');
     return unlisten;
   } catch (error) {
     console.error('Failed to register input detection listener:', error);
@@ -118,7 +109,6 @@ export async function setupInputListener(
   return () => {
     if (unlisten) {
       unlisten();
-      console.log('Input detection listener cleaned up');
     }
   };
 }

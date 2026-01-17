@@ -23,14 +23,11 @@ function isTauriEnvironment(): boolean {
  */
 export async function notifyWorkComplete(): Promise<void> {
   if (!isTauriEnvironment()) {
-    console.log('Skipping notification (not in Tauri environment)');
     return;
   }
 
   try {
-    console.log('Calling notify_work_complete...');
     await invoke('notify_work_complete');
-    console.log('Notification sent successfully');
   } catch (error) {
     console.error('Failed to show work complete notification:', error);
   }
@@ -41,14 +38,11 @@ export async function notifyWorkComplete(): Promise<void> {
  */
 export async function notifyBreakComplete(): Promise<void> {
   if (!isTauriEnvironment()) {
-    console.log('Skipping notification (not in Tauri environment)');
     return;
   }
 
   try {
-    console.log('Calling notify_break_complete...');
     await invoke('notify_break_complete');
-    console.log('Notification sent successfully');
   } catch (error) {
     console.error('Failed to show break complete notification:', error);
   }
@@ -59,14 +53,11 @@ export async function notifyBreakComplete(): Promise<void> {
  */
 export async function notifyLongBreakComplete(): Promise<void> {
   if (!isTauriEnvironment()) {
-    console.log('Skipping notification (not in Tauri environment)');
     return;
   }
 
   try {
-    console.log('Calling notify_long_break_complete...');
     await invoke('notify_long_break_complete');
-    console.log('Notification sent successfully');
   } catch (error) {
     console.error('Failed to show long break complete notification:', error);
   }
