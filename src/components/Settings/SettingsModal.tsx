@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
-import { useSettingsStore, VALIDATION_RULES } from '../../store/settingsStore';
-import { DurationInput } from './DurationInput';
+import { useState, useEffect } from "react";
+import { useSettingsStore, VALIDATION_RULES } from "../../store/settingsStore";
+import { DurationInput } from "./DurationInput";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -19,16 +19,28 @@ interface SettingsModalProps {
  */
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const workDurationStore = useSettingsStore((state) => state.workDuration);
-  const shortBreakDurationStore = useSettingsStore((state) => state.shortBreakDuration);
-  const longBreakDurationStore = useSettingsStore((state) => state.longBreakDuration);
-  const longBreakIntervalStore = useSettingsStore((state) => state.longBreakInterval);
+  const shortBreakDurationStore = useSettingsStore(
+    (state) => state.shortBreakDuration,
+  );
+  const longBreakDurationStore = useSettingsStore(
+    (state) => state.longBreakDuration,
+  );
+  const longBreakIntervalStore = useSettingsStore(
+    (state) => state.longBreakInterval,
+  );
   const updateSettings = useSettingsStore((state) => state.updateSettings);
 
   // Local state for form inputs
   const [workDuration, setWorkDuration] = useState(workDurationStore);
-  const [shortBreakDuration, setShortBreakDuration] = useState(shortBreakDurationStore);
-  const [longBreakDuration, setLongBreakDuration] = useState(longBreakDurationStore);
-  const [longBreakInterval, setLongBreakInterval] = useState(longBreakIntervalStore);
+  const [shortBreakDuration, setShortBreakDuration] = useState(
+    shortBreakDurationStore,
+  );
+  const [longBreakDuration, setLongBreakDuration] = useState(
+    longBreakDurationStore,
+  );
+  const [longBreakInterval, setLongBreakInterval] = useState(
+    longBreakIntervalStore,
+  );
 
   // Sync local state with store when modal opens
   useEffect(() => {
@@ -38,7 +50,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setLongBreakDuration(longBreakDurationStore);
       setLongBreakInterval(longBreakIntervalStore);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
   if (!isOpen) {
@@ -60,7 +71,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     longBreakInterval <= VALIDATION_RULES.longBreakInterval.max;
 
   const isFormValid =
-    isWorkDurationValid && isShortBreakValid && isLongBreakValid && isIntervalValid;
+    isWorkDurationValid &&
+    isShortBreakValid &&
+    isLongBreakValid &&
+    isIntervalValid;
 
   const handleSave = () => {
     if (!isFormValid) {
@@ -146,8 +160,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             disabled={!isFormValid}
             className={`flex-1 px-6 py-3 text-white rounded-lg focus:outline-none focus:ring-2 transition-colors ${
               isFormValid
-                ? 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500'
-                : 'bg-gray-400 cursor-not-allowed'
+                ? "bg-blue-600 hover:bg-blue-700 focus:ring-blue-500"
+                : "bg-gray-400 cursor-not-allowed"
             }`}
             data-testid="settings-save"
           >

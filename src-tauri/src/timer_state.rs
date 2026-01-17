@@ -30,17 +30,6 @@ pub struct AppState {
     last_transition: Option<Instant>,
 }
 
-impl AppState {
-    fn new() -> Self {
-        Self {
-            status: TimerStatus::Idle,
-            break_start_time: None,
-            skip_attempts: 0,
-            last_transition: None,
-        }
-    }
-}
-
 // Global application state
 static APP_STATE: Mutex<AppState> = Mutex::new(AppState {
     status: TimerStatus::Idle,
@@ -286,7 +275,12 @@ mod tests {
 
     #[test]
     fn test_app_state_initial() {
-        let state = AppState::new();
+        let state = AppState {
+            status: TimerStatus::Idle,
+            break_start_time: None,
+            skip_attempts: 0,
+            last_transition: None,
+        };
         assert_eq!(state.status, TimerStatus::Idle);
         assert_eq!(state.break_start_time, None);
         assert_eq!(state.skip_attempts, 0);
