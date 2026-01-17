@@ -1,11 +1,31 @@
 // Pomolice - Input Monitor Module
 // Phase 4: Global keyboard and mouse input monitoring for break enforcement
 
-use rdev::{listen, Event, EventType};
+use rdev::{listen, Event, EventType, Key};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tauri::{AppHandle, Emitter};
+
+#[derive(Default)]
+struct ModifierState {
+    ctrl: bool,
+    alt: bool,
+    shift: bool,
+}
+
+fn update_modifiers(mods: &mut ModifierState, key: Key, pressed: bool) {
+    match key {
+        Key::ControlLeft | Key::ControlRight => mods.ctrl = pressed,
+        Key::Alt | Key::AltGr => mods.alt = pressed,
+        Key::ShiftLeft | Key::ShiftRight => mods.shift = pressed,
+        _ => {}
+    }
+}
+
+fn is_escape_combo(mods: &ModifierState, key: Key) -> bool {
+    mods.ctrl && mods.alt && mods.shift && matches!(key, Key::KeyE)
+}
 
 /// Input event types detected during break time
 /// Note: We do NOT record the actual key pressed or mouse position for privacy
@@ -53,7 +73,6 @@ fn check_accessibility_permission() -> Result<bool, String> {
 /// Start global input monitoring
 /// This will listen to ALL keyboard and mouse events system-wide
 /// and emit "input-detected" events to the frontend
-#[tauri::command]
 pub fn start_monitoring(app_handle: AppHandle) -> Result<(), String> {
     // Check accessibility permissions
     if !check_accessibility_permission()? {
@@ -77,6 +96,7 @@ pub fn start_monitoring(app_handle: AppHandle) -> Result<(), String> {
         is_monitoring: true,
         should_stop: false,
     }));
+    let mods = Arc::new(Mutex::new(ModifierState::default()));
     *state_lock = Some(state.clone());
     drop(state_lock);
 
@@ -89,6 +109,28 @@ pub fn start_monitoring(app_handle: AppHandle) -> Result<(), String> {
                     // Signal rdev to stop listening
                     // Note: rdev doesn't have a clean way to stop, so we just return
                     return;
+                }
+            }
+
+            // Escape hatch: detect Ctrl+Alt+Shift+E and exit fullscreen
+            if let EventType::KeyPress(key) = event.event_type {
+                if let Ok(mut m) = mods.lock() {
+                    update_modifiers(&mut m, key, true);
+                    if is_escape_combo(&m, key) {
+                        let app = app_handle.clone();
+                        // Best-effort exit; ignore errors
+                        let _ = tauri::async_runtime::block_on(async {
+                            crate::window_control::exit_fullscreen_all_monitors(app.clone()).await
+                        });
+                        if let Ok(mut state) = state.lock() {
+                            state.should_stop = true;
+                        }
+                        return;
+                    }
+                }
+            } else if let EventType::KeyRelease(key) = event.event_type {
+                if let Ok(mut m) = mods.lock() {
+                    update_modifiers(&mut m, key, false);
                 }
             }
 
@@ -136,7 +178,6 @@ pub fn start_monitoring(app_handle: AppHandle) -> Result<(), String> {
 }
 
 /// Stop global input monitoring
-#[tauri::command]
 pub fn stop_monitoring() -> Result<(), String> {
     let mut state_lock = MONITOR_STATE.lock().map_err(|e| e.to_string())?;
 

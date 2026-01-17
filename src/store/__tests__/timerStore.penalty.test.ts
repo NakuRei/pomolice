@@ -15,13 +15,10 @@ vi.mock('../../services/notifications', () => ({
 }));
 
 vi.mock('../../services/windowControl', () => ({
-  enterFullscreenAllMonitors: vi.fn().mockResolvedValue(undefined),
-  exitFullscreenAllMonitors: vi.fn().mockResolvedValue(undefined),
-}));
-
-vi.mock('../../services/inputMonitor', () => ({
-  startMonitoring: vi.fn().mockResolvedValue(undefined),
-  stopMonitoring: vi.fn().mockResolvedValue(undefined),
+  startBreak: vi.fn().mockResolvedValue(undefined),
+  completeBreak: vi.fn().mockResolvedValue(undefined),
+  startWork: vi.fn().mockResolvedValue(undefined),
+  completeWork: vi.fn().mockResolvedValue(undefined),
 }));
 
 describe('Timer Store - Penalty System', () => {

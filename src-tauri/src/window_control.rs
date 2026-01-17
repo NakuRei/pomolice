@@ -1,5 +1,6 @@
 // Window control module for Phase 3: Fullscreen Break Enforcement
-// Provides commands to control window state: fullscreen, always-on-top, etc.
+// Provides INTERNAL commands to control window state: fullscreen, always-on-top, etc.
+// Security: These functions are NOT exposed to frontend - only callable from timer_state module
 
 use tauri::{AppHandle, Manager, Runtime, PhysicalPosition, PhysicalSize};
 use std::sync::Mutex;
@@ -15,10 +16,10 @@ struct WindowState {
 
 /// Enter fullscreen mode with always-on-top
 ///
+/// INTERNAL USE ONLY - Called by timer_state module
 /// This command makes the window fullscreen and ensures it stays on top
 /// of all other windows, making it difficult for users to switch away.
-#[tauri::command]
-pub async fn enter_fullscreen<R: Runtime>(
+pub(crate) async fn enter_fullscreen<R: Runtime>(
     app: AppHandle<R>,
 ) -> Result<(), String> {
     let window = app
@@ -40,9 +41,9 @@ pub async fn enter_fullscreen<R: Runtime>(
 
 /// Exit fullscreen mode and restore normal window state
 ///
+/// INTERNAL USE ONLY - Called by timer_state module
 /// This command restores the window to its normal state after break completion.
-#[tauri::command]
-pub async fn exit_fullscreen<R: Runtime>(
+pub(crate) async fn exit_fullscreen<R: Runtime>(
     app: AppHandle<R>,
 ) -> Result<(), String> {
     let window = app
@@ -64,9 +65,9 @@ pub async fn exit_fullscreen<R: Runtime>(
 
 /// Set always-on-top behavior
 ///
+/// INTERNAL USE ONLY
 /// Utility command to control always-on-top independently.
-#[tauri::command]
-pub async fn set_always_on_top<R: Runtime>(
+pub(crate) async fn set_always_on_top<R: Runtime>(
     app: AppHandle<R>,
     always_on_top: bool,
 ) -> Result<(), String> {
@@ -83,9 +84,9 @@ pub async fn set_always_on_top<R: Runtime>(
 
 /// Restore window to normal state
 ///
+/// INTERNAL USE ONLY
 /// Ensures window is visible, focused, and in normal mode (not minimized).
-#[tauri::command]
-pub async fn restore_window<R: Runtime>(
+pub(crate) async fn restore_window<R: Runtime>(
     app: AppHandle<R>,
 ) -> Result<(), String> {
     let window = app
@@ -112,10 +113,10 @@ pub async fn restore_window<R: Runtime>(
 
 /// Enter fullscreen mode on all monitors
 ///
+/// INTERNAL USE ONLY - Called by timer_state::start_break
 /// Creates fullscreen windows on all available monitors to prevent users
 /// from working on secondary displays during break time.
-#[tauri::command]
-pub async fn enter_fullscreen_all_monitors<R: Runtime>(
+pub(crate) async fn enter_fullscreen_all_monitors<R: Runtime>(
     app: AppHandle<R>,
 ) -> Result<(), String> {
     use tauri::WebviewUrl;
@@ -246,9 +247,9 @@ pub async fn enter_fullscreen_all_monitors<R: Runtime>(
 
 /// Exit fullscreen mode on all monitors
 ///
+/// INTERNAL USE ONLY - Called by timer_state::complete_break
 /// Closes all overlay windows and restores main window to normal state.
-#[tauri::command]
-pub async fn exit_fullscreen_all_monitors<R: Runtime>(
+pub(crate) async fn exit_fullscreen_all_monitors<R: Runtime>(
     app: AppHandle<R>,
 ) -> Result<(), String> {
     // Close all overlay windows

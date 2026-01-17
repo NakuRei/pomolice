@@ -3,8 +3,7 @@ import { devtools } from "zustand/middleware";
 import { immer } from "zustand/middleware/immer";
 import { useSettingsStore } from "./settingsStore";
 import { notifyWorkComplete, notifyBreakComplete, notifyLongBreakComplete } from "../services/notifications";
-import { enterFullscreenAllMonitors, exitFullscreenAllMonitors } from "../services/windowControl";
-import { startMonitoring, stopMonitoring } from "../services/inputMonitor";
+import { startBreak, completeBreak, startWork, completeWork } from "../services/windowControl";
 
 /**
  * Timer status constants
@@ -160,21 +159,32 @@ export const useTimerStore = create<TimerStore>()(
     immer((set, get) => ({
       ...initialState,
 
-      start: () =>
+      start: () => {
+        const duration = get().remainingSeconds;
+
         set((state) => {
           state.status = TimerStatus.RUNNING;
           // Initialize cycle on first start if needed
           if (state.currentCycle === 0) {
             state.currentCycle = 1;
           }
-        }),
+        });
+
+        // Inform backend of work session start (guarded in Rust)
+        startWork(duration).catch((error) => {
+          console.error("Failed to start work session in backend:", error);
+        });
+      },
 
       stop: () =>
         set((state) => {
           state.status = TimerStatus.IDLE;
         }),
 
-      emergencyStop: () =>
+      emergencyStop: () => {
+        const wasFullscreenBreak = get().isFullscreenBreak;
+        const wasRunning = get().status === TimerStatus.RUNNING;
+
         set((state) => {
           // Emergency stop: invalidate session, reset to idle
           state.status = TimerStatus.IDLE;
@@ -185,17 +195,20 @@ export const useTimerStore = create<TimerStore>()(
           state.breakInteractionCount = 0; // Phase 4: Reset interaction count
           // Note: completedPomodoros and currentCycle are NOT reset
           // to maintain the count, but current session is invalidated
+        });
 
-          // Phase 4: Stop input monitoring (bypass penalty)
-          stopMonitoring().catch((error) => {
-            console.error("Failed to stop input monitoring during emergency stop:", error);
-          });
-
-          // Phase 3: Exit fullscreen mode if active (multi-monitor support)
-          exitFullscreenAllMonitors().catch((error) => {
+        // Phase 3: Exit fullscreen mode if active (secure break management)
+        if (wasFullscreenBreak) {
+          completeBreak().catch((error) => {
             console.error("Failed to exit fullscreen during emergency stop:", error);
           });
-        }),
+        } else if (wasRunning) {
+          // Ensure backend state resets if work was active
+          completeWork().catch((error) => {
+            console.error("Failed to reset work state during emergency stop:", error);
+          });
+        }
+      },
 
       reset: () => set(initialState),
 
@@ -272,17 +285,22 @@ export const useTimerStore = create<TimerStore>()(
         }
       },
 
-      startNextSession: () =>
-        set((state) => {
-          const settings = useSettingsStore.getState();
+      startNextSession: () => {
+        const settings = useSettingsStore.getState();
 
+        set((state) => {
           // Increment cycle for next work session
           state.currentCycle += 1;
           state.sessionType = SessionType.WORK;
           state.remainingSeconds = settings.workDuration * 60;
           state.showContinueDialog = false;
           state.status = TimerStatus.RUNNING;
-        }),
+        });
+
+        startWork(settings.workDuration * 60).catch((error) => {
+          console.error("Failed to start next work session in backend:", error);
+        });
+      },
 
       endCycle: () =>
         set((state) => {
@@ -296,32 +314,33 @@ export const useTimerStore = create<TimerStore>()(
           // Keep completedPomodoros and currentCycle for statistics
         }),
 
-      // Phase 3: Enter fullscreen break mode (multi-monitor support)
-      // Phase 4: Start input monitoring
+      // Phase 3: Enter fullscreen break mode (secure state-managed)
+      // Phase 4: Start input monitoring (backend-managed)
       enterBreakMode: async () => {
         try {
-          await enterFullscreenAllMonitors();
+          const state = get();
+          const duration = state.remainingSeconds;
+
+          // Start break through secure backend API
+          await startBreak(duration);
+
           set((state) => {
             state.isFullscreenBreak = true;
             state.breakInteractionCount = 0; // Reset interaction count for new break
           });
-
-          // Phase 4: Start input monitoring
-          await startMonitoring();
         } catch (error) {
           console.error("Failed to enter fullscreen break mode:", error);
           throw error;
         }
       },
 
-      // Phase 3: Exit fullscreen break mode (multi-monitor support)
-      // Phase 4: Stop input monitoring
+      // Phase 3: Exit fullscreen break mode (secure state-managed)
+      // Phase 4: Stop input monitoring (backend-managed)
       exitBreakMode: async () => {
         try {
-          // Phase 4: Stop input monitoring first
-          await stopMonitoring();
+          // Complete break through secure backend API
+          await completeBreak();
 
-          await exitFullscreenAllMonitors();
           set((state) => {
             state.isFullscreenBreak = false;
           });

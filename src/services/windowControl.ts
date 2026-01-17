@@ -1,97 +1,149 @@
 /**
  * Window Control Service
  *
- * Frontend wrapper for Tauri window control commands.
- * Provides functions to manage fullscreen mode and window state.
+ * Frontend wrapper for Tauri timer state management commands.
+ * Security: Uses high-level commands that validate state in Rust backend.
  *
- * Phase 3: Basic fullscreen enforcement
+ * Phase 3: Secure fullscreen enforcement through timer state management
  */
 
 import { invoke } from "@tauri-apps/api/core";
 
 /**
- * Enter fullscreen mode with always-on-top
+ * Start a break session
  *
- * Makes the window fullscreen and prevents users from easily switching away.
- * Used when break time starts.
+ * Requests the backend to start a break session.
+ * The backend will validate the state and automatically enter fullscreen on all monitors.
+ *
+ * @param duration - Break duration in seconds
+ * @throws Error if not in valid state or window control fails
+ */
+export async function startBreak(duration: number): Promise<void> {
+  try {
+    await invoke("start_break", { duration });
+  } catch (error) {
+    console.error("Failed to start break:", error);
+    throw error;
+  }
+}
+
+/**
+ * Complete a break session
+ *
+ * Requests the backend to complete the current break session.
+ * The backend will validate the state and automatically exit fullscreen on all monitors.
+ *
+ * @throws Error if not on break or window control fails
+ */
+export async function completeBreak(): Promise<void> {
+  try {
+    await invoke("complete_break");
+  } catch (error) {
+    console.error("Failed to complete break:", error);
+    throw error;
+  }
+}
+
+/**
+ * Start a work session
+ *
+ * @param duration - Work duration in seconds
+ */
+export async function startWork(duration: number): Promise<void> {
+  try {
+    await invoke("start_work", { duration });
+  } catch (error) {
+    console.error("Failed to start work:", error);
+    throw error;
+  }
+}
+
+/**
+ * Complete a work session
+ */
+export async function completeWork(): Promise<void> {
+  try {
+    await invoke("complete_work");
+  } catch (error) {
+    console.error("Failed to complete work:", error);
+    throw error;
+  }
+}
+
+/**
+ * Get current timer status
+ *
+ * @returns "idle" | "working" | "on_break"
+ */
+export async function getTimerStatus(): Promise<string> {
+  try {
+    return await invoke("get_timer_status");
+  } catch (error) {
+    console.error("Failed to get timer status:", error);
+    throw error;
+  }
+}
+
+/**
+ * Record a skip attempt
+ *
+ * Notifies the backend that the user attempted to skip.
+ * Used for analytics and penalty calculation.
+ *
+ * @returns Number of skip attempts in current session
+ */
+export async function recordSkipAttempt(): Promise<number> {
+  try {
+    return await invoke("record_skip_attempt");
+  } catch (error) {
+    console.error("Failed to record skip attempt:", error);
+    throw error;
+  }
+}
+
+// ============================================================================
+// DEPRECATED FUNCTIONS - DO NOT USE
+// These low-level functions are no longer available from the backend
+// ============================================================================
+
+/**
+ * @deprecated Use startBreak() instead - direct window control is disabled for security
  */
 export async function enterFullscreen(): Promise<void> {
-  try {
-    await invoke("enter_fullscreen");
-  } catch (error) {
-    console.error("Failed to enter fullscreen:", error);
-    throw error;
-  }
+  throw new Error("enterFullscreen is deprecated. Use startBreak() instead.");
 }
 
 /**
- * Exit fullscreen mode and restore normal window state
- *
- * Restores the window to normal mode after break completion.
+ * @deprecated Use completeBreak() instead - direct window control is disabled for security
  */
 export async function exitFullscreen(): Promise<void> {
-  try {
-    await invoke("exit_fullscreen");
-  } catch (error) {
-    console.error("Failed to exit fullscreen:", error);
-    throw error;
-  }
+  throw new Error("exitFullscreen is deprecated. Use completeBreak() instead.");
 }
 
 /**
- * Set always-on-top behavior
- *
- * @param alwaysOnTop - Whether the window should stay on top
+ * @deprecated Direct window control is disabled for security
  */
-export async function setAlwaysOnTop(alwaysOnTop: boolean): Promise<void> {
-  try {
-    await invoke("set_always_on_top", { alwaysOnTop });
-  } catch (error) {
-    console.error("Failed to set always on top:", error);
-    throw error;
-  }
+export async function setAlwaysOnTop(_alwaysOnTop: boolean): Promise<void> {
+  throw new Error("setAlwaysOnTop is deprecated and disabled for security.");
 }
 
 /**
- * Restore window to normal state
- *
- * Ensures the window is visible, focused, and not minimized.
+ * @deprecated Direct window control is disabled for security
  */
 export async function restoreWindow(): Promise<void> {
-  try {
-    await invoke("restore_window");
-  } catch (error) {
-    console.error("Failed to restore window:", error);
-    throw error;
-  }
+  throw new Error("restoreWindow is deprecated and disabled for security.");
 }
 
 /**
- * Enter fullscreen mode on all monitors
- *
- * Creates fullscreen windows on all available monitors to prevent users
- * from working on secondary displays during break time.
- * The main window displays the timer, while other monitors show a simple overlay.
+ * @deprecated Use startBreak() instead - direct window control is disabled for security
  */
 export async function enterFullscreenAllMonitors(): Promise<void> {
-  try {
-    await invoke("enter_fullscreen_all_monitors");
-  } catch (error) {
-    console.error("Failed to enter fullscreen on all monitors:", error);
-    throw error;
-  }
+  throw new Error("enterFullscreenAllMonitors is deprecated. Use startBreak() instead.");
 }
 
 /**
- * Exit fullscreen mode on all monitors
- *
- * Closes all overlay windows and restores the main window to normal mode.
+ * @deprecated Use completeBreak() instead - direct window control is disabled for security
  */
 export async function exitFullscreenAllMonitors(): Promise<void> {
-  try {
-    await invoke("exit_fullscreen_all_monitors");
-  } catch (error) {
-    console.error("Failed to exit fullscreen on all monitors:", error);
-    throw error;
-  }
+  throw new Error("exitFullscreenAllMonitors is deprecated. Use completeBreak() instead.");
 }

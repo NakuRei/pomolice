@@ -43,32 +43,14 @@ function isTauriEnvironment(): boolean {
  * This will begin listening to all keyboard and mouse events system-wide
  */
 export async function startMonitoring(): Promise<void> {
-  if (!isTauriEnvironment()) {
-    return;
-  }
-
-  try {
-    await invoke('start_monitoring');
-  } catch (error) {
-    console.error('Failed to start input monitoring:', error);
-    throw error;
-  }
+  throw new Error('startMonitoring is backend-managed. Do not call from renderer.');
 }
 
 /**
  * Stop global input monitoring
  */
 export async function stopMonitoring(): Promise<void> {
-  if (!isTauriEnvironment()) {
-    return;
-  }
-
-  try {
-    await invoke('stop_monitoring');
-  } catch (error) {
-    console.error('Failed to stop input monitoring:', error);
-    throw error;
-  }
+  throw new Error('stopMonitoring is backend-managed. Do not call from renderer.');
 }
 
 /**
