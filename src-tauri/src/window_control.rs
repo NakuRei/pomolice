@@ -1,7 +1,17 @@
 // Window control module for Phase 3: Fullscreen Break Enforcement
 // Provides commands to control window state: fullscreen, always-on-top, etc.
 
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Manager, Runtime, PhysicalPosition, PhysicalSize};
+use std::sync::Mutex;
+
+// Global state to store window position and size before fullscreen
+static WINDOW_STATE: Mutex<Option<WindowState>> = Mutex::new(None);
+
+#[derive(Clone)]
+struct WindowState {
+    position: PhysicalPosition<i32>,
+    size: PhysicalSize<u32>,
+}
 
 /// Enter fullscreen mode with always-on-top
 ///
@@ -116,6 +126,67 @@ pub async fn enter_fullscreen_all_monitors<R: Runtime>(
         .get_webview_window("main")
         .ok_or_else(|| "Main window not found".to_string())?;
 
+    // Save current window position and size before fullscreen
+    let current_position = main_window
+        .outer_position()
+        .map_err(|e| format!("Failed to get window position: {}", e))?;
+    let current_size = main_window
+        .outer_size()
+        .map_err(|e| format!("Failed to get window size: {}", e))?;
+
+    // Store the state globally
+    {
+        let mut state = WINDOW_STATE.lock().unwrap();
+        *state = Some(WindowState {
+            position: current_position,
+            size: current_size,
+        });
+    }
+
+    // First, hide the window briefly to break any ongoing OS-level resize operation
+    main_window
+        .hide()
+        .map_err(|e| format!("Failed to hide window: {}", e))?;
+
+    // Small delay to ensure OS releases any resize locks
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    // Disable window decorations to prevent any resize operations
+    main_window
+        .set_decorations(false)
+        .map_err(|e| format!("Failed to disable decorations: {}", e))?;
+
+    // Disable resizable to stop any ongoing resize operations
+    main_window
+        .set_resizable(false)
+        .map_err(|e| format!("Failed to disable resizable: {}", e))?;
+
+    // Get the monitor where main window is currently displayed
+    let main_monitor = main_window
+        .current_monitor()
+        .map_err(|e| format!("Failed to get current monitor: {}", e))?;
+
+    // If we have a monitor, reset window position and size to match the monitor
+    if let Some(monitor) = &main_monitor {
+        let position = monitor.position();
+        let size = monitor.size();
+
+        // Reset window to monitor's position and size before setting fullscreen
+        main_window
+            .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+                x: position.x,
+                y: position.y,
+            }))
+            .map_err(|e| format!("Failed to set window position: {}", e))?;
+
+        main_window
+            .set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                width: size.width,
+                height: size.height,
+            }))
+            .map_err(|e| format!("Failed to set window size: {}", e))?;
+    }
+
     // Set main window to fullscreen and always on top
     main_window
         .set_fullscreen(true)
@@ -125,15 +196,15 @@ pub async fn enter_fullscreen_all_monitors<R: Runtime>(
         .set_always_on_top(true)
         .map_err(|e| format!("Failed to set main window always on top: {}", e))?;
 
+    // Show the window again
+    main_window
+        .show()
+        .map_err(|e| format!("Failed to show window: {}", e))?;
+
     // Get all available monitors
     let monitors = main_window
         .available_monitors()
         .map_err(|e| format!("Failed to get monitors: {}", e))?;
-
-    // Get the monitor where main window is currently displayed
-    let main_monitor = main_window
-        .current_monitor()
-        .map_err(|e| format!("Failed to get current monitor: {}", e))?;
 
     // Create overlay windows for other monitors
     for (index, monitor) in monitors.iter().enumerate() {
@@ -202,6 +273,46 @@ pub async fn exit_fullscreen_all_monitors<R: Runtime>(
     main_window
         .set_fullscreen(false)
         .map_err(|e| format!("Failed to exit fullscreen: {}", e))?;
+
+    // Re-enable decorations
+    main_window
+        .set_decorations(true)
+        .map_err(|e| format!("Failed to enable decorations: {}", e))?;
+
+    // Re-enable resizable
+    main_window
+        .set_resizable(true)
+        .map_err(|e| format!("Failed to enable resizable: {}", e))?;
+
+    // Restore window to previous position and size
+    let saved_state = {
+        let state = WINDOW_STATE.lock().unwrap();
+        state.clone()
+    };
+
+    if let Some(state) = saved_state {
+        // Restore previous size
+        main_window
+            .set_size(tauri::Size::Physical(state.size))
+            .map_err(|e| format!("Failed to restore window size: {}", e))?;
+
+        // Restore previous position
+        main_window
+            .set_position(tauri::Position::Physical(state.position))
+            .map_err(|e| format!("Failed to restore window position: {}", e))?;
+    } else {
+        // Fallback: restore to default size (800x600) and center
+        main_window
+            .set_size(tauri::Size::Logical(tauri::LogicalSize {
+                width: 800.0,
+                height: 600.0,
+            }))
+            .map_err(|e| format!("Failed to restore window size: {}", e))?;
+
+        main_window
+            .center()
+            .map_err(|e| format!("Failed to center window: {}", e))?;
+    }
 
     Ok(())
 }
