@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ContinueDialog } from "../ContinueDialog/ContinueDialog";
 import { useTimerStore, TimerStatus } from "../../store/timerStore";
@@ -108,7 +108,9 @@ describe("ContinueDialog", () => {
       expect(screen.getByText("5")).toBeInTheDocument();
 
       // Update count
-      useTimerStore.setState({ completedPomodoros: 10 });
+      act(() => {
+        useTimerStore.setState({ completedPomodoros: 10 });
+      });
       rerender(<ContinueDialog />);
 
       expect(screen.getByText("10")).toBeInTheDocument();
@@ -121,7 +123,9 @@ describe("ContinueDialog", () => {
       expect(screen.getByTestId("continue-dialog")).toBeInTheDocument();
 
       // Hide dialog
-      useTimerStore.setState({ showContinueDialog: false });
+      act(() => {
+        useTimerStore.setState({ showContinueDialog: false });
+      });
       rerender(<ContinueDialog />);
 
       expect(screen.queryByTestId("continue-dialog")).not.toBeInTheDocument();

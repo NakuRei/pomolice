@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act, waitForElementToBeRemoved } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import LongPressButton from "../steps/LongPressButton";
 
@@ -18,7 +18,9 @@ describe("LongPressButton", () => {
   });
 
   afterEach(() => {
-    vi.runOnlyPendingTimers();
+    act(() => {
+      vi.runAllTimers();
+    });
     vi.useRealTimers();
   });
 
@@ -70,7 +72,10 @@ describe("LongPressButton", () => {
       );
 
       const button = screen.getByRole("button", { name: /Press and Hold/i });
-      fireEvent.mouseDown(button);
+
+      act(() => {
+        fireEvent.mouseDown(button);
+      });
 
       expect(screen.getByText(/Keep holding.../i)).toBeInTheDocument();
     });
@@ -81,7 +86,10 @@ describe("LongPressButton", () => {
       );
 
       const button = screen.getByRole("button", { name: /Press and Hold/i });
-      fireEvent.mouseDown(button);
+
+      act(() => {
+        fireEvent.mouseDown(button);
+      });
 
       // Initially should show 15 seconds
       expect(screen.getByText(/15s/)).toBeInTheDocument();
@@ -95,16 +103,19 @@ describe("LongPressButton", () => {
       const button = screen.getByRole("button", { name: /Press and Hold/i });
 
       // Start pressing
-      fireEvent.mouseDown(button);
+      act(() => {
+        fireEvent.mouseDown(button);
+      });
 
       // Advance time by 5 seconds
-      vi.advanceTimersByTime(5000);
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
 
-      // Release before completion
-      fireEvent.mouseUp(button);
-
-      // Wait for state to update
-      vi.runAllTimers();
+      // Release before completion and wait for warning to appear
+      act(() => {
+        fireEvent.mouseUp(button);
+      });
 
       // Should show release warning
       expect(screen.getByText(/You released too early/i)).toBeInTheDocument();
@@ -118,13 +129,15 @@ describe("LongPressButton", () => {
       const button = screen.getByRole("button", { name: /Press and Hold/i });
 
       // Start pressing
-      fireEvent.mouseDown(button);
+      act(() => {
+        fireEvent.mouseDown(button);
+      });
 
-      // Advance time by 15+ seconds
-      vi.advanceTimersByTime(15100);
-
-      // Run all remaining timers
-      vi.runAllTimers();
+      // Advance time by 15+ seconds and run timers
+      act(() => {
+        vi.advanceTimersByTime(15100);
+        vi.runAllTimers();
+      });
 
       expect(mockOnComplete).toHaveBeenCalled();
     });
@@ -136,13 +149,16 @@ describe("LongPressButton", () => {
 
       const button = screen.getByRole("button", { name: /Press and Hold/i });
 
-      fireEvent.mouseDown(button);
-
-      // Check initial progress (0%)
-      expect(screen.getByText(/Progress:/)).toBeInTheDocument();
+      act(() => {
+        fireEvent.mouseDown(button);
+        // Check initial progress (0%)
+        expect(screen.getByText(/Progress:/)).toBeInTheDocument();
+      });
 
       // Advance by 7.5 seconds (50%)
-      vi.advanceTimersByTime(7500);
+      act(() => {
+        vi.advanceTimersByTime(7500);
+      });
 
       // Progress should have increased
       const progressText = screen.getByText(/Progress:/);
@@ -157,15 +173,19 @@ describe("LongPressButton", () => {
       const button = screen.getByRole("button", { name: /Press and Hold/i });
 
       // Start pressing
-      fireEvent.mouseDown(button);
+      act(() => {
+        fireEvent.mouseDown(button);
+      });
 
       // Advance time
-      vi.advanceTimersByTime(5000);
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
 
       // Mouse leaves button
-      fireEvent.mouseLeave(button);
-
-      vi.runAllTimers();
+      act(() => {
+        fireEvent.mouseLeave(button);
+      });
 
       // Should show release warning
       expect(screen.getByText(/You released too early/i)).toBeInTheDocument();
@@ -180,7 +200,9 @@ describe("LongPressButton", () => {
 
       const button = screen.getByRole("button", { name: /Press and Hold/i });
 
-      fireEvent.touchStart(button);
+      act(() => {
+        fireEvent.touchStart(button);
+      });
 
       expect(screen.getByText(/Keep holding.../i)).toBeInTheDocument();
     });
@@ -192,11 +214,17 @@ describe("LongPressButton", () => {
 
       const button = screen.getByRole("button", { name: /Press and Hold/i });
 
-      fireEvent.touchStart(button);
-      vi.advanceTimersByTime(5000);
-      fireEvent.touchEnd(button);
+      act(() => {
+        fireEvent.touchStart(button);
+      });
 
-      vi.runAllTimers();
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+
+      act(() => {
+        fireEvent.touchEnd(button);
+      });
 
       expect(screen.getByText(/You released too early/i)).toBeInTheDocument();
     });
@@ -226,8 +254,13 @@ describe("LongPressButton", () => {
 
       const button = screen.getByRole("button", { name: /Press and Hold/i });
 
-      fireEvent.mouseDown(button);
-      vi.advanceTimersByTime(7500); // 50%
+      act(() => {
+        fireEvent.mouseDown(button);
+      });
+
+      act(() => {
+        vi.advanceTimersByTime(7500); // 50%
+      });
 
       // Progress bar should have width style
       const progressBar = button.querySelector(".bg-blue-500");
@@ -242,19 +275,25 @@ describe("LongPressButton", () => {
       const button = screen.getByRole("button", { name: /Press and Hold/i });
 
       // Press and release early
-      fireEvent.mouseDown(button);
-      vi.advanceTimersByTime(1000);
-      fireEvent.mouseUp(button);
+      act(() => {
+        fireEvent.mouseDown(button);
+      });
 
-      // Run timers to process the release
-      vi.runAllTimers();
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+
+      act(() => {
+        fireEvent.mouseUp(button);
+      });
 
       // Warning should appear
       expect(screen.getByText(/You released too early/i)).toBeInTheDocument();
 
       // Advance by 2+ seconds to clear warning
-      vi.advanceTimersByTime(2100);
-      vi.runAllTimers();
+      act(() => {
+        vi.advanceTimersByTime(2100);
+      });
 
       // Note: The warning may still be in document depending on React state update timing
       // This is acceptable for this test

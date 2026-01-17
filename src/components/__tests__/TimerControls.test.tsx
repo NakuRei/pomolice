@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TimerControls } from '../Timer/TimerControls';
 import { useTimerStore, TimerStatus } from '../../store/timerStore';
@@ -83,12 +83,16 @@ describe('TimerControls', () => {
       const { rerender } = render(<TimerControls />);
 
       // Start timer
-      useTimerStore.getState().start();
+      act(() => {
+        useTimerStore.getState().start();
+      });
       rerender(<TimerControls />);
       expect(screen.queryByTestId('start-button')).not.toBeInTheDocument();
 
       // Emergency stop
-      useTimerStore.getState().emergencyStop();
+      act(() => {
+        useTimerStore.getState().emergencyStop();
+      });
       rerender(<TimerControls />);
 
       // Start button is visible again

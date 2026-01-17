@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import { SessionIndicator } from "../Timer/SessionIndicator";
 import { useTimerStore } from "../../store/timerStore";
 import { useSettingsStore } from "../../store/settingsStore";
@@ -58,7 +58,9 @@ describe("SessionIndicator", () => {
       );
 
       // Update cycle
-      useTimerStore.setState({ currentCycle: 3 });
+      act(() => {
+        useTimerStore.setState({ currentCycle: 3 });
+      });
       rerender(<SessionIndicator />);
       expect(screen.getByTestId("session-indicator")).toHaveTextContent(
         "ポモドーロ 3/4"
@@ -84,7 +86,9 @@ describe("SessionIndicator", () => {
       );
 
       // Change interval setting
-      useSettingsStore.getState().setLongBreakInterval(3);
+      act(() => {
+        useSettingsStore.getState().setLongBreakInterval(3);
+      });
       rerender(<SessionIndicator />);
       expect(screen.getByTestId("session-indicator")).toHaveTextContent(
         "ポモドーロ 1/3"

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import { renderHook, act } from '@testing-library/react';
 import { useTimer } from '../useTimer';
 import { useTimerStore } from '../../store/timerStore';
 
@@ -60,20 +60,29 @@ describe('useTimer', () => {
 
   it('should stop interval when timer is stopped', () => {
     const { start, stop } = useTimerStore.getState();
-    start();
+
+    act(() => {
+      start();
+    });
 
     renderHook(() => useTimer());
 
     // Advance time by 1 second
-    vi.advanceTimersByTime(1000);
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
 
     const currentSeconds = useTimerStore.getState().remainingSeconds;
 
     // Stop the timer
-    stop();
+    act(() => {
+      stop();
+    });
 
     // Advance time by another second
-    vi.advanceTimersByTime(1000);
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
 
     // remainingSeconds should not decrease after stopping
     expect(useTimerStore.getState().remainingSeconds).toBe(currentSeconds);

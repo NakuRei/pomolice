@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { FullscreenBreak } from "../BreakScreen/FullscreenBreak";
 import { useTimerStore, SessionType } from "../../store/timerStore";
 
@@ -92,7 +92,9 @@ describe("FullscreenBreak", () => {
 
       expect(screen.getByText("05:00")).toBeInTheDocument();
 
-      useTimerStore.setState({ remainingSeconds: 60 }); // 1:00
+      act(() => {
+        useTimerStore.setState({ remainingSeconds: 60 }); // 1:00
+      });
       rerender(<FullscreenBreak />);
 
       expect(screen.getByText("01:00")).toBeInTheDocument();
@@ -207,7 +209,9 @@ describe("FullscreenBreak", () => {
 
       expect(screen.getByText("00:10")).toBeInTheDocument();
 
-      useTimerStore.setState({ remainingSeconds: 5 });
+      act(() => {
+        useTimerStore.setState({ remainingSeconds: 5 });
+      });
       rerender(<FullscreenBreak />);
 
       expect(screen.getByText("00:05")).toBeInTheDocument();

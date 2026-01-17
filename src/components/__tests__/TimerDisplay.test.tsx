@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 import { TimerDisplay } from '../Timer/TimerDisplay';
 import { useTimerStore, TimerStatus, SessionType } from '../../store/timerStore';
 
@@ -62,12 +62,16 @@ describe('TimerDisplay', () => {
     expect(screen.getByTestId('timer-display')).toHaveTextContent('25:00');
 
     // Update remaining seconds
-    useTimerStore.setState({ remainingSeconds: 1499 }); // 24:59
+    act(() => {
+      useTimerStore.setState({ remainingSeconds: 1499 }); // 24:59
+    });
     rerender(<TimerDisplay />);
     expect(screen.getByTestId('timer-display')).toHaveTextContent('24:59');
 
     // Another update
-    useTimerStore.setState({ remainingSeconds: 60 }); // 01:00
+    act(() => {
+      useTimerStore.setState({ remainingSeconds: 60 }); // 01:00
+    });
     rerender(<TimerDisplay />);
     expect(screen.getByTestId('timer-display')).toHaveTextContent('01:00');
   });

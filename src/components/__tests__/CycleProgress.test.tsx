@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import { CycleProgress } from "../Timer/CycleProgress";
 import { useTimerStore } from "../../store/timerStore";
 import { useSettingsStore } from "../../store/settingsStore";
@@ -118,7 +118,9 @@ describe("CycleProgress", () => {
       expect(screen.getByTestId("cycle-dot-2")).toHaveClass("bg-gray-300");
 
       // Progress to cycle 2: ●●○○
-      useTimerStore.setState({ currentCycle: 2 });
+      act(() => {
+        useTimerStore.setState({ currentCycle: 2 });
+      });
       rerender(<CycleProgress />);
 
       expect(screen.getByTestId("cycle-dot-1")).toHaveClass("bg-blue-600");
@@ -134,7 +136,9 @@ describe("CycleProgress", () => {
       expect(screen.getAllByRole("img")[0].children).toHaveLength(4);
 
       // Change to 6 dots
-      useSettingsStore.getState().setLongBreakInterval(6);
+      act(() => {
+        useSettingsStore.getState().setLongBreakInterval(6);
+      });
       rerender(<CycleProgress />);
 
       expect(screen.getAllByRole("img")[0].children).toHaveLength(6);

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import { BreakStats } from "../BreakScreen/BreakStats";
 import { useTimerStore } from "../../store/timerStore";
 
@@ -46,7 +46,9 @@ describe("BreakStats", () => {
       expect(screen.getAllByText("0").length).toBeGreaterThanOrEqual(1);
 
       // Update completed pomodoros
-      useTimerStore.setState({ completedPomodoros: 5 });
+      act(() => {
+        useTimerStore.setState({ completedPomodoros: 5 });
+      });
       rerender(<BreakStats />);
 
       expect(screen.getByText("5")).toBeInTheDocument();
@@ -74,7 +76,9 @@ describe("BreakStats", () => {
     it("should update when cycle changes", () => {
       const { rerender } = render(<BreakStats />);
 
-      useTimerStore.setState({ currentCycle: 3 });
+      act(() => {
+        useTimerStore.setState({ currentCycle: 3 });
+      });
       rerender(<BreakStats />);
 
       expect(screen.getByText("3")).toBeInTheDocument();
@@ -120,9 +124,11 @@ describe("BreakStats", () => {
       const { rerender } = render(<BreakStats />);
 
       // Simulate completing a work session
-      useTimerStore.setState({
-        completedPomodoros: 1,
-        currentCycle: 1,
+      act(() => {
+        useTimerStore.setState({
+          completedPomodoros: 1,
+          currentCycle: 1,
+        });
       });
 
       rerender(<BreakStats />);
