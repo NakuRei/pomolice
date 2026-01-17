@@ -32,12 +32,16 @@ export default function ProgressIndicator({
       <div className="h-2 w-full overflow-hidden rounded-full bg-gray-700">
         <div
           className="h-full bg-blue-500 transition-all duration-300"
-          style={{ width: `${progressPercentage}%` }}
           role="progressbar"
           aria-valuenow={currentStep}
           aria-valuemin={1}
           aria-valuemax={totalSteps}
-        />
+          aria-label={`Progress: ${Math.round(progressPercentage)}%`}
+        >
+          <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+            <rect width={`${progressPercentage}%`} height="100%" fill="currentColor" />
+          </svg>
+        </div>
       </div>
 
       {/* Step dots (optional visual indicator) */}

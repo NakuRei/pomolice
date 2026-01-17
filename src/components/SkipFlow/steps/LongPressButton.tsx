@@ -132,10 +132,20 @@ export default function LongPressButton({
           }`}
         >
           {/* Progress bar background */}
-          <div
-            className="absolute inset-0 bg-blue-500 transition-all"
-            style={{ width: `${progress}%` }}
-          />
+          <div className="absolute inset-0 overflow-hidden">
+            <svg
+              className="absolute inset-0 h-full w-full"
+              xmlns="http://www.w3.org/2000/svg"
+              preserveAspectRatio="none"
+            >
+              <rect
+                width={`${progress}%`}
+                height="100%"
+                fill="rgb(37, 99, 235)"
+                className="transition-all"
+              />
+            </svg>
+          </div>
 
           {/* Button text */}
           <div className="relative z-10 flex h-full items-center justify-center">

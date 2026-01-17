@@ -262,8 +262,11 @@ describe("LongPressButton", () => {
         vi.advanceTimersByTime(7500); // 50%
       });
 
-      // Progress bar should have width style
-      const progressBar = button.querySelector(".bg-blue-500");
+      // Progress bar should exist as SVG rect element
+      const svg = button.querySelector("svg");
+      expect(svg).toBeInTheDocument();
+
+      const progressBar = button.querySelector("rect");
       expect(progressBar).toBeInTheDocument();
     });
 
