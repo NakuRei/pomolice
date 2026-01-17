@@ -3,7 +3,6 @@
 // Phase 3: Fullscreen break enforcement
 // Phase 4: Input monitoring and penalty system
 
-mod notifications;
 mod window_control;
 mod input_monitor;
 
@@ -13,9 +12,6 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
-            notifications::notify_work_complete,
-            notifications::notify_break_complete,
-            notifications::notify_long_break_complete,
             window_control::enter_fullscreen,
             window_control::exit_fullscreen,
             window_control::set_always_on_top,

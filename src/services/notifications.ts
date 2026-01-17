@@ -3,7 +3,11 @@
  * Wrapper for Tauri notification commands
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from '@tauri-apps/plugin-notification';
 
 /**
  * Check if we're running in Tauri environment
@@ -19,15 +23,43 @@ function isTauriEnvironment(): boolean {
 }
 
 /**
+ * Ensure notification permission is granted
+ * @returns true if permission is granted, false otherwise
+ */
+async function ensureNotificationPermission(): Promise<boolean> {
+  if (!isTauriEnvironment()) {
+    return false;
+  }
+
+  try {
+    let permissionGranted = await isPermissionGranted();
+
+    if (!permissionGranted) {
+      const permission = await requestPermission();
+      permissionGranted = permission === 'granted';
+    }
+
+    return permissionGranted;
+  } catch (error) {
+    console.error('Failed to request notification permission:', error);
+    return false;
+  }
+}
+
+/**
  * Show notification when work session is complete
  */
 export async function notifyWorkComplete(): Promise<void> {
-  if (!isTauriEnvironment()) {
+  const hasPermission = await ensureNotificationPermission();
+  if (!hasPermission) {
     return;
   }
 
   try {
-    await invoke('notify_work_complete');
+    sendNotification({
+      title: '休憩時間です！',
+      body: 'お疲れ様でした。休憩を取りましょう。',
+    });
   } catch (error) {
     console.error('Failed to show work complete notification:', error);
   }
@@ -37,12 +69,16 @@ export async function notifyWorkComplete(): Promise<void> {
  * Show notification when break session is complete
  */
 export async function notifyBreakComplete(): Promise<void> {
-  if (!isTauriEnvironment()) {
+  const hasPermission = await ensureNotificationPermission();
+  if (!hasPermission) {
     return;
   }
 
   try {
-    await invoke('notify_break_complete');
+    sendNotification({
+      title: '作業に戻りましょう！',
+      body: '休憩が終わりました。次のポモドーロを始めましょう。',
+    });
   } catch (error) {
     console.error('Failed to show break complete notification:', error);
   }
@@ -52,12 +88,16 @@ export async function notifyBreakComplete(): Promise<void> {
  * Show notification when long break session is complete
  */
 export async function notifyLongBreakComplete(): Promise<void> {
-  if (!isTauriEnvironment()) {
+  const hasPermission = await ensureNotificationPermission();
+  if (!hasPermission) {
     return;
   }
 
   try {
-    await invoke('notify_long_break_complete');
+    sendNotification({
+      title: '長い休憩完了！',
+      body: 'サイクルが完了しました。次のサイクルを始めますか？',
+    });
   } catch (error) {
     console.error('Failed to show long break complete notification:', error);
   }
