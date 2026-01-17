@@ -8,7 +8,6 @@ import {
   generateEasyProblem,
   generateHardProblem,
   validateAnswer,
-  MathOperation,
 } from "../mathGenerator";
 
 describe("mathGenerator", () => {

@@ -6,8 +6,6 @@
  * Last chance to reconsider before actually skipping the break
  */
 
-import { useSettingsStore } from "../../../store/settingsStore";
-
 interface FinalWarningProps {
   onConfirm: () => void;
   onCancel: () => void;
@@ -20,13 +18,9 @@ export default function FinalWarning({
   onConfirm,
   onCancel,
 }: FinalWarningProps) {
-  const settings = useSettingsStore();
-
+  // TODO: Implement SNS integration feature in SettingsStore
   // Check if any SNS integration is enabled
-  const hasSnsEnabled =
-    settings.integrations.twitter.enabled ||
-    settings.integrations.slack.enabled ||
-    settings.integrations.discord.enabled;
+  const hasSnsEnabled = false;
 
   return (
     <div className="space-y-8">
@@ -58,13 +52,8 @@ export default function FinalWarning({
               📢 This will be posted to your connected social accounts
             </p>
             <p className="mt-2 text-sm text-orange-200">
-              Your skip will be publicly visible on:
+              Your skip will be publicly visible on your connected social accounts.
             </p>
-            <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-orange-200">
-              {settings.integrations.twitter.enabled && <li>Twitter / X</li>}
-              {settings.integrations.slack.enabled && <li>Slack</li>}
-              {settings.integrations.discord.enabled && <li>Discord</li>}
-            </ul>
           </div>
         )}
 

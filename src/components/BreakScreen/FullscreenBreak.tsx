@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useTimerStore, SessionType } from "../../store/timerStore";
 import { useSkipFlowStore } from "../../store/skipFlowStore";
 import { formatTime } from "../../formatters/timeFormatter";

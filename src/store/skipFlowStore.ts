@@ -125,8 +125,6 @@ export const useSkipFlowStore = create<SkipFlowStore>()(
         }),
 
       nextStep: () => {
-        const state = get();
-
         set((draft) => {
           // Mark current step as completed
           draft.stepsCompleted[draft.currentStep - 1] = true;
@@ -144,8 +142,6 @@ export const useSkipFlowStore = create<SkipFlowStore>()(
       },
 
       retryStep: () => {
-        const state = get();
-
         set((draft) => {
           // Increment retry count for current step
           const currentRetries = draft.stepRetries[draft.currentStep] || 0;
@@ -165,8 +161,6 @@ export const useSkipFlowStore = create<SkipFlowStore>()(
         }),
 
       completeSkipFlow: () => {
-        const state = get();
-
         set((draft) => {
           // Mark final step as completed
           draft.stepsCompleted[TOTAL_STEPS - 1] = true;

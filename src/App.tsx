@@ -29,7 +29,7 @@ function App() {
     const setupListener = async () => {
       if (isFullscreenBreak) {
         // Register input detection listener with debouncing
-        const unlisten = await onInputDetected((payload) => {
+        const unlisten = await onInputDetected(() => {
           // Debounce: only apply penalty once per 100ms to avoid excessive resets
           const now = Date.now();
           if (now - lastPenaltyTime < 100) {

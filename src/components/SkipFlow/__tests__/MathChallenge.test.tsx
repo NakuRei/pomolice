@@ -228,7 +228,6 @@ describe("MathChallenge", () => {
       );
 
       const input = screen.getByPlaceholderText("Your answer");
-      const submitButton = screen.getByRole("button", { name: /Submit/i });
       const cancelButton = screen.getByRole("button", {
         name: /Cancel and Take Break/i,
       });
