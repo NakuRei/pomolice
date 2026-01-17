@@ -83,13 +83,21 @@ function validateRange(value: number, min: number, max: number): number {
 }
 
 /**
+ * Helper to conditionally apply devtools middleware only in development
+ */
+const conditionalDevtools =
+  process.env.NODE_ENV === 'development'
+    ? devtools
+    : (<T,>(config: T): T => config) as typeof devtools;
+
+/**
  * Zustand store for settings management
  * Uses immer middleware for immutable state updates
- * Uses devtools middleware for Redux DevTools integration
+ * Uses devtools middleware for Redux DevTools integration (development only)
  * Uses persist middleware for localStorage persistence
  */
 export const useSettingsStore = create<SettingsStore>()(
-  devtools(
+  conditionalDevtools(
     persist(
       immer((set) => ({
         ...DEFAULT_SETTINGS,

@@ -145,12 +145,20 @@ function getBreakType(cycle: number, interval: number): SessionTypeType {
 }
 
 /**
+ * Helper to conditionally apply devtools middleware only in development
+ */
+const conditionalDevtools =
+  process.env.NODE_ENV === 'development'
+    ? devtools
+    : (<T,>(config: T): T => config) as typeof devtools;
+
+/**
  * Zustand store for timer state management
  * Uses immer middleware for immutable state updates
- * Uses devtools middleware for Redux DevTools integration
+ * Uses devtools middleware for Redux DevTools integration (development only)
  */
 export const useTimerStore = create<TimerStore>()(
-  devtools(
+  conditionalDevtools(
     immer((set, get) => ({
       ...initialState,
 
