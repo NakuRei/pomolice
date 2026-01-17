@@ -85,10 +85,8 @@ function validateRange(value: number, min: number, max: number): number {
 /**
  * Helper to conditionally apply devtools middleware only in development
  */
-const conditionalDevtools =
-  process.env.NODE_ENV === 'development'
-    ? devtools
-    : (<T,>(config: T): T => config) as typeof devtools;
+const noopDevtools = (<T,>(config: T): T => config) as typeof devtools;
+const conditionalDevtools = import.meta.env.DEV ? devtools : noopDevtools;
 
 /**
  * Zustand store for settings management
