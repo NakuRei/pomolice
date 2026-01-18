@@ -3,7 +3,8 @@
 
 use rdev::{listen, Event, EventType, Key};
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, Once, OnceLock};
 use std::thread;
 use tauri::{AppHandle, Emitter};
 
@@ -47,13 +48,9 @@ pub struct InputDetectedPayload {
     pub timestamp: u64,
 }
 
-/// Global state to control monitoring lifecycle
-struct MonitorState {
-    is_monitoring: bool,
-    should_stop: bool,
-}
-
-static MONITOR_STATE: Mutex<Option<Arc<Mutex<MonitorState>>>> = Mutex::new(None);
+static ENABLED: AtomicBool = AtomicBool::new(false);
+static LISTENER_STARTED: Once = Once::new();
+static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
 
 /// Check if we have accessibility permissions (macOS only)
 #[cfg(target_os = "macos")]
@@ -82,96 +79,82 @@ pub fn start_monitoring(app_handle: AppHandle) -> Result<(), String> {
         );
     }
 
-    // Check if already monitoring
-    let mut state_lock = MONITOR_STATE.lock().map_err(|e| e.to_string())?;
-    if let Some(state) = &*state_lock {
-        let monitoring = state.lock().map_err(|e| e.to_string())?;
-        if monitoring.is_monitoring {
-            return Err("Monitoring already started".to_string());
-        }
+    // Prevent double-start
+    if ENABLED.swap(true, Ordering::SeqCst) {
+        return Err("Monitoring already started".to_string());
     }
 
-    // Initialize state
-    let state = Arc::new(Mutex::new(MonitorState {
-        is_monitoring: true,
-        should_stop: false,
-    }));
-    let mods = Arc::new(Mutex::new(ModifierState::default()));
-    *state_lock = Some(state.clone());
-    drop(state_lock);
+    // Preserve app handle for the listener thread
+    let _ = APP_HANDLE.get_or_init(|| app_handle.clone());
 
-    // Spawn monitoring thread
-    thread::spawn(move || {
-        let callback = move |event: Event| {
-            // Check if we should stop
-            if let Ok(state) = state.lock() {
-                if state.should_stop {
-                    // Signal rdev to stop listening
-                    // Note: rdev doesn't have a clean way to stop, so we just return
+    LISTENER_STARTED.call_once(|| {
+        let app_handle = APP_HANDLE
+            .get()
+            .expect("App handle should be set before starting listener")
+            .clone();
+        let mods = Arc::new(Mutex::new(ModifierState::default()));
+
+        // Spawn monitoring thread
+        thread::spawn(move || {
+            let callback = move |event: Event| {
+                if !ENABLED.load(Ordering::Relaxed) {
                     return;
                 }
-            }
 
-            // Escape hatch: detect Ctrl+Alt+Shift+E and exit fullscreen
-            if let EventType::KeyPress(key) = event.event_type {
-                if let Ok(mut m) = mods.lock() {
-                    update_modifiers(&mut m, key, true);
-                    if is_escape_combo(&m, key) {
-                        let app = app_handle.clone();
-                        // Best-effort exit; ignore errors
-                        let _ = tauri::async_runtime::block_on(async {
-                            crate::window_control::exit_fullscreen_all_monitors(app.clone()).await
-                        });
-                        if let Ok(mut state) = state.lock() {
-                            state.should_stop = true;
+                // Escape hatch: detect Ctrl+Alt+Shift+E and exit fullscreen
+                if let EventType::KeyPress(key) = event.event_type {
+                    if let Ok(mut m) = mods.lock() {
+                        update_modifiers(&mut m, key, true);
+                        if is_escape_combo(&m, key) {
+                            let app = app_handle.clone();
+                            // Best-effort exit; ignore errors
+                            let _ = tauri::async_runtime::block_on(async {
+                                crate::window_control::exit_fullscreen_all_monitors(app.clone())
+                                    .await
+                            });
+                            // Disable monitoring after escape
+                            ENABLED.store(false, Ordering::SeqCst);
+                            return;
                         }
-                        return;
+                    }
+                } else if let EventType::KeyRelease(key) = event.event_type {
+                    if let Ok(mut m) = mods.lock() {
+                        update_modifiers(&mut m, key, false);
                     }
                 }
-            } else if let EventType::KeyRelease(key) = event.event_type {
-                if let Ok(mut m) = mods.lock() {
-                    update_modifiers(&mut m, key, false);
-                }
-            }
 
-            // Determine event type and emit to frontend
-            let event_type = match event.event_type {
-                EventType::KeyPress(_) | EventType::KeyRelease(_) => Some(InputEventType::Keyboard),
-                EventType::ButtonPress(_) | EventType::ButtonRelease(_) => {
-                    Some(InputEventType::MouseClick)
-                }
-                EventType::MouseMove { .. } => Some(InputEventType::MouseMove),
-                EventType::Wheel { .. } => Some(InputEventType::MouseMove), // Treat wheel as mouse activity
-            };
-
-            if let Some(event_type) = event_type {
-                let payload = InputDetectedPayload {
-                    event_type,
-                    timestamp: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64,
+                // Determine event type and emit to frontend
+                let event_type = match event.event_type {
+                    EventType::KeyPress(_) | EventType::KeyRelease(_) => {
+                        Some(InputEventType::Keyboard)
+                    }
+                    EventType::ButtonPress(_) | EventType::ButtonRelease(_) => {
+                        Some(InputEventType::MouseClick)
+                    }
+                    EventType::MouseMove { .. } => Some(InputEventType::MouseMove),
+                    EventType::Wheel { .. } => Some(InputEventType::MouseMove), // Treat wheel as mouse activity
                 };
 
-                // Emit event to frontend
-                // Note: We ignore errors here to avoid blocking the event loop
-                let _ = app_handle.emit("input-detected", payload);
-            }
-        };
+                if let Some(event_type) = event_type {
+                    let payload = InputDetectedPayload {
+                        event_type,
+                        timestamp: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64,
+                    };
 
-        // Start listening (this blocks until stopped or error)
-        if let Err(e) = listen(callback) {
-            eprintln!("Error in input monitoring: {:?}", e);
-        }
-
-        // Clean up state when stopped
-        if let Ok(state_lock) = MONITOR_STATE.lock() {
-            if let Some(state) = &*state_lock {
-                if let Ok(mut monitoring) = state.lock() {
-                    monitoring.is_monitoring = false;
+                    // Emit event to frontend
+                    // Note: We ignore errors here to avoid blocking the event loop
+                    let _ = app_handle.emit("input-detected", payload);
                 }
+            };
+
+            // Start listening (this blocks until process exit or error)
+            if let Err(e) = listen(callback) {
+                eprintln!("Error in input monitoring: {:?}", e);
             }
-        }
+        });
     });
 
     Ok(())
@@ -179,20 +162,9 @@ pub fn start_monitoring(app_handle: AppHandle) -> Result<(), String> {
 
 /// Stop global input monitoring
 pub fn stop_monitoring() -> Result<(), String> {
-    let mut state_lock = MONITOR_STATE.lock().map_err(|e| e.to_string())?;
-
-    if let Some(state) = &*state_lock {
-        let mut monitoring = state.lock().map_err(|e| e.to_string())?;
-        if !monitoring.is_monitoring {
-            return Err("Monitoring not started".to_string());
-        }
-        monitoring.should_stop = true;
-    } else {
+    if !ENABLED.swap(false, Ordering::SeqCst) {
         return Err("Monitoring not started".to_string());
     }
-
-    // Clean up state
-    *state_lock = None;
 
     Ok(())
 }
