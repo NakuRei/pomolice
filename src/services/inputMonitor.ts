@@ -4,7 +4,6 @@
  * Phase 4: Break time penalty system
  */
 
-import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 
 /**
