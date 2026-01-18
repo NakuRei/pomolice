@@ -38,6 +38,7 @@ export default function TypingChallenge({
   const [userInput, setUserInput] = useState("");
   const [hasTypo, setHasTypo] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const resetTimeoutRef = useRef<number | null>(null);
 
   // Generate target phrase on mount
   useEffect(() => {
@@ -51,7 +52,13 @@ export default function TypingChallenge({
   // Validate input in real-time
   useEffect(() => {
     if (userInput.length === 0) {
-      setHasTypo(false);
+      if (hasTypo) {
+        setHasTypo(false);
+      }
+      return;
+    }
+
+    if (hasTypo) {
       return;
     }
 
@@ -64,10 +71,14 @@ export default function TypingChallenge({
       // Increment retry count
       retryStep();
       // Reset after showing error briefly
-      setTimeout(() => {
+      if (resetTimeoutRef.current !== null) {
+        clearTimeout(resetTimeoutRef.current);
+      }
+      resetTimeoutRef.current = window.setTimeout(() => {
         setUserInput("");
         setHasTypo(false);
         inputRef.current?.focus();
+        resetTimeoutRef.current = null;
       }, 1000);
       return;
     }
@@ -76,11 +87,27 @@ export default function TypingChallenge({
     if (validateTypedPhrase(userInput, targetPhrase)) {
       onComplete();
     }
-  }, [userInput, targetPhrase, onComplete, retryStep]);
+  }, [userInput, targetPhrase, hasTypo, onComplete, retryStep]);
+
+  useEffect(() => {
+    return () => {
+      if (resetTimeoutRef.current !== null) {
+        clearTimeout(resetTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (hasTypo) return; // Prevent input during error display
     setUserInput(e.target.value);
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLInputElement>) => {
+    e.preventDefault();
   };
 
   // Get character validation for styling
@@ -127,6 +154,8 @@ export default function TypingChallenge({
           type="text"
           value={userInput}
           onChange={handleInputChange}
+          onPaste={handlePaste}
+          onDrop={handleDrop}
           disabled={hasTypo}
           placeholder="Start typing here..."
           autoComplete="off"
