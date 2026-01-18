@@ -30,15 +30,18 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   );
   const updateSettings = useSettingsStore((state) => state.updateSettings);
 
+  const isFiniteNumber = (value: number | null): value is number =>
+    typeof value === "number" && Number.isFinite(value);
+
   // Local state for form inputs
-  const [workDuration, setWorkDuration] = useState(workDurationStore);
-  const [shortBreakDuration, setShortBreakDuration] = useState(
+  const [workDuration, setWorkDuration] = useState<number | null>(workDurationStore);
+  const [shortBreakDuration, setShortBreakDuration] = useState<number | null>(
     shortBreakDurationStore,
   );
-  const [longBreakDuration, setLongBreakDuration] = useState(
+  const [longBreakDuration, setLongBreakDuration] = useState<number | null>(
     longBreakDurationStore,
   );
-  const [longBreakInterval, setLongBreakInterval] = useState(
+  const [longBreakInterval, setLongBreakInterval] = useState<number | null>(
     longBreakIntervalStore,
   );
 
@@ -58,15 +61,19 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
   // Validation: Check if all values are within valid ranges
   const isWorkDurationValid =
+    isFiniteNumber(workDuration) &&
     workDuration >= VALIDATION_RULES.workDuration.min &&
     workDuration <= VALIDATION_RULES.workDuration.max;
   const isShortBreakValid =
+    isFiniteNumber(shortBreakDuration) &&
     shortBreakDuration >= VALIDATION_RULES.shortBreakDuration.min &&
     shortBreakDuration <= VALIDATION_RULES.shortBreakDuration.max;
   const isLongBreakValid =
+    isFiniteNumber(longBreakDuration) &&
     longBreakDuration >= VALIDATION_RULES.longBreakDuration.min &&
     longBreakDuration <= VALIDATION_RULES.longBreakDuration.max;
   const isIntervalValid =
+    isFiniteNumber(longBreakInterval) &&
     longBreakInterval >= VALIDATION_RULES.longBreakInterval.min &&
     longBreakInterval <= VALIDATION_RULES.longBreakInterval.max;
 
@@ -77,7 +84,16 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     isIntervalValid;
 
   const handleSave = () => {
-    if (!isFormValid) {
+    if (
+      !isWorkDurationValid ||
+      !isShortBreakValid ||
+      !isLongBreakValid ||
+      !isIntervalValid ||
+      workDuration === null ||
+      shortBreakDuration === null ||
+      longBreakDuration === null ||
+      longBreakInterval === null
+    ) {
       return;
     }
 

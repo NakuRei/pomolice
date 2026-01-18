@@ -1,3 +1,4 @@
+import { ChangeEvent, useEffect, useState } from "react";
 /**
  * DurationInput Component
  * Reusable input component for duration settings with validation
@@ -5,8 +6,8 @@
 
 interface DurationInputProps {
   label: string;
-  value: number;
-  onChange: (value: number) => void;
+  value: number | null;
+  onChange: (value: number | null) => void;
   min: number;
   max: number;
   unit?: string;
@@ -22,15 +23,46 @@ export function DurationInput({
   unit = '分',
   testId,
 }: DurationInputProps) {
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // TEMP: Support decimals for Phase 3 testing (e.g., 0.1 min = 6 seconds)
-    const newValue = parseFloat(e.target.value);
-    if (!isNaN(newValue)) {
-      onChange(newValue);
+  const [inputValue, setInputValue] = useState(
+    value !== null && Number.isFinite(value) ? String(value) : ""
+  );
+
+  useEffect(() => {
+    if (value !== null && Number.isFinite(value)) {
+      setInputValue(String(value));
     }
+  }, [value]);
+
+  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const { value: raw } = e.target;
+    setInputValue(raw);
+
+    if (raw.trim() === "") {
+      onChange(null);
+      return;
+    }
+
+    const parsedValue = Number(raw);
+
+    if (!Number.isFinite(parsedValue)) {
+      onChange(null);
+      return;
+    }
+
+    if (parsedValue < min || parsedValue > max) {
+      onChange(null);
+      return;
+    }
+
+    onChange(parsedValue);
   };
 
-  const isValid = value >= min && value <= max;
+  const parsedInput = Number(inputValue);
+  const isValid =
+    inputValue.trim() !== "" &&
+    Number.isFinite(parsedInput) &&
+    parsedInput >= min &&
+    parsedInput <= max;
 
   return (
     <div className="flex flex-col gap-2" data-testid={testId}>
@@ -40,7 +72,7 @@ export function DurationInput({
       <div className="flex items-center gap-2">
         <input
           type="number"
-          value={value}
+          value={inputValue}
           onChange={handleChange}
           min={min}
           max={max}

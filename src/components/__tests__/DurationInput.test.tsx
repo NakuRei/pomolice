@@ -65,7 +65,7 @@ describe("DurationInput", () => {
       expect(onChange).toHaveBeenCalledWith(100);
     });
 
-    it("should not call onChange with invalid input", () => {
+    it("should emit null with non-numeric input", () => {
       const onChange = vi.fn();
       render(<DurationInput {...defaultProps} onChange={onChange} />);
 
@@ -74,8 +74,53 @@ describe("DurationInput", () => {
       // Simulate user entering non-numeric value
       fireEvent.change(input, { target: { value: "abc" } });
 
-      // onChange should not be called with NaN
-      expect(onChange).not.toHaveBeenCalled();
+      expect(onChange).toHaveBeenCalledWith(null);
+    });
+
+    it("should emit null with Infinity", () => {
+      const onChange = vi.fn();
+      render(<DurationInput {...defaultProps} onChange={onChange} />);
+
+      const input = screen.getByTestId("work-duration-input") as HTMLInputElement;
+
+      fireEvent.change(input, { target: { value: "Infinity" } });
+
+      expect(onChange).toHaveBeenCalledWith(null);
+    });
+
+    it("should emit null with overflow values", () => {
+      const onChange = vi.fn();
+      render(<DurationInput {...defaultProps} onChange={onChange} />);
+
+      const input = screen.getByTestId("work-duration-input") as HTMLInputElement;
+
+      fireEvent.change(input, { target: { value: "1e309" } });
+
+      expect(onChange).toHaveBeenCalledWith(null);
+    });
+
+    it("should emit null when clearing input", () => {
+      const onChange = vi.fn();
+      render(<DurationInput {...defaultProps} onChange={onChange} />);
+
+      const input = screen.getByTestId("work-duration-input") as HTMLInputElement;
+
+      fireEvent.change(input, { target: { value: "" } });
+
+      expect(onChange).toHaveBeenCalledWith(null);
+      expect(input.value).toBe("");
+    });
+
+    it("should emit null when value is out of range", () => {
+      const onChange = vi.fn();
+      render(<DurationInput {...defaultProps} onChange={onChange} max={60} />);
+
+      const input = screen.getByTestId("work-duration-input") as HTMLInputElement;
+
+      fireEvent.change(input, { target: { value: "999" } });
+
+      expect(onChange).toHaveBeenCalledWith(null);
+      expect(input.value).toBe("999");
     });
   });
 
