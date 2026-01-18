@@ -100,6 +100,10 @@ pub(crate) async fn enter_fullscreen_all_monitors<R: Runtime>(
         .set_always_on_top(true)
         .map_err(|e| format!("Failed to set main window always on top: {}", e))?;
 
+    // Best-effort: keep main visible across virtual desktops where supported
+    let _ = main_window.set_visible_on_all_workspaces(true);
+    let _ = main_window.set_skip_taskbar(true);
+
     // Show the window again
     main_window
         .show()
@@ -145,6 +149,7 @@ pub(crate) async fn enter_fullscreen_all_monitors<R: Runtime>(
             .inner_size(size.width as f64, size.height as f64)
             .fullscreen(true)
             .always_on_top(true)
+            .visible_on_all_workspaces(true)
             .decorations(false)
             .resizable(false)
             .skip_taskbar(true)
@@ -184,6 +189,9 @@ pub(crate) async fn exit_fullscreen_all_monitors<R: Runtime>(
     main_window
         .set_fullscreen(false)
         .map_err(|e| format!("Failed to exit fullscreen: {}", e))?;
+
+    let _ = main_window.set_visible_on_all_workspaces(false);
+    let _ = main_window.set_skip_taskbar(false);
 
     // Re-enable decorations
     main_window
