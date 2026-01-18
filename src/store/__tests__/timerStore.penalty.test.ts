@@ -33,6 +33,7 @@ describe('Timer Store - Penalty System', () => {
       showContinueDialog: false,
       isFullscreenBreak: false,
       breakInteractionCount: 0,
+      lastPenaltyTime: 0,
     });
 
     useSettingsStore.setState({
@@ -77,6 +78,9 @@ describe('Timer Store - Penalty System', () => {
     });
 
     it('should increment multiple times for multiple inputs', () => {
+      vi.useFakeTimers();
+      const baseTime = new Date('2025-01-01T00:00:00.000Z').getTime();
+      vi.setSystemTime(new Date(baseTime));
       useTimerStore.setState({
         isFullscreenBreak: true,
         sessionType: SessionType.SHORT_BREAK,
@@ -87,11 +91,14 @@ describe('Timer Store - Penalty System', () => {
       const { handleInputDuringBreak } = useTimerStore.getState();
 
       handleInputDuringBreak();
+      vi.setSystemTime(new Date(baseTime + 200));
       handleInputDuringBreak();
+      vi.setSystemTime(new Date(baseTime + 400));
       handleInputDuringBreak();
 
       const state = useTimerStore.getState();
       expect(state.breakInteractionCount).toBe(3);
+      vi.useRealTimers();
     });
 
     it('should reset to 0 on emergency stop', () => {
@@ -251,6 +258,9 @@ describe('Timer Store - Penalty System', () => {
     });
 
     it('should handle multiple rapid penalties correctly', () => {
+      vi.useFakeTimers();
+      const baseTime = new Date('2025-01-01T00:00:00.000Z').getTime();
+      vi.setSystemTime(new Date(baseTime));
       useTimerStore.setState({
         isFullscreenBreak: true,
         sessionType: SessionType.SHORT_BREAK,
@@ -263,16 +273,21 @@ describe('Timer Store - Penalty System', () => {
       // Simulate rapid input (5 penalties)
       for (let i = 0; i < 5; i++) {
         handleInputDuringBreak();
+        vi.setSystemTime(new Date(baseTime + (i + 1) * 200));
       }
 
       const state = useTimerStore.getState();
       expect(state.breakInteractionCount).toBe(5);
       expect(state.remainingSeconds).toBe(5 * 60); // Still reset to full
+      vi.useRealTimers();
     });
   });
 
   describe('Integration with break mode lifecycle', () => {
     it('should track interactions throughout a break session', async () => {
+      vi.useFakeTimers();
+      const baseTime = new Date('2025-01-01T00:00:00.000Z').getTime();
+      vi.setSystemTime(new Date(baseTime));
       useTimerStore.setState({
         sessionType: SessionType.SHORT_BREAK,
         remainingSeconds: 5 * 60,
@@ -288,7 +303,9 @@ describe('Timer Store - Penalty System', () => {
       // User interacts 3 times
       const { handleInputDuringBreak } = useTimerStore.getState();
       handleInputDuringBreak();
+      vi.setSystemTime(new Date(baseTime + 200));
       handleInputDuringBreak();
+      vi.setSystemTime(new Date(baseTime + 400));
       handleInputDuringBreak();
 
       state = useTimerStore.getState();
@@ -301,6 +318,7 @@ describe('Timer Store - Penalty System', () => {
       expect(state.isFullscreenBreak).toBe(false);
       // Interaction count persists for statistics (not reset on exit)
       expect(state.breakInteractionCount).toBe(3);
+      vi.useRealTimers();
     });
   });
 });

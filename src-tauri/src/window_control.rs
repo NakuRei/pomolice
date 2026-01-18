@@ -104,6 +104,13 @@ pub(crate) async fn enter_fullscreen_all_monitors<R: Runtime>(
     main_window
         .show()
         .map_err(|e| format!("Failed to show window: {}", e))?;
+    // Retry focus because Windows can reject focus requests immediately after show.
+    for _ in 0..5 {
+        if main_window.set_focus().is_ok() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
 
     // Get all available monitors
     let monitors = main_window

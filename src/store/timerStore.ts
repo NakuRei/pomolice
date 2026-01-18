@@ -58,6 +58,9 @@ interface TimerState {
 
   // Phase 4: Number of input interactions detected during current break
   breakInteractionCount: number;
+
+  // Phase 4: Timestamp of last penalty applied (ms)
+  lastPenaltyTime: number;
 }
 
 /**
@@ -131,6 +134,7 @@ const initialState: TimerState = {
   showContinueDialog: false,
   isFullscreenBreak: false,
   breakInteractionCount: 0,
+  lastPenaltyTime: 0,
 };
 
 /**
@@ -193,6 +197,7 @@ export const useTimerStore = create<TimerStore>()(
           state.showContinueDialog = false;
           state.isFullscreenBreak = false; // Phase 3: Exit fullscreen if in break mode
           state.breakInteractionCount = 0; // Phase 4: Reset interaction count
+          state.lastPenaltyTime = 0;
           // Note: completedPomodoros and currentCycle are NOT reset
           // to maintain the count, but current session is invalidated
         });
@@ -327,6 +332,7 @@ export const useTimerStore = create<TimerStore>()(
           set((state) => {
             state.isFullscreenBreak = true;
             state.breakInteractionCount = 0; // Reset interaction count for new break
+            state.lastPenaltyTime = 0;
           });
         } catch (error) {
           console.error("Failed to enter fullscreen break mode:", error);
@@ -366,6 +372,7 @@ export const useTimerStore = create<TimerStore>()(
       // Phase 4: Handle input detected during break (silent penalty)
       handleInputDuringBreak: () => {
         const state = get();
+        const now = Date.now();
 
         // Only apply penalty if in break mode
         if (!state.isFullscreenBreak) {
@@ -380,9 +387,15 @@ export const useTimerStore = create<TimerStore>()(
           return;
         }
 
+        // Debounce across input sources
+        if (now - state.lastPenaltyTime < 100) {
+          return;
+        }
+
         set((draft) => {
           // Increment interaction count
           draft.breakInteractionCount += 1;
+          draft.lastPenaltyTime = now;
         });
 
         // Reset break timer (silent penalty - no warning message)

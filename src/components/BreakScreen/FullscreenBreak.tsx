@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useTimerStore, SessionType } from "../../store/timerStore";
 import { useSkipFlowStore } from "../../store/skipFlowStore";
 import { formatTime } from "../../formatters/timeFormatter";
@@ -25,8 +26,33 @@ export function FullscreenBreak() {
   const remainingSeconds = useTimerStore((state) => state.remainingSeconds);
   const sessionType = useTimerStore((state) => state.sessionType);
   const { isActive, startSkipFlow, resetSkipFlow } = useSkipFlowStore();
+  const handleInputDuringBreak = useTimerStore((state) => state.handleInputDuringBreak);
+
 
   const formattedTime = formatTime(remainingSeconds);
+
+  useEffect(() => {
+    const handleKeyDown = () => {
+      handleInputDuringBreak();
+    };
+
+    const handleMouseMove = () => {
+      handleInputDuringBreak();
+    };
+
+    const handleMouseDown = () => {
+      handleInputDuringBreak();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mousedown", handleMouseDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mousedown", handleMouseDown);
+    };
+  }, [handleInputDuringBreak]);
 
   // Get session type display text
   const getSessionTypeText = () => {
