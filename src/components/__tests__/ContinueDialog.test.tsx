@@ -1,12 +1,28 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ContinueDialog } from "../ContinueDialog/ContinueDialog";
-import { useTimerStore, TimerStatus } from "../../store/timerStore";
+import { useTimerStore, TimerStatus, SessionType } from "../../store/timerStore";
+
+// Mock Tauri invoke
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn().mockResolvedValue(undefined),
+}));
 
 describe("ContinueDialog", () => {
   beforeEach(() => {
-    useTimerStore.getState().reset();
+    // Reset store to initial state
+    useTimerStore.setState({
+      status: TimerStatus.IDLE,
+      remainingSeconds: 25 * 60,
+      sessionType: SessionType.WORK,
+      currentCycle: 0,
+      completedPomodoros: 0,
+      breakInteractionCount: 0,
+      isFullscreenBreak: false,
+      showContinueDialog: false,
+      isConnected: false,
+    });
   });
 
   describe("Visibility", () => {
@@ -70,30 +86,28 @@ describe("ContinueDialog", () => {
       });
     });
 
-    it("should start next session when continue button is clicked", async () => {
+    it("should call continueToNextSession when continue button is clicked", async () => {
+      const { invoke } = await import("@tauri-apps/api/core");
       const user = userEvent.setup();
       render(<ContinueDialog />);
 
       const continueButton = screen.getByTestId("continue-dialog-continue");
       await user.click(continueButton);
 
-      const state = useTimerStore.getState();
-      expect(state.status).toBe(TimerStatus.RUNNING);
-      expect(state.currentCycle).toBe(3); // Incremented
-      expect(state.showContinueDialog).toBe(false);
+      // Backend receives the command to start next session
+      expect(invoke).toHaveBeenCalledWith("continue_to_next_session");
     });
 
-    it("should end cycle when end button is clicked", async () => {
+    it("should call endCycle when end button is clicked", async () => {
+      const { invoke } = await import("@tauri-apps/api/core");
       const user = userEvent.setup();
       render(<ContinueDialog />);
 
       const endButton = screen.getByTestId("continue-dialog-end");
       await user.click(endButton);
 
-      const state = useTimerStore.getState();
-      expect(state.status).toBe(TimerStatus.IDLE);
-      expect(state.showContinueDialog).toBe(false);
-      expect(state.completedPomodoros).toBe(2); // Preserved
+      // Backend receives the command to end cycle
+      expect(invoke).toHaveBeenCalledWith("end_cycle");
     });
   });
 

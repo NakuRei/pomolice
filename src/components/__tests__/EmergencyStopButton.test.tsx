@@ -1,12 +1,28 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { EmergencyStopButton } from "../EmergencyStop/EmergencyStopButton";
-import { useTimerStore, TimerStatus } from "../../store/timerStore";
+import { useTimerStore, TimerStatus, SessionType } from "../../store/timerStore";
+
+// Mock Tauri invoke
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn().mockResolvedValue(undefined),
+}));
 
 describe("EmergencyStopButton", () => {
   beforeEach(() => {
-    useTimerStore.getState().reset();
+    // Reset store to initial state
+    useTimerStore.setState({
+      status: TimerStatus.IDLE,
+      remainingSeconds: 25 * 60,
+      sessionType: SessionType.WORK,
+      currentCycle: 0,
+      completedPomodoros: 0,
+      breakInteractionCount: 0,
+      isFullscreenBreak: false,
+      showContinueDialog: false,
+      isConnected: false,
+    });
   });
 
   describe("Visibility", () => {
@@ -16,8 +32,8 @@ describe("EmergencyStopButton", () => {
       expect(button).not.toBeInTheDocument();
     });
 
-    it("should render when timer is running", () => {
-      useTimerStore.getState().start();
+    it("should render when timer is working", () => {
+      useTimerStore.setState({ status: TimerStatus.WORKING });
       render(<EmergencyStopButton />);
       const button = screen.getByTestId("emergency-stop-button");
       expect(button).toBeInTheDocument();
@@ -26,21 +42,21 @@ describe("EmergencyStopButton", () => {
 
   describe("Button Appearance", () => {
     it("should have correct text", () => {
-      useTimerStore.getState().start();
+      useTimerStore.setState({ status: TimerStatus.WORKING });
       render(<EmergencyStopButton />);
       const button = screen.getByTestId("emergency-stop-button");
       expect(button).toHaveTextContent("緊急停止");
     });
 
     it("should have aria-label", () => {
-      useTimerStore.getState().start();
+      useTimerStore.setState({ status: TimerStatus.WORKING });
       render(<EmergencyStopButton />);
       const button = screen.getByTestId("emergency-stop-button");
       expect(button).toHaveAttribute("aria-label", "緊急停止");
     });
 
     it("should have small, subtle styling", () => {
-      useTimerStore.getState().start();
+      useTimerStore.setState({ status: TimerStatus.WORKING });
       render(<EmergencyStopButton />);
       const button = screen.getByTestId("emergency-stop-button");
       expect(button).toHaveClass("text-xs");
@@ -51,7 +67,7 @@ describe("EmergencyStopButton", () => {
   describe("Confirmation Dialog", () => {
     it("should show dialog when button is clicked", async () => {
       const user = userEvent.setup();
-      useTimerStore.getState().start();
+      useTimerStore.setState({ status: TimerStatus.WORKING });
       render(<EmergencyStopButton />);
 
       const button = screen.getByTestId("emergency-stop-button");
@@ -63,7 +79,7 @@ describe("EmergencyStopButton", () => {
 
     it("should show correct dialog title", async () => {
       const user = userEvent.setup();
-      useTimerStore.getState().start();
+      useTimerStore.setState({ status: TimerStatus.WORKING });
       render(<EmergencyStopButton />);
 
       await user.click(screen.getByTestId("emergency-stop-button"));
@@ -73,7 +89,7 @@ describe("EmergencyStopButton", () => {
 
     it("should show warning message", async () => {
       const user = userEvent.setup();
-      useTimerStore.getState().start();
+      useTimerStore.setState({ status: TimerStatus.WORKING });
       render(<EmergencyStopButton />);
 
       await user.click(screen.getByTestId("emergency-stop-button"));
@@ -85,7 +101,7 @@ describe("EmergencyStopButton", () => {
 
     it("should have cancel and confirm buttons", async () => {
       const user = userEvent.setup();
-      useTimerStore.getState().start();
+      useTimerStore.setState({ status: TimerStatus.WORKING });
       render(<EmergencyStopButton />);
 
       await user.click(screen.getByTestId("emergency-stop-button"));
@@ -98,7 +114,7 @@ describe("EmergencyStopButton", () => {
   describe("Dialog Actions", () => {
     it("should close dialog when cancel is clicked", async () => {
       const user = userEvent.setup();
-      useTimerStore.getState().start();
+      useTimerStore.setState({ status: TimerStatus.WORKING });
       render(<EmergencyStopButton />);
 
       await user.click(screen.getByTestId("emergency-stop-button"));
@@ -113,31 +129,38 @@ describe("EmergencyStopButton", () => {
       });
     });
 
-    it("should not stop timer when cancel is clicked", async () => {
+    it("should not change timer status when cancel is clicked", async () => {
       const user = userEvent.setup();
-      useTimerStore.getState().start();
+      useTimerStore.setState({ status: TimerStatus.WORKING });
       render(<EmergencyStopButton />);
 
       await user.click(screen.getByTestId("emergency-stop-button"));
       await user.click(screen.getByTestId("emergency-stop-cancel"));
 
-      expect(useTimerStore.getState().status).toBe(TimerStatus.RUNNING);
+      expect(useTimerStore.getState().status).toBe(TimerStatus.WORKING);
     });
 
-    it("should stop timer when confirm is clicked", async () => {
+    it("should call emergencyStop when confirm is clicked", async () => {
       const user = userEvent.setup();
-      useTimerStore.getState().start();
+      useTimerStore.setState({ status: TimerStatus.WORKING });
       render(<EmergencyStopButton />);
 
       await user.click(screen.getByTestId("emergency-stop-button"));
       await user.click(screen.getByTestId("emergency-stop-confirm"));
 
-      expect(useTimerStore.getState().status).toBe(TimerStatus.IDLE);
+      // emergencyStop calls invoke, which is mocked
+      // The actual state change comes from backend via events
+      // Here we just verify the dialog closes
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId("emergency-stop-dialog")
+        ).not.toBeInTheDocument();
+      });
     });
 
     it("should close dialog after confirming", async () => {
       const user = userEvent.setup();
-      useTimerStore.getState().start();
+      useTimerStore.setState({ status: TimerStatus.WORKING });
       render(<EmergencyStopButton />);
 
       await user.click(screen.getByTestId("emergency-stop-button"));
@@ -152,10 +175,11 @@ describe("EmergencyStopButton", () => {
   });
 
   describe("Emergency Stop Behavior", () => {
-    it("should reset timer to idle state", async () => {
+    it("should call backend emergency_stop command", async () => {
+      const { invoke } = await import("@tauri-apps/api/core");
       const user = userEvent.setup();
       useTimerStore.setState({
-        status: TimerStatus.RUNNING,
+        status: TimerStatus.WORKING,
         remainingSeconds: 500,
         currentCycle: 2,
       });
@@ -164,15 +188,13 @@ describe("EmergencyStopButton", () => {
       await user.click(screen.getByTestId("emergency-stop-button"));
       await user.click(screen.getByTestId("emergency-stop-confirm"));
 
-      const state = useTimerStore.getState();
-      expect(state.status).toBe(TimerStatus.IDLE);
-      expect(state.remainingSeconds).toBe(25 * 60); // Reset to default
+      expect(invoke).toHaveBeenCalledWith("emergency_stop");
     });
 
-    it("should preserve pomodoro count for statistics", async () => {
+    it("should preserve pomodoro count (handled by backend)", async () => {
       const user = userEvent.setup();
       useTimerStore.setState({
-        status: TimerStatus.RUNNING,
+        status: TimerStatus.WORKING,
         completedPomodoros: 3,
         currentCycle: 3,
       });
@@ -181,9 +203,9 @@ describe("EmergencyStopButton", () => {
       await user.click(screen.getByTestId("emergency-stop-button"));
       await user.click(screen.getByTestId("emergency-stop-confirm"));
 
+      // The backend handles state, so pomodoro count is preserved until backend responds
       const state = useTimerStore.getState();
-      expect(state.completedPomodoros).toBe(3); // Preserved
-      expect(state.currentCycle).toBe(3); // Preserved
+      expect(state.completedPomodoros).toBe(3);
     });
   });
 });

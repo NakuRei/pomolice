@@ -1,6 +1,35 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import App from "./App";
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn().mockResolvedValue(() => {}),
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn().mockResolvedValue({
+    status: "idle",
+    remaining_seconds: 1500,
+    session_type: "work",
+    current_cycle: 0,
+    completed_pomodoros: 0,
+    break_interaction_count: 0,
+    is_fullscreen_break: false,
+    show_continue_dialog: false,
+    settings: {
+      work_duration_secs: 1500,
+      short_break_duration_secs: 300,
+      long_break_duration_secs: 900,
+      long_break_interval: 4,
+    },
+  }),
+}));
+
+vi.mock("@tauri-apps/plugin-notification", () => ({
+  isPermissionGranted: vi.fn().mockResolvedValue(false),
+  requestPermission: vi.fn().mockResolvedValue("denied"),
+  sendNotification: vi.fn(),
+}));
 
 describe("App", () => {
   it("renders without crashing", () => {

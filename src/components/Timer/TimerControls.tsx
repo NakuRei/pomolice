@@ -14,10 +14,12 @@ export function TimerControls() {
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
   const isIdle = status === TimerStatus.IDLE;
-  const isRunning = status === TimerStatus.RUNNING;
+  const isWorking = status === TimerStatus.WORKING;
 
   const handleStart = () => {
-    start();
+    start().catch((error) => {
+      console.error("Failed to start:", error);
+    });
   };
 
   const handleEmergencyStopClick = () => {
@@ -25,7 +27,9 @@ export function TimerControls() {
   };
 
   const handleConfirm = () => {
-    emergencyStop();
+    emergencyStop().catch((error) => {
+      console.error("Failed to emergency stop:", error);
+    });
     setShowConfirmDialog(false);
   };
 
@@ -46,7 +50,7 @@ export function TimerControls() {
             開始
           </button>
         )}
-        {isRunning && (
+        {isWorking && (
           <button
             onClick={handleEmergencyStopClick}
             className="text-xs text-gray-400 hover:text-red-600 transition-colors underline"

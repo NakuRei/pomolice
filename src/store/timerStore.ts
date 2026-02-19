@@ -1,24 +1,22 @@
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
 import { immer } from "zustand/middleware/immer";
+import { invoke } from "@tauri-apps/api/core";
 import { useSettingsStore } from "./settingsStore";
-import { notifyWorkComplete, notifyBreakComplete, notifyLongBreakComplete } from "../services/notifications";
-import { startBreak, completeBreak, startWork, completeWork } from "../services/windowControl";
 
 /**
- * Timer status constants
- * Using const object for type-safe, reusable constants with zero runtime overhead
+ * Timer status constants matching backend TimerStatus enum
  */
 export const TimerStatus = {
   IDLE: "idle",
-  RUNNING: "running",
-  PAUSED: "paused",
+  WORKING: "working",
+  ON_BREAK: "on_break",
 } as const;
 
-export type TimerStatusType = typeof TimerStatus[keyof typeof TimerStatus];
+export type TimerStatusType = (typeof TimerStatus)[keyof typeof TimerStatus];
 
 /**
- * Session type constants
+ * Session type constants matching backend SessionType enum
  */
 export const SessionType = {
   WORK: "work",
@@ -26,126 +24,102 @@ export const SessionType = {
   LONG_BREAK: "long_break",
 } as const;
 
-export type SessionTypeType = typeof SessionType[keyof typeof SessionType];
+export type SessionTypeValue = (typeof SessionType)[keyof typeof SessionType];
 
 /**
- * Timer state interface
- * Phase 2: Extended with cycle tracking and session management
- * Phase 3: Added fullscreen break mode
- * Phase 4: Added input monitoring and penalty system
+ * Payload received from backend timer_tick events
+ */
+export interface TimerTickPayload {
+  status: TimerStatusType;
+  remaining_seconds: number;
+  session_type: SessionTypeValue;
+  current_cycle: number;
+  completed_pomodoros: number;
+  break_interaction_count: number;
+  is_fullscreen_break: boolean;
+}
+
+/**
+ * Payload received from backend session_completed events
+ */
+export interface SessionCompletedPayload {
+  completed_session_type: SessionTypeValue;
+  next_session_type: SessionTypeValue | null;
+  show_continue_dialog: boolean;
+}
+
+/**
+ * Full state payload from backend get_full_state command
+ */
+export interface FullStatePayload extends TimerTickPayload {
+  show_continue_dialog: boolean;
+  settings: {
+    work_duration_secs: number;
+    short_break_duration_secs: number;
+    long_break_duration_secs: number;
+    long_break_interval: number;
+  };
+}
+
+/**
+ * Timer state interface - display-only state from backend
+ * The backend is the single source of truth
  */
 interface TimerState {
-  // Timer status: idle (not started), running (counting down), paused (not used in Phase 1-2)
+  // Display state (received from backend events)
   status: TimerStatusType;
-
-  // Remaining time in seconds
   remainingSeconds: number;
-
-  // Session type: work, short_break, or long_break
-  sessionType: SessionTypeType;
-
-  // Number of completed pomodoros (work sessions) in current cycle
-  completedPomodoros: number;
-
-  // Current cycle position (1-based, resets after long break)
+  sessionType: SessionTypeValue;
   currentCycle: number;
-
-  // Flag to show "Continue?" dialog after break completion
-  showContinueDialog: boolean;
-
-  // Phase 3: Flag to indicate fullscreen break mode is active
+  completedPomodoros: number;
+  breakInteractionCount: number;
   isFullscreenBreak: boolean;
 
-  // Phase 4: Number of input interactions detected during current break
-  breakInteractionCount: number;
-
-  // Phase 4: Timestamp of last penalty applied (ms)
-  lastPenaltyTime: number;
+  // UI-only state
+  showContinueDialog: boolean;
+  isConnected: boolean;
 }
 
 /**
  * Timer actions interface
- * Phase 2: Extended with session completion and cycle management
- * Phase 3: Added break mode actions
- * Phase 4: Added input monitoring and penalty actions
+ * Actions send commands to backend or handle events from backend
  */
 interface TimerActions {
-  // Start the timer
-  start: () => void;
+  // User actions (send commands to backend)
+  start: () => Promise<void>;
+  startNextSession: () => Promise<void>;
+  endCycle: () => Promise<void>;
+  emergencyStop: () => Promise<void>;
+  syncSettings: () => Promise<void>;
 
-  // Stop the timer (Phase 1 only - will be removed in Phase 2)
+  // Event handlers (called by event listeners from useTimerSync)
+  handleTimerTick: (payload: TimerTickPayload) => void;
+  handleSessionCompleted: (payload: SessionCompletedPayload) => void;
+  handleFullState: (payload: FullStatePayload) => void;
+  setConnected: (connected: boolean) => void;
+
+  // Legacy compatibility (to be removed)
   stop: () => void;
-
-  // Emergency stop (Phase 2+)
-  emergencyStop: () => void;
-
-  // Reset the timer to initial state
   reset: () => void;
-
-  // Tick function to decrease time by 1 second
   tick: () => void;
-
-  // Complete current session and transition to next
-  completeSession: () => void;
-
-  // Start next work session (called from continue dialog)
-  startNextSession: () => void;
-
-  // End pomodoro cycle (called from continue dialog)
-  endCycle: () => void;
-
-  // Phase 3: Enter fullscreen break mode
-  enterBreakMode: () => Promise<void>;
-
-  // Phase 3: Exit fullscreen break mode
-  exitBreakMode: () => Promise<void>;
-
-  // Phase 4: Reset break timer to full duration (penalty for input during break)
-  resetBreakTimer: () => void;
-
-  // Phase 4: Handle input detected during break (silent penalty)
-  handleInputDuringBreak: () => void;
 }
 
-/**
- * Combined timer store type
- */
 type TimerStore = TimerState & TimerActions;
 
 /**
- * Get initial remaining seconds from settings
- */
-function getInitialRemainingSeconds(): number {
-  return useSettingsStore.getState().workDuration * 60;
-}
-
-/**
  * Initial state for the timer
- * Phase 2: Extended with cycle tracking
- * Phase 3: Added fullscreen break flag
- * Phase 4: Added breakInteractionCount
  */
 const initialState: TimerState = {
   status: TimerStatus.IDLE,
-  remainingSeconds: getInitialRemainingSeconds(),
+  remainingSeconds: 25 * 60, // Will be updated from backend
   sessionType: SessionType.WORK,
-  completedPomodoros: 0,
   currentCycle: 0,
-  showContinueDialog: false,
-  isFullscreenBreak: false,
+  completedPomodoros: 0,
   breakInteractionCount: 0,
-  lastPenaltyTime: 0,
+  isFullscreenBreak: false,
+  showContinueDialog: false,
+  isConnected: false,
 };
-
-/**
- * Determine break type based on current cycle
- * @param cycle - Current cycle number (1-based)
- * @param interval - Long break interval from settings
- * @returns "short_break" or "long_break"
- */
-function getBreakType(cycle: number, interval: number): SessionTypeType {
-  return cycle % interval === 0 ? SessionType.LONG_BREAK : SessionType.SHORT_BREAK;
-}
 
 /**
  * Helper to conditionally apply devtools middleware only in development
@@ -155,278 +129,127 @@ const conditionalDevtools = import.meta.env.DEV ? devtools : noopDevtools;
 
 /**
  * Zustand store for timer state management
- * Uses immer middleware for immutable state updates
- * Uses devtools middleware for Redux DevTools integration (development only)
+ * This store is display-only - all state comes from backend events
  */
 export const useTimerStore = create<TimerStore>()(
   conditionalDevtools(
-    immer((set, get) => ({
+    immer((set) => ({
       ...initialState,
 
-      start: () => {
-        const duration = get().remainingSeconds;
-
-        set((state) => {
-          state.status = TimerStatus.RUNNING;
-          // Initialize cycle on first start if needed
-          if (state.currentCycle === 0) {
-            state.currentCycle = 1;
-          }
-        });
-
-        // Inform backend of work session start (guarded in Rust)
-        startWork(duration).catch((error) => {
-          console.error("Failed to start work session in backend:", error);
-        });
-      },
-
-      stop: () =>
-        set((state) => {
-          state.status = TimerStatus.IDLE;
-        }),
-
-      emergencyStop: () => {
-        const wasFullscreenBreak = get().isFullscreenBreak;
-        const wasRunning = get().status === TimerStatus.RUNNING;
-
-        set((state) => {
-          // Emergency stop: invalidate session, reset to idle
-          state.status = TimerStatus.IDLE;
-          state.sessionType = SessionType.WORK;
-          state.remainingSeconds = useSettingsStore.getState().workDuration * 60;
-          state.showContinueDialog = false;
-          state.isFullscreenBreak = false; // Phase 3: Exit fullscreen if in break mode
-          state.breakInteractionCount = 0; // Phase 4: Reset interaction count
-          state.lastPenaltyTime = 0;
-          // Note: completedPomodoros and currentCycle are NOT reset
-          // to maintain the count, but current session is invalidated
-        });
-
-        // Phase 3: Exit fullscreen mode if active (secure break management)
-        if (wasFullscreenBreak) {
-          completeBreak().catch((error) => {
-            console.error("Failed to exit fullscreen during emergency stop:", error);
-          });
-        } else if (wasRunning) {
-          // Ensure backend state resets if work was active
-          completeWork().catch((error) => {
-            console.error("Failed to reset work state during emergency stop:", error);
-          });
-        }
-      },
-
-      reset: () => set(initialState),
-
-      tick: () => {
-        const state = get();
-        if (state.status === TimerStatus.RUNNING && state.remainingSeconds > 0) {
-          set((draft) => {
-            draft.remainingSeconds -= 1;
-          });
-
-          // Check if session is complete after decrement
-          if (state.remainingSeconds === 1) {
-            // Will become 0 after this tick, so complete the session
-            get().completeSession();
-          }
-        }
-      },
-
-      completeSession: () => {
-        const state = get();
+      // Start work session - sends command to backend with current settings
+      start: async () => {
         const settings = useSettingsStore.getState();
-
-        if (state.sessionType === SessionType.WORK) {
-          // Work session completed
-          set((draft) => {
-            draft.completedPomodoros += 1;
-
-            // Determine break type
-            const breakType = getBreakType(draft.currentCycle, settings.longBreakInterval);
-            draft.sessionType = breakType;
-
-            // Set break duration
-            draft.remainingSeconds =
-              breakType === SessionType.LONG_BREAK
-                ? settings.longBreakDuration * 60
-                : settings.shortBreakDuration * 60;
-
-            // Auto-start break (no user interaction needed)
-            draft.status = TimerStatus.RUNNING;
-          });
-
-          // Show notification
-          notifyWorkComplete();
-
-          // Phase 3: Enter fullscreen break mode
-          get().enterBreakMode().catch((error) => {
-            console.error("Failed to enter break mode:", error);
-          });
-        } else {
-          // Break session completed (short or long)
-          const isLongBreak = state.sessionType === SessionType.LONG_BREAK;
-
-          set((draft) => {
-            draft.status = TimerStatus.IDLE;
-            draft.showContinueDialog = true;
-
-            // If long break completed, reset cycle
-            if (isLongBreak) {
-              draft.currentCycle = 0;
-            }
-          });
-
-          // Show notification
-          if (isLongBreak) {
-            notifyLongBreakComplete();
-          } else {
-            notifyBreakComplete();
-          }
-
-          // Phase 3: Exit fullscreen break mode
-          get().exitBreakMode().catch((error) => {
-            console.error("Failed to exit break mode:", error);
-          });
-        }
-      },
-
-      startNextSession: () => {
-        const settings = useSettingsStore.getState();
-
-        set((state) => {
-          // Increment cycle for next work session
-          state.currentCycle += 1;
-          state.sessionType = SessionType.WORK;
-          state.remainingSeconds = settings.workDuration * 60;
-          state.showContinueDialog = false;
-          state.status = TimerStatus.RUNNING;
-        });
-
-        startWork(settings.workDuration * 60).catch((error) => {
-          console.error("Failed to start next work session in backend:", error);
-        });
-      },
-
-      endCycle: () =>
-        set((state) => {
-          const settings = useSettingsStore.getState();
-
-          // End cycle, return to idle
-          state.status = TimerStatus.IDLE;
-          state.sessionType = SessionType.WORK;
-          state.remainingSeconds = settings.workDuration * 60;
-          state.showContinueDialog = false;
-          // Keep completedPomodoros and currentCycle for statistics
-        }),
-
-      // Phase 3: Enter fullscreen break mode (secure state-managed)
-      // Phase 4: Start input monitoring (backend-managed)
-      enterBreakMode: async () => {
         try {
-          const state = get();
-          const duration = state.remainingSeconds;
-
-          // Start break through secure backend API
-          await startBreak(duration);
-
-          set((state) => {
-            state.isFullscreenBreak = true;
-            state.breakInteractionCount = 0; // Reset interaction count for new break
-            state.lastPenaltyTime = 0;
+          await invoke("start_work", {
+            workDurationSecs: settings.workDuration * 60,
+            shortBreakDurationSecs: settings.shortBreakDuration * 60,
+            longBreakDurationSecs: settings.longBreakDuration * 60,
+            longBreakInterval: settings.longBreakInterval,
           });
         } catch (error) {
-          console.error("Failed to enter fullscreen break mode:", error);
+          console.error("Failed to start work:", error);
           throw error;
         }
       },
 
-      // Phase 3: Exit fullscreen break mode (secure state-managed)
-      // Phase 4: Stop input monitoring (backend-managed)
-      exitBreakMode: async () => {
+      // Continue to next work session after break
+      startNextSession: async () => {
         try {
-          // Complete break through secure backend API
-          await completeBreak();
-
-          set((state) => {
-            state.isFullscreenBreak = false;
-          });
+          await invoke("continue_to_next_session");
         } catch (error) {
-          console.error("Failed to exit fullscreen break mode:", error);
+          console.error("Failed to continue to next session:", error);
           throw error;
         }
       },
 
-      // Phase 4: Reset break timer to full duration (penalty)
-      resetBreakTimer: () =>
-        set((state) => {
-          const settings = useSettingsStore.getState();
+      // End current cycle
+      endCycle: async () => {
+        try {
+          await invoke("end_cycle");
+        } catch (error) {
+          console.error("Failed to end cycle:", error);
+          throw error;
+        }
+      },
 
-          // Only reset if currently in a break session
-          if (state.sessionType === SessionType.SHORT_BREAK) {
-            state.remainingSeconds = settings.shortBreakDuration * 60;
-          } else if (state.sessionType === SessionType.LONG_BREAK) {
-            state.remainingSeconds = settings.longBreakDuration * 60;
-          }
+      // Emergency stop
+      emergencyStop: async () => {
+        try {
+          await invoke("emergency_stop");
+        } catch (error) {
+          console.error("Failed to emergency stop:", error);
+          throw error;
+        }
+      },
+
+      // Sync settings to backend
+      syncSettings: async () => {
+        const settings = useSettingsStore.getState();
+        try {
+          await invoke("sync_settings", {
+            workDurationSecs: settings.workDuration * 60,
+            shortBreakDurationSecs: settings.shortBreakDuration * 60,
+            longBreakDurationSecs: settings.longBreakDuration * 60,
+            longBreakInterval: settings.longBreakInterval,
+          });
+        } catch (error) {
+          // Silently fail - settings sync is not critical
+          console.debug("Settings sync failed (timer may be running):", error);
+        }
+      },
+
+      // Handle timer tick event from backend
+      handleTimerTick: (payload: TimerTickPayload) =>
+        set((state) => {
+          state.status = payload.status;
+          state.remainingSeconds = payload.remaining_seconds;
+          state.sessionType = payload.session_type;
+          state.currentCycle = payload.current_cycle;
+          state.completedPomodoros = payload.completed_pomodoros;
+          state.breakInteractionCount = payload.break_interaction_count;
+          state.isFullscreenBreak = payload.is_fullscreen_break;
         }),
 
-      // Phase 4: Handle input detected during break (silent penalty)
-      handleInputDuringBreak: () => {
-        const state = get();
-        const now = Date.now();
+      // Handle session completed event from backend
+      handleSessionCompleted: (payload: SessionCompletedPayload) =>
+        set((state) => {
+          state.showContinueDialog = payload.show_continue_dialog;
+          // Session type will be updated via timer_tick event
+        }),
 
-        // Only apply penalty if in break mode
-        if (!state.isFullscreenBreak) {
-          return;
-        }
+      // Handle full state from backend (initial sync)
+      handleFullState: (payload: FullStatePayload) =>
+        set((state) => {
+          state.status = payload.status;
+          state.remainingSeconds = payload.remaining_seconds;
+          state.sessionType = payload.session_type;
+          state.currentCycle = payload.current_cycle;
+          state.completedPomodoros = payload.completed_pomodoros;
+          state.breakInteractionCount = payload.break_interaction_count;
+          state.isFullscreenBreak = payload.is_fullscreen_break;
+          state.showContinueDialog = payload.show_continue_dialog;
+          state.isConnected = true;
+        }),
 
-        // Only apply penalty if in break session
-        if (
-          state.sessionType !== SessionType.SHORT_BREAK &&
-          state.sessionType !== SessionType.LONG_BREAK
-        ) {
-          return;
-        }
+      // Set connection status
+      setConnected: (connected: boolean) =>
+        set((state) => {
+          state.isConnected = connected;
+        }),
 
-        // Debounce across input sources
-        if (now - state.lastPenaltyTime < 100) {
-          return;
-        }
-
-        set((draft) => {
-          // Increment interaction count
-          draft.breakInteractionCount += 1;
-          draft.lastPenaltyTime = now;
-        });
-
-        // Reset break timer (silent penalty - no warning message)
-        get().resetBreakTimer();
-      },
+      // Legacy compatibility - these do nothing now
+      stop: () => {},
+      reset: () => {},
+      tick: () => {},
     })),
     { name: "TimerStore" }
   )
 );
 
-// Subscribe to settings changes and update timer when idle
-useSettingsStore.subscribe((settings, prevSettings) => {
+// Sync settings to backend when they change (while idle)
+useSettingsStore.subscribe(() => {
   const timerState = useTimerStore.getState();
-
-  // Only update if timer is idle
-  if (timerState.status !== TimerStatus.IDLE) {
-    return;
-  }
-
-  // Update remaining seconds based on current session type
-  let newRemainingSeconds = timerState.remainingSeconds;
-
-  if (timerState.sessionType === SessionType.WORK && settings.workDuration !== prevSettings.workDuration) {
-    newRemainingSeconds = settings.workDuration * 60;
-  } else if (timerState.sessionType === SessionType.SHORT_BREAK && settings.shortBreakDuration !== prevSettings.shortBreakDuration) {
-    newRemainingSeconds = settings.shortBreakDuration * 60;
-  } else if (timerState.sessionType === SessionType.LONG_BREAK && settings.longBreakDuration !== prevSettings.longBreakDuration) {
-    newRemainingSeconds = settings.longBreakDuration * 60;
-  }
-
-  if (newRemainingSeconds !== timerState.remainingSeconds) {
-    useTimerStore.setState({ remainingSeconds: newRemainingSeconds });
+  if (timerState.status === TimerStatus.IDLE && timerState.isConnected) {
+    timerState.syncSettings();
   }
 });

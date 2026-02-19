@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { useTimerStore, SessionType } from "../../store/timerStore";
 import { useSkipFlowStore } from "../../store/skipFlowStore";
 import { formatTime } from "../../formatters/timeFormatter";
@@ -13,46 +12,22 @@ import SkipFlowModal from "../SkipFlow/SkipFlowModal";
  * Displays during break time as a fullscreen overlay.
  * Prevents users from working by covering the entire screen.
  *
- * Features (Phase 3):
- * - Large countdown timer
+ * Features:
+ * - Large countdown timer (state from backend)
  * - Motivational messages
  * - Break statistics
- * - Small skip button (triggers simple confirmation)
+ * - Small skip button (triggers multi-step confirmation)
  *
- * Phase 4: Input monitoring and penalties
- * Phase 5: Multi-step skip confirmation flow (10 steps)
+ * Note: Input monitoring and penalties are handled entirely by the backend.
+ * This component is display-only.
  */
 export function FullscreenBreak() {
   const remainingSeconds = useTimerStore((state) => state.remainingSeconds);
   const sessionType = useTimerStore((state) => state.sessionType);
   const { isActive, startSkipFlow, resetSkipFlow } = useSkipFlowStore();
-  const handleInputDuringBreak = useTimerStore((state) => state.handleInputDuringBreak);
-
+  const emergencyStop = useTimerStore((state) => state.emergencyStop);
 
   const formattedTime = formatTime(remainingSeconds);
-
-  useEffect(() => {
-    const handleKeyDown = () => {
-      handleInputDuringBreak();
-    };
-
-    const handleMouseMove = () => {
-      handleInputDuringBreak();
-    };
-
-    const handleMouseDown = () => {
-      handleInputDuringBreak();
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mousedown", handleMouseDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mousedown", handleMouseDown);
-    };
-  }, [handleInputDuringBreak]);
 
   // Get session type display text
   const getSessionTypeText = () => {
@@ -66,23 +41,16 @@ export function FullscreenBreak() {
     }
   };
 
-  // Handle skip button click - start the 10-step skip flow
+  // Handle skip button click - start the multi-step skip flow
   const handleSkipClick = () => {
     startSkipFlow();
   };
 
-  // Handle skip flow completion - user completed all 10 steps
+  // Handle skip flow completion - user completed all steps
   const handleSkipComplete = () => {
-    // User successfully completed all 10 steps, skip the break
-    const timerStore = useTimerStore.getState();
-
-    // TODO Phase 6: Record skip in statistics
-    // statisticsStore.recordBreakSkip(skipFlowStore.totalTimeSpent, skipFlowStore.stepRetries);
-
-    // Exit break mode and complete session
-    timerStore.exitBreakMode().then(() => {
-      timerStore.completeSession();
-    });
+    // User successfully completed all steps, skip the break via emergency stop
+    // This will exit fullscreen and reset to idle state
+    emergencyStop();
 
     // Reset skip flow
     resetSkipFlow();
@@ -126,7 +94,7 @@ export function FullscreenBreak() {
         <SkipButton onClick={handleSkipClick} />
       </div>
 
-      {/* Phase 5: Multi-step skip confirmation flow (10 steps) */}
+      {/* Multi-step skip confirmation flow */}
       {isActive && (
         <SkipFlowModal
           onComplete={handleSkipComplete}

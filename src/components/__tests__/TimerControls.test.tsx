@@ -1,102 +1,127 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { render, screen, act } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { TimerControls } from '../Timer/TimerControls';
-import { useTimerStore, TimerStatus } from '../../store/timerStore';
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { render, screen, act } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { TimerControls } from "../Timer/TimerControls";
+import { useTimerStore, TimerStatus, SessionType } from "../../store/timerStore";
 
-describe('TimerControls', () => {
+// Mock Tauri invoke
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn().mockResolvedValue(undefined),
+}));
+
+describe("TimerControls", () => {
   beforeEach(() => {
     // Reset store to initial state before each test
-    useTimerStore.getState().reset();
+    useTimerStore.setState({
+      status: TimerStatus.IDLE,
+      remainingSeconds: 25 * 60,
+      sessionType: SessionType.WORK,
+      currentCycle: 0,
+      completedPomodoros: 0,
+      breakInteractionCount: 0,
+      isFullscreenBreak: false,
+      showContinueDialog: false,
+      isConnected: false,
+    });
   });
 
-  describe('Initial State (IDLE)', () => {
-    it('should render start button when timer is idle', () => {
+  describe("Initial State (IDLE)", () => {
+    it("should render start button when timer is idle", () => {
       render(<TimerControls />);
-      const startButton = screen.getByTestId('start-button');
+      const startButton = screen.getByTestId("start-button");
       expect(startButton).toBeInTheDocument();
-      expect(startButton).toHaveTextContent('開始');
+      expect(startButton).toHaveTextContent("開始");
     });
 
-    it('should not render stop button when timer is idle', () => {
+    it("should not render stop button when timer is idle", () => {
       render(<TimerControls />);
-      const stopButton = screen.queryByTestId('stop-button');
+      const stopButton = screen.queryByTestId("stop-button");
       expect(stopButton).not.toBeInTheDocument();
     });
 
-    it('should start timer when start button is clicked', async () => {
+    it("should call startWork when start button is clicked", async () => {
+      const { invoke } = await import("@tauri-apps/api/core");
       const user = userEvent.setup();
       render(<TimerControls />);
 
-      const startButton = screen.getByTestId('start-button');
+      const startButton = screen.getByTestId("start-button");
       await user.click(startButton);
 
-      expect(useTimerStore.getState().status).toBe(TimerStatus.RUNNING);
+      expect(invoke).toHaveBeenCalledWith(
+        "start_work",
+        expect.objectContaining({
+          workDurationSecs: expect.any(Number),
+          shortBreakDurationSecs: expect.any(Number),
+          longBreakDurationSecs: expect.any(Number),
+          longBreakInterval: expect.any(Number),
+        })
+      );
     });
   });
 
-  describe('Running State', () => {
+  describe("Working State", () => {
     beforeEach(() => {
-      useTimerStore.getState().start();
+      useTimerStore.setState({ status: TimerStatus.WORKING });
     });
 
-    it('should not render any button when timer is running', () => {
+    it("should not render any button when timer is working", () => {
       render(<TimerControls />);
-      const startButton = screen.queryByTestId('start-button');
+      const startButton = screen.queryByTestId("start-button");
       expect(startButton).not.toBeInTheDocument();
     });
 
-    it('should not render start button when timer is running', () => {
+    it("should not render start button when timer is working", () => {
       render(<TimerControls />);
-      const startButton = screen.queryByTestId('start-button');
+      const startButton = screen.queryByTestId("start-button");
       expect(startButton).not.toBeInTheDocument();
     });
   });
 
-  describe('Button Accessibility', () => {
-    it('should have aria-label on start button', () => {
+  describe("Button Accessibility", () => {
+    it("should have aria-label on start button", () => {
       render(<TimerControls />);
-      const startButton = screen.getByTestId('start-button');
-      expect(startButton).toHaveAttribute('aria-label', 'タイマーを開始');
+      const startButton = screen.getByTestId("start-button");
+      expect(startButton).toHaveAttribute("aria-label", "タイマーを開始");
     });
   });
 
-  describe('State Transitions', () => {
-    it('should hide start button after starting', async () => {
-      const user = userEvent.setup();
+  describe("State Transitions", () => {
+    it("should hide start button after starting (backend updates state)", async () => {
       const { rerender } = render(<TimerControls />);
 
       // Initially shows start button
-      expect(screen.getByTestId('start-button')).toBeInTheDocument();
+      expect(screen.getByTestId("start-button")).toBeInTheDocument();
 
-      // Click start button
-      await user.click(screen.getByTestId('start-button'));
+      // Simulate backend response updating state
+      act(() => {
+        useTimerStore.setState({ status: TimerStatus.WORKING });
+      });
 
       // Rerender to reflect state change
       rerender(<TimerControls />);
 
-      // Start button is hidden (no buttons shown during running)
-      expect(screen.queryByTestId('start-button')).not.toBeInTheDocument();
+      // Start button is hidden (no buttons shown during working)
+      expect(screen.queryByTestId("start-button")).not.toBeInTheDocument();
     });
 
-    it('should show start button again after emergency stop', async () => {
+    it("should show start button again after emergency stop (backend updates state)", async () => {
       const { rerender } = render(<TimerControls />);
 
-      // Start timer
+      // Simulate working state from backend
       act(() => {
-        useTimerStore.getState().start();
+        useTimerStore.setState({ status: TimerStatus.WORKING });
       });
       rerender(<TimerControls />);
-      expect(screen.queryByTestId('start-button')).not.toBeInTheDocument();
+      expect(screen.queryByTestId("start-button")).not.toBeInTheDocument();
 
-      // Emergency stop
+      // Simulate emergency stop response from backend
       act(() => {
-        useTimerStore.getState().emergencyStop();
+        useTimerStore.setState({ status: TimerStatus.IDLE });
       });
       rerender(<TimerControls />);
 
       // Start button is visible again
-      expect(screen.getByTestId('start-button')).toBeInTheDocument();
+      expect(screen.getByTestId("start-button")).toBeInTheDocument();
     });
   });
 });

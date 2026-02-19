@@ -19,11 +19,15 @@ export function ContinueDialog() {
   }
 
   const handleContinue = () => {
-    startNextSession();
+    startNextSession().catch((error) => {
+      console.error("Failed to continue:", error);
+    });
   };
 
   const handleEnd = () => {
-    endCycle();
+    endCycle().catch((error) => {
+      console.error("Failed to end cycle:", error);
+    });
   };
 
   return (

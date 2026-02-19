@@ -48,8 +48,8 @@ export function TimerDisplay() {
       {/* Status indicator */}
       <div className="text-sm text-gray-500 uppercase tracking-wide">
         {status === 'idle' && '待機中'}
-        {status === 'running' && '実行中'}
-        {status === 'paused' && '一時停止'}
+        {status === 'working' && '実行中'}
+        {status === 'on_break' && '休憩中'}
       </div>
     </div>
   );

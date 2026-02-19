@@ -1,12 +1,12 @@
 // Pomolice - Input Monitor Module
 // Phase 4: Global keyboard and mouse input monitoring for break enforcement
+// Now applies penalties directly instead of emitting events to frontend
 
 use rdev::{listen, Event, EventType, Key};
-use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, Once, OnceLock};
+use std::sync::{Mutex, Once, OnceLock};
 use std::thread;
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 
 #[derive(Default)]
 struct ModifierState {
@@ -28,29 +28,14 @@ fn is_escape_combo(mods: &ModifierState, key: Key) -> bool {
     mods.ctrl && mods.alt && mods.shift && matches!(key, Key::KeyE)
 }
 
-/// Input event types detected during break time
-/// Note: We do NOT record the actual key pressed or mouse position for privacy
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum InputEventType {
-    /// Any keyboard key press detected
-    Keyboard,
-    /// Any mouse button press detected
-    MouseClick,
-    /// Any mouse movement detected
-    MouseMove,
-}
-
-/// Payload sent to frontend when input is detected
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InputDetectedPayload {
-    pub event_type: InputEventType,
-    pub timestamp: u64,
-}
-
 static ENABLED: AtomicBool = AtomicBool::new(false);
 static LISTENER_STARTED: Once = Once::new();
 static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
+static MODIFIER_STATE: Mutex<ModifierState> = Mutex::new(ModifierState {
+    ctrl: false,
+    alt: false,
+    shift: false,
+});
 
 /// Check if we have accessibility permissions (macOS only)
 #[cfg(target_os = "macos")]
@@ -69,7 +54,7 @@ fn check_accessibility_permission() -> Result<bool, String> {
 
 /// Start global input monitoring
 /// This will listen to ALL keyboard and mouse events system-wide
-/// and emit "input-detected" events to the frontend
+/// and apply penalties directly to the timer state
 pub fn start_monitoring(app_handle: AppHandle) -> Result<(), String> {
     // Check accessibility permissions
     if !check_accessibility_permission()? {
@@ -92,7 +77,6 @@ pub fn start_monitoring(app_handle: AppHandle) -> Result<(), String> {
             .get()
             .expect("App handle should be set before starting listener")
             .clone();
-        let mods = Arc::new(Mutex::new(ModifierState::default()));
 
         // Spawn monitoring thread
         thread::spawn(move || {
@@ -101,52 +85,49 @@ pub fn start_monitoring(app_handle: AppHandle) -> Result<(), String> {
                     return;
                 }
 
-                // Escape hatch: detect Ctrl+Alt+Shift+E and exit fullscreen
-                if let EventType::KeyPress(key) = event.event_type {
-                    if let Ok(mut m) = mods.lock() {
-                        update_modifiers(&mut m, key, true);
-                        if is_escape_combo(&m, key) {
-                            let app = app_handle.clone();
-                            // Best-effort exit; ignore errors
-                            let _ = tauri::async_runtime::block_on(async {
-                                crate::window_control::exit_fullscreen_all_monitors(app.clone())
-                                    .await
-                            });
-                            // Disable monitoring after escape
-                            ENABLED.store(false, Ordering::SeqCst);
-                            return;
+                // Track modifier keys for escape combo detection
+                match event.event_type {
+                    EventType::KeyPress(key) => {
+                        if let Ok(mut mods) = MODIFIER_STATE.lock() {
+                            update_modifiers(&mut mods, key, true);
+
+                            // Escape hatch: detect Ctrl+Alt+Shift+E and exit fullscreen
+                            if is_escape_combo(&mods, key) {
+                                let app = app_handle.clone();
+                                // Best-effort exit; ignore errors
+                                let _ = tauri::async_runtime::block_on(async {
+                                    crate::window_control::exit_fullscreen_all_monitors(app.clone())
+                                        .await
+                                });
+                                // Disable monitoring after escape
+                                ENABLED.store(false, Ordering::SeqCst);
+                                return;
+                            }
                         }
                     }
-                } else if let EventType::KeyRelease(key) = event.event_type {
-                    if let Ok(mut m) = mods.lock() {
-                        update_modifiers(&mut m, key, false);
+                    EventType::KeyRelease(key) => {
+                        if let Ok(mut mods) = MODIFIER_STATE.lock() {
+                            update_modifiers(&mut mods, key, false);
+                        }
                     }
+                    _ => {}
                 }
 
-                // Determine event type and emit to frontend
-                let event_type = match event.event_type {
-                    EventType::KeyPress(_) | EventType::KeyRelease(_) => {
-                        Some(InputEventType::Keyboard)
-                    }
-                    EventType::ButtonPress(_) | EventType::ButtonRelease(_) => {
-                        Some(InputEventType::MouseClick)
-                    }
-                    EventType::MouseMove { .. } => Some(InputEventType::MouseMove),
-                    EventType::Wheel { .. } => Some(InputEventType::MouseMove), // Treat wheel as mouse activity
-                };
+                // Check if this is an input event that should trigger a penalty
+                let should_penalize = matches!(
+                    event.event_type,
+                    EventType::KeyPress(_)
+                        | EventType::KeyRelease(_)
+                        | EventType::ButtonPress(_)
+                        | EventType::ButtonRelease(_)
+                        | EventType::MouseMove { .. }
+                        | EventType::Wheel { .. }
+                );
 
-                if let Some(event_type) = event_type {
-                    let payload = InputDetectedPayload {
-                        event_type,
-                        timestamp: std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as u64,
-                    };
-
-                    // Emit event to frontend
-                    // Note: We ignore errors here to avoid blocking the event loop
-                    let _ = app_handle.emit("input-detected", payload);
+                if should_penalize {
+                    // Apply penalty directly to timer state
+                    // The timer_state module handles debouncing internally
+                    crate::timer_state::apply_input_penalty(&app_handle);
                 }
             };
 
@@ -166,6 +147,11 @@ pub fn stop_monitoring() -> Result<(), String> {
         return Err("Monitoring not started".to_string());
     }
 
+    // Reset modifier state
+    if let Ok(mut mods) = MODIFIER_STATE.lock() {
+        *mods = ModifierState::default();
+    }
+
     Ok(())
 }
 
@@ -174,29 +160,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_input_event_type_serialization() {
-        let event = InputEventType::Keyboard;
-        let serialized = serde_json::to_string(&event).unwrap();
-        assert!(serialized.contains("Keyboard"));
-
-        let event = InputEventType::MouseClick;
-        let serialized = serde_json::to_string(&event).unwrap();
-        assert!(serialized.contains("MouseClick"));
-
-        let event = InputEventType::MouseMove;
-        let serialized = serde_json::to_string(&event).unwrap();
-        assert!(serialized.contains("MouseMove"));
+    fn test_modifier_state_default() {
+        let mods = ModifierState::default();
+        assert!(!mods.ctrl);
+        assert!(!mods.alt);
+        assert!(!mods.shift);
     }
 
     #[test]
-    fn test_input_detected_payload() {
-        let payload = InputDetectedPayload {
-            event_type: InputEventType::Keyboard,
-            timestamp: 1234567890,
-        };
+    fn test_escape_combo_detection() {
+        let mut mods = ModifierState::default();
 
-        let serialized = serde_json::to_string(&payload).unwrap();
-        assert!(serialized.contains("Keyboard"));
-        assert!(serialized.contains("1234567890"));
+        // Not enough modifiers
+        assert!(!is_escape_combo(&mods, Key::KeyE));
+
+        // Add modifiers one by one
+        update_modifiers(&mut mods, Key::ControlLeft, true);
+        assert!(!is_escape_combo(&mods, Key::KeyE));
+
+        update_modifiers(&mut mods, Key::Alt, true);
+        assert!(!is_escape_combo(&mods, Key::KeyE));
+
+        update_modifiers(&mut mods, Key::ShiftLeft, true);
+        // Now all modifiers are pressed
+        assert!(is_escape_combo(&mods, Key::KeyE));
+
+        // Wrong key
+        assert!(!is_escape_combo(&mods, Key::KeyA));
     }
 }

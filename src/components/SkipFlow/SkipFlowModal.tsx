@@ -8,7 +8,6 @@
 
 import { useEffect } from "react";
 import { useSkipFlowStore, SKIP_FLOW_STEPS } from "../../store/skipFlowStore";
-import { useTimerStore } from "../../store/timerStore";
 import ProgressIndicator from "./ProgressIndicator";
 import ConfirmationStep from "./steps/ConfirmationStep";
 import TypingChallenge from "./steps/TypingChallenge";
@@ -24,11 +23,13 @@ interface SkipFlowModalProps {
 /**
  * Main skip flow modal component
  * Renders different step components based on current step
+ *
+ * Note: Input penalties are now handled entirely by the backend.
+ * The backend monitors global input and applies penalties directly.
  */
 export default function SkipFlowModal({ onComplete, onCancel }: SkipFlowModalProps) {
   const { currentStep, nextStep, cancelSkipFlow, completeSkipFlow, updateTimeSpent } =
     useSkipFlowStore();
-  const { handleInputDuringBreak } = useTimerStore();
 
   // Update time spent every second
   useEffect(() => {
@@ -38,24 +39,6 @@ export default function SkipFlowModal({ onComplete, onCancel }: SkipFlowModalPro
 
     return () => clearInterval(interval);
   }, [updateTimeSpent]);
-
-  // Trigger penalty on any interaction during skip flow
-  useEffect(() => {
-    const handleInteraction = () => {
-      handleInputDuringBreak();
-    };
-
-    // Listen for all interaction events
-    window.addEventListener("click", handleInteraction);
-    window.addEventListener("keydown", handleInteraction);
-    window.addEventListener("mousemove", handleInteraction);
-
-    return () => {
-      window.removeEventListener("click", handleInteraction);
-      window.removeEventListener("keydown", handleInteraction);
-      window.removeEventListener("mousemove", handleInteraction);
-    };
-  }, [handleInputDuringBreak]);
 
   const handleNext = () => {
     nextStep();

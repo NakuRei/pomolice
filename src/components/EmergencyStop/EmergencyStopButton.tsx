@@ -15,14 +15,16 @@ export function EmergencyStopButton() {
   const emergencyStop = useTimerStore((state) => state.emergencyStop);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
-  const isRunning = status === TimerStatus.RUNNING;
+  const isWorking = status === TimerStatus.WORKING;
 
   const handleEmergencyStopClick = () => {
     setShowConfirmDialog(true);
   };
 
   const handleConfirm = () => {
-    emergencyStop();
+    emergencyStop().catch((error) => {
+      console.error("Failed to emergency stop:", error);
+    });
     setShowConfirmDialog(false);
   };
 
@@ -30,8 +32,8 @@ export function EmergencyStopButton() {
     setShowConfirmDialog(false);
   };
 
-  // Don't show button if timer is not running
-  if (!isRunning) {
+  // Don't show button if timer is not working
+  if (!isWorking) {
     return null;
   }
 

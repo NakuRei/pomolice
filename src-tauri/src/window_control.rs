@@ -30,7 +30,18 @@ pub(crate) async fn enter_fullscreen_all_monitors<R: Runtime>(
         .get_webview_window("main")
         .ok_or_else(|| "Main window not found".to_string())?;
 
-    // Save current window position and size before fullscreen
+    // Restore window from minimized state FIRST before saving position/size
+    // On Windows, minimized windows have position (-32000, -32000) which we don't want to save
+    main_window
+        .unminimize()
+        .map_err(|e| format!("Failed to unminimize window: {}", e))?;
+
+    // Wait for OS to update window state after unminimize
+    // This ensures we get valid position/size values
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    // Save current window position and size AFTER unminimize
+    // This ensures we save valid values, not minimized state values
     let current_position = main_window
         .outer_position()
         .map_err(|e| format!("Failed to get window position: {}", e))?;
@@ -38,8 +49,9 @@ pub(crate) async fn enter_fullscreen_all_monitors<R: Runtime>(
         .outer_size()
         .map_err(|e| format!("Failed to get window size: {}", e))?;
 
-    // Store the state globally
-    {
+    // Store the state globally (only if values are valid)
+    // On Windows, minimized position is (-32000, -32000) - skip saving if still invalid
+    if current_position.x > -30000 && current_size.width > 0 {
         let mut state = WINDOW_STATE.lock().unwrap();
         *state = Some(WindowState {
             position: current_position,
@@ -47,7 +59,7 @@ pub(crate) async fn enter_fullscreen_all_monitors<R: Runtime>(
         });
     }
 
-    // First, hide the window briefly to break any ongoing OS-level resize operation
+    // Hide the window briefly to break any ongoing OS-level resize operation
     main_window
         .hide()
         .map_err(|e| format!("Failed to hide window: {}", e))?;
@@ -66,11 +78,24 @@ pub(crate) async fn enter_fullscreen_all_monitors<R: Runtime>(
         .map_err(|e| format!("Failed to disable resizable: {}", e))?;
 
     // Get the monitor where main window is currently displayed
+    // Use fallback chain: current_monitor -> primary_monitor -> first available monitor
     let main_monitor = main_window
         .current_monitor()
-        .map_err(|e| format!("Failed to get current monitor: {}", e))?;
+        .map_err(|e| format!("Failed to get current monitor: {}", e))?
+        .or_else(|| {
+            // Fallback 1: Try primary monitor if current_monitor returns None
+            // This can happen when window was recently unminimized
+            main_window.primary_monitor().ok().flatten()
+        })
+        .or_else(|| {
+            // Fallback 2: Use first available monitor as last resort
+            main_window
+                .available_monitors()
+                .ok()
+                .and_then(|monitors| monitors.into_iter().next())
+        });
 
-    // If we have a monitor, reset window position and size to match the monitor
+    // Reset window position and size to match the monitor
     if let Some(monitor) = &main_monitor {
         let position = monitor.position();
         let size = monitor.size();
