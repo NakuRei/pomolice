@@ -37,7 +37,7 @@ export function TimerDisplay() {
 
       {/* Large timer display */}
       <div
-        className="text-8xl font-bold tabular-nums tracking-tight"
+        className="text-8xl font-bold tabular-nums tracking-tight font-['Geist_Mono']"
         data-testid="timer-display"
         aria-live="polite"
         aria-atomic="true"
