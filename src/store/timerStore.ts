@@ -15,7 +15,7 @@ export const TimerStatus = {
   ON_BREAK: "on_break",
 } as const;
 
-export type TimerStatusType = (typeof TimerStatus)[keyof typeof TimerStatus];
+export type TimerStatus = (typeof TimerStatus)[keyof typeof TimerStatus];
 
 /**
  * Session type constants matching backend SessionType enum
@@ -32,7 +32,7 @@ export type SessionTypeValue = (typeof SessionType)[keyof typeof SessionType];
  * Payload received from backend timer_tick events
  */
 export interface TimerTickPayload {
-  status: TimerStatusType;
+  status: TimerStatus;
   remaining_seconds: number;
   session_type: SessionTypeValue;
   current_cycle: number;
@@ -69,7 +69,7 @@ export interface FullStatePayload extends TimerTickPayload {
  */
 interface TimerState {
   // Display state (received from backend events)
-  status: TimerStatusType;
+  status: TimerStatus;
   remainingSeconds: number;
   sessionType: SessionTypeValue;
   currentCycle: number;
