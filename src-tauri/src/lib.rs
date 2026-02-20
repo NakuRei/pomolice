@@ -59,7 +59,9 @@ pub async fn lib_handle_session_complete(app: AppHandle) {
 
     match session_type {
         SessionType::Work => {
-            // Work session completed - transition to break
+            // Work session completed - transition to break.
+            // The break timer is driven by the same task that just fired this
+            // completion, so we reuse it (no cancel/respawn needed here).
             let (_break_type, payload) = {
                 let mut timer = state_handle.timer_manager.lock().await;
                 timer.transition_to_break()
@@ -77,13 +79,22 @@ pub async fn lib_handle_session_complete(app: AppHandle) {
             enter_break_mode(app.clone()).await;
         }
         SessionType::ShortBreak | SessionType::LongBreak => {
-            // Break session completed - transition to idle
-            let payload = {
+            // Break session completed - transition to idle and stop the task.
+            // Step 1: Cancel the task and update state inside the lock.
+            let (payload, old_task) = {
                 let mut timer = state_handle.timer_manager.lock().await;
-                timer.transition_to_idle_after_break()
+                let old = timer.cancel_and_take_task();
+                let p = timer.transition_to_idle_after_break();
+                (p, old)
             };
 
             let _ = app.emit("session_completed", &payload);
+
+            // Step 2: Await the old task outside the lock so it cannot
+            // re-acquire the lock and dispatch an extra tick.
+            if let Some(handle) = old_task {
+                let _ = handle.await;
+            }
 
             // Save state
             {

@@ -1,4 +1,5 @@
 import { useTimerStore } from '../../store/timerStore';
+import { InlineError } from '../shared/InlineError';
 
 /**
  * ContinueDialog Component
@@ -19,15 +20,13 @@ export function ContinueDialog() {
   }
 
   const handleContinue = () => {
-    startNextSession().catch((error) => {
-      console.error("Failed to continue:", error);
-    });
+    // Errors are reported to errorStore by timerStore — InlineError handles display
+    startNextSession().catch(() => undefined);
   };
 
   const handleEnd = () => {
-    endCycle().catch((error) => {
-      console.error("Failed to end cycle:", error);
-    });
+    // Errors are reported to errorStore by timerStore — InlineError handles display
+    endCycle().catch(() => undefined);
   };
 
   return (
@@ -45,9 +44,14 @@ export function ContinueDialog() {
         <p className="text-gray-600 mb-6">
           完了したポモドーロ: <span className="font-semibold">{completedPomodoros}</span>
         </p>
-        <p className="text-gray-700 font-medium mb-6">
+        <p className="text-gray-700 font-medium mb-4">
           次のポモドーロを続けますか？
         </p>
+        {/* Error area: shown when continue or end operation fails */}
+        <div className="mb-4 space-y-2">
+          <InlineError errorId="continue_to_next_session" onRetry={handleContinue} />
+          <InlineError errorId="end_cycle" onRetry={handleEnd} />
+        </div>
         <div className="flex gap-4">
           <button
             onClick={handleEnd}

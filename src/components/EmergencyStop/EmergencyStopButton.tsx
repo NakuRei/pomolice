@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTimerStore, TimerStatus } from "../../store/timerStore";
+import { InlineError } from "../shared/InlineError";
 
 /**
  * EmergencyStopButton Component
@@ -22,10 +23,8 @@ export function EmergencyStopButton() {
   };
 
   const handleConfirm = () => {
-    emergencyStop().catch((error) => {
-      console.error("Failed to emergency stop:", error);
-    });
-    setShowConfirmDialog(false);
+    // Keep the dialog open on failure so the user can see the error and retry
+    emergencyStop().then(() => setShowConfirmDialog(false)).catch(() => undefined);
   };
 
   const handleCancel = () => {
@@ -57,11 +56,15 @@ export function EmergencyStopButton() {
             <h2 className="text-xl font-bold mb-4 text-gray-900">
               緊急停止しますか？
             </h2>
-            <p className="text-gray-600 mb-6">
+            <p className="text-gray-600 mb-4">
               現在のポモドーロセッションは記録されません。
               <br />
               緊急時以外は、セッション完了までお待ちください。
             </p>
+            {/* Dialog stays open on failure; error shown here with retry button */}
+            <div className="mb-4">
+              <InlineError errorId="emergency_stop" onRetry={handleConfirm} />
+            </div>
             <div className="flex gap-3 justify-end">
               <button
                 onClick={handleCancel}

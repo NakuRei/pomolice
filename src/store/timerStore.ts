@@ -3,6 +3,8 @@ import { devtools } from "zustand/middleware";
 import { immer } from "zustand/middleware/immer";
 import { invoke } from "@tauri-apps/api/core";
 import { useSettingsStore } from "./settingsStore";
+import { useErrorStore } from "./errorStore";
+import { classifyBackendError } from "../errors/classifyBackendError";
 
 /**
  * Timer status constants matching backend TimerStatus enum
@@ -146,7 +148,19 @@ export const useTimerStore = create<TimerStore>()(
             longBreakDurationSecs: settings.longBreakDuration * 60,
             longBreakInterval: settings.longBreakInterval,
           });
+          useErrorStore.getState().clearError("start_work");
         } catch (error) {
+          const detail = String(error);
+          const { userMessage, severity } = classifyBackendError(detail, "start_work");
+          useErrorStore.getState().reportError({
+            id: "start_work",
+            message: userMessage,
+            technicalDetail: detail,
+            severity,
+            origin: "backend_command",
+            canRetry: false,
+            retryFn: null,
+          });
           console.error("Failed to start work:", error);
           throw error;
         }
@@ -156,7 +170,19 @@ export const useTimerStore = create<TimerStore>()(
       startNextSession: async () => {
         try {
           await invoke("continue_to_next_session");
+          useErrorStore.getState().clearError("continue_to_next_session");
         } catch (error) {
+          const detail = String(error);
+          const { userMessage, severity } = classifyBackendError(detail, "continue_to_next_session");
+          useErrorStore.getState().reportError({
+            id: "continue_to_next_session",
+            message: userMessage,
+            technicalDetail: detail,
+            severity,
+            origin: "backend_command",
+            canRetry: true,
+            retryFn: null,
+          });
           console.error("Failed to continue to next session:", error);
           throw error;
         }
@@ -166,7 +192,19 @@ export const useTimerStore = create<TimerStore>()(
       endCycle: async () => {
         try {
           await invoke("end_cycle");
+          useErrorStore.getState().clearError("end_cycle");
         } catch (error) {
+          const detail = String(error);
+          const { userMessage, severity } = classifyBackendError(detail, "end_cycle");
+          useErrorStore.getState().reportError({
+            id: "end_cycle",
+            message: userMessage,
+            technicalDetail: detail,
+            severity,
+            origin: "backend_command",
+            canRetry: true,
+            retryFn: null,
+          });
           console.error("Failed to end cycle:", error);
           throw error;
         }
@@ -176,7 +214,19 @@ export const useTimerStore = create<TimerStore>()(
       emergencyStop: async () => {
         try {
           await invoke("emergency_stop");
+          useErrorStore.getState().clearError("emergency_stop");
         } catch (error) {
+          const detail = String(error);
+          const { userMessage } = classifyBackendError(detail, "emergency_stop");
+          useErrorStore.getState().reportError({
+            id: "emergency_stop",
+            message: userMessage,
+            technicalDetail: detail,
+            severity: "critical",
+            origin: "backend_command",
+            canRetry: true,
+            retryFn: null,
+          });
           console.error("Failed to emergency stop:", error);
           throw error;
         }

@@ -50,7 +50,8 @@ export function FullscreenBreak() {
   const handleSkipComplete = () => {
     // User successfully completed all steps, skip the break via emergency stop
     // This will exit fullscreen and reset to idle state
-    emergencyStop();
+    // Errors are reported to errorStore by timerStore
+    emergencyStop().catch(() => undefined);
 
     // Reset skip flow
     resetSkipFlow();

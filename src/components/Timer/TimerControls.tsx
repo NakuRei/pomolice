@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useTimerStore, TimerStatus } from '../../store/timerStore';
+import { InlineError } from '../shared/InlineError';
 
 /**
  * TimerControls Component
@@ -17,9 +18,8 @@ export function TimerControls() {
   const isWorking = status === TimerStatus.WORKING;
 
   const handleStart = () => {
-    start().catch((error) => {
-      console.error("Failed to start:", error);
-    });
+    // Errors from start() are reported to errorStore by timerStore — InlineError handles display
+    start().catch(() => undefined);
   };
 
   const handleEmergencyStopClick = () => {
@@ -27,10 +27,8 @@ export function TimerControls() {
   };
 
   const handleConfirm = () => {
-    emergencyStop().catch((error) => {
-      console.error("Failed to emergency stop:", error);
-    });
-    setShowConfirmDialog(false);
+    // Keep the dialog open on failure so the user can see the error and retry
+    emergencyStop().then(() => setShowConfirmDialog(false)).catch(() => undefined);
   };
 
   const handleCancel = () => {
@@ -39,16 +37,20 @@ export function TimerControls() {
 
   return (
     <>
-      <div className="flex items-center justify-center gap-4 min-h-[4rem]">
+      <div className="flex flex-col items-center gap-2 min-h-[4rem]">
         {isIdle && (
-          <button
-            onClick={handleStart}
-            className="px-8 py-4 text-lg font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
-            data-testid="start-button"
-            aria-label="タイマーを開始"
-          >
-            開始
-          </button>
+          <>
+            <button
+              onClick={handleStart}
+              className="px-8 py-4 text-lg font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
+              data-testid="start-button"
+              aria-label="タイマーを開始"
+            >
+              開始
+            </button>
+            {/* Shown when start_work fails; auto-clears after 5 seconds */}
+            <InlineError errorId="start_work" />
+          </>
         )}
         {isWorking && (
           <button
@@ -71,11 +73,15 @@ export function TimerControls() {
             <h2 className="text-xl font-bold mb-4 text-gray-900">
               緊急停止しますか？
             </h2>
-            <p className="text-gray-600 mb-6">
+            <p className="text-gray-600 mb-4">
               現在のポモドーロセッションは記録されません。
               <br />
               緊急時以外は、セッション完了までお待ちください。
             </p>
+            {/* Dialog stays open on failure; error shown here with retry button */}
+            <div className="mb-4">
+              <InlineError errorId="emergency_stop" onRetry={handleConfirm} />
+            </div>
             <div className="flex gap-3 justify-end">
               <button
                 onClick={handleCancel}

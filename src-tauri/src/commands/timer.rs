@@ -32,10 +32,27 @@ pub async fn start_work(
         long_break_interval,
     };
 
-    // Start work session
+    // Step 1: Update state and cancel the old task inside the lock.
+    // cancel_and_take_task() only signals cancellation (non-blocking),
+    // so holding the lock here is safe.
+    let old_task = {
+        let mut timer = state.timer_manager.lock().await;
+        let old = timer.cancel_and_take_task();
+        timer.start_work(settings)?;
+        old
+    };
+
+    // Step 2: Await the old task outside the lock.
+    // This ensures the old tick loop has fully stopped before the new one starts,
+    // preventing a residual tick from running concurrently with the new session.
+    if let Some(handle) = old_task {
+        let _ = handle.await;
+    }
+
+    // Step 3: Spawn the new timer task inside a fresh lock.
     {
         let mut timer = state.timer_manager.lock().await;
-        timer.start_work(settings)?;
+        timer.spawn_timer_task();
     }
 
     // Save state to persistence
@@ -57,9 +74,20 @@ pub async fn continue_to_next_session(
         return Err(PomoliceError::Unauthorized(window.label().to_string()));
     }
 
+    let old_task = {
+        let mut timer = state.timer_manager.lock().await;
+        let old = timer.cancel_and_take_task();
+        timer.continue_to_next_session()?;
+        old
+    };
+
+    if let Some(handle) = old_task {
+        let _ = handle.await;
+    }
+
     {
         let mut timer = state.timer_manager.lock().await;
-        timer.continue_to_next_session()?;
+        timer.spawn_timer_task();
     }
 
     // Save state
@@ -102,10 +130,16 @@ pub async fn emergency_stop(window: WebviewWindow, state: State<'_, AppState>) -
         return Err(PomoliceError::Unauthorized(window.label().to_string()));
     }
 
-    let was_fullscreen_break = {
+    let (was_fullscreen_break, old_task) = {
         let mut timer = state.timer_manager.lock().await;
-        timer.emergency_stop()?
+        let old = timer.cancel_and_take_task();
+        let was_fullscreen = timer.emergency_stop()?;
+        (was_fullscreen, old)
     };
+
+    if let Some(handle) = old_task {
+        let _ = handle.await;
+    }
 
     // Exit fullscreen if needed
     if was_fullscreen_break {

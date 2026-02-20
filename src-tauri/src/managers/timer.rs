@@ -1,11 +1,9 @@
 // Timer State Manager
 // Manages timer state and session lifecycle without global statics
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
+use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 use crate::error::{PomoliceError, Result};
@@ -18,8 +16,11 @@ use crate::types::{
 pub struct TimerStateManager {
     app_handle: AppHandle,
     state: TimerState,
-    timer_running: Arc<AtomicBool>,
-    timer_thread: Option<JoinHandle<()>>,
+    /// Token used to signal the timer task to stop.
+    /// Cancelling this token causes the task's `select!` to resolve immediately,
+    /// preventing any in-flight tick from being spawned after the task exits.
+    cancel_token: Option<CancellationToken>,
+    timer_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl TimerStateManager {
@@ -30,8 +31,8 @@ impl TimerStateManager {
         Self {
             app_handle,
             state,
-            timer_running: Arc::new(AtomicBool::new(false)),
-            timer_thread: None,
+            cancel_token: None,
+            timer_task: None,
         }
     }
 
@@ -99,8 +100,9 @@ impl TimerStateManager {
         let payload = self.state.to_tick_payload();
         let _ = self.app_handle.emit("timer_tick", &payload);
 
-        // Start timer thread
-        self.start_timer_thread();
+        // Note: caller must call cancel_and_take_task() before the lock,
+        // await the old handle outside the lock, then call spawn_timer_task()
+        // inside a new lock. See commands/timer.rs for the call sequence.
 
         let _ = self.app_handle.emit(
             "work_started",
@@ -135,8 +137,7 @@ impl TimerStateManager {
         let payload = self.state.to_tick_payload();
         let _ = self.app_handle.emit("timer_tick", &payload);
 
-        // Start timer thread
-        self.start_timer_thread();
+        // Note: see start_work for task management call sequence.
 
         Ok(())
     }
@@ -175,8 +176,8 @@ impl TimerStateManager {
         let payload = self.state.to_tick_payload();
         let _ = self.app_handle.emit("timer_tick", &payload);
 
-        // Stop timer thread
-        self.stop_timer_thread();
+        // Note: caller must call cancel_and_take_task() inside the lock,
+        // then await the handle outside the lock. See commands/timer.rs.
 
         Ok(was_fullscreen_break)
     }
@@ -319,8 +320,7 @@ impl TimerStateManager {
             self.state.current_cycle = 0;
         }
 
-        // Stop timer thread
-        self.stop_timer_thread();
+        // Note: caller must cancel and await the old task outside the lock.
 
         SessionCompletedPayload {
             completed_session_type: completed_type,
@@ -337,48 +337,69 @@ impl TimerStateManager {
         false
     }
 
-    /// Start the timer thread
-    fn start_timer_thread(&mut self) {
-        // Stop any existing timer
-        self.stop_timer_thread();
+    /// Cancel the running timer task and extract its JoinHandle.
+    ///
+    /// This is intentionally split into two steps so the caller can release
+    /// the Mutex lock before awaiting the handle, avoiding a deadlock:
+    ///
+    /// ```text
+    /// // Inside the Mutex lock:
+    /// let old_handle = timer.cancel_and_take_task();
+    /// // Release the lock here (end of scope / drop)
+    ///
+    /// // Outside the Mutex lock:
+    /// if let Some(h) = old_handle { h.await; }
+    /// ```
+    ///
+    /// The cancelled token causes the task's `select!` to resolve immediately,
+    /// so the await completes quickly without dispatching another tick.
+    pub fn cancel_and_take_task(&mut self) -> Option<tokio::task::JoinHandle<()>> {
+        if let Some(token) = self.cancel_token.take() {
+            token.cancel();
+        }
+        self.timer_task.take()
+    }
 
-        self.timer_running.store(true, Ordering::SeqCst);
+    /// Spawn a new timer task.
+    ///
+    /// Must be called **after** the old task has been awaited (outside the lock).
+    /// See `cancel_and_take_task` for the required call sequence.
+    pub fn spawn_timer_task(&mut self) {
+        let token = CancellationToken::new();
+        self.cancel_token = Some(token.clone());
 
         let app_handle = self.app_handle.clone();
-        let timer_running = Arc::clone(&self.timer_running);
 
-        let handle = thread::spawn(move || {
-            while timer_running.load(Ordering::SeqCst) {
-                thread::sleep(Duration::from_secs(1));
-
-                if !timer_running.load(Ordering::SeqCst) {
-                    break;
+        let handle = tokio::task::spawn(async move {
+            loop {
+                tokio::select! {
+                    // Cancel wins immediately with no side-effect
+                    _ = token.cancelled() => break,
+                    // Sleep for one second, then dispatch a tick
+                    _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                        // Re-check cancellation after waking so we never dispatch
+                        // a tick that races with a newly started session
+                        if token.is_cancelled() {
+                            break;
+                        }
+                        crate::lib_handle_timer_tick(app_handle.clone()).await;
+                    }
                 }
-
-                // Call the tick handler in an async context
-                let app = app_handle.clone();
-                tauri::async_runtime::spawn(async move {
-                    crate::lib_handle_timer_tick(app).await;
-                });
             }
         });
 
-        self.timer_thread = Some(handle);
-    }
-
-    /// Stop the timer thread
-    fn stop_timer_thread(&mut self) {
-        self.timer_running.store(false, Ordering::SeqCst);
-
-        if let Some(handle) = self.timer_thread.take() {
-            let _ = handle.join();
-        }
+        self.timer_task = Some(handle);
     }
 }
 
 impl Drop for TimerStateManager {
     fn drop(&mut self) {
-        self.stop_timer_thread();
+        // Cancel the token so the task exits on its next select! poll.
+        // We cannot await the JoinHandle here (Drop is sync), but the task
+        // will observe the cancellation and terminate on its own.
+        if let Some(token) = self.cancel_token.take() {
+            token.cancel();
+        }
     }
 }
 
