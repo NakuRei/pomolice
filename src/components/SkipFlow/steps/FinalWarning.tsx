@@ -18,10 +18,6 @@ export default function FinalWarning({
   onConfirm,
   onCancel,
 }: FinalWarningProps) {
-  // TODO: Implement SNS integration feature in SettingsStore
-  // Check if any SNS integration is enabled
-  const hasSnsEnabled = false;
-
   return (
     <div className="space-y-8">
       {/* Final warning header */}
@@ -44,18 +40,6 @@ export default function FinalWarning({
             tracked in your daily report.
           </p>
         </div>
-
-        {/* SNS notification warning */}
-        {hasSnsEnabled && (
-          <div className="rounded-lg border-2 border-orange-500 bg-orange-900 bg-opacity-30 p-4">
-            <p className="font-semibold text-orange-300">
-              📢 This will be posted to your connected social accounts
-            </p>
-            <p className="mt-2 text-sm text-orange-200">
-              Your skip will be publicly visible on your connected social accounts.
-            </p>
-          </div>
-        )}
 
         {/* Health reminder */}
         <div className="rounded-lg border-2 border-red-500 bg-red-900 bg-opacity-30 p-4">

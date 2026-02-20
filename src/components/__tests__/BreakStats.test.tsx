@@ -15,17 +15,14 @@ describe("BreakStats", () => {
 
       expect(screen.getByText("今日のポモドーロ:")).toBeInTheDocument();
       expect(screen.getByText("現在のサイクル:")).toBeInTheDocument();
-      expect(screen.getByText("休憩達成率:")).toBeInTheDocument();
     });
 
     it("should display correct initial values", () => {
       render(<BreakStats />);
 
-      // Initial completed pomodoros should be 0
+      // Initial completed pomodoros and cycle should both be 0
       const allZeros = screen.getAllByText("0");
-      expect(allZeros.length).toBeGreaterThanOrEqual(2); // pomodoros and cycle both 0
-      // Initial cycle should be 0
-      expect(screen.getByText(/100%/)).toBeInTheDocument();
+      expect(allZeros.length).toBeGreaterThanOrEqual(2);
     });
   });
 
@@ -82,24 +79,6 @@ describe("BreakStats", () => {
       rerender(<BreakStats />);
 
       expect(screen.getByText("3")).toBeInTheDocument();
-    });
-  });
-
-  describe("Break Completion Rate", () => {
-    it("should display placeholder break completion rate", () => {
-      render(<BreakStats />);
-
-      // Phase 3: This is a placeholder value (100%)
-      expect(screen.getByText(/休憩達成率:/)).toBeInTheDocument();
-      expect(screen.getByText("100%")).toBeInTheDocument();
-    });
-
-    it("should have placeholder note in component", () => {
-      // This test verifies the placeholder is documented
-      // In Phase 6, this will be replaced with actual statistics
-      render(<BreakStats />);
-
-      expect(screen.getByText("100%")).toBeInTheDocument();
     });
   });
 

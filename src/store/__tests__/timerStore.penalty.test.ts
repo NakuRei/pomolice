@@ -20,10 +20,7 @@ vi.mock("../../services/notifications", () => ({
 }));
 
 vi.mock("../../services/windowControl", () => ({
-  startBreak: vi.fn().mockResolvedValue(undefined),
-  completeBreak: vi.fn().mockResolvedValue(undefined),
   startWork: vi.fn().mockResolvedValue(undefined),
-  completeWork: vi.fn().mockResolvedValue(undefined),
 }));
 
 describe("Timer Store - Penalty System", () => {

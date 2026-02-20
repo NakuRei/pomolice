@@ -72,19 +72,3 @@ export async function recordSkipAttempt(): Promise<number> {
   return await invoke("record_skip_attempt");
 }
 
-// Legacy exports for backward compatibility (these are no-ops now)
-export async function startBreak(_duration: number): Promise<void> {
-  // Break is now started automatically by backend
-}
-
-export async function completeBreak(): Promise<void> {
-  // Break completion is now handled automatically by backend
-}
-
-export async function startWorkLegacy(_duration: number): Promise<void> {
-  // Use startWork with full settings instead
-}
-
-export async function completeWork(): Promise<void> {
-  // Work completion is now handled automatically by backend
-}

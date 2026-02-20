@@ -1,8 +1,7 @@
 /**
- * useTimer Hook Tests
+ * useTimerSync Hook Tests
  *
- * Note: Timer tick logic has been moved to the Rust backend.
- * The useTimer hook now only re-exports useTimerSync for backward compatibility.
+ * Note: Timer tick logic is handled by the Rust backend.
  * These tests verify that the hook correctly sets up event listeners.
  */
 
