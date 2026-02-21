@@ -11,13 +11,6 @@ mod managers;
 mod state;
 mod types;
 
-/// Setup event listeners for internal events
-fn setup_event_listeners(_app: AppHandle) {
-    // Note: For now, we'll handle events directly in the timer thread
-    // and input monitor rather than using Tauri's event system
-    // This is simpler and avoids the complexity of cross-thread event handling
-}
-
 /// Handle timer tick event
 pub async fn lib_handle_timer_tick(app: AppHandle) {
     let state_handle = app.state::<state::AppState>();
@@ -255,9 +248,6 @@ pub fn run() {
 
             // Register state with Tauri
             app.manage(app_state);
-
-            // Setup event listeners
-            setup_event_listeners(app.handle().clone());
 
             Ok(())
         })
