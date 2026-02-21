@@ -1,9 +1,13 @@
 // Pomolice - Rust Test Module
 // Phase 0: Basic test infrastructure
 // Phase 4: Input monitor tests
+// Phase 5: Lock ordering regression tests
 
 #[cfg(test)]
 mod input_monitor_test;
+
+#[cfg(test)]
+mod lock_ordering_test;
 
 #[cfg(test)]
 mod basic_tests {

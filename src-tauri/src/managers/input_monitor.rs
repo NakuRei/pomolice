@@ -5,7 +5,6 @@ use rdev::{listen, Event, EventType, Key};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Once};
 use std::thread;
-use tauri::AppHandle;
 use tracing::{error, info};
 
 use crate::error::Result;
@@ -33,21 +32,35 @@ impl ModifierState {
 }
 
 /// Manager for global input monitoring
+///
+/// Callbacks are injected at construction time to decouple this manager
+/// from Tauri's `AppHandle`. The caller (e.g. `AppState::new`) is responsible
+/// for capturing any `AppHandle` clones inside the closures.
 pub struct InputMonitorManager {
-    app_handle: AppHandle,
     enabled: Arc<AtomicBool>,
     listener_started: Arc<Once>,
     modifier_state: Arc<parking_lot::Mutex<ModifierState>>,
+    /// Called when the escape combo (Ctrl+Alt+Shift+E) is detected.
+    on_escape_combo: Arc<dyn Fn() + Send + Sync>,
+    /// Called when any input event (key, mouse, wheel) is detected during break.
+    on_input_detected: Arc<dyn Fn() + Send + Sync>,
 }
 
 impl InputMonitorManager {
     /// Create a new input monitor manager
-    pub fn new(app_handle: AppHandle) -> Self {
+    ///
+    /// - `on_escape_combo`: invoked when Ctrl+Alt+Shift+E is detected
+    /// - `on_input_detected`: invoked on any input event while monitoring is active
+    pub fn new(
+        on_escape_combo: impl Fn() + Send + Sync + 'static,
+        on_input_detected: impl Fn() + Send + Sync + 'static,
+    ) -> Self {
         Self {
-            app_handle,
             enabled: Arc::new(AtomicBool::new(false)),
             listener_started: Arc::new(Once::new()),
             modifier_state: Arc::new(parking_lot::Mutex::new(ModifierState::default())),
+            on_escape_combo: Arc::new(on_escape_combo),
+            on_input_detected: Arc::new(on_input_detected),
         }
     }
 
@@ -68,10 +81,11 @@ impl InputMonitorManager {
             return Ok(()); // Already started, not an error
         }
 
-        let app_handle = self.app_handle.clone();
         let enabled = Arc::clone(&self.enabled);
         let listener_started = Arc::clone(&self.listener_started);
         let modifier_state = Arc::clone(&self.modifier_state);
+        let on_escape_combo = Arc::clone(&self.on_escape_combo);
+        let on_input_detected = Arc::clone(&self.on_input_detected);
 
         listener_started.call_once(move || {
             // Spawn monitoring thread
@@ -90,10 +104,7 @@ impl InputMonitorManager {
                             // Escape hatch: detect Ctrl+Alt+Shift+E
                             if mods.is_escape_combo(key) {
                                 enabled.store(false, Ordering::SeqCst);
-                                let app = app_handle.clone();
-                                tauri::async_runtime::spawn(async move {
-                                    crate::lib_handle_escape_combo(app).await;
-                                });
+                                (on_escape_combo)();
                                 return;
                             }
                         }
@@ -116,11 +127,7 @@ impl InputMonitorManager {
                     );
 
                     if should_penalize {
-                        // Handle input detection
-                        let app = app_handle.clone();
-                        tauri::async_runtime::spawn(async move {
-                            crate::lib_handle_input_detected(app).await;
-                        });
+                        (on_input_detected)();
                     }
                 };
 
@@ -150,12 +157,15 @@ impl InputMonitorManager {
 
         Ok(())
     }
-
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn make_manager() -> InputMonitorManager {
+        InputMonitorManager::new(|| {}, || {})
+    }
 
     #[test]
     fn test_modifier_state_default() {
@@ -275,6 +285,35 @@ mod tests {
         assert!(mods.is_escape_combo(Key::KeyE));
     }
 
-    // Note: start() and stop() methods require real AppHandle and cannot be unit tested
-    // without integration tests. These functions are tested during manual integration testing.
+    #[test]
+    fn test_stop_is_idempotent() {
+        let mut mgr = make_manager();
+        // stop on an already-stopped manager must not error
+        assert!(mgr.stop().is_ok());
+        assert!(mgr.stop().is_ok());
+    }
+
+    #[test]
+    fn test_start_is_idempotent() {
+        let mut mgr = make_manager();
+        assert!(mgr.start().is_ok());
+        // Second start must not error
+        assert!(mgr.start().is_ok());
+        // Cleanup
+        let _ = mgr.stop();
+    }
+
+    #[test]
+    fn test_stop_clears_enabled_flag() {
+        let mut mgr = make_manager();
+        mgr.start().unwrap();
+        assert!(mgr.enabled.load(Ordering::SeqCst));
+
+        mgr.stop().unwrap();
+        assert!(!mgr.enabled.load(Ordering::SeqCst));
+    }
+
+    // Note: start() spawns a real OS thread via rdev::listen which blocks until
+    // process exit. Callback invocation is therefore not tested at unit level;
+    // it is covered by manual integration testing.
 }

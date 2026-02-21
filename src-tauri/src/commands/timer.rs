@@ -1,6 +1,6 @@
 // Timer commands using dependency injection
 
-use tauri::{Manager, State, WebviewWindow};
+use tauri::{Emitter, Manager, State, WebviewWindow};
 use tracing::{info, warn};
 
 use crate::error::{PomoliceError, Result};
@@ -35,12 +35,17 @@ pub async fn start_work(
     // Step 1: Update state and cancel the old task inside the lock.
     // cancel_and_take_task() only signals cancellation (non-blocking),
     // so holding the lock here is safe.
-    let old_task = {
+    let (old_task, tick_payload, work_duration) = {
         let mut timer = state.timer_manager.lock().await;
         let old = timer.cancel_and_take_task();
-        timer.start_work(settings)?;
-        old
+        let (payload, duration) = timer.start_work(settings)?;
+        (old, payload, duration)
     };
+
+    // Emit initial state and work_started event
+    let app = window.app_handle();
+    let _ = app.emit("timer_tick", &tick_payload);
+    let _ = app.emit("work_started", serde_json::json!({ "duration": work_duration }));
 
     // Step 2: Await the old task outside the lock.
     // This ensures the old tick loop has fully stopped before the new one starts,
@@ -52,7 +57,7 @@ pub async fn start_work(
     // Step 3: Spawn the new timer task inside a fresh lock.
     {
         let mut timer = state.timer_manager.lock().await;
-        timer.spawn_timer_task();
+        timer.spawn_timer_task(app.clone());
     }
 
     // Save state to persistence
@@ -74,12 +79,15 @@ pub async fn continue_to_next_session(
         return Err(PomoliceError::Unauthorized(window.label().to_string()));
     }
 
-    let old_task = {
+    let (old_task, tick_payload) = {
         let mut timer = state.timer_manager.lock().await;
         let old = timer.cancel_and_take_task();
-        timer.continue_to_next_session()?;
-        old
+        let payload = timer.continue_to_next_session()?;
+        (old, payload)
     };
+
+    let app = window.app_handle();
+    let _ = app.emit("timer_tick", &tick_payload);
 
     if let Some(handle) = old_task {
         let _ = handle.await;
@@ -87,7 +95,7 @@ pub async fn continue_to_next_session(
 
     {
         let mut timer = state.timer_manager.lock().await;
-        timer.spawn_timer_task();
+        timer.spawn_timer_task(app.clone());
     }
 
     // Save state
@@ -106,10 +114,12 @@ pub async fn end_cycle(window: WebviewWindow, state: State<'_, AppState>) -> Res
         return Err(PomoliceError::Unauthorized(window.label().to_string()));
     }
 
-    {
+    let tick_payload = {
         let mut timer = state.timer_manager.lock().await;
-        timer.end_cycle()?;
-    }
+        timer.end_cycle()?
+    };
+
+    let _ = window.app_handle().emit("timer_tick", &tick_payload);
 
     // Save state
     {
@@ -130,12 +140,14 @@ pub async fn emergency_stop(window: WebviewWindow, state: State<'_, AppState>) -
         return Err(PomoliceError::Unauthorized(window.label().to_string()));
     }
 
-    let (was_fullscreen_break, old_task) = {
+    let (was_fullscreen_break, tick_payload, old_task) = {
         let mut timer = state.timer_manager.lock().await;
         let old = timer.cancel_and_take_task();
-        let was_fullscreen = timer.emergency_stop()?;
-        (was_fullscreen, old)
+        let (was_fullscreen, payload) = timer.emergency_stop()?;
+        (was_fullscreen, payload, old)
     };
+
+    let _ = window.app_handle().emit("timer_tick", &tick_payload);
 
     if let Some(handle) = old_task {
         let _ = handle.await;
@@ -182,10 +194,12 @@ pub async fn sync_settings(
         long_break_interval,
     };
 
-    {
+    let tick_payload = {
         let mut timer = state.timer_manager.lock().await;
-        timer.sync_settings(settings)?;
-    }
+        timer.sync_settings(settings)?
+    };
+
+    let _ = window.app_handle().emit("timer_tick", &tick_payload);
 
     // Save state
     {

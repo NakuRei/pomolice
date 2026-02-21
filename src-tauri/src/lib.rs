@@ -186,24 +186,35 @@ async fn exit_break_mode(app: AppHandle) {
 pub async fn lib_handle_input_detected(app: AppHandle) {
     let state_handle = app.state::<state::AppState>();
 
-    let mut timer = state_handle.timer_manager.lock().await;
-    let _ = timer.apply_input_penalty();
+    let tick_payload = {
+        let mut timer = state_handle.timer_manager.lock().await;
+        let payload = timer.apply_input_penalty().ok().flatten();
+        // Save state
+        state_handle.persistence.save_state(timer.get_state());
+        payload
+    };
 
-    // Save state
-    state_handle.persistence.save_state(timer.get_state());
+    if let Some(payload) = tick_payload {
+        let _ = app.emit("timer_tick", &payload);
+    }
 }
 
 /// Handle escape combo detection
 pub async fn lib_handle_escape_combo(app: AppHandle) {
     let state_handle = app.state::<state::AppState>();
 
-    let mut window_manager = state_handle.window_manager.lock().await;
-    let _ = window_manager
-        .exit_fullscreen_all_monitors(app.clone())
-        .await;
+    // Lock ordering: input_monitor first, then window_manager (matches exit_break_mode)
+    {
+        let mut input_monitor = state_handle.input_monitor.lock().await;
+        let _ = input_monitor.stop();
+    }
 
-    let mut input_monitor = state_handle.input_monitor.lock().await;
-    let _ = input_monitor.stop();
+    {
+        let mut window_manager = state_handle.window_manager.lock().await;
+        let _ = window_manager
+            .exit_fullscreen_all_monitors(app.clone())
+            .await;
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -231,10 +242,15 @@ pub fn run() {
 
             // Initialize state (handles persisted state restoration)
             tauri::async_runtime::block_on(async {
-                app_state
+                let tick_payload = app_state
                     .initialize()
                     .await
                     .expect("Failed to initialize application state");
+
+                // Emit restored state to frontend if the timer was running when app closed
+                if let Some(payload) = tick_payload {
+                    let _ = app.emit("timer_tick", &payload);
+                }
             });
 
             // Register state with Tauri

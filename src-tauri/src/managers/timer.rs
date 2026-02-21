@@ -2,7 +2,7 @@
 // Manages timer state and session lifecycle without global statics
 
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
@@ -13,8 +13,10 @@ use crate::types::{
 };
 
 /// Manager for timer state and lifecycle
+///
+/// This struct holds only pure timer state and task lifecycle handles.
+/// All side effects (event emission to frontend) are the caller's responsibility.
 pub struct TimerStateManager {
-    app_handle: AppHandle,
     state: TimerState,
     /// Token used to signal the timer task to stop.
     /// Cancelling this token causes the task's `select!` to resolve immediately,
@@ -25,11 +27,10 @@ pub struct TimerStateManager {
 
 impl TimerStateManager {
     /// Create a new timer state manager
-    pub fn new(app_handle: AppHandle, persisted_state: Option<TimerState>) -> Self {
+    pub fn new(persisted_state: Option<TimerState>) -> Self {
         let state = persisted_state.unwrap_or_default();
 
         Self {
-            app_handle,
             state,
             cancel_token: None,
             timer_task: None,
@@ -37,15 +38,16 @@ impl TimerStateManager {
     }
 
     /// Initialize from persisted state (called during app setup)
-    pub fn initialize_from_persisted_state(&mut self) -> Result<()> {
-        // If the timer was running when the app closed, we need to handle elapsed time
+    ///
+    /// Returns the tick payload to emit if the timer was running when the app closed,
+    /// or `None` if the timer was idle.
+    pub fn initialize_from_persisted_state(&mut self) -> Result<Option<TimerTickPayload>> {
         if self.state.status != TimerStatus::Idle {
-            // For now, just emit the current state
             // In the future, we can implement elapsed time calculation here
             let payload = self.state.to_tick_payload();
-            let _ = self.app_handle.emit("timer_tick", &payload);
+            return Ok(Some(payload));
         }
-        Ok(())
+        Ok(None)
     }
 
     /// Get current timer status
@@ -64,7 +66,10 @@ impl TimerStateManager {
     }
 
     /// Start a work session
-    pub fn start_work(&mut self, settings: TimerSettings) -> Result<()> {
+    ///
+    /// Returns the tick payload for the caller to emit as `"timer_tick"`,
+    /// and the work duration for the caller to emit as `"work_started"`.
+    pub fn start_work(&mut self, settings: TimerSettings) -> Result<(TimerTickPayload, u64)> {
         info!("Starting work session with duration: {}s", settings.work_duration_secs);
 
         if self.state.status != TimerStatus::Idle {
@@ -80,13 +85,15 @@ impl TimerStateManager {
             return Err(PomoliceError::RateLimited { remaining_ms: 300 });
         }
 
+        let work_duration_secs = settings.work_duration_secs;
+
         // Update settings
-        self.state.settings = settings.clone();
+        self.state.settings = settings;
 
         // Initialize work session
         self.state.status = TimerStatus::Working;
         self.state.session_type = SessionType::Work;
-        self.state.remaining_seconds = settings.work_duration_secs;
+        self.state.remaining_seconds = work_duration_secs;
         self.state.show_continue_dialog = false;
 
         // Initialize cycle on first start
@@ -96,24 +103,18 @@ impl TimerStateManager {
 
         self.state.last_transition = Some(Instant::now());
 
-        // Emit initial state
-        let payload = self.state.to_tick_payload();
-        let _ = self.app_handle.emit("timer_tick", &payload);
-
         // Note: caller must call cancel_and_take_task() before the lock,
         // await the old handle outside the lock, then call spawn_timer_task()
         // inside a new lock. See commands/timer.rs for the call sequence.
 
-        let _ = self.app_handle.emit(
-            "work_started",
-            serde_json::json!({ "duration": settings.work_duration_secs }),
-        );
-
-        Ok(())
+        let payload = self.state.to_tick_payload();
+        Ok((payload, work_duration_secs))
     }
 
     /// Continue to next work session after break
-    pub fn continue_to_next_session(&mut self) -> Result<()> {
+    ///
+    /// Returns the tick payload for the caller to emit as `"timer_tick"`.
+    pub fn continue_to_next_session(&mut self) -> Result<TimerTickPayload> {
         info!("Continuing to next work session");
 
         if self.state.status != TimerStatus::Idle || !self.state.show_continue_dialog {
@@ -133,17 +134,15 @@ impl TimerStateManager {
         self.state.status = TimerStatus::Working;
         self.state.last_transition = Some(Instant::now());
 
-        // Emit initial state
-        let payload = self.state.to_tick_payload();
-        let _ = self.app_handle.emit("timer_tick", &payload);
-
         // Note: see start_work for task management call sequence.
 
-        Ok(())
+        Ok(self.state.to_tick_payload())
     }
 
     /// End the current cycle
-    pub fn end_cycle(&mut self) -> Result<()> {
+    ///
+    /// Returns the tick payload for the caller to emit as `"timer_tick"`.
+    pub fn end_cycle(&mut self) -> Result<TimerTickPayload> {
         // Reset to idle
         self.state.status = TimerStatus::Idle;
         self.state.session_type = SessionType::Work;
@@ -151,15 +150,14 @@ impl TimerStateManager {
         self.state.show_continue_dialog = false;
         self.state.last_transition = Some(Instant::now());
 
-        // Emit state
-        let payload = self.state.to_tick_payload();
-        let _ = self.app_handle.emit("timer_tick", &payload);
-
-        Ok(())
+        Ok(self.state.to_tick_payload())
     }
 
     /// Emergency stop - reset all state
-    pub fn emergency_stop(&mut self) -> Result<bool> {
+    ///
+    /// Returns `(was_fullscreen_break, tick_payload)`.
+    /// The caller is responsible for emitting `"timer_tick"` and exiting fullscreen if needed.
+    pub fn emergency_stop(&mut self) -> Result<(bool, TimerTickPayload)> {
         let was_fullscreen_break = self.state.is_fullscreen_break;
 
         // Reset state
@@ -172,18 +170,16 @@ impl TimerStateManager {
         self.state.last_penalty_time = None;
         self.state.last_transition = Some(Instant::now());
 
-        // Emit state
-        let payload = self.state.to_tick_payload();
-        let _ = self.app_handle.emit("timer_tick", &payload);
-
         // Note: caller must call cancel_and_take_task() inside the lock,
         // then await the handle outside the lock. See commands/timer.rs.
 
-        Ok(was_fullscreen_break)
+        Ok((was_fullscreen_break, self.state.to_tick_payload()))
     }
 
     /// Sync settings from frontend
-    pub fn sync_settings(&mut self, settings: TimerSettings) -> Result<()> {
+    ///
+    /// Returns the tick payload for the caller to emit as `"timer_tick"`.
+    pub fn sync_settings(&mut self, settings: TimerSettings) -> Result<TimerTickPayload> {
         if self.state.status != TimerStatus::Idle {
             return Err(PomoliceError::InvalidStateTransition {
                 action: "sync settings".to_string(),
@@ -198,24 +194,23 @@ impl TimerStateManager {
             self.state.remaining_seconds = self.state.settings.work_duration_secs;
         }
 
-        // Emit updated state
-        let payload = self.state.to_tick_payload();
-        let _ = self.app_handle.emit("timer_tick", &payload);
-
-        Ok(())
+        Ok(self.state.to_tick_payload())
     }
 
     /// Apply input penalty during break
-    pub fn apply_input_penalty(&mut self) -> Result<()> {
+    ///
+    /// Returns the tick payload for the caller to emit as `"timer_tick"`,
+    /// or `None` if the penalty was skipped (not on break, or debounced).
+    pub fn apply_input_penalty(&mut self) -> Result<Option<TimerTickPayload>> {
         // Only apply penalty if on break
         if self.state.status != TimerStatus::OnBreak {
-            return Ok(());
+            return Ok(None);
         }
 
         // Debounce: 100ms between penalties
         if let Some(last) = self.state.last_penalty_time {
             if last.elapsed() < Duration::from_millis(100) {
-                return Ok(());
+                return Ok(None);
             }
         }
 
@@ -226,11 +221,7 @@ impl TimerStateManager {
         // Reset break timer to full duration
         self.state.remaining_seconds = self.state.get_break_duration();
 
-        // Emit updated state
-        let payload = self.state.to_tick_payload();
-        let _ = self.app_handle.emit("timer_tick", &payload);
-
-        Ok(())
+        Ok(Some(self.state.to_tick_payload()))
     }
 
     /// Record a skip attempt
@@ -362,13 +353,14 @@ impl TimerStateManager {
 
     /// Spawn a new timer task.
     ///
+    /// `app_handle` is passed by value here (not stored as a field) so that
+    /// `TimerStateManager` remains free of `AppHandle` ownership.
+    ///
     /// Must be called **after** the old task has been awaited (outside the lock).
     /// See `cancel_and_take_task` for the required call sequence.
-    pub fn spawn_timer_task(&mut self) {
+    pub fn spawn_timer_task(&mut self, app_handle: AppHandle) {
         let token = CancellationToken::new();
         self.cancel_token = Some(token.clone());
-
-        let app_handle = self.app_handle.clone();
 
         let handle = tokio::task::spawn(async move {
             loop {
@@ -415,6 +407,10 @@ fn get_break_type(cycle: u32, interval: u32) -> SessionType {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn make_manager() -> TimerStateManager {
+        TimerStateManager::new(None)
+    }
 
     #[test]
     fn test_get_break_type() {
@@ -502,5 +498,156 @@ mod tests {
         assert_eq!(payload.current_cycle, 1);
         assert_eq!(payload.completed_pomodoros, 1);
         assert!(!payload.show_continue_dialog);
+    }
+
+    #[test]
+    fn test_start_work_transitions_to_working() {
+        let mut mgr = make_manager();
+        let settings = TimerSettings {
+            work_duration_secs: 1500,
+            short_break_duration_secs: 300,
+            long_break_duration_secs: 900,
+            long_break_interval: 4,
+        };
+
+        let (payload, duration) = mgr.start_work(settings).unwrap();
+
+        assert_eq!(mgr.status(), TimerStatus::Working);
+        assert_eq!(duration, 1500);
+        assert_eq!(payload.remaining_seconds, 1500);
+        assert_eq!(payload.status, TimerStatus::Working);
+    }
+
+    #[test]
+    fn test_start_work_fails_when_not_idle() {
+        let mut mgr = make_manager();
+        let settings = TimerSettings {
+            work_duration_secs: 1500,
+            short_break_duration_secs: 300,
+            long_break_duration_secs: 900,
+            long_break_interval: 4,
+        };
+
+        mgr.start_work(settings.clone()).unwrap();
+
+        // Second call must fail
+        let err = mgr.start_work(settings).unwrap_err();
+        assert!(matches!(err, PomoliceError::InvalidStateTransition { .. }));
+    }
+
+    #[test]
+    fn test_tick_decrements_remaining_seconds() {
+        let mut mgr = make_manager();
+        let settings = TimerSettings {
+            work_duration_secs: 5,
+            short_break_duration_secs: 300,
+            long_break_duration_secs: 900,
+            long_break_interval: 4,
+        };
+        mgr.start_work(settings).unwrap();
+
+        let (should_complete, payload) = mgr.tick();
+        assert!(!should_complete);
+        assert_eq!(payload.remaining_seconds, 4);
+    }
+
+    #[test]
+    fn test_tick_signals_completion_at_zero() {
+        let mut mgr = make_manager();
+        let settings = TimerSettings {
+            work_duration_secs: 1,
+            short_break_duration_secs: 300,
+            long_break_duration_secs: 900,
+            long_break_interval: 4,
+        };
+        mgr.start_work(settings).unwrap();
+
+        let (should_complete, _) = mgr.tick();
+        assert!(should_complete);
+    }
+
+    #[test]
+    fn test_apply_input_penalty_skipped_when_not_on_break() {
+        let mut mgr = make_manager();
+        let result = mgr.apply_input_penalty().unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_apply_input_penalty_resets_break_timer() {
+        let mut mgr = make_manager();
+        let settings = TimerSettings {
+            work_duration_secs: 1500,
+            short_break_duration_secs: 300,
+            long_break_duration_secs: 900,
+            long_break_interval: 4,
+        };
+        mgr.start_work(settings).unwrap();
+        mgr.transition_to_break();
+
+        // Drain some time from the break timer
+        mgr.state.remaining_seconds = 100;
+
+        let result = mgr.apply_input_penalty().unwrap();
+        assert!(result.is_some());
+        // Timer reset to full short break duration
+        assert_eq!(mgr.state.remaining_seconds, 300);
+        assert_eq!(mgr.state.break_interaction_count, 1);
+    }
+
+    #[test]
+    fn test_emergency_stop_resets_to_idle() {
+        let mut mgr = make_manager();
+        let settings = TimerSettings {
+            work_duration_secs: 1500,
+            short_break_duration_secs: 300,
+            long_break_duration_secs: 900,
+            long_break_interval: 4,
+        };
+        mgr.start_work(settings).unwrap();
+
+        let (was_fullscreen, payload) = mgr.emergency_stop().unwrap();
+        assert!(!was_fullscreen);
+        assert_eq!(mgr.status(), TimerStatus::Idle);
+        assert_eq!(payload.status, TimerStatus::Idle);
+    }
+
+    #[test]
+    fn test_end_cycle_resets_to_idle() {
+        let mut mgr = make_manager();
+        let settings = TimerSettings {
+            work_duration_secs: 1500,
+            short_break_duration_secs: 300,
+            long_break_duration_secs: 900,
+            long_break_interval: 4,
+        };
+        mgr.start_work(settings).unwrap();
+        mgr.state.status = TimerStatus::Idle;
+        mgr.state.show_continue_dialog = true;
+
+        let payload = mgr.end_cycle().unwrap();
+        assert_eq!(mgr.status(), TimerStatus::Idle);
+        assert!(!mgr.state.show_continue_dialog);
+        assert_eq!(payload.status, TimerStatus::Idle);
+    }
+
+    #[test]
+    fn test_initialize_from_persisted_state_returns_payload_when_running() {
+        let mut state = TimerState::default();
+        state.status = TimerStatus::Working;
+        state.remaining_seconds = 900;
+
+        let mut mgr = TimerStateManager::new(Some(state));
+        let result = mgr.initialize_from_persisted_state().unwrap();
+
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().remaining_seconds, 900);
+    }
+
+    #[test]
+    fn test_initialize_from_persisted_state_returns_none_when_idle() {
+        let mut mgr = make_manager();
+        let result = mgr.initialize_from_persisted_state().unwrap();
+        assert!(result.is_none());
     }
 }
