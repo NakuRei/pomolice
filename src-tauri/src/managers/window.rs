@@ -40,7 +40,7 @@ impl WindowStateManager {
             .map_err(|e| PomoliceError::WindowControl(format!("Failed to unminimize: {}", e)))?;
 
         // Wait for OS to update window state
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         // Save current window position and size
         let current_position = main_window
@@ -63,7 +63,7 @@ impl WindowStateManager {
             .hide()
             .map_err(|e| PomoliceError::WindowControl(format!("Failed to hide: {}", e)))?;
 
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         // Disable decorations and resizing
         main_window.set_decorations(false).map_err(|e| {
@@ -130,7 +130,7 @@ impl WindowStateManager {
             if main_window.set_focus().is_ok() {
                 break;
             }
-            std::thread::sleep(std::time::Duration::from_millis(50));
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
 
         // Get all available monitors
