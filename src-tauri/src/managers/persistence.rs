@@ -1,11 +1,13 @@
 // Persistence Manager
 // Handles saving and loading timer state without global statics
 
+use atomic_write_file::AtomicWriteFile;
 use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
 use std::time::Instant;
 use tracing::{error, info, warn};
@@ -111,15 +113,24 @@ impl PersistenceManager {
                 }
             }
 
-            // Serialize and write
+            // Serialize and write atomically: write to a temp file in the same
+            // directory, then rename it to the target path. This ensures the
+            // target file is never left in a truncated/partial state on crash.
             match serde_json::to_string_pretty(&persisted) {
-                Ok(json) => {
-                    if let Err(e) = fs::write(&path, json) {
-                        error!("Failed to write state file to {:?}: {}", path, e);
-                    } else {
-                        info!("Successfully saved state to {:?}", path);
+                Ok(json) => match AtomicWriteFile::options().open(&path) {
+                    Ok(mut tmp) => {
+                        if let Err(e) = tmp.write_all(json.as_bytes()) {
+                            error!("Failed to write state to temp file: {}", e);
+                        } else if let Err(e) = tmp.commit() {
+                            error!("Failed to commit state file atomically: {}", e);
+                        } else {
+                            info!("Successfully saved state to {:?}", path);
+                        }
                     }
-                }
+                    Err(e) => {
+                        error!("Failed to open atomic write file at {:?}: {}", path, e);
+                    }
+                },
                 Err(e) => {
                     error!("Failed to serialize state: {}", e);
                 }
@@ -294,5 +305,21 @@ mod tests {
 
         let loaded = manager.load_state();
         assert!(loaded.is_none());
+    }
+
+    #[test]
+    fn test_load_state_with_corrupted_file() {
+        // Simulate a partial write by writing invalid JSON to the state file.
+        // load_state() must return None without panicking.
+        if let Some(path) = PersistenceManager::get_state_file_path() {
+            let _ = fs::create_dir_all(path.parent().unwrap());
+            fs::write(&path, b"not valid json {{{").expect("failed to write corrupted fixture");
+
+            let manager = PersistenceManager::new();
+            let loaded = manager.load_state();
+            assert!(loaded.is_none(), "expected None for corrupted state file");
+
+            let _ = fs::remove_file(&path);
+        }
     }
 }
