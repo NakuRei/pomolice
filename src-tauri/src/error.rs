@@ -20,23 +20,8 @@ pub enum PomoliceError {
     #[error("Rate limited: please wait {remaining_ms}ms")]
     RateLimited { remaining_ms: u64 },
 
-    #[error("Timer not running")]
-    TimerNotRunning,
-
-    #[error("Timer already running")]
-    TimerAlreadyRunning,
-
     #[error("Window control error: {0}")]
     WindowControl(String),
-
-    #[error("Persistence error: {0}")]
-    Persistence(String),
-
-    #[error("Input monitoring error: {0}")]
-    InputMonitoring(String),
-
-    #[error("Failed to lock state: {0}")]
-    LockError(String),
 }
 
 /// Result type alias for Pomolice operations
@@ -80,45 +65,12 @@ mod tests {
     }
 
     #[test]
-    fn test_timer_not_running_error() {
-        let err = PomoliceError::TimerNotRunning;
-        assert_eq!(err.to_string(), "Timer not running");
-    }
-
-    #[test]
-    fn test_timer_already_running_error() {
-        let err = PomoliceError::TimerAlreadyRunning;
-        assert_eq!(err.to_string(), "Timer already running");
-    }
-
-    #[test]
     fn test_window_control_error() {
         let err = PomoliceError::WindowControl("Failed to enter fullscreen".to_string());
         assert_eq!(
             err.to_string(),
             "Window control error: Failed to enter fullscreen"
         );
-    }
-
-    #[test]
-    fn test_persistence_error() {
-        let err = PomoliceError::Persistence("Failed to save state".to_string());
-        assert_eq!(err.to_string(), "Persistence error: Failed to save state");
-    }
-
-    #[test]
-    fn test_input_monitoring_error() {
-        let err = PomoliceError::InputMonitoring("Failed to start listener".to_string());
-        assert_eq!(
-            err.to_string(),
-            "Input monitoring error: Failed to start listener"
-        );
-    }
-
-    #[test]
-    fn test_lock_error() {
-        let err = PomoliceError::LockError("Mutex poisoned".to_string());
-        assert_eq!(err.to_string(), "Failed to lock state: Mutex poisoned");
     }
 
     #[test]
@@ -135,13 +87,4 @@ mod tests {
         assert_eq!(result.unwrap(), 42);
     }
 
-    #[test]
-    fn test_result_type_err() {
-        let result: Result<i32> = Err(PomoliceError::TimerNotRunning);
-        assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().to_string(),
-            "Timer not running"
-        );
-    }
 }

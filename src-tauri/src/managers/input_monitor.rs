@@ -151,10 +151,6 @@ impl InputMonitorManager {
         Ok(())
     }
 
-    /// Check if monitoring is currently enabled
-    pub fn is_enabled(&self) -> bool {
-        self.enabled.load(Ordering::SeqCst)
-    }
 }
 
 #[cfg(test)]
