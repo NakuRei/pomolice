@@ -80,9 +80,9 @@ impl TimerStateManager {
             });
         }
 
-        if self.is_rate_limited() {
-            warn!("Start work action is rate limited");
-            return Err(PomoliceError::RateLimited { remaining_ms: 300 });
+        if let Some(remaining_ms) = self.rate_limit_remaining_ms() {
+            warn!("Start work action is rate limited ({}ms remaining)", remaining_ms);
+            return Err(PomoliceError::RateLimited { remaining_ms });
         }
 
         let work_duration_secs = settings.work_duration_secs;
@@ -320,12 +320,16 @@ impl TimerStateManager {
         }
     }
 
-    /// Check if an action is rate limited
-    fn is_rate_limited(&self) -> bool {
+    /// Returns the remaining rate-limit duration in milliseconds, or None if not rate-limited.
+    fn rate_limit_remaining_ms(&self) -> Option<u64> {
         if let Some(t) = self.state.last_transition {
-            return t.elapsed() < Duration::from_millis(300);
+            let elapsed = t.elapsed();
+            let limit = Duration::from_millis(300);
+            if elapsed < limit {
+                return Some((limit - elapsed).as_millis() as u64);
+            }
         }
-        false
+        None
     }
 
     /// Cancel the running timer task and extract its JoinHandle.
@@ -649,5 +653,58 @@ mod tests {
         let mut mgr = make_manager();
         let result = mgr.initialize_from_persisted_state().unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_rate_limit_remaining_ms_returns_none_when_no_transition() {
+        let mgr = make_manager();
+        // last_transition is None on a fresh manager
+        assert!(mgr.rate_limit_remaining_ms().is_none());
+    }
+
+    #[test]
+    fn test_rate_limit_remaining_ms_returns_some_immediately_after_transition() {
+        let mut mgr = make_manager();
+        let settings = TimerSettings {
+            work_duration_secs: 1500,
+            short_break_duration_secs: 300,
+            long_break_duration_secs: 900,
+            long_break_interval: 4,
+        };
+        mgr.start_work(settings).unwrap();
+
+        // Called immediately after start_work sets last_transition
+        let remaining = mgr.rate_limit_remaining_ms();
+        assert!(remaining.is_some());
+        let ms = remaining.unwrap();
+        assert!(ms > 0, "remaining_ms should be > 0");
+        assert!(ms <= 300, "remaining_ms should be <= 300, got {}", ms);
+    }
+
+    #[test]
+    fn test_start_work_rate_limited_returns_accurate_remaining_ms() {
+        let mut mgr = make_manager();
+        let settings = TimerSettings {
+            work_duration_secs: 1500,
+            short_break_duration_secs: 300,
+            long_break_duration_secs: 900,
+            long_break_interval: 4,
+        };
+        mgr.start_work(settings.clone()).unwrap();
+
+        // Immediately call emergency_stop to reset to Idle, preserving last_transition timing
+        mgr.state.status = TimerStatus::Idle;
+
+        // Second start_work must be rate-limited.
+        // remaining_ms reflects actual elapsed time: close to 300ms when called immediately,
+        // so we assert it is in (0, 300] rather than strictly < 300.
+        let err = mgr.start_work(settings).unwrap_err();
+        match err {
+            PomoliceError::RateLimited { remaining_ms } => {
+                assert!(remaining_ms > 0, "remaining_ms should be > 0");
+                assert!(remaining_ms <= 300, "remaining_ms should be <= 300, got {}", remaining_ms);
+            }
+            other => panic!("Expected RateLimited, got {:?}", other),
+        }
     }
 }
