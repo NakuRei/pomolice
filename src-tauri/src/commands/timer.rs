@@ -45,6 +45,7 @@ pub async fn start_work(
     // Emit initial state and work_started event
     let app = window.app_handle();
     let _ = app.emit("timer_tick", &tick_payload);
+    crate::tray::update_tray_icon(app, &tick_payload);
     let _ = app.emit("work_started", serde_json::json!({ "duration": work_duration }));
 
     // Step 2: Await the old task outside the lock.
@@ -88,6 +89,7 @@ pub async fn continue_to_next_session(
 
     let app = window.app_handle();
     let _ = app.emit("timer_tick", &tick_payload);
+    crate::tray::update_tray_icon(app, &tick_payload);
 
     if let Some(handle) = old_task {
         let _ = handle.await;
@@ -120,6 +122,7 @@ pub async fn end_cycle(window: WebviewWindow, state: State<'_, AppState>) -> Res
     };
 
     let _ = window.app_handle().emit("timer_tick", &tick_payload);
+    crate::tray::update_tray_icon(window.app_handle(), &tick_payload);
 
     // Save state
     {
@@ -148,6 +151,7 @@ pub async fn emergency_stop(window: WebviewWindow, state: State<'_, AppState>) -
     };
 
     let _ = window.app_handle().emit("timer_tick", &tick_payload);
+    crate::tray::update_tray_icon(window.app_handle(), &tick_payload);
 
     if let Some(handle) = old_task {
         let _ = handle.await;
@@ -200,6 +204,7 @@ pub async fn sync_settings(
     };
 
     let _ = window.app_handle().emit("timer_tick", &tick_payload);
+    crate::tray::update_tray_icon(window.app_handle(), &tick_payload);
 
     // Save state
     {

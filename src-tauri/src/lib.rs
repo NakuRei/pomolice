@@ -9,6 +9,8 @@ mod commands;
 mod error;
 mod managers;
 mod state;
+mod tray;
+mod tray_icon_renderer;
 mod types;
 
 /// Handle timer tick event
@@ -33,6 +35,7 @@ pub async fn lib_handle_timer_tick(app: AppHandle) {
 
     // Emit tick event to frontend
     let _ = app.emit("timer_tick", &tick_payload);
+    tray::update_tray_icon(&app, &tick_payload);
 
     if should_complete_session {
         lib_handle_session_complete(app).await;
@@ -62,6 +65,12 @@ pub async fn lib_handle_session_complete(app: AppHandle) {
 
             let _ = app.emit("session_completed", &payload);
 
+            // Update tray icon for break state
+            {
+                let timer = state_handle.timer_manager.lock().await;
+                tray::update_tray_icon(&app, &timer.get_state().to_tick_payload());
+            }
+
             // Save state
             {
                 let timer = state_handle.timer_manager.lock().await;
@@ -73,21 +82,26 @@ pub async fn lib_handle_session_complete(app: AppHandle) {
         }
         SessionType::ShortBreak | SessionType::LongBreak => {
             // Break session completed - transition to idle and stop the task.
-            // Step 1: Cancel the task and update state inside the lock.
-            let (payload, old_task) = {
+            //
+            // IMPORTANT: This code runs INSIDE the timer task spawned by
+            // spawn_timer_task() (via lib_handle_timer_tick → here).
+            // cancel_and_take_task() cancels the token and extracts the
+            // JoinHandle, but we must NOT await that handle because it is
+            // our own task — awaiting it would deadlock (self-join).
+            // The task will exit naturally after this function returns:
+            // the select! loop checks token.is_cancelled() and breaks.
+            let (completed_payload, tick_payload) = {
                 let mut timer = state_handle.timer_manager.lock().await;
-                let old = timer.cancel_and_take_task();
-                let p = timer.transition_to_idle_after_break();
-                (p, old)
+                // Cancel token and drop the JoinHandle (do not await)
+                let _ = timer.cancel_and_take_task();
+                let payload = timer.transition_to_idle_after_break();
+                let tick = timer.get_state().to_tick_payload();
+                (payload, tick)
             };
 
-            let _ = app.emit("session_completed", &payload);
-
-            // Step 2: Await the old task outside the lock so it cannot
-            // re-acquire the lock and dispatch an extra tick.
-            if let Some(handle) = old_task {
-                let _ = handle.await;
-            }
+            let _ = app.emit("session_completed", &completed_payload);
+            let _ = app.emit("timer_tick", &tick_payload);
+            tray::update_tray_icon(&app, &tick_payload);
 
             // Save state
             {
@@ -166,11 +180,17 @@ async fn exit_break_mode(app: AppHandle) {
         info!("Exited fullscreen mode on all monitors");
     }
 
-    // Update state
-    {
+    // Update state and notify frontend that fullscreen break ended
+    let tick_payload = {
         let mut timer = state_handle.timer_manager.lock().await;
         timer.set_fullscreen_break(false);
-    }
+        timer.get_state().to_tick_payload()
+    };
+
+    // Emit timer_tick with is_fullscreen_break: false so the frontend
+    // switches from FullscreenBreak back to the normal timer view.
+    let _ = app.emit("timer_tick", &tick_payload);
+    tray::update_tray_icon(&app, &tick_payload);
 
     let _ = app.emit("break_completed", serde_json::json!({}));
 }
@@ -187,8 +207,9 @@ pub async fn lib_handle_input_detected(app: AppHandle) {
         payload
     };
 
-    if let Some(payload) = tick_payload {
-        let _ = app.emit("timer_tick", &payload);
+    if let Some(ref payload) = tick_payload {
+        let _ = app.emit("timer_tick", payload);
+        tray::update_tray_icon(&app, payload);
     }
 }
 
@@ -249,18 +270,32 @@ pub fn run() {
             // Register state with Tauri
             app.manage(app_state);
 
+            // Initialize system tray icon
+            if let Err(e) = tray::setup_tray(app.handle()) {
+                error!("Failed to setup tray icon: {:?}", e);
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
-                    let app = window.app_handle();
-                    for (label, win) in app.webview_windows() {
-                        if label.starts_with("break-overlay-") {
-                            let _ = win.close();
-                        }
+                    // Hide to tray instead of closing
+                    api.prevent_close();
+                    let _ = window.hide();
+
+                    // Show a notification the first time the window is minimized to tray
+                    if tray::should_show_tray_notification() {
+                        info!("Window minimized to tray (first time notification)");
+                        use tauri_plugin_notification::NotificationExt;
+                        let _ = window
+                            .app_handle()
+                            .notification()
+                            .builder()
+                            .title("Pomolice")
+                            .body("Pomolice is still running in the system tray.")
+                            .show();
                     }
-                    app.exit(0);
                 }
             }
         })

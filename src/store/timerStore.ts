@@ -170,6 +170,7 @@ export const useTimerStore = create<TimerStore>()(
       startNextSession: async () => {
         try {
           await invoke("continue_to_next_session");
+          set((state) => { state.showContinueDialog = false; });
           useErrorStore.getState().clearError("continue_to_next_session");
         } catch (error) {
           const detail = String(error);
@@ -192,6 +193,7 @@ export const useTimerStore = create<TimerStore>()(
       endCycle: async () => {
         try {
           await invoke("end_cycle");
+          set((state) => { state.showContinueDialog = false; });
           useErrorStore.getState().clearError("end_cycle");
         } catch (error) {
           const detail = String(error);
