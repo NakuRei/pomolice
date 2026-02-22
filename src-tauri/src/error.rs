@@ -22,6 +22,10 @@ pub enum PomoliceError {
 
     #[error("Window control error: {0}")]
     WindowControl(String),
+
+    #[error("Input monitoring failed: {0}")]
+    #[allow(dead_code)]
+    InputMonitorFailed(String),
 }
 
 /// Result type alias for Pomolice operations

@@ -3,8 +3,9 @@
 
 use rdev::{listen, Event, EventType, Key};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Once};
+use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 use tracing::{error, info};
 
 use crate::error::Result;
@@ -37,8 +38,15 @@ impl ModifierState {
 /// from Tauri's `AppHandle`. The caller (e.g. `AppState::new`) is responsible
 /// for capturing any `AppHandle` clones inside the closures.
 pub struct InputMonitorManager {
+    /// Whether callbacks should fire. Set to true by start(), false by stop().
     enabled: Arc<AtomicBool>,
-    listener_started: Arc<Once>,
+    /// True while the supervisor thread is alive. Cleared by the thread itself on exit.
+    /// Never written by start() or stop() after the initial spawn — only the thread
+    /// clears it, preventing a race between a dying thread and a new spawn.
+    listener_alive: Arc<AtomicBool>,
+    /// Set to true by stop() to tell the supervisor loop to exit cleanly instead of
+    /// retrying. Reset to false by start() before each spawn.
+    shutdown_requested: Arc<AtomicBool>,
     modifier_state: Arc<parking_lot::Mutex<ModifierState>>,
     /// Called when the escape combo (Ctrl+Alt+Shift+E) is detected.
     on_escape_combo: Arc<dyn Fn() + Send + Sync>,
@@ -57,86 +65,77 @@ impl InputMonitorManager {
     ) -> Self {
         Self {
             enabled: Arc::new(AtomicBool::new(false)),
-            listener_started: Arc::new(Once::new()),
+            listener_alive: Arc::new(AtomicBool::new(false)),
+            shutdown_requested: Arc::new(AtomicBool::new(false)),
             modifier_state: Arc::new(parking_lot::Mutex::new(ModifierState::default())),
             on_escape_combo: Arc::new(on_escape_combo),
             on_input_detected: Arc::new(on_input_detected),
         }
     }
 
-    /// Start global input monitoring
+    /// Start global input monitoring.
+    ///
+    /// If a supervisor thread is already running (`listener_alive` is true), this
+    /// call re-enables callbacks without spawning a new thread. Otherwise it resets
+    /// the shutdown signal, marks the thread as alive, and spawns a new supervisor.
     pub fn start(&mut self) -> Result<()> {
         info!("Starting global input monitoring");
 
-        // Check accessibility permissions (macOS only)
-        #[cfg(target_os = "macos")]
-        {
-            // rdev handles permission prompts automatically on macOS
-            // If permissions are denied, listen() will fail gracefully
+        // If the supervisor thread is already running, just re-enable callbacks.
+        if self.listener_alive.load(Ordering::SeqCst) {
+            self.enabled.store(true, Ordering::SeqCst);
+            info!("Input monitoring already running; callbacks re-enabled");
+            return Ok(());
         }
 
-        // Prevent double-start
-        if self.enabled.swap(true, Ordering::SeqCst) {
-            info!("Input monitoring already running");
-            return Ok(()); // Already started, not an error
-        }
+        // Reset signals before spawning so the supervisor loop starts fresh.
+        self.shutdown_requested.store(false, Ordering::SeqCst);
+        self.enabled.store(true, Ordering::SeqCst);
+        self.listener_alive.store(true, Ordering::SeqCst);
 
         let enabled = Arc::clone(&self.enabled);
-        let listener_started = Arc::clone(&self.listener_started);
+        let listener_alive = Arc::clone(&self.listener_alive);
+        let shutdown_requested = Arc::clone(&self.shutdown_requested);
         let modifier_state = Arc::clone(&self.modifier_state);
         let on_escape_combo = Arc::clone(&self.on_escape_combo);
         let on_input_detected = Arc::clone(&self.on_input_detected);
 
-        listener_started.call_once(move || {
-            // Spawn monitoring thread
-            thread::spawn(move || {
-                let callback = move |event: Event| {
-                    if !enabled.load(Ordering::Relaxed) {
-                        return;
-                    }
+        thread::spawn(move || {
+            let mut backoff = Duration::from_secs(1);
+            const MAX_BACKOFF: Duration = Duration::from_secs(30);
 
-                    // Track modifier keys for escape combo detection
-                    match event.event_type {
-                        EventType::KeyPress(key) => {
-                            let mut mods = modifier_state.lock();
-                            mods.update(key, true);
+            loop {
+                let callback = build_event_callback(
+                    Arc::clone(&enabled),
+                    Arc::clone(&modifier_state),
+                    Arc::clone(&on_escape_combo),
+                    Arc::clone(&on_input_detected),
+                );
 
-                            // Escape hatch: detect Ctrl+Alt+Shift+E
-                            if mods.is_escape_combo(key) {
-                                enabled.store(false, Ordering::SeqCst);
-                                (on_escape_combo)();
-                                return;
-                            }
-                        }
-                        EventType::KeyRelease(key) => {
-                            let mut mods = modifier_state.lock();
-                            mods.update(key, false);
-                        }
-                        _ => {}
-                    }
-
-                    // Check if this is an input event that should trigger a penalty
-                    let should_penalize = matches!(
-                        event.event_type,
-                        EventType::KeyPress(_)
-                            | EventType::KeyRelease(_)
-                            | EventType::ButtonPress(_)
-                            | EventType::ButtonRelease(_)
-                            | EventType::MouseMove { .. }
-                            | EventType::Wheel { .. }
-                    );
-
-                    if should_penalize {
-                        (on_input_detected)();
-                    }
-                };
-
-                // Start listening (this blocks until process exit or error)
                 info!("Starting input event listener");
-                if let Err(e) = listen(callback) {
-                    error!("Error in input monitoring: {:?}", e);
+                match listen(callback) {
+                    Ok(()) => {
+                        // rdev returned cleanly. Treat as a stop signal.
+                        info!("Input event listener stopped cleanly");
+                        break;
+                    }
+                    Err(e) => {
+                        if shutdown_requested.load(Ordering::SeqCst) {
+                            info!("Input monitoring shut down on request after listener error");
+                            break;
+                        }
+                        error!(
+                            "Input monitoring listener failed: {:?}; retrying in {:?}",
+                            e, backoff
+                        );
+                        thread::sleep(backoff);
+                        backoff = (backoff * 2).min(MAX_BACKOFF);
+                    }
                 }
-            });
+            }
+
+            // Always clear the alive flag so start() can spawn a new thread later.
+            listener_alive.store(false, Ordering::SeqCst);
         });
 
         Ok(())
@@ -151,11 +150,78 @@ impl InputMonitorManager {
 
         info!("Stopping global input monitoring");
 
-        // Reset modifier state
+        // Signal the supervisor loop to exit on its next iteration rather than retry.
+        self.shutdown_requested.store(true, Ordering::SeqCst);
+
+        // Reset modifier state so no stale key flags remain for the next session.
         let mut mods = self.modifier_state.lock();
         *mods = ModifierState::default();
 
         Ok(())
+    }
+}
+
+/// Construct one rdev event callback for a single `listen()` invocation.
+///
+/// All Arc arguments must be freshly cloned from the supervisor's Arcs before
+/// each call, because closures cannot be cloned. Each `listen()` invocation
+/// therefore gets independent captures with the same underlying shared state.
+///
+/// # Example
+/// ```ignore
+/// let callback = build_event_callback(
+///     Arc::clone(&enabled),
+///     Arc::clone(&modifier_state),
+///     Arc::clone(&on_escape_combo),
+///     Arc::clone(&on_input_detected),
+/// );
+/// rdev::listen(callback)?;
+/// ```
+fn build_event_callback(
+    enabled: Arc<AtomicBool>,
+    modifier_state: Arc<parking_lot::Mutex<ModifierState>>,
+    on_escape_combo: Arc<dyn Fn() + Send + Sync>,
+    on_input_detected: Arc<dyn Fn() + Send + Sync>,
+) -> impl Fn(Event) {
+    move |event: Event| {
+        if !enabled.load(Ordering::Relaxed) {
+            return;
+        }
+
+        // Track modifier keys for escape combo detection.
+        match event.event_type {
+            EventType::KeyPress(key) => {
+                let mut mods = modifier_state.lock();
+                mods.update(key, true);
+
+                // Escape hatch: Ctrl+Alt+Shift+E exits break mode immediately.
+                if mods.is_escape_combo(key) {
+                    enabled.store(false, Ordering::SeqCst);
+                    (on_escape_combo)();
+                    return;
+                }
+            }
+            EventType::KeyRelease(key) => {
+                let mut mods = modifier_state.lock();
+                mods.update(key, false);
+            }
+            _ => {}
+        }
+
+        // Penalise any input event that occurs during an active break.
+        let should_penalize = matches!(
+            event.event_type,
+            EventType::KeyPress(_)
+                | EventType::KeyRelease(_)
+                | EventType::ButtonPress(_)
+                | EventType::ButtonRelease(_)
+                | EventType::MouseMove { .. }
+                | EventType::Wheel { .. }
+        );
+
+        if should_penalize {
+            (on_input_detected)();
+        }
     }
 }
 
@@ -297,20 +363,52 @@ mod tests {
     fn test_start_is_idempotent() {
         let mut mgr = make_manager();
         assert!(mgr.start().is_ok());
-        // Second start must not error
+        // listener_alive is true after the first start (thread was spawned)
+        assert!(mgr.listener_alive.load(Ordering::SeqCst));
+        // Second start must not error and must not spawn a second thread
         assert!(mgr.start().is_ok());
         // Cleanup
         let _ = mgr.stop();
     }
 
     #[test]
-    fn test_stop_clears_enabled_flag() {
+    fn test_stop_clears_enabled_flag_and_sets_shutdown_requested() {
         let mut mgr = make_manager();
         mgr.start().unwrap();
         assert!(mgr.enabled.load(Ordering::SeqCst));
 
         mgr.stop().unwrap();
         assert!(!mgr.enabled.load(Ordering::SeqCst));
+        // stop() must signal the supervisor loop to exit.
+        assert!(mgr.shutdown_requested.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_stop_on_already_stopped_does_not_set_shutdown_requested() {
+        let mut mgr = make_manager();
+        // stop() on a never-started manager: enabled was already false, so the
+        // early-return guard fires and shutdown_requested must stay false.
+        mgr.stop().unwrap();
+        assert!(!mgr.shutdown_requested.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_start_after_stop_resets_shutdown_requested() {
+        let mut mgr = make_manager();
+        // Simulate a start → stop cycle.
+        mgr.start().unwrap();
+        mgr.stop().unwrap();
+        assert!(mgr.shutdown_requested.load(Ordering::SeqCst));
+
+        // Manually clear listener_alive so start() treats the thread as dead
+        // (in production the thread sets this; here the rdev thread is blocked
+        // so we simulate thread exit to test the start() reset path).
+        mgr.listener_alive.store(false, Ordering::SeqCst);
+
+        mgr.start().unwrap();
+        // start() must reset shutdown_requested before spawning.
+        assert!(!mgr.shutdown_requested.load(Ordering::SeqCst));
+        let _ = mgr.stop();
     }
 
     // Note: start() spawns a real OS thread via rdev::listen which blocks until
