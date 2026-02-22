@@ -4,12 +4,10 @@
 use atomic_write_file::AtomicWriteFile;
 use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
-use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
-use std::time::Instant;
 use tracing::{error, info, warn};
 
 use crate::types::{SessionType, TimerSettings, TimerState, TimerStatus};
@@ -29,18 +27,26 @@ pub struct PersistedState {
 
 impl PersistedState {
     /// Calculate elapsed seconds since this state was saved
-    #[allow(dead_code)]
     pub fn elapsed_seconds_since_save(&self) -> u64 {
         let now = Utc::now();
         let elapsed = now.signed_duration_since(self.saved_at);
         elapsed.num_seconds().max(0) as u64
     }
 
-    /// Convert to TimerState
+    /// Convert to TimerState, adjusting remaining_seconds for elapsed time
+    /// since the state was saved.
     pub fn into_timer_state(self) -> TimerState {
+        let remaining_seconds =
+            if self.status == TimerStatus::Working || self.status == TimerStatus::OnBreak {
+                let elapsed = self.elapsed_seconds_since_save();
+                self.remaining_seconds.saturating_sub(elapsed)
+            } else {
+                self.remaining_seconds
+            };
+
         TimerState {
             status: self.status,
-            remaining_seconds: self.remaining_seconds,
+            remaining_seconds,
             session_type: self.session_type,
             current_cycle: self.current_cycle,
             completed_pomodoros: self.completed_pomodoros,
@@ -56,18 +62,12 @@ impl PersistedState {
 }
 
 /// Manager for state persistence
-pub struct PersistenceManager {
-    last_save: Mutex<Option<Instant>>,
-}
+pub struct PersistenceManager;
 
 impl PersistenceManager {
-    const SAVE_DEBOUNCE_MS: u64 = 500;
-
     /// Create a new persistence manager
     pub fn new() -> Self {
-        Self {
-            last_save: Mutex::new(None),
-        }
+        Self
     }
 
     /// Get the path to the state file
@@ -78,19 +78,8 @@ impl PersistenceManager {
         })
     }
 
-    /// Save timer state to disk (debounced)
+    /// Save timer state to disk
     pub fn save_state(&self, state: &TimerState) {
-        // Debounce: only save once per 500ms
-        {
-            let mut last_save = self.last_save.lock();
-            if let Some(last) = *last_save {
-                if last.elapsed().as_millis() < Self::SAVE_DEBOUNCE_MS as u128 {
-                    return;
-                }
-            }
-            *last_save = Some(Instant::now());
-        }
-
         info!("Saving timer state to disk");
 
         let persisted = PersistedState {
@@ -182,7 +171,7 @@ impl PersistenceManager {
 
 impl Default for PersistenceManager {
     fn default() -> Self {
-        Self::new()
+        Self
     }
 }
 
@@ -217,7 +206,7 @@ mod tests {
     }
 
     #[test]
-    fn test_persisted_state_conversion() {
+    fn test_persisted_state_conversion_just_saved() {
         let settings = TimerSettings {
             work_duration_secs: 1500,
             short_break_duration_secs: 300,
@@ -238,6 +227,7 @@ mod tests {
 
         let timer_state = persisted.into_timer_state();
         assert_eq!(timer_state.status, TimerStatus::Working);
+        // saved_at is now, so elapsed ≈ 0 and remaining stays at 1200
         assert_eq!(timer_state.remaining_seconds, 1200);
         assert_eq!(timer_state.session_type, SessionType::Work);
         assert_eq!(timer_state.current_cycle, 2);
@@ -251,17 +241,56 @@ mod tests {
     }
 
     #[test]
-    fn test_persistence_manager_initialization() {
-        let manager = PersistenceManager::new();
-        let last_save = manager.last_save.lock();
-        assert!(last_save.is_none());
+    fn test_persisted_state_conversion_adjusts_elapsed_time() {
+        let persisted = PersistedState {
+            status: TimerStatus::Working,
+            remaining_seconds: 100,
+            session_type: SessionType::Work,
+            current_cycle: 1,
+            completed_pomodoros: 0,
+            show_continue_dialog: false,
+            settings: TimerSettings::default(),
+            saved_at: Utc::now() - chrono::Duration::seconds(30),
+        };
+
+        let timer_state = persisted.into_timer_state();
+        // 100 - 30 = 70 (allow ±1 for timing)
+        assert!(timer_state.remaining_seconds >= 69 && timer_state.remaining_seconds <= 71);
     }
 
     #[test]
-    fn test_persistence_manager_default() {
-        let manager = PersistenceManager::default();
-        let last_save = manager.last_save.lock();
-        assert!(last_save.is_none());
+    fn test_persisted_state_conversion_saturates_at_zero() {
+        let persisted = PersistedState {
+            status: TimerStatus::OnBreak,
+            remaining_seconds: 10,
+            session_type: SessionType::ShortBreak,
+            current_cycle: 1,
+            completed_pomodoros: 1,
+            show_continue_dialog: false,
+            settings: TimerSettings::default(),
+            saved_at: Utc::now() - chrono::Duration::seconds(60),
+        };
+
+        let timer_state = persisted.into_timer_state();
+        assert_eq!(timer_state.remaining_seconds, 0);
+    }
+
+    #[test]
+    fn test_persisted_state_conversion_idle_no_adjustment() {
+        let persisted = PersistedState {
+            status: TimerStatus::Idle,
+            remaining_seconds: 1500,
+            session_type: SessionType::Work,
+            current_cycle: 0,
+            completed_pomodoros: 0,
+            show_continue_dialog: false,
+            settings: TimerSettings::default(),
+            saved_at: Utc::now() - chrono::Duration::seconds(3600),
+        };
+
+        let timer_state = persisted.into_timer_state();
+        // Idle state should not adjust remaining_seconds
+        assert_eq!(timer_state.remaining_seconds, 1500);
     }
 
     #[test]

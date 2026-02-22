@@ -27,9 +27,6 @@ pub async fn lib_handle_timer_tick(app: AppHandle) {
 
         let (completed, payload) = timer.tick();
 
-        // Save state
-        state_handle.persistence.save_state(timer.get_state());
-
         (completed, payload)
     };
 
