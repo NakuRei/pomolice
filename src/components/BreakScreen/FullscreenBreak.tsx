@@ -74,7 +74,7 @@ export function FullscreenBreak() {
 
       {/* Large countdown timer */}
       <div
-        className="text-[120px] font-bold text-white tabular-nums tracking-tight mb-8"
+        className="text-[120px] font-bold text-white tabular-nums tracking-tight font-['Geist_Mono'] mb-8"
         data-testid="break-timer-display"
         aria-live="polite"
         aria-atomic="true"
