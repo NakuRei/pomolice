@@ -1,5 +1,9 @@
 import { useState, useEffect, useRef, useId, type KeyboardEvent } from "react";
 import { useSettingsStore, VALIDATION_RULES } from "../../store/settingsStore";
+import {
+  playNotificationSoundPreview,
+  type NotificationSoundType,
+} from "../../services/notifications";
 import { VolumeMutedIcon, VolumeOnIcon } from "../icons";
 import { DurationInput } from "./DurationInput";
 import "./SettingsModal.css";
@@ -60,6 +64,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     useState<number | null>(notificationSoundVolumePercentStore);
   const [notificationSoundMuted, setNotificationSoundMuted] =
     useState<boolean>(notificationSoundMutedStore);
+  const [notificationSoundPreviewType, setNotificationSoundPreviewType] =
+    useState<NotificationSoundType>("work");
+  const [notificationSoundPreviewStatusText, setNotificationSoundPreviewStatusText] =
+    useState<string>("");
 
   // Sync local state with store when modal opens
   useEffect(() => {
@@ -70,6 +78,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setLongBreakInterval(longBreakIntervalStore);
       setNotificationSoundVolumePercent(notificationSoundVolumePercentStore);
       setNotificationSoundMuted(notificationSoundMutedStore);
+      setNotificationSoundPreviewType("work");
+      setNotificationSoundPreviewStatusText("");
     }
   }, [isOpen]);
 
@@ -221,6 +231,38 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     onClose();
   };
 
+  const handleNotificationSoundPreview = async () => {
+    if (notificationSoundMuted) {
+      setNotificationSoundPreviewStatusText("通知音がミュート中のため再生しませんでした。");
+      return;
+    }
+
+    const previewResult = await playNotificationSoundPreview({
+      soundType: notificationSoundPreviewType,
+      volumePercent: notificationSoundVolumePercent ?? 0,
+      muted: notificationSoundMuted,
+    });
+
+    if (previewResult.status === "played") {
+      setNotificationSoundPreviewStatusText("通知音を再生しました。");
+      return;
+    }
+
+    if (previewResult.status === "muted") {
+      setNotificationSoundPreviewStatusText("通知音がミュート中のため再生しませんでした。");
+      return;
+    }
+
+    if (previewResult.status === "unavailable") {
+      setNotificationSoundPreviewStatusText(
+        "通知音ファイルを読み込めなかったため再生できませんでした。",
+      );
+      return;
+    }
+
+    setNotificationSoundPreviewStatusText("通知音の再生に失敗しました。");
+  };
+
   return (
     <div
       className="settingsModalOverlay"
@@ -298,7 +340,16 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={() => setNotificationSoundMuted((prev) => !prev)}
+                onClick={() =>
+                  setNotificationSoundMuted((previousMutedState) => {
+                    if (!previousMutedState) {
+                      setNotificationSoundPreviewStatusText(
+                        "通知音がミュート中のため再生しませんでした。",
+                      );
+                    }
+                    return !previousMutedState;
+                  })
+                }
                 className={`transition-colors ${
                   notificationSoundMuted
                     ? "text-red-600 hover:text-red-700"
@@ -331,6 +382,51 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 disabled={notificationSoundMuted}
               />
             </div>
+            <div className="mt-3 flex items-center gap-2">
+              <label
+                htmlFor="settings-notification-sound-preview-type"
+                className="text-sm text-gray-700"
+              >
+                音の種類
+              </label>
+              <select
+                id="settings-notification-sound-preview-type"
+                value={notificationSoundPreviewType}
+                onChange={(event) =>
+                  setNotificationSoundPreviewType(
+                    event.target.value as NotificationSoundType,
+                  )
+                }
+                className="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-700"
+                data-testid="settings-notification-sound-preview-type"
+                aria-label="テストする通知音の種類"
+              >
+                <option value="work">作業終了</option>
+                <option value="short_break">短い休憩終了</option>
+                <option value="long_break">長い休憩終了</option>
+              </select>
+              <button
+                type="button"
+                onClick={handleNotificationSoundPreview}
+                disabled={notificationSoundMuted}
+                className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${
+                  notificationSoundMuted
+                    ? "cursor-not-allowed bg-gray-200 text-gray-500"
+                    : "bg-blue-600 text-white hover:bg-blue-700"
+                }`}
+                data-testid="settings-notification-sound-preview-button"
+                aria-label="通知音をテスト再生する"
+              >
+                テスト再生
+              </button>
+            </div>
+            <p
+              className="mt-2 text-xs text-gray-600"
+              data-testid="settings-notification-sound-preview-status"
+              aria-live="polite"
+            >
+              {notificationSoundPreviewStatusText}
+            </p>
           </div>
         </section>
 

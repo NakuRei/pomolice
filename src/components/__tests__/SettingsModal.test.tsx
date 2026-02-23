@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { playNotificationSoundPreview } from "../../services/notifications";
 import { SettingsModal } from "../Settings/SettingsModal";
 import { useSettingsStore } from "../../store/settingsStore";
+
+vi.mock("../../services/notifications", () => ({
+  playNotificationSoundPreview: vi.fn(async () => ({ status: "played" })),
+}));
 
 describe("SettingsModal", () => {
   const mockOnClose = vi.fn();
@@ -9,6 +14,7 @@ describe("SettingsModal", () => {
   beforeEach(() => {
     useSettingsStore.getState().reset();
     mockOnClose.mockClear();
+    vi.mocked(playNotificationSoundPreview).mockResolvedValue({ status: "played" });
   });
 
   describe("Visibility", () => {
@@ -91,6 +97,16 @@ describe("SettingsModal", () => {
       expect(screen.getByTestId("settings-save")).toBeInTheDocument();
       expect(screen.getByTestId("settings-cancel")).toBeInTheDocument();
     });
+
+    it("should display notification sound preview controls", () => {
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+      expect(
+        screen.getByTestId("settings-notification-sound-preview-type"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("settings-notification-sound-preview-button"),
+      ).toBeInTheDocument();
+    });
   });
 
   describe("Input Changes", () => {
@@ -157,6 +173,68 @@ describe("SettingsModal", () => {
 
       fireEvent.click(screen.getByTestId("settings-save"));
       expect(useSettingsStore.getState().notificationSoundMuted).toBe(true);
+    });
+
+    it("should play selected notification sound preview", async () => {
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+
+      const soundTypeSelect = screen.getByTestId(
+        "settings-notification-sound-preview-type",
+      ) as HTMLSelectElement;
+      fireEvent.change(soundTypeSelect, { target: { value: "long_break" } });
+
+      const soundVolumeInput = screen.getByTestId(
+        "settings-notification-sound-volume",
+      ) as HTMLInputElement;
+      fireEvent.change(soundVolumeInput, { target: { value: "25" } });
+
+      fireEvent.click(screen.getByTestId("settings-notification-sound-preview-button"));
+
+      expect(playNotificationSoundPreview).toHaveBeenCalledWith({
+        soundType: "long_break",
+        volumePercent: 25,
+        muted: false,
+      });
+      expect(
+        await screen.findByText("通知音を再生しました。"),
+      ).toBeInTheDocument();
+    });
+
+    it("should show playback error status when preview playback fails", async () => {
+      vi.mocked(playNotificationSoundPreview).mockResolvedValueOnce({ status: "error" });
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByTestId("settings-notification-sound-preview-button"));
+
+      expect(
+        await screen.findByText("通知音の再生に失敗しました。"),
+      ).toBeInTheDocument();
+    });
+
+    it("should show unavailable status when preview sound is unavailable", async () => {
+      vi.mocked(playNotificationSoundPreview).mockResolvedValueOnce({
+        status: "unavailable",
+      });
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByTestId("settings-notification-sound-preview-button"));
+
+      expect(
+        await screen.findByText(
+          "通知音ファイルを読み込めなかったため再生できませんでした。",
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it("should disable preview button while muted and show muted status", () => {
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByTestId("settings-notification-mute-button"));
+
+      expect(
+        screen.getByTestId("settings-notification-sound-preview-button"),
+      ).toBeDisabled();
+      expect(screen.getByText("通知音がミュート中のため再生しませんでした。")).toBeInTheDocument();
     });
   });
 
@@ -367,6 +445,15 @@ describe("SettingsModal", () => {
 
       fireEvent.keyDown(workInput, { key: "Tab", shiftKey: true });
       expect(saveButton).toHaveFocus();
+    });
+
+    it("should expose live region for preview playback status", () => {
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+
+      const previewStatusRegion = screen.getByTestId(
+        "settings-notification-sound-preview-status",
+      );
+      expect(previewStatusRegion).toHaveAttribute("aria-live", "polite");
     });
   });
 

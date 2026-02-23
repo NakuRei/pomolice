@@ -13,23 +13,60 @@ import { resolveResource } from '@tauri-apps/api/path';
 import { useSettingsStore } from '../store/settingsStore';
 import { SessionTypeValue } from '../store/timerStore';
 
-const sessionSoundResourceBySessionType = {
+const notificationSoundResourcePathByType = {
   work: 'resources/sounds/work.wav',
   short_break: 'resources/sounds/short_break.wav',
   long_break: 'resources/sounds/long_break.wav',
 } as const;
 
-type SessionSoundType = keyof typeof sessionSoundResourceBySessionType;
+/**
+ * Notification sound categories used by both timer notifications and settings preview.
+ *
+ * Usage examples:
+ * - `const type: NotificationSoundType = "work";`
+ * - `await resolveNotificationSoundResourcePath("short_break");`
+ */
+export type NotificationSoundType = keyof typeof notificationSoundResourcePathByType;
 
-const resolvedSessionSoundPathBySessionType: Partial<
-  Record<SessionSoundType, string>
+const resolvedNotificationSoundPathByType: Partial<
+  Record<NotificationSoundType, string>
 > = {};
+let currentNotificationPreviewAudio: HTMLAudioElement | null = null;
 
-const windowsSoundEventBySessionType: Record<SessionSoundType, string> = {
+const windowsSoundEventByType: Record<NotificationSoundType, string> = {
   work: 'ms-winsoundevent:Notification.IM',
   short_break: 'ms-winsoundevent:Notification.Mail',
   long_break: 'ms-winsoundevent:Notification.Reminder',
 };
+
+/**
+ * Input for previewing notification sounds from settings without using persisted store values.
+ *
+ * Usage examples:
+ * - `await playNotificationSoundPreview({ soundType: "work", volumePercent: 35, muted: false });`
+ * - `await playNotificationSoundPreview({ soundType: "long_break", volumePercent: 80, muted: true });`
+ */
+export interface NotificationSoundPreviewOptions {
+  soundType: NotificationSoundType;
+  volumePercent: number;
+  muted: boolean;
+}
+
+export type NotificationSoundPreviewStatus =
+  | 'played'
+  | 'muted'
+  | 'unavailable'
+  | 'error';
+
+export interface NotificationSoundPreviewResult {
+  status: NotificationSoundPreviewStatus;
+}
+
+interface SessionCompleteNotificationPayload {
+  title: string;
+  body: string;
+  soundType: NotificationSoundType;
+}
 
 function isWindowsPlatform(): boolean {
   return (
@@ -38,44 +75,89 @@ function isWindowsPlatform(): boolean {
   );
 }
 
-async function resolveSessionSoundPath(
-  sessionSoundType: SessionSoundType
+export async function resolveNotificationSoundResourcePath(
+  notificationSoundType: NotificationSoundType
 ): Promise<string | undefined> {
-  const cachedPath = resolvedSessionSoundPathBySessionType[sessionSoundType];
+  const cachedPath = resolvedNotificationSoundPathByType[notificationSoundType];
   if (cachedPath) {
     return cachedPath;
   }
 
   try {
-    const resourcePath = sessionSoundResourceBySessionType[sessionSoundType];
+    const resourcePath = notificationSoundResourcePathByType[notificationSoundType];
     const resolvedPath = await resolveResource(resourcePath);
-    resolvedSessionSoundPathBySessionType[sessionSoundType] = resolvedPath;
+    resolvedNotificationSoundPathByType[notificationSoundType] = resolvedPath;
     return resolvedPath;
   } catch (error) {
     console.warn('Failed to resolve notification sound path:', {
-      sessionSoundType,
+      notificationSoundType,
       error,
     });
     return undefined;
   }
 }
 
+function stopCurrentNotificationPreviewAudio(): void {
+  if (!currentNotificationPreviewAudio) {
+    return;
+  }
+
+  currentNotificationPreviewAudio.pause();
+  currentNotificationPreviewAudio.currentTime = 0;
+  currentNotificationPreviewAudio = null;
+}
+
+/**
+ * Play a settings preview tone using caller-provided values instead of persisted settings state.
+ */
+export async function playNotificationSoundPreview(
+  options: NotificationSoundPreviewOptions
+): Promise<NotificationSoundPreviewResult> {
+  if (options.muted) {
+    stopCurrentNotificationPreviewAudio();
+    return { status: 'muted' };
+  }
+
+  const resolvedPath = await resolveNotificationSoundResourcePath(options.soundType);
+  if (!resolvedPath) {
+    return { status: 'unavailable' };
+  }
+
+  try {
+    const normalizedVolume = Math.max(0, Math.min(100, options.volumePercent)) / 100;
+    const soundAssetUrl = convertFileSrc(resolvedPath.replace(/\\/g, '/'));
+    const previewAudio = new Audio(soundAssetUrl);
+
+    previewAudio.volume = normalizedVolume;
+    stopCurrentNotificationPreviewAudio();
+    currentNotificationPreviewAudio = previewAudio;
+    await previewAudio.play();
+    return { status: 'played' };
+  } catch (error) {
+    console.warn('Failed to play notification sound preview:', {
+      notificationSoundType: options.soundType,
+      error,
+    });
+    return { status: 'error' };
+  }
+}
+
 async function resolveNotificationSound(
-  sessionSoundType: SessionSoundType
+  notificationSoundType: NotificationSoundType
 ): Promise<string | undefined> {
   if (useSettingsStore.getState().notificationSoundMuted) {
     return undefined;
   }
 
   if (isWindowsPlatform()) {
-    return windowsSoundEventBySessionType[sessionSoundType];
+    return windowsSoundEventByType[notificationSoundType];
   }
 
-  return resolveSessionSoundPath(sessionSoundType);
+  return resolveNotificationSoundResourcePath(notificationSoundType);
 }
 
 async function playInAppSoundFallback(
-  sessionSoundType: SessionSoundType
+  notificationSoundType: NotificationSoundType
 ): Promise<void> {
   if (!isWindowsPlatform()) {
     return;
@@ -86,7 +168,7 @@ async function playInAppSoundFallback(
   }
 
   try {
-    const resolvedPath = await resolveSessionSoundPath(sessionSoundType);
+    const resolvedPath = await resolveNotificationSoundResourcePath(notificationSoundType);
     if (!resolvedPath) {
       return;
     }
@@ -99,7 +181,7 @@ async function playInAppSoundFallback(
     await soundAudio.play();
   } catch (error) {
     console.warn('Failed to play in-app sound fallback:', {
-      sessionSoundType,
+      notificationSoundType,
       error,
     });
   }
@@ -148,26 +230,39 @@ async function ensureNotificationPermission(): Promise<boolean> {
 export async function notifyWorkComplete(
   nextSessionType: SessionTypeValue | null
 ): Promise<void> {
+  const nextSessionSoundType =
+    nextSessionType === 'long_break' ? 'long_break' : 'short_break';
+
+  await sendSessionCompleteNotification({
+    title: '休憩時間です！',
+    body: 'お疲れ様でした。休憩を取りましょう。',
+    soundType: nextSessionSoundType,
+  });
+}
+
+async function sendSessionCompleteNotification(
+  payload: SessionCompleteNotificationPayload
+): Promise<void> {
   const hasPermission = await ensureNotificationPermission();
   if (!hasPermission) {
     return;
   }
 
-  const nextSessionSoundType =
-    nextSessionType === 'long_break' ? 'long_break' : 'short_break';
-
   try {
-    const soundPath = await resolveNotificationSound(nextSessionSoundType);
+    const soundPath = await resolveNotificationSound(payload.soundType);
 
     sendNotification({
-      title: '休憩時間です！',
-      body: 'お疲れ様でした。休憩を取りましょう。',
+      title: payload.title,
+      body: payload.body,
       sound: soundPath,
     });
 
-    await playInAppSoundFallback(nextSessionSoundType);
+    await playInAppSoundFallback(payload.soundType);
   } catch (error) {
-    console.error('Failed to show work complete notification:', error);
+    console.error('Failed to show session complete notification:', {
+      payload,
+      error,
+    });
   }
 }
 
@@ -175,46 +270,20 @@ export async function notifyWorkComplete(
  * Show notification when break session is complete
  */
 export async function notifyBreakComplete(): Promise<void> {
-  const hasPermission = await ensureNotificationPermission();
-  if (!hasPermission) {
-    return;
-  }
-
-  try {
-    const soundPath = await resolveNotificationSound('work');
-
-    sendNotification({
-      title: '作業に戻りましょう！',
-      body: '休憩が終わりました。次のポモドーロを始めましょう。',
-      sound: soundPath,
-    });
-
-    await playInAppSoundFallback('work');
-  } catch (error) {
-    console.error('Failed to show break complete notification:', error);
-  }
+  await sendSessionCompleteNotification({
+    title: '作業に戻りましょう！',
+    body: '休憩が終わりました。次のポモドーロを始めましょう。',
+    soundType: 'work',
+  });
 }
 
 /**
  * Show notification when long break session is complete
  */
 export async function notifyLongBreakComplete(): Promise<void> {
-  const hasPermission = await ensureNotificationPermission();
-  if (!hasPermission) {
-    return;
-  }
-
-  try {
-    const soundPath = await resolveNotificationSound('work');
-
-    sendNotification({
-      title: '長い休憩完了！',
-      body: 'サイクルが完了しました。次のサイクルを始めますか？',
-      sound: soundPath,
-    });
-
-    await playInAppSoundFallback('work');
-  } catch (error) {
-    console.error('Failed to show long break complete notification:', error);
-  }
+  await sendSessionCompleteNotification({
+    title: '長い休憩完了！',
+    body: 'サイクルが完了しました。次のサイクルを始めますか？',
+    soundType: 'work',
+  });
 }
