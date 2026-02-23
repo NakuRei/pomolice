@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useId, type KeyboardEvent } from "react";
 import { useSettingsStore, VALIDATION_RULES } from "../../store/settingsStore";
 import { VolumeMutedIcon, VolumeOnIcon } from "../icons";
 import { DurationInput } from "./DurationInput";
+import "./SettingsModal.css";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -19,6 +20,10 @@ interface SettingsModalProps {
  * - Long break interval (2-10 cycles)
  */
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const titleId = useId();
+
   const workDurationStore = useSettingsStore((state) => state.workDuration);
   const shortBreakDurationStore = useSettingsStore(
     (state) => state.shortBreakDuration,
@@ -67,6 +72,80 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setNotificationSoundMuted(notificationSoundMutedStore);
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousBodyOverscrollBehavior = document.body.style.overscrollBehavior;
+
+    document.body.style.overflow = "hidden";
+    document.body.style.overscrollBehavior = "contain";
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.body.style.overscrollBehavior = previousBodyOverscrollBehavior;
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    cancelButtonRef.current?.focus();
+  }, [isOpen]);
+
+  const handleDialogKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+
+    if (event.key !== "Tab") {
+      return;
+    }
+
+    const dialog = dialogRef.current;
+    if (!dialog) {
+      return;
+    }
+
+    const focusableElements = Array.from(
+      dialog.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    );
+
+    if (focusableElements.length === 0) {
+      event.preventDefault();
+      dialog.focus();
+      return;
+    }
+
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+    const activeElement = document.activeElement as HTMLElement | null;
+    const isFocusInsideDialog = activeElement
+      ? dialog.contains(activeElement)
+      : false;
+
+    if (event.shiftKey) {
+      if (!isFocusInsideDialog || activeElement === firstElement) {
+        event.preventDefault();
+        lastElement.focus();
+      }
+      return;
+    }
+
+    if (!isFocusInsideDialog || activeElement === lastElement) {
+      event.preventDefault();
+      firstElement.focus();
+    }
+  };
 
   if (!isOpen) {
     return null;
@@ -144,13 +223,26 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
   return (
     <div
-      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+      className="settingsModalOverlay"
       data-testid="settings-modal"
     >
-      <div className="bg-white rounded-lg shadow-xl p-8 max-w-md w-full mx-4">
-        <h2 className="text-2xl font-bold mb-6 text-gray-900">設定</h2>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        onKeyDown={handleDialogKeyDown}
+        className="settingsModalDialog"
+        data-testid="settings-modal-dialog"
+      >
+        <header className="settingsModalHeader" data-testid="settings-modal-header">
+          <h2 id={titleId} className="settingsModalTitle">
+            設定
+          </h2>
+        </header>
 
-        <div className="space-y-6">
+        <section className="settingsModalBody" data-testid="settings-modal-body">
           <DurationInput
             label="作業時間"
             value={workDuration}
@@ -240,12 +332,17 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               />
             </div>
           </div>
-        </div>
+        </section>
 
-        <div className="flex gap-4 mt-8">
+        <footer
+          className="settingsModalFooter"
+          data-testid="settings-modal-footer"
+          style={{ paddingBottom: "calc(1.5rem + env(safe-area-inset-bottom))" }}
+        >
           <button
+            ref={cancelButtonRef}
             onClick={handleCancel}
-            className="flex-1 px-6 py-3 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition-colors"
+            className="settingsModalCancelButton"
             data-testid="settings-cancel"
           >
             キャンセル
@@ -253,16 +350,16 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           <button
             onClick={handleSave}
             disabled={!isFormValid}
-            className={`flex-1 px-6 py-3 text-white rounded-lg focus:outline-none focus:ring-2 transition-colors ${
+            className={`settingsModalSaveButton ${
               isFormValid
-                ? "bg-blue-600 hover:bg-blue-700 focus:ring-blue-500"
-                : "bg-gray-400 cursor-not-allowed"
+                ? "settingsModalSaveButtonEnabled"
+                : "settingsModalSaveButtonDisabled"
             }`}
             data-testid="settings-save"
           >
             保存
           </button>
-        </div>
+        </footer>
       </div>
     </div>
   );

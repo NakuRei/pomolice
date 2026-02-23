@@ -290,20 +290,101 @@ describe("SettingsModal", () => {
     it("should have overlay background", () => {
       render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
       const modal = screen.getByTestId("settings-modal");
-      expect(modal).toHaveClass("bg-black/50");
+      expect(modal).toHaveClass("settingsModalOverlay");
     });
 
     it("should be positioned as fixed overlay", () => {
       render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
       const modal = screen.getByTestId("settings-modal");
-      expect(modal).toHaveClass("fixed");
-      expect(modal).toHaveClass("inset-0");
+      expect(modal).toHaveClass("settingsModalOverlay");
     });
 
     it("should have high z-index", () => {
       render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
       const modal = screen.getByTestId("settings-modal");
-      expect(modal).toHaveClass("z-50");
+      expect(modal).toHaveClass("settingsModalOverlay");
+    });
+
+    it("should render a scrollable modal body area", () => {
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+      const body = screen.getByTestId("settings-modal-body");
+      expect(body).toHaveClass("settingsModalBody");
+    });
+
+    it("should keep footer as a non-scrolling area", () => {
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+      const footer = screen.getByTestId("settings-modal-footer");
+      expect(footer).toHaveClass("settingsModalFooter");
+    });
+
+    it("should constrain dialog height for small viewports", () => {
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+      const dialog = screen.getByTestId("settings-modal-dialog");
+      expect(dialog).toHaveClass("settingsModalDialog");
+    });
+  });
+
+  describe("Accessibility", () => {
+    it("should expose dialog role and modal attributes", () => {
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+      const dialog = screen.getByRole("dialog", { name: "設定" });
+      expect(dialog).toHaveAttribute("aria-modal", "true");
+      expect(dialog).toHaveAttribute("aria-labelledby");
+    });
+
+    it("should focus cancel button when opened", () => {
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+      const cancelButton = screen.getByTestId("settings-cancel");
+      expect(cancelButton).toHaveFocus();
+    });
+
+    it("should close when Escape key is pressed", () => {
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+      const dialog = screen.getByRole("dialog", { name: "設定" });
+      fireEvent.keyDown(dialog, { key: "Escape" });
+      expect(mockOnClose).toHaveBeenCalledTimes(1);
+    });
+
+    it("should trap focus forward with Tab from last element to first element", () => {
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+      const saveButton = screen.getByTestId("settings-save");
+      const workInput = screen.getByTestId("settings-work-duration-input");
+
+      saveButton.focus();
+      expect(saveButton).toHaveFocus();
+
+      fireEvent.keyDown(saveButton, { key: "Tab" });
+      expect(workInput).toHaveFocus();
+    });
+
+    it("should trap focus backward with Shift+Tab from first element to last element", () => {
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+      const saveButton = screen.getByTestId("settings-save");
+      const workInput = screen.getByTestId("settings-work-duration-input");
+
+      workInput.focus();
+      expect(workInput).toHaveFocus();
+
+      fireEvent.keyDown(workInput, { key: "Tab", shiftKey: true });
+      expect(saveButton).toHaveFocus();
+    });
+  });
+
+  describe("Scroll Lock", () => {
+    it("should lock body scroll while modal is open", () => {
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+      expect(document.body.style.overflow).toBe("hidden");
+      expect(document.body.style.overscrollBehavior).toBe("contain");
+    });
+
+    it("should restore body scroll styles when modal closes", () => {
+      const { rerender } = render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+      expect(document.body.style.overflow).toBe("hidden");
+      expect(document.body.style.overscrollBehavior).toBe("contain");
+
+      rerender(<SettingsModal isOpen={false} onClose={mockOnClose} />);
+      expect(document.body.style.overflow).toBe("");
+      expect(document.body.style.overscrollBehavior).toBe("");
     });
   });
 

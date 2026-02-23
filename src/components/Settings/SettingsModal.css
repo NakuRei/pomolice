@@ -1,0 +1,108 @@
+.settingsModalOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background-color: rgb(0 0 0 / 0.5);
+}
+
+.settingsModalDialog {
+  display: flex;
+  width: 100%;
+  max-width: 28rem;
+  max-height: calc(100vh - 2rem);
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 0.5rem;
+  background-color: #fff;
+  box-shadow:
+    0 20px 25px -5px rgb(0 0 0 / 0.1),
+    0 8px 10px -6px rgb(0 0 0 / 0.1);
+}
+
+.settingsModalHeader {
+  flex: 0 0 auto;
+  padding: 2rem 2rem 1.5rem;
+}
+
+.settingsModalTitle {
+  margin: 0;
+  color: #111827;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 2rem;
+}
+
+.settingsModalBody {
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 1.5rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 2rem 1.5rem;
+}
+
+.settingsModalFooter {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 1rem;
+  border-top: 1px solid #f3f4f6;
+  padding: 1rem 2rem 0;
+}
+
+.settingsModalCancelButton {
+  flex: 1 1 0%;
+  border: 0;
+  border-radius: 0.5rem;
+  background-color: #e5e7eb;
+  padding: 0.75rem 1.5rem;
+  color: #374151;
+  transition: background-color 150ms ease;
+}
+
+.settingsModalSaveButton {
+  flex: 1 1 0%;
+  border: 0;
+  border-radius: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  color: #fff;
+  transition: background-color 150ms ease;
+}
+
+.settingsModalSaveButtonEnabled {
+  background-color: #2563eb;
+}
+
+.settingsModalSaveButtonDisabled {
+  cursor: not-allowed;
+  background-color: #9ca3af;
+}
+
+.settingsModalCancelButton:hover {
+  background-color: #d1d5db;
+}
+
+.settingsModalCancelButton:focus-visible {
+  outline: 2px solid #9ca3af;
+  outline-offset: 2px;
+}
+
+.settingsModalSaveButtonEnabled:hover {
+  background-color: #1d4ed8;
+}
+
+.settingsModalSaveButton:focus-visible {
+  outline-offset: 2px;
+}
+
+.settingsModalSaveButtonEnabled:focus-visible {
+  outline: 2px solid #3b82f6;
+}
+
+.settingsModalSaveButtonDisabled:focus-visible {
+  outline: 2px solid #9ca3af;
+}
