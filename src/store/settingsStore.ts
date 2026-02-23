@@ -15,6 +15,10 @@ interface SettingsState {
   longBreakDuration: number;
   /** Number of pomodoros before a long break (2-10) */
   longBreakInterval: number;
+  /** Notification sound volume percentage (0-100) */
+  notificationSoundVolumePercent: number;
+  /** Whether notification sound is muted */
+  notificationSoundMuted: boolean;
 }
 
 /**
@@ -29,6 +33,10 @@ interface SettingsActions {
   setLongBreakDuration: (minutes: number) => void;
   /** Set long break interval with validation */
   setLongBreakInterval: (count: number) => void;
+  /** Set notification sound volume percentage with validation */
+  setNotificationSoundVolumePercent: (percent: number) => void;
+  /** Toggle notification sound mute state */
+  toggleNotificationSoundMuted: () => void;
   /** Update multiple settings at once */
   updateSettings: (settings: Partial<SettingsState>) => void;
   /** Reset all settings to default values */
@@ -50,6 +58,8 @@ export const DEFAULT_SETTINGS: SettingsState = {
   shortBreakDuration: 5,
   longBreakDuration: 15,
   longBreakInterval: 4,
+  notificationSoundVolumePercent: 50,
+  notificationSoundMuted: false,
 };
 
 /**
@@ -66,6 +76,7 @@ export const VALIDATION_RULES = {
   shortBreakDuration: { min: 0.01, max: 60 },   // TEMP: 0.01 min (0.6 sec) for testing
   longBreakDuration: { min: 0.01, max: 60 },    // TEMP: 0.01 min (0.6 sec) for testing
   longBreakInterval: { min: 2, max: 10 },
+  notificationSoundVolumePercent: { min: 0, max: 100 },
 } as const;
 
 /**
@@ -136,6 +147,20 @@ export const useSettingsStore = create<SettingsStore>()(
             );
           }),
 
+        setNotificationSoundVolumePercent: (percent: number) =>
+          set((state) => {
+            state.notificationSoundVolumePercent = validateRange(
+              percent,
+              VALIDATION_RULES.notificationSoundVolumePercent.min,
+              VALIDATION_RULES.notificationSoundVolumePercent.max
+            );
+          }),
+
+        toggleNotificationSoundMuted: () =>
+          set((state) => {
+            state.notificationSoundMuted = !state.notificationSoundMuted;
+          }),
+
         updateSettings: (settings: Partial<SettingsState>) =>
           set((state) => {
             if (settings.workDuration !== undefined) {
@@ -165,6 +190,16 @@ export const useSettingsStore = create<SettingsStore>()(
                 VALIDATION_RULES.longBreakInterval.min,
                 VALIDATION_RULES.longBreakInterval.max
               );
+            }
+            if (settings.notificationSoundVolumePercent !== undefined) {
+              state.notificationSoundVolumePercent = validateRange(
+                settings.notificationSoundVolumePercent,
+                VALIDATION_RULES.notificationSoundVolumePercent.min,
+                VALIDATION_RULES.notificationSoundVolumePercent.max
+              );
+            }
+            if (settings.notificationSoundMuted !== undefined) {
+              state.notificationSoundMuted = settings.notificationSoundMuted;
             }
           }),
 

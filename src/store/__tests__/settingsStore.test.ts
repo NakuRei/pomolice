@@ -31,6 +31,16 @@ describe("settingsStore", () => {
       const state = useSettingsStore.getState();
       expect(state.longBreakInterval).toBe(4);
     });
+
+    it("should have correct default notification sound volume (50%)", () => {
+      const state = useSettingsStore.getState();
+      expect(state.notificationSoundVolumePercent).toBe(50);
+    });
+
+    it("should have notification sound unmuted by default", () => {
+      const state = useSettingsStore.getState();
+      expect(state.notificationSoundMuted).toBe(false);
+    });
   });
 
   describe("Actions", () => {
@@ -144,6 +154,45 @@ describe("settingsStore", () => {
       });
     });
 
+    describe("setNotificationSoundVolumePercent()", () => {
+      it("should update notification sound volume within valid range", () => {
+        const { setNotificationSoundVolumePercent } = useSettingsStore.getState();
+        setNotificationSoundVolumePercent(30);
+        expect(useSettingsStore.getState().notificationSoundVolumePercent).toBe(30);
+      });
+
+      it("should clamp notification sound volume to minimum (0)", () => {
+        const { setNotificationSoundVolumePercent } = useSettingsStore.getState();
+        setNotificationSoundVolumePercent(-10);
+        expect(useSettingsStore.getState().notificationSoundVolumePercent).toBe(
+          VALIDATION_RULES.notificationSoundVolumePercent.min
+        );
+      });
+
+      it("should clamp notification sound volume to maximum (100)", () => {
+        const { setNotificationSoundVolumePercent } = useSettingsStore.getState();
+        setNotificationSoundVolumePercent(120);
+        expect(useSettingsStore.getState().notificationSoundVolumePercent).toBe(
+          VALIDATION_RULES.notificationSoundVolumePercent.max
+        );
+      });
+    });
+
+    describe("toggleNotificationSoundMuted()", () => {
+      it("should toggle mute state from false to true", () => {
+        const { toggleNotificationSoundMuted } = useSettingsStore.getState();
+        toggleNotificationSoundMuted();
+        expect(useSettingsStore.getState().notificationSoundMuted).toBe(true);
+      });
+
+      it("should toggle mute state from true back to false", () => {
+        const { toggleNotificationSoundMuted } = useSettingsStore.getState();
+        toggleNotificationSoundMuted();
+        toggleNotificationSoundMuted();
+        expect(useSettingsStore.getState().notificationSoundMuted).toBe(false);
+      });
+    });
+
     describe("resetToDefaults()", () => {
       it("should reset all settings to default values", () => {
         const { setWorkDuration, setShortBreakDuration, resetToDefaults } =
@@ -163,6 +212,12 @@ describe("settingsStore", () => {
         );
         expect(state.longBreakDuration).toBe(DEFAULT_SETTINGS.longBreakDuration);
         expect(state.longBreakInterval).toBe(DEFAULT_SETTINGS.longBreakInterval);
+        expect(state.notificationSoundVolumePercent).toBe(
+          DEFAULT_SETTINGS.notificationSoundVolumePercent
+        );
+        expect(state.notificationSoundMuted).toBe(
+          DEFAULT_SETTINGS.notificationSoundMuted
+        );
       });
     });
   });
@@ -184,6 +239,8 @@ describe("settingsStore", () => {
         shortBreakDuration: 5,
         longBreakDuration: 15,
         longBreakInterval: 4,
+        notificationSoundVolumePercent: 50,
+        notificationSoundMuted: false,
       });
     });
 
@@ -193,6 +250,7 @@ describe("settingsStore", () => {
       expect(VALIDATION_RULES.shortBreakDuration).toEqual({ min: 0.01, max: 60 });
       expect(VALIDATION_RULES.longBreakDuration).toEqual({ min: 0.01, max: 60 });
       expect(VALIDATION_RULES.longBreakInterval).toEqual({ min: 2, max: 10 });
+      expect(VALIDATION_RULES.notificationSoundVolumePercent).toEqual({ min: 0, max: 100 });
     });
   });
 });

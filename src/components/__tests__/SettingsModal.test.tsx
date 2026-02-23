@@ -32,6 +32,7 @@ describe("SettingsModal", () => {
         shortBreakDuration: 10,
         longBreakDuration: 20,
         longBreakInterval: 3,
+        notificationSoundVolumePercent: 35,
       });
 
       render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
@@ -40,11 +41,15 @@ describe("SettingsModal", () => {
       const shortBreakInput = screen.getByTestId("settings-short-break-input") as HTMLInputElement;
       const longBreakInput = screen.getByTestId("settings-long-break-input") as HTMLInputElement;
       const intervalInput = screen.getByTestId("settings-interval-input") as HTMLInputElement;
+      const notificationSoundVolume = screen.getByTestId(
+        "settings-notification-sound-volume"
+      ) as HTMLInputElement;
 
       expect(workInput).toHaveValue(30);
       expect(shortBreakInput).toHaveValue(10);
       expect(longBreakInput).toHaveValue(20);
       expect(intervalInput).toHaveValue(3);
+      expect(notificationSoundVolume).toHaveValue("35");
     });
 
     it("should display default settings", () => {
@@ -54,11 +59,15 @@ describe("SettingsModal", () => {
       const shortBreakInput = screen.getByTestId("settings-short-break-input") as HTMLInputElement;
       const longBreakInput = screen.getByTestId("settings-long-break-input") as HTMLInputElement;
       const intervalInput = screen.getByTestId("settings-interval-input") as HTMLInputElement;
+      const notificationSoundVolume = screen.getByTestId(
+        "settings-notification-sound-volume"
+      ) as HTMLInputElement;
 
       expect(workInput).toHaveValue(25);
       expect(shortBreakInput).toHaveValue(5);
       expect(longBreakInput).toHaveValue(15);
       expect(intervalInput).toHaveValue(4);
+      expect(notificationSoundVolume).toHaveValue("50");
     });
   });
 
@@ -74,6 +83,7 @@ describe("SettingsModal", () => {
       expect(screen.getByText("短い休憩")).toBeInTheDocument();
       expect(screen.getByText("長い休憩")).toBeInTheDocument();
       expect(screen.getByText("長い休憩の間隔")).toBeInTheDocument();
+      expect(screen.getByText("通知音量")).toBeInTheDocument();
     });
 
     it("should have save and cancel buttons", () => {
@@ -118,6 +128,35 @@ describe("SettingsModal", () => {
       fireEvent.change(intervalInput, { target: { value: "3" } });
 
       expect(intervalInput).toHaveValue(3);
+    });
+
+    it("should update notification sound volume slider", () => {
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+
+      const soundVolumeInput = screen.getByTestId(
+        "settings-notification-sound-volume"
+      ) as HTMLInputElement;
+      fireEvent.change(soundVolumeInput, { target: { value: "25" } });
+
+      expect(soundVolumeInput).toHaveValue("25");
+      expect(
+        screen.getByTestId("settings-notification-sound-volume-value")
+      ).toHaveTextContent("25%");
+    });
+
+    it("should toggle notification mute button and save muted state", () => {
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+
+      const muteButton = screen.getByTestId("settings-notification-mute-button");
+      fireEvent.click(muteButton);
+
+      const soundVolumeInput = screen.getByTestId(
+        "settings-notification-sound-volume"
+      ) as HTMLInputElement;
+      expect(soundVolumeInput).toBeDisabled();
+
+      fireEvent.click(screen.getByTestId("settings-save"));
+      expect(useSettingsStore.getState().notificationSoundMuted).toBe(true);
     });
   });
 
@@ -191,11 +230,15 @@ describe("SettingsModal", () => {
       const shortBreakInput = screen.getByTestId("settings-short-break-input") as HTMLInputElement;
       const longBreakInput = screen.getByTestId("settings-long-break-input") as HTMLInputElement;
       const intervalInput = screen.getByTestId("settings-interval-input") as HTMLInputElement;
+      const soundVolumeInput = screen.getByTestId(
+        "settings-notification-sound-volume"
+      ) as HTMLInputElement;
 
       fireEvent.change(workInput, { target: { value: "40" } });
       fireEvent.change(shortBreakInput, { target: { value: "8" } });
       fireEvent.change(longBreakInput, { target: { value: "20" } });
       fireEvent.change(intervalInput, { target: { value: "3" } });
+      fireEvent.change(soundVolumeInput, { target: { value: "70" } });
 
       const saveButton = screen.getByTestId("settings-save");
       fireEvent.click(saveButton);
@@ -205,6 +248,7 @@ describe("SettingsModal", () => {
       expect(state.shortBreakDuration).toBe(8);
       expect(state.longBreakDuration).toBe(20);
       expect(state.longBreakInterval).toBe(3);
+      expect(state.notificationSoundVolumePercent).toBe(70);
     });
   });
 
@@ -220,6 +264,7 @@ describe("SettingsModal", () => {
 
       const state = useSettingsStore.getState();
       expect(state.workDuration).toBe(25); // Original value
+      expect(state.notificationSoundVolumePercent).toBe(50);
       expect(mockOnClose).toHaveBeenCalledTimes(1);
     });
 

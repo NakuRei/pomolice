@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import App from "./App";
+import { useSettingsStore } from "./store/settingsStore";
 
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
@@ -52,5 +54,17 @@ describe("App", () => {
     render(<App />);
     const startButton = screen.getByTestId("start-button");
     expect(startButton).toBeInTheDocument();
+  });
+
+  it("toggles notification mute state when mute button is clicked", async () => {
+    const user = userEvent.setup();
+    useSettingsStore.setState({ notificationSoundMuted: false });
+
+    render(<App />);
+
+    const muteButton = screen.getByTestId("notification-mute-button");
+    await user.click(muteButton);
+
+    expect(useSettingsStore.getState().notificationSoundMuted).toBe(true);
   });
 });

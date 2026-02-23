@@ -68,9 +68,9 @@ export function useTimerSync() {
               handleSessionCompleted(event.payload);
 
               // Show notification based on completed session type
-              const { completed_session_type } = event.payload;
+              const { completed_session_type, next_session_type } = event.payload;
               if (completed_session_type === SessionType.WORK) {
-                notifyWorkComplete();
+                notifyWorkComplete(next_session_type);
               } else if (completed_session_type === SessionType.SHORT_BREAK) {
                 notifyBreakComplete();
               } else if (completed_session_type === SessionType.LONG_BREAK) {

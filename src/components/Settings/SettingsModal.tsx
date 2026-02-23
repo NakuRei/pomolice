@@ -28,6 +28,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const longBreakIntervalStore = useSettingsStore(
     (state) => state.longBreakInterval,
   );
+  const notificationSoundVolumePercentStore = useSettingsStore(
+    (state) => state.notificationSoundVolumePercent,
+  );
+  const notificationSoundMutedStore = useSettingsStore(
+    (state) => state.notificationSoundMuted,
+  );
   const updateSettings = useSettingsStore((state) => state.updateSettings);
 
   const isFiniteNumber = (value: number | null): value is number =>
@@ -44,6 +50,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [longBreakInterval, setLongBreakInterval] = useState<number | null>(
     longBreakIntervalStore,
   );
+  const [notificationSoundVolumePercent, setNotificationSoundVolumePercent] =
+    useState<number | null>(notificationSoundVolumePercentStore);
+  const [notificationSoundMuted, setNotificationSoundMuted] =
+    useState<boolean>(notificationSoundMutedStore);
 
   // Sync local state with store when modal opens
   useEffect(() => {
@@ -52,6 +62,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setShortBreakDuration(shortBreakDurationStore);
       setLongBreakDuration(longBreakDurationStore);
       setLongBreakInterval(longBreakIntervalStore);
+      setNotificationSoundVolumePercent(notificationSoundVolumePercentStore);
+      setNotificationSoundMuted(notificationSoundMutedStore);
     }
   }, [isOpen]);
 
@@ -76,12 +88,19 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     isFiniteNumber(longBreakInterval) &&
     longBreakInterval >= VALIDATION_RULES.longBreakInterval.min &&
     longBreakInterval <= VALIDATION_RULES.longBreakInterval.max;
+  const isNotificationSoundVolumeValid =
+    isFiniteNumber(notificationSoundVolumePercent) &&
+    notificationSoundVolumePercent >=
+      VALIDATION_RULES.notificationSoundVolumePercent.min &&
+    notificationSoundVolumePercent <=
+      VALIDATION_RULES.notificationSoundVolumePercent.max;
 
   const isFormValid =
     isWorkDurationValid &&
     isShortBreakValid &&
     isLongBreakValid &&
-    isIntervalValid;
+    isIntervalValid &&
+    isNotificationSoundVolumeValid;
 
   const handleSave = () => {
     if (
@@ -89,10 +108,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       !isShortBreakValid ||
       !isLongBreakValid ||
       !isIntervalValid ||
+      !isNotificationSoundVolumeValid ||
       workDuration === null ||
       shortBreakDuration === null ||
       longBreakDuration === null ||
-      longBreakInterval === null
+      longBreakInterval === null ||
+      notificationSoundVolumePercent === null
     ) {
       return;
     }
@@ -102,6 +123,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       shortBreakDuration,
       longBreakDuration,
       longBreakInterval,
+      notificationSoundVolumePercent,
+      notificationSoundMuted,
     });
 
     onClose();
@@ -113,6 +136,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setShortBreakDuration(shortBreakDurationStore);
     setLongBreakDuration(longBreakDurationStore);
     setLongBreakInterval(longBreakIntervalStore);
+    setNotificationSoundVolumePercent(notificationSoundVolumePercentStore);
+    setNotificationSoundMuted(notificationSoundMutedStore);
     onClose();
   };
 
@@ -161,6 +186,79 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             unit="回"
             testId="settings-interval"
           />
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label
+                htmlFor="settings-notification-sound-volume"
+                className="text-sm font-medium text-gray-700"
+              >
+                通知音量
+              </label>
+              <span
+                className="text-sm text-gray-600 tabular-nums"
+                data-testid="settings-notification-sound-volume-value"
+              >
+                {notificationSoundVolumePercent ?? 0}%
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setNotificationSoundMuted((prev) => !prev)}
+                className={`transition-colors ${
+                  notificationSoundMuted
+                    ? "text-red-600 hover:text-red-700"
+                    : "text-gray-600 hover:text-gray-800"
+                }`}
+                title={notificationSoundMuted ? "通知音ミュート中" : "通知音オン"}
+                data-testid="settings-notification-mute-button"
+                aria-label={notificationSoundMuted ? "通知音をオンにする" : "通知音をミュートする"}
+              >
+                {notificationSoundMuted ? (
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth={1.5}
+                    stroke="currentColor"
+                    className="w-5 h-5"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 9.75 21 6m0 0-3.75-3.75M21 6H9m8.25 8.25L21 18m0 0-3.75 3.75M21 18H9" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 9.75H3.75A1.5 1.5 0 0 0 2.25 11.25v1.5a1.5 1.5 0 0 0 1.5 1.5h1.5l3.75 3V6.75l-3.75 3Z" />
+                  </svg>
+                ) : (
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth={1.5}
+                    stroke="currentColor"
+                    className="w-5 h-5"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 9.75H3.75A1.5 1.5 0 0 0 2.25 11.25v1.5a1.5 1.5 0 0 0 1.5 1.5h1.5l3.75 3V6.75l-3.75 3Z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.25 9.75a4.5 4.5 0 0 1 0 4.5m2.25-7.5a8.25 8.25 0 0 1 0 10.5" />
+                  </svg>
+                )}
+              </button>
+
+              <input
+                id="settings-notification-sound-volume"
+                type="range"
+                min={VALIDATION_RULES.notificationSoundVolumePercent.min}
+                max={VALIDATION_RULES.notificationSoundVolumePercent.max}
+                step={1}
+                value={notificationSoundVolumePercent ?? 0}
+                onChange={(event) =>
+                  setNotificationSoundVolumePercent(Number(event.target.value))
+                }
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                data-testid="settings-notification-sound-volume"
+                aria-label="通知音量"
+                disabled={notificationSoundMuted}
+              />
+            </div>
+          </div>
         </div>
 
         <div className="flex gap-4 mt-8">

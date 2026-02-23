@@ -8,6 +8,11 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { useTimerStore, TimerStatus, SessionType } from "../../store/timerStore";
+import {
+  notifyWorkComplete,
+  notifyBreakComplete,
+  notifyLongBreakComplete,
+} from "../../services/notifications";
 
 // Mock Tauri APIs
 const mockListen = vi.fn();
@@ -161,6 +166,69 @@ describe("useTimerSync", () => {
     });
 
     expect(useTimerStore.getState().showContinueDialog).toBe(true);
+  });
+
+  it("should call notifyWorkComplete with next_session_type", async () => {
+    let sessionHandler: ((event: { payload: unknown }) => void) | undefined;
+
+    mockListen.mockImplementation((event: string, handler: (event: { payload: unknown }) => void) => {
+      if (event === "session_completed") {
+        sessionHandler = handler;
+      }
+      return Promise.resolve(() => {});
+    });
+
+    renderHook(() => useTimerSync());
+
+    await waitFor(() => {
+      expect(sessionHandler).toBeDefined();
+    });
+
+    sessionHandler!({
+      payload: {
+        completed_session_type: "work",
+        next_session_type: "long_break",
+        show_continue_dialog: false,
+      },
+    });
+
+    expect(notifyWorkComplete).toHaveBeenCalledWith("long_break");
+  });
+
+  it("should call break completion notifications for completed breaks", async () => {
+    let sessionHandler: ((event: { payload: unknown }) => void) | undefined;
+
+    mockListen.mockImplementation((event: string, handler: (event: { payload: unknown }) => void) => {
+      if (event === "session_completed") {
+        sessionHandler = handler;
+      }
+      return Promise.resolve(() => {});
+    });
+
+    renderHook(() => useTimerSync());
+
+    await waitFor(() => {
+      expect(sessionHandler).toBeDefined();
+    });
+
+    sessionHandler!({
+      payload: {
+        completed_session_type: "short_break",
+        next_session_type: null,
+        show_continue_dialog: true,
+      },
+    });
+
+    sessionHandler!({
+      payload: {
+        completed_session_type: "long_break",
+        next_session_type: null,
+        show_continue_dialog: true,
+      },
+    });
+
+    expect(notifyBreakComplete).toHaveBeenCalled();
+    expect(notifyLongBreakComplete).toHaveBeenCalled();
   });
 
   it("should clean up listeners on unmount", async () => {
