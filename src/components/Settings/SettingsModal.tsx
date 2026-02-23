@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useSettingsStore, VALIDATION_RULES } from "../../store/settingsStore";
+import { VolumeMutedIcon, VolumeOnIcon } from "../icons";
 import { DurationInput } from "./DurationInput";
 
 interface SettingsModalProps {
@@ -216,29 +217,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 aria-label={notificationSoundMuted ? "通知音をオンにする" : "通知音をミュートする"}
               >
                 {notificationSoundMuted ? (
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    strokeWidth={1.5}
-                    stroke="currentColor"
-                    className="w-5 h-5"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 9.75 21 6m0 0-3.75-3.75M21 6H9m8.25 8.25L21 18m0 0-3.75 3.75M21 18H9" />
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 9.75H3.75A1.5 1.5 0 0 0 2.25 11.25v1.5a1.5 1.5 0 0 0 1.5 1.5h1.5l3.75 3V6.75l-3.75 3Z" />
-                  </svg>
+                  <VolumeMutedIcon className="w-5 h-5" />
                 ) : (
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    strokeWidth={1.5}
-                    stroke="currentColor"
-                    className="w-5 h-5"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 9.75H3.75A1.5 1.5 0 0 0 2.25 11.25v1.5a1.5 1.5 0 0 0 1.5 1.5h1.5l3.75 3V6.75l-3.75 3Z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.25 9.75a4.5 4.5 0 0 1 0 4.5m2.25-7.5a8.25 8.25 0 0 1 0 10.5" />
-                  </svg>
+                  <VolumeOnIcon className="w-5 h-5" />
                 )}
               </button>
 
