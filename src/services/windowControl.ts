@@ -50,8 +50,10 @@ export async function syncSettings(settings: {
   shortBreakDurationSecs: number;
   longBreakDurationSecs: number;
   longBreakInterval: number;
+  autoRunFeatureEnabled: boolean;
+  weeklyAutoRunConfig: Record<string, unknown>;
 }): Promise<void> {
-  await invoke("sync_settings", settings);
+  await invoke("sync_all_settings", settings);
 }
 
 /**

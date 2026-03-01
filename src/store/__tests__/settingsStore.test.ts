@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
+  createWeeklyAutoRunConfigAllDaysDisabled,
   useSettingsStore,
   DEFAULT_SETTINGS,
   VALIDATION_RULES,
+  parseHhMm,
 } from "../settingsStore";
 
 describe("settingsStore", () => {
@@ -40,6 +42,24 @@ describe("settingsStore", () => {
     it("should have notification sound unmuted by default", () => {
       const state = useSettingsStore.getState();
       expect(state.notificationSoundMuted).toBe(false);
+    });
+
+    it("should have auto-run feature disabled by default", () => {
+      const state = useSettingsStore.getState();
+      expect(state.autoRunFeatureEnabled).toBe(false);
+    });
+
+    it("should default all weekday auto-run slots to disabled", () => {
+      const state = useSettingsStore.getState();
+      expect(state.weeklyAutoRunConfig).toEqual(
+        createWeeklyAutoRunConfigAllDaysDisabled(),
+      );
+    });
+
+    it("should start with no schedule validation errors", () => {
+      const state = useSettingsStore.getState();
+      expect(state.dayScheduleValidationErrors).toEqual({});
+      expect(state.weeklyScheduleValidationErrors).toEqual([]);
     });
   });
 
@@ -193,6 +213,171 @@ describe("settingsStore", () => {
       });
     });
 
+    describe("setAutoRunFeatureEnabled()", () => {
+      it("should enable auto-run feature", () => {
+        const { setAutoRunFeatureEnabled } = useSettingsStore.getState();
+        setAutoRunFeatureEnabled(true);
+        expect(useSettingsStore.getState().autoRunFeatureEnabled).toBe(true);
+      });
+
+      it("should disable auto-run feature", () => {
+        const { setAutoRunFeatureEnabled } = useSettingsStore.getState();
+        setAutoRunFeatureEnabled(true);
+        setAutoRunFeatureEnabled(false);
+        expect(useSettingsStore.getState().autoRunFeatureEnabled).toBe(false);
+      });
+    });
+
+    describe("setDayAutoRunEnabled()", () => {
+      it("should toggle one weekday slot", () => {
+        const { setDayAutoRunEnabled } = useSettingsStore.getState();
+        setDayAutoRunEnabled("mon", true);
+        expect(useSettingsStore.getState().weeklyAutoRunConfig.mon.enabled).toBe(true);
+      });
+    });
+
+    describe("setDayStartTime() and setDayEndTime()", () => {
+      it("should update one weekday slot time text", () => {
+        const { setDayStartTime, setDayEndTime } = useSettingsStore.getState();
+        setDayStartTime("wed", "10:00");
+        setDayEndTime("wed", "19:00");
+
+        const daySlot = useSettingsStore.getState().weeklyAutoRunConfig.wed;
+        expect(daySlot.startTime).toBe("10:00");
+        expect(daySlot.endTime).toBe("19:00");
+      });
+
+      it("should write start-time format error when start time is invalid", () => {
+        const { setDayAutoRunEnabled, setDayStartTime } = useSettingsStore.getState();
+        setDayAutoRunEnabled("mon", true);
+        setDayStartTime("mon", "9:00");
+
+        const error = useSettingsStore.getState().dayScheduleValidationErrors.mon;
+        expect(error).toEqual({
+          code: "start_time_format_invalid",
+          weekday: "mon",
+          invalidStartTimeText: "9:00",
+          message: "Start time for mon must use HH:MM (24-hour).",
+        });
+      });
+
+      it("should write end-time format error when end time is invalid", () => {
+        const { setDayAutoRunEnabled, setDayEndTime } = useSettingsStore.getState();
+        setDayAutoRunEnabled("mon", true);
+        setDayEndTime("mon", "24:00");
+
+        const error = useSettingsStore.getState().dayScheduleValidationErrors.mon;
+        expect(error).toEqual({
+          code: "end_time_format_invalid",
+          weekday: "mon",
+          invalidEndTimeText: "24:00",
+          message: "End time for mon must use HH:MM (24-hour).",
+        });
+      });
+
+      it("should write equality error when start and end are identical", () => {
+        const { setDayAutoRunEnabled, setDayStartTime, setDayEndTime } =
+          useSettingsStore.getState();
+        setDayAutoRunEnabled("mon", true);
+        setDayStartTime("mon", "12:00");
+        setDayEndTime("mon", "12:00");
+
+        const error = useSettingsStore.getState().dayScheduleValidationErrors.mon;
+        expect(error).toEqual({
+          code: "start_time_equals_end_time",
+          weekday: "mon",
+          startTime: "12:00",
+          endTime: "12:00",
+          message: "Start and end time cannot be identical for mon.",
+        });
+      });
+
+      it("should allow overnight windows without a day error", () => {
+        const { setDayAutoRunEnabled, setDayStartTime, setDayEndTime } =
+          useSettingsStore.getState();
+        setDayAutoRunEnabled("mon", true);
+        setDayStartTime("mon", "22:00");
+        setDayEndTime("mon", "02:00");
+
+        expect(useSettingsStore.getState().dayScheduleValidationErrors.mon).toBeUndefined();
+      });
+
+      it("should clear day error when weekday slot becomes disabled", () => {
+        const { setDayAutoRunEnabled, setDayStartTime, setDayEndTime } =
+          useSettingsStore.getState();
+        setDayAutoRunEnabled("fri", true);
+        setDayStartTime("fri", "12:00");
+        setDayEndTime("fri", "12:00");
+        expect(useSettingsStore.getState().dayScheduleValidationErrors.fri).toBeDefined();
+
+        setDayAutoRunEnabled("fri", false);
+        expect(useSettingsStore.getState().dayScheduleValidationErrors.fri).toBeUndefined();
+      });
+    });
+
+    describe("weekly schedule overlap validation", () => {
+      it("should write overlap error for adjacent weekday windows", () => {
+        const { setDayAutoRunEnabled, setDayStartTime, setDayEndTime } =
+          useSettingsStore.getState();
+
+        setDayAutoRunEnabled("mon", true);
+        setDayStartTime("mon", "22:00");
+        setDayEndTime("mon", "02:00");
+
+        setDayAutoRunEnabled("tue", true);
+        setDayStartTime("tue", "01:00");
+        setDayEndTime("tue", "05:00");
+
+        expect(useSettingsStore.getState().weeklyScheduleValidationErrors).toEqual([
+          {
+            code: "overlapping_windows_between_days",
+            primaryWeekday: "mon",
+            secondaryWeekday: "tue",
+            message: "Schedule windows overlap between mon and tue.",
+          },
+        ]);
+      });
+
+      it("should clear overlap error when windows no longer overlap", () => {
+        const { setDayAutoRunEnabled, setDayStartTime, setDayEndTime } =
+          useSettingsStore.getState();
+
+        setDayAutoRunEnabled("mon", true);
+        setDayStartTime("mon", "22:00");
+        setDayEndTime("mon", "02:00");
+        setDayAutoRunEnabled("tue", true);
+        setDayStartTime("tue", "01:00");
+        setDayEndTime("tue", "05:00");
+
+        setDayStartTime("tue", "03:00");
+        setDayEndTime("tue", "05:00");
+
+        expect(useSettingsStore.getState().weeklyScheduleValidationErrors).toEqual([]);
+      });
+
+      it("should detect overlap when sunday overnight range reaches monday", () => {
+        const { setDayAutoRunEnabled, setDayStartTime, setDayEndTime } =
+          useSettingsStore.getState();
+
+        setDayAutoRunEnabled("sun", true);
+        setDayStartTime("sun", "22:00");
+        setDayEndTime("sun", "02:00");
+
+        setDayAutoRunEnabled("mon", true);
+        setDayStartTime("mon", "01:00");
+        setDayEndTime("mon", "03:00");
+
+        expect(useSettingsStore.getState().weeklyScheduleValidationErrors).toEqual([
+          {
+            code: "overlapping_windows_between_days",
+            primaryWeekday: "mon",
+            secondaryWeekday: "sun",
+            message: "Schedule windows overlap between mon and sun.",
+          },
+        ]);
+      });
+    });
+
     describe("resetToDefaults()", () => {
       it("should reset all settings to default values", () => {
         const { setWorkDuration, setShortBreakDuration, resetToDefaults } =
@@ -218,6 +403,18 @@ describe("settingsStore", () => {
         expect(state.notificationSoundMuted).toBe(
           DEFAULT_SETTINGS.notificationSoundMuted
         );
+        expect(state.autoRunFeatureEnabled).toBe(
+          DEFAULT_SETTINGS.autoRunFeatureEnabled
+        );
+        expect(state.weeklyAutoRunConfig).toEqual(
+          DEFAULT_SETTINGS.weeklyAutoRunConfig
+        );
+        expect(state.dayScheduleValidationErrors).toEqual(
+          DEFAULT_SETTINGS.dayScheduleValidationErrors
+        );
+        expect(state.weeklyScheduleValidationErrors).toEqual(
+          DEFAULT_SETTINGS.weeklyScheduleValidationErrors
+        );
       });
     });
   });
@@ -241,6 +438,10 @@ describe("settingsStore", () => {
         longBreakInterval: 4,
         notificationSoundVolumePercent: 50,
         notificationSoundMuted: false,
+        autoRunFeatureEnabled: false,
+        weeklyAutoRunConfig: createWeeklyAutoRunConfigAllDaysDisabled(),
+        dayScheduleValidationErrors: {},
+        weeklyScheduleValidationErrors: [],
       });
     });
 
@@ -251,6 +452,23 @@ describe("settingsStore", () => {
       expect(VALIDATION_RULES.longBreakDuration).toEqual({ min: 0.01, max: 60 });
       expect(VALIDATION_RULES.longBreakInterval).toEqual({ min: 2, max: 10 });
       expect(VALIDATION_RULES.notificationSoundVolumePercent).toEqual({ min: 0, max: 100 });
+    });
+  });
+
+  describe("parseHhMm()", () => {
+    it("should parse strict HH:MM format", () => {
+      expect(parseHhMm("09:05")).toEqual({
+        hour: 9,
+        minute: 5,
+        minutesSinceStartOfDay: 9 * 60 + 5,
+      });
+    });
+
+    it("should reject non-strict time text", () => {
+      expect(parseHhMm("9:05")).toBeNull();
+      expect(parseHhMm("24:00")).toBeNull();
+      expect(parseHhMm("12:60")).toBeNull();
+      expect(parseHhMm("aa:bb")).toBeNull();
     });
   });
 });

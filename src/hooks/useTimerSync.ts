@@ -42,6 +42,8 @@ export function useTimerSync() {
   const handleFullState = useTimerStore((s) => s.handleFullState);
   const setConnected = useTimerStore((s) => s.setConnected);
   const syncSettings = useTimerStore((s) => s.syncSettings);
+  const showAutoRunStopPendingInfo = useTimerStore((s) => s.showAutoRunStopPendingInfo);
+  const showAutoRunStoppedInfo = useTimerStore((s) => s.showAutoRunStoppedInfo);
 
   useEffect(() => {
     const listeners: UnlistenFn[] = [];
@@ -80,6 +82,20 @@ export function useTimerSync() {
           }
         );
         listeners.push(unlistenSessionCompleted);
+
+        const unlistenAutoRunStopPending = await listen("auto_run_stop_pending", () => {
+          if (mounted) {
+            showAutoRunStopPendingInfo();
+          }
+        });
+        listeners.push(unlistenAutoRunStopPending);
+
+        const unlistenAutoRunStopped = await listen("auto_run_stopped", () => {
+          if (mounted) {
+            showAutoRunStoppedInfo();
+          }
+        });
+        listeners.push(unlistenAutoRunStopped);
 
         // Listen for break started events (for UI updates)
         const unlistenBreakStarted = await listen("break_started", () => {
@@ -148,5 +164,13 @@ export function useTimerSync() {
       mounted = false;
       listeners.forEach((unlisten) => unlisten());
     };
-  }, [handleTimerTick, handleSessionCompleted, handleFullState, setConnected, syncSettings]);
+  }, [
+    handleTimerTick,
+    handleSessionCompleted,
+    handleFullState,
+    setConnected,
+    showAutoRunStopPendingInfo,
+    showAutoRunStoppedInfo,
+    syncSettings,
+  ]);
 }

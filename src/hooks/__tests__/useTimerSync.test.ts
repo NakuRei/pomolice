@@ -56,6 +56,10 @@ describe("useTimerSync", () => {
       isFullscreenBreak: false,
       showContinueDialog: false,
       isConnected: false,
+      shouldPromptStartOnBoot: false,
+      activeWindowSummary: null,
+      infoMessage: null,
+      infoMessageShownAtById: {},
     });
 
     // Default mock implementations
@@ -69,6 +73,8 @@ describe("useTimerSync", () => {
       break_interaction_count: 0,
       is_fullscreen_break: false,
       show_continue_dialog: false,
+      should_prompt_start_on_boot: false,
+      active_window_summary: null,
       settings: {
         work_duration_secs: 1500,
         short_break_duration_secs: 300,
@@ -89,6 +95,8 @@ describe("useTimerSync", () => {
     const listenCalls = mockListen.mock.calls.map((call) => call[0]);
     expect(listenCalls).toContain("timer_tick");
     expect(listenCalls).toContain("session_completed");
+    expect(listenCalls).toContain("auto_run_stop_pending");
+    expect(listenCalls).toContain("auto_run_stopped");
   });
 
   it("should call get_full_state on mount", async () => {
@@ -247,17 +255,61 @@ describe("useTimerSync", () => {
     expect(unsubscribe).toHaveBeenCalled();
   });
 
+  it("should show stop-pending info on auto_run_stop_pending events", async () => {
+    let stopPendingListener: (() => void) | undefined;
+
+    mockListen.mockImplementation((event: string, listener: () => void) => {
+      if (event === "auto_run_stop_pending") {
+        stopPendingListener = listener;
+      }
+      return Promise.resolve(() => {});
+    });
+
+    renderHook(() => useTimerSync());
+
+    await waitFor(() => {
+      expect(stopPendingListener).toBeDefined();
+    });
+
+    stopPendingListener!();
+
+    expect(useTimerStore.getState().infoMessage?.id).toBe("auto_run_stop_pending");
+  });
+
+  it("should show stopped info on auto_run_stopped events", async () => {
+    let stoppedListener: (() => void) | undefined;
+
+    mockListen.mockImplementation((event: string, listener: () => void) => {
+      if (event === "auto_run_stopped") {
+        stoppedListener = listener;
+      }
+      return Promise.resolve(() => {});
+    });
+
+    renderHook(() => useTimerSync());
+
+    await waitFor(() => {
+      expect(stoppedListener).toBeDefined();
+    });
+
+    stoppedListener!();
+
+    expect(useTimerStore.getState().infoMessage?.id).toBe("auto_run_stopped");
+  });
+
   it("should sync settings to backend on mount", async () => {
     renderHook(() => useTimerSync());
 
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith(
-        "sync_settings",
+        "sync_all_settings",
         expect.objectContaining({
           workDurationSecs: expect.any(Number),
           shortBreakDurationSecs: expect.any(Number),
           longBreakDurationSecs: expect.any(Number),
           longBreakInterval: expect.any(Number),
+          autoRunFeatureEnabled: expect.any(Boolean),
+          weeklyAutoRunConfig: expect.any(Object),
         })
       );
     });

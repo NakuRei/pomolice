@@ -2,7 +2,13 @@
 // Backend is the single source of truth for all timer state
 // Security: Window control is managed through timer_state module
 
+use chrono::{DateTime, Duration as ChronoDuration, Local};
+use std::collections::HashSet;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
+use tokio::time::MissedTickBehavior;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
 mod commands;
@@ -12,6 +18,24 @@ mod state;
 mod tray;
 mod tray_icon_renderer;
 mod types;
+
+use crate::managers::weekly_schedule::{
+    collect_crossed_end_boundaries, collect_crossed_start_boundaries,
+};
+use crate::types::{
+    BootPromptRuntimeState, BoundaryOccurrenceId, ScheduledStopState, TimerStartSource,
+    TimerStatus,
+};
+
+const SCHEDULER_INTERVAL_SECONDS: u64 = 1;
+const PROCESSED_BOUNDARY_RETENTION_DAYS: i64 = 8;
+
+struct SchedulerRuntimeState {
+    processed_boundary_occurrences: HashSet<BoundaryOccurrenceId>,
+    last_checked_local: DateTime<Local>,
+    start_boundaries_blocked_until_idle: bool,
+    last_seen_config_revision: u64,
+}
 
 /// Handle timer tick event
 pub async fn lib_handle_timer_tick(app: AppHandle) {
@@ -45,69 +69,116 @@ pub async fn lib_handle_session_complete(app: AppHandle) {
 
     let state_handle = app.state::<state::AppState>();
 
-    let (session_type, _next_action) = {
+    let (session_type, scheduled_stop_state) = {
         let timer = state_handle.timer_manager.lock().await;
-        (timer.get_state().session_type, timer.status())
+        (timer.get_state().session_type, timer.get_state().scheduled_stop_state)
     };
+    let has_pending_scheduled_stop = scheduled_stop_state == ScheduledStopState::Pending;
 
     match session_type {
         SessionType::Work => {
-            // Work session completed - transition to break.
-            // The break timer is driven by the same task that just fired this
-            // completion, so we reuse it (no cancel/respawn needed here).
-            let (_break_type, payload) = {
-                let mut timer = state_handle.timer_manager.lock().await;
-                timer.transition_to_break()
-            };
+            if has_pending_scheduled_stop {
+                let (completed_payload, tick_payload) = {
+                    let mut timer = state_handle.timer_manager.lock().await;
+                    // This runs inside the timer task; cancel and drop handle without awaiting.
+                    let _ = timer.cancel_and_take_task();
+                    let payload =
+                        timer.transition_to_idle_due_to_scheduled_stop(SessionType::Work);
+                    let tick = timer.get_state().to_tick_payload();
+                    (payload, tick)
+                };
 
-            let _ = app.emit("session_completed", &payload);
+                let _ = app.emit("session_completed", &completed_payload);
+                let _ = app.emit("timer_tick", &tick_payload);
+                let _ = app.emit("auto_run_stopped", serde_json::json!({}));
+                tray::update_tray_icon(&app, &tick_payload);
 
-            // Update tray icon for break state
-            {
-                let timer = state_handle.timer_manager.lock().await;
-                tray::update_tray_icon(&app, &timer.get_state().to_tick_payload());
+                {
+                    let timer = state_handle.timer_manager.lock().await;
+                    state_handle.persistence.save_state(timer.get_state());
+                }
+            } else {
+                // Work session completed - transition to break.
+                // The break timer is driven by the same task that just fired this
+                // completion, so we reuse it (no cancel/respawn needed here).
+                let (_break_type, payload) = {
+                    let mut timer = state_handle.timer_manager.lock().await;
+                    timer.transition_to_break()
+                };
+
+                let _ = app.emit("session_completed", &payload);
+
+                // Update tray icon for break state
+                {
+                    let timer = state_handle.timer_manager.lock().await;
+                    tray::update_tray_icon(&app, &timer.get_state().to_tick_payload());
+                }
+
+                // Save state
+                {
+                    let timer = state_handle.timer_manager.lock().await;
+                    state_handle.persistence.save_state(timer.get_state());
+                }
+
+                // Enter fullscreen break mode
+                enter_break_mode(app.clone()).await;
             }
-
-            // Save state
-            {
-                let timer = state_handle.timer_manager.lock().await;
-                state_handle.persistence.save_state(timer.get_state());
-            }
-
-            // Enter fullscreen break mode
-            enter_break_mode(app.clone()).await;
         }
         SessionType::ShortBreak | SessionType::LongBreak => {
-            // Break session completed - transition to idle and stop the task.
-            //
-            // IMPORTANT: This code runs INSIDE the timer task spawned by
-            // spawn_timer_task() (via lib_handle_timer_tick → here).
-            // cancel_and_take_task() cancels the token and extracts the
-            // JoinHandle, but we must NOT await that handle because it is
-            // our own task — awaiting it would deadlock (self-join).
-            // The task will exit naturally after this function returns:
-            // the select! loop checks token.is_cancelled() and breaks.
-            let (completed_payload, tick_payload) = {
-                let mut timer = state_handle.timer_manager.lock().await;
-                // Cancel token and drop the JoinHandle (do not await)
-                let _ = timer.cancel_and_take_task();
-                let payload = timer.transition_to_idle_after_break();
-                let tick = timer.get_state().to_tick_payload();
-                (payload, tick)
-            };
+            if has_pending_scheduled_stop {
+                let (completed_payload, tick_payload) = {
+                    let mut timer = state_handle.timer_manager.lock().await;
+                    // This runs inside the timer task; cancel and drop handle without awaiting.
+                    let _ = timer.cancel_and_take_task();
+                    let payload = timer.transition_to_idle_due_to_scheduled_stop(session_type);
+                    let tick = timer.get_state().to_tick_payload();
+                    (payload, tick)
+                };
 
-            let _ = app.emit("session_completed", &completed_payload);
-            let _ = app.emit("timer_tick", &tick_payload);
-            tray::update_tray_icon(&app, &tick_payload);
+                let _ = app.emit("session_completed", &completed_payload);
+                let _ = app.emit("timer_tick", &tick_payload);
+                let _ = app.emit("auto_run_stopped", serde_json::json!({}));
+                tray::update_tray_icon(&app, &tick_payload);
 
-            // Save state
-            {
-                let timer = state_handle.timer_manager.lock().await;
-                state_handle.persistence.save_state(timer.get_state());
+                {
+                    let timer = state_handle.timer_manager.lock().await;
+                    state_handle.persistence.save_state(timer.get_state());
+                }
+
+                // Exit fullscreen break mode
+                exit_break_mode(app.clone()).await;
+            } else {
+                // Break session completed - transition to idle and stop the task.
+                //
+                // IMPORTANT: This code runs INSIDE the timer task spawned by
+                // spawn_timer_task() (via lib_handle_timer_tick → here).
+                // cancel_and_take_task() cancels the token and extracts the
+                // JoinHandle, but we must NOT await that handle because it is
+                // our own task — awaiting it would deadlock (self-join).
+                // The task will exit naturally after this function returns:
+                // the select! loop checks token.is_cancelled() and breaks.
+                let (completed_payload, tick_payload) = {
+                    let mut timer = state_handle.timer_manager.lock().await;
+                    // Cancel token and drop the JoinHandle (do not await)
+                    let _ = timer.cancel_and_take_task();
+                    let payload = timer.transition_to_idle_after_break();
+                    let tick = timer.get_state().to_tick_payload();
+                    (payload, tick)
+                };
+
+                let _ = app.emit("session_completed", &completed_payload);
+                let _ = app.emit("timer_tick", &tick_payload);
+                tray::update_tray_icon(&app, &tick_payload);
+
+                // Save state
+                {
+                    let timer = state_handle.timer_manager.lock().await;
+                    state_handle.persistence.save_state(timer.get_state());
+                }
+
+                // Exit fullscreen break mode
+                exit_break_mode(app.clone()).await;
             }
-
-            // Exit fullscreen break mode
-            exit_break_mode(app.clone()).await;
         }
     }
 }
@@ -228,6 +299,278 @@ pub async fn lib_handle_escape_combo(app: AppHandle) {
     }
 }
 
+/// Start the weekly scheduler background task.
+pub async fn lib_start_scheduler_task(app: AppHandle) {
+    let state_handle = app.state::<state::AppState>();
+    state_handle.stop_scheduler_task();
+
+    let now_local = state_handle.clock.now_local();
+    let startup_timer_status = {
+        let timer_manager = state_handle.timer_manager.lock().await;
+        timer_manager.status()
+    };
+
+    let mut start_boundaries_blocked_until_idle = false;
+    let mut initial_previous_local = now_local;
+
+    if matches!(startup_timer_status, TimerStatus::Working | TimerStatus::OnBreak) {
+        start_boundaries_blocked_until_idle = true;
+        initial_previous_local = state_handle
+            .restored_running_saved_at_local
+            .unwrap_or(now_local - ChronoDuration::days(7));
+    }
+
+    let cancellation_token = CancellationToken::new();
+    let scheduler_cancellation_token = cancellation_token.clone();
+    let scheduler_app = app.clone();
+
+    let scheduler_join_handle = tauri::async_runtime::spawn(async move {
+        let mut scheduler_interval = tokio::time::interval(Duration::from_secs(
+            SCHEDULER_INTERVAL_SECONDS,
+        ));
+        scheduler_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+        let state_handle = scheduler_app.state::<state::AppState>();
+        let mut runtime_state = SchedulerRuntimeState {
+            processed_boundary_occurrences: HashSet::new(),
+            last_checked_local: initial_previous_local,
+            start_boundaries_blocked_until_idle,
+            last_seen_config_revision: state_handle.config_revision.load(Ordering::Acquire),
+        };
+
+        info!(
+            "Weekly scheduler started (previous_local: {}, blocked_until_idle: {})",
+            runtime_state.last_checked_local,
+            runtime_state.start_boundaries_blocked_until_idle
+        );
+
+        loop {
+            tokio::select! {
+                _ = scheduler_cancellation_token.cancelled() => {
+                    info!("Weekly scheduler received cancellation");
+                    break;
+                }
+                _ = scheduler_interval.tick() => {
+                    lib_run_scheduler_tick(scheduler_app.clone(), &mut runtime_state).await;
+                }
+            }
+        }
+
+        info!("Weekly scheduler stopped");
+    });
+
+    if let Ok(mut scheduler_task_state) = state_handle.scheduler_task_state.lock() {
+        scheduler_task_state.cancellation_token = Some(cancellation_token);
+        scheduler_task_state.join_handle = Some(scheduler_join_handle);
+    };
+}
+
+async fn lib_run_scheduler_tick(app: AppHandle, runtime_state: &mut SchedulerRuntimeState) {
+    let state_handle = app.state::<state::AppState>();
+    let now_local = state_handle.clock.now_local();
+    let previous_local = runtime_state.last_checked_local;
+
+    let timer_snapshot = {
+        let timer_manager = state_handle.timer_manager.lock().await;
+        let timer_state = timer_manager.get_state();
+        (
+            timer_manager.status(),
+            timer_state.auto_run_feature_enabled,
+            timer_state.weekly_auto_run_config.clone(),
+            timer_state.settings.clone(),
+        )
+    };
+    let (timer_status, auto_run_feature_enabled, weekly_auto_run_config, timer_settings) =
+        timer_snapshot;
+
+    if runtime_state.start_boundaries_blocked_until_idle && timer_status == TimerStatus::Idle {
+        runtime_state.start_boundaries_blocked_until_idle = false;
+        info!("Weekly scheduler resumed start-boundary evaluation after idle transition");
+    }
+
+    let config_revision = state_handle.config_revision.load(Ordering::Acquire);
+    let config_changed = config_revision != runtime_state.last_seen_config_revision;
+    let mut skip_start_boundaries_this_tick = false;
+
+    let end_boundary_previous_local = if config_changed {
+        runtime_state.processed_boundary_occurrences.clear();
+        runtime_state.last_checked_local = now_local;
+        runtime_state.last_seen_config_revision = config_revision;
+        skip_start_boundaries_this_tick = true;
+        info!(
+            "Weekly scheduler detected config revision change: {}",
+            config_revision
+        );
+        now_local - ChronoDuration::seconds(1)
+    } else {
+        previous_local
+    };
+
+    if auto_run_feature_enabled {
+        let crossed_end_boundaries = collect_crossed_end_boundaries(
+            end_boundary_previous_local,
+            now_local,
+            &weekly_auto_run_config,
+        );
+
+        for end_boundary in crossed_end_boundaries {
+            if runtime_state
+                .processed_boundary_occurrences
+                .insert(end_boundary.clone())
+            {
+                info!("Weekly scheduler crossed end boundary: {}", end_boundary.0);
+                let did_mark_stop_pending =
+                    mark_scheduled_stop_pending_for_current_session(app.clone()).await;
+                if did_mark_stop_pending {
+                    info!(
+                        "Weekly scheduler marked scheduled stop as pending at end boundary: {}",
+                        end_boundary.0
+                    );
+                }
+            }
+        }
+    }
+
+    let auto_start_boundary_enabled = state_handle
+        .auto_start_boundary_enabled
+        .load(Ordering::Acquire);
+    let boot_prompt_check_pending = state_handle.boot_prompt_check_pending.load(Ordering::Acquire);
+    let boot_prompt_runtime_state = match state_handle.boot_prompt_runtime_state.lock() {
+        Ok(guard) => *guard,
+        Err(_) => BootPromptRuntimeState::NotApplicable,
+    };
+
+    let can_run_start_boundary_evaluation = auto_run_feature_enabled
+        && auto_start_boundary_enabled
+        && !boot_prompt_check_pending
+        && boot_prompt_runtime_state != BootPromptRuntimeState::AwaitingDecision
+        && !runtime_state.start_boundaries_blocked_until_idle
+        && !skip_start_boundaries_this_tick;
+
+    if can_run_start_boundary_evaluation {
+        let crossed_start_boundaries =
+            collect_crossed_start_boundaries(previous_local, now_local, &weekly_auto_run_config);
+
+        for start_boundary in crossed_start_boundaries {
+            if runtime_state
+                .processed_boundary_occurrences
+                .insert(start_boundary.clone())
+            {
+                info!("Weekly scheduler crossed start boundary: {}", start_boundary.0);
+                let did_start = start_work_from_scheduler_when_idle(
+                    app.clone(),
+                    timer_status,
+                    timer_settings.clone(),
+                    &start_boundary,
+                )
+                .await;
+
+                if did_start {
+                    info!(
+                        "Weekly scheduler started a work session from start boundary: {}",
+                        start_boundary.0
+                    );
+                }
+            }
+        }
+    }
+
+    trim_old_processed_boundaries(&mut runtime_state.processed_boundary_occurrences, now_local);
+    runtime_state.last_checked_local = now_local;
+}
+
+fn trim_old_processed_boundaries(
+    processed_boundary_occurrences: &mut HashSet<BoundaryOccurrenceId>,
+    now_local: DateTime<Local>,
+) {
+    let oldest_epoch_to_keep = (now_local - ChronoDuration::days(PROCESSED_BOUNDARY_RETENTION_DAYS))
+        .timestamp();
+
+    processed_boundary_occurrences.retain(|boundary_id| {
+        extract_boundary_epoch_seconds(boundary_id)
+            .map(|epoch_seconds| epoch_seconds >= oldest_epoch_to_keep)
+            .unwrap_or(false)
+    });
+}
+
+fn extract_boundary_epoch_seconds(boundary_id: &BoundaryOccurrenceId) -> Option<i64> {
+    boundary_id.0.rsplit('|').next()?.parse::<i64>().ok()
+}
+
+async fn mark_scheduled_stop_pending_for_current_session(app: AppHandle) -> bool {
+    let state_handle = app.state::<state::AppState>();
+
+    let should_persist = {
+        let mut timer_manager = state_handle.timer_manager.lock().await;
+        timer_manager.mark_scheduled_stop_pending_if_session_is_eligible()
+    };
+
+    if should_persist {
+        let _ = app.emit("auto_run_stop_pending", serde_json::json!({}));
+        {
+            let timer_manager = state_handle.timer_manager.lock().await;
+            state_handle.persistence.save_state(timer_manager.get_state());
+        }
+    }
+
+    should_persist
+}
+
+async fn start_work_from_scheduler_when_idle(
+    app: AppHandle,
+    timer_status_at_tick_start: TimerStatus,
+    timer_settings: types::TimerSettings,
+    start_boundary: &BoundaryOccurrenceId,
+) -> bool {
+    if timer_status_at_tick_start != TimerStatus::Idle {
+        return false;
+    }
+
+    let state_handle = app.state::<state::AppState>();
+
+    let (old_timer_task, tick_payload, work_duration_secs) = {
+        let mut timer_manager = state_handle.timer_manager.lock().await;
+        if timer_manager.status() != TimerStatus::Idle {
+            return false;
+        }
+
+        let old_task = timer_manager.cancel_and_take_task();
+        let Ok((payload, duration_secs)) = timer_manager
+            .start_work_with_source(timer_settings, TimerStartSource::ScheduledAutoStart)
+        else {
+            info!(
+                "Weekly scheduler skipped auto-start due to start_work rejection at boundary {}",
+                start_boundary.0
+            );
+            return false;
+        };
+        (old_task, payload, duration_secs)
+    };
+
+    let _ = app.emit("timer_tick", &tick_payload);
+    tray::update_tray_icon(&app, &tick_payload);
+    let _ = app.emit(
+        "work_started",
+        serde_json::json!({ "duration": work_duration_secs }),
+    );
+
+    if let Some(join_handle) = old_timer_task {
+        let _ = join_handle.await;
+    }
+
+    {
+        let mut timer_manager = state_handle.timer_manager.lock().await;
+        timer_manager.spawn_timer_task(app.clone());
+    }
+
+    {
+        let timer_manager = state_handle.timer_manager.lock().await;
+        state_handle.persistence.save_state(timer_manager.get_state());
+    }
+
+    true
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialize tracing subscriber for structured logging
@@ -272,6 +615,12 @@ pub fn run() {
                 error!("Failed to setup tray icon: {:?}", e);
             }
 
+            // Start weekly scheduler after initialization and state registration.
+            let scheduler_app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                lib_start_scheduler_task(scheduler_app_handle).await;
+            });
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -302,8 +651,10 @@ pub fn run() {
             commands::timer::continue_to_next_session,
             commands::timer::end_cycle,
             commands::timer::emergency_stop,
-            commands::timer::sync_settings,
+            commands::timer::sync_all_settings,
+            commands::timer::sync_auto_run_settings,
             commands::timer::get_full_state,
+            commands::timer::resolve_boot_auto_start_prompt,
             commands::timer::get_timer_status,
             commands::timer::record_skip_attempt,
         ])

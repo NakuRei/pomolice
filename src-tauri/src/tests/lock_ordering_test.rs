@@ -24,6 +24,7 @@ mod lock_ordering_tests {
         input_monitor: Arc<Mutex<FakeInputMonitor>>,
         window_manager: Arc<Mutex<FakeWindowManager>>,
         timer_manager: Arc<Mutex<FakeTimerManager>>,
+        scheduler_task_state: Arc<Mutex<()>>,
     }
 
     impl FakeLocks {
@@ -32,6 +33,7 @@ mod lock_ordering_tests {
                 input_monitor: Arc::new(Mutex::new(FakeInputMonitor)),
                 window_manager: Arc::new(Mutex::new(FakeWindowManager)),
                 timer_manager: Arc::new(Mutex::new(FakeTimerManager)),
+                scheduler_task_state: Arc::new(Mutex::new(())),
             }
         }
     }
@@ -92,6 +94,13 @@ mod lock_ordering_tests {
     ///   1. timer_manager (only)
     async fn input_detected_pattern(locks: &FakeLocks) {
         let _timer = locks.timer_manager.lock().await;
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+
+    /// Simulates `scheduler_task_state` start/stop management.
+    /// This lock must never be held together with other manager locks.
+    async fn scheduler_task_state_pattern(locks: &FakeLocks) {
+        let _scheduler = locks.scheduler_task_state.lock().await;
         tokio::time::sleep(Duration::from_millis(1)).await;
     }
 
@@ -178,6 +187,7 @@ mod lock_ordering_tests {
         let locks_b = Arc::clone(&locks);
         let locks_c = Arc::clone(&locks);
         let locks_d = Arc::clone(&locks);
+        let locks_e = Arc::clone(&locks);
 
         let result = tokio::time::timeout(Duration::from_secs(5), async move {
             tokio::join!(
@@ -185,10 +195,29 @@ mod lock_ordering_tests {
                 exit_break_mode_pattern(&locks_b),
                 enter_break_mode_pattern(&locks_c),
                 input_detected_pattern(&locks_d),
+                scheduler_task_state_pattern(&locks_e),
             )
         })
         .await;
 
         assert!(result.is_ok(), "Deadlock detected: tasks did not complete within timeout");
+    }
+
+    /// `scheduler_task_state` and `timer_manager` access must remain independent.
+    /// Running both patterns concurrently should complete without deadlock.
+    #[tokio::test]
+    async fn test_scheduler_task_state_and_timer_manager_patterns_do_not_deadlock() {
+        let locks = Arc::new(FakeLocks::new());
+        let locks_b = Arc::clone(&locks);
+
+        let result = tokio::time::timeout(Duration::from_secs(5), async move {
+            tokio::join!(
+                scheduler_task_state_pattern(&locks),
+                input_detected_pattern(&locks_b),
+            )
+        })
+        .await;
+
+        assert!(result.is_ok(), "Deadlock detected: scheduler and timer patterns did not complete");
     }
 }

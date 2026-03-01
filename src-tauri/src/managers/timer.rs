@@ -8,8 +8,8 @@ use tracing::{info, warn};
 
 use crate::error::{PomoliceError, Result};
 use crate::types::{
-    FullStatePayload, SessionCompletedPayload, SessionType, TimerSettings, TimerState, TimerStatus,
-    TimerTickPayload,
+    FullStatePayload, ScheduledStopState, SessionCompletedPayload, SessionType, TimerSettings,
+    TimerStartSource, TimerState, TimerStatus, TimerTickPayload, WeeklyAutoRunConfig,
 };
 
 /// Manager for timer state and lifecycle
@@ -65,12 +65,16 @@ impl TimerStateManager {
         &self.state
     }
 
-    /// Start a work session
-    ///
-    /// Returns the tick payload for the caller to emit as `"timer_tick"`,
-    /// and the work duration for the caller to emit as `"work_started"`.
-    pub fn start_work(&mut self, settings: TimerSettings) -> Result<(TimerTickPayload, u64)> {
-        info!("Starting work session with duration: {}s", settings.work_duration_secs);
+    /// Start a work session with an explicit session start source.
+    pub fn start_work_with_source(
+        &mut self,
+        settings: TimerSettings,
+        timer_start_source: TimerStartSource,
+    ) -> Result<(TimerTickPayload, u64)> {
+        info!(
+            "Starting work session with duration: {}s",
+            settings.work_duration_secs
+        );
 
         if self.state.status != TimerStatus::Idle {
             warn!("Cannot start work from {:?} state", self.state.status);
@@ -80,9 +84,14 @@ impl TimerStateManager {
             });
         }
 
-        if let Some(remaining_ms) = self.rate_limit_remaining_ms() {
-            warn!("Start work action is rate limited ({}ms remaining)", remaining_ms);
-            return Err(PomoliceError::RateLimited { remaining_ms });
+        if timer_start_source != TimerStartSource::ScheduledAutoStart {
+            if let Some(remaining_ms) = self.rate_limit_remaining_ms() {
+                warn!(
+                    "Start work action is rate limited ({}ms remaining)",
+                    remaining_ms
+                );
+                return Err(PomoliceError::RateLimited { remaining_ms });
+            }
         }
 
         let work_duration_secs = settings.work_duration_secs;
@@ -95,6 +104,8 @@ impl TimerStateManager {
         self.state.session_type = SessionType::Work;
         self.state.remaining_seconds = work_duration_secs;
         self.state.show_continue_dialog = false;
+        self.state.timer_start_source = Some(timer_start_source);
+        self.state.scheduled_stop_state = ScheduledStopState::None;
 
         // Initialize cycle on first start
         if self.state.current_cycle == 0 {
@@ -118,8 +129,10 @@ impl TimerStateManager {
         info!("Continuing to next work session");
 
         if self.state.status != TimerStatus::Idle || !self.state.show_continue_dialog {
-            warn!("Cannot continue from {:?} state (show_dialog: {})",
-                self.state.status, self.state.show_continue_dialog);
+            warn!(
+                "Cannot continue from {:?} state (show_dialog: {})",
+                self.state.status, self.state.show_continue_dialog
+            );
             return Err(PomoliceError::InvalidStateTransition {
                 action: "continue to next session".to_string(),
                 current_state: self.state.status,
@@ -132,6 +145,7 @@ impl TimerStateManager {
         self.state.remaining_seconds = self.state.settings.work_duration_secs;
         self.state.show_continue_dialog = false;
         self.state.status = TimerStatus::Working;
+        self.state.scheduled_stop_state = ScheduledStopState::None;
         self.state.last_transition = Some(Instant::now());
 
         // Note: see start_work for task management call sequence.
@@ -148,6 +162,8 @@ impl TimerStateManager {
         self.state.session_type = SessionType::Work;
         self.state.remaining_seconds = self.state.settings.work_duration_secs;
         self.state.show_continue_dialog = false;
+        self.state.timer_start_source = None;
+        self.state.scheduled_stop_state = ScheduledStopState::None;
         self.state.last_transition = Some(Instant::now());
 
         Ok(self.state.to_tick_payload())
@@ -168,6 +184,8 @@ impl TimerStateManager {
         self.state.is_fullscreen_break = false;
         self.state.break_interaction_count = 0;
         self.state.last_penalty_time = None;
+        self.state.timer_start_source = None;
+        self.state.scheduled_stop_state = ScheduledStopState::None;
         self.state.last_transition = Some(Instant::now());
 
         // Note: caller must call cancel_and_take_task() inside the lock,
@@ -176,18 +194,19 @@ impl TimerStateManager {
         Ok((was_fullscreen_break, self.state.to_tick_payload()))
     }
 
-    /// Sync settings from frontend
+    /// Sync timer settings and auto-run settings from frontend.
     ///
     /// Returns the tick payload for the caller to emit as `"timer_tick"`.
-    pub fn sync_settings(&mut self, settings: TimerSettings) -> Result<TimerTickPayload> {
-        if self.state.status != TimerStatus::Idle {
-            return Err(PomoliceError::InvalidStateTransition {
-                action: "sync settings".to_string(),
-                current_state: self.state.status,
-            });
-        }
+    pub fn sync_all_settings(
+        &mut self,
+        settings: TimerSettings,
+        auto_run_feature_enabled: bool,
+        weekly_auto_run_config: WeeklyAutoRunConfig,
+    ) -> Result<TimerTickPayload> {
+        self.ensure_idle_for_duration_setting_sync("sync all settings")?;
 
         self.state.settings = settings;
+        self.apply_auto_run_settings_update(auto_run_feature_enabled, weekly_auto_run_config);
 
         // Update remaining seconds if currently in work mode
         if self.state.session_type == SessionType::Work {
@@ -195,6 +214,20 @@ impl TimerStateManager {
         }
 
         Ok(self.state.to_tick_payload())
+    }
+
+    /// Sync only auto-run settings from frontend.
+    ///
+    /// This method is allowed in every timer state. It intentionally does not
+    /// recalculate `timer_start_source` and only clears pending scheduled stop
+    /// when the feature is disabled.
+    pub fn sync_auto_run_settings(
+        &mut self,
+        auto_run_feature_enabled: bool,
+        weekly_auto_run_config: WeeklyAutoRunConfig,
+    ) -> TimerTickPayload {
+        self.apply_auto_run_settings_update(auto_run_feature_enabled, weekly_auto_run_config);
+        self.state.to_tick_payload()
     }
 
     /// Apply input penalty during break
@@ -269,8 +302,10 @@ impl TimerStateManager {
             self.state.settings.long_break_interval,
         );
 
-        info!("Transitioning to {:?} (completed {} pomodoros)",
-            break_type, self.state.completed_pomodoros);
+        info!(
+            "Transitioning to {:?} (completed {} pomodoros)",
+            break_type, self.state.completed_pomodoros
+        );
 
         self.state.session_type = break_type;
 
@@ -304,6 +339,8 @@ impl TimerStateManager {
         // Stop timer
         self.state.status = TimerStatus::Idle;
         self.state.show_continue_dialog = true;
+        self.state.timer_start_source = None;
+        self.state.scheduled_stop_state = ScheduledStopState::None;
         self.state.last_transition = Some(Instant::now());
 
         // If long break completed, reset cycle
@@ -320,6 +357,37 @@ impl TimerStateManager {
         }
     }
 
+    /// Transition to idle when a scheduled stop is pending at session boundary.
+    ///
+    /// This path intentionally skips the continue dialog and clears scheduled-stop
+    /// metadata so later sessions start cleanly.
+    pub fn transition_to_idle_due_to_scheduled_stop(
+        &mut self,
+        completed_session_type: SessionType,
+    ) -> SessionCompletedPayload {
+        if completed_session_type == SessionType::Work {
+            self.state.completed_pomodoros += 1;
+        }
+
+        if completed_session_type == SessionType::LongBreak {
+            self.state.current_cycle = 0;
+        }
+
+        self.state.status = TimerStatus::Idle;
+        self.state.session_type = SessionType::Work;
+        self.state.remaining_seconds = self.state.settings.work_duration_secs;
+        self.state.show_continue_dialog = false;
+        self.state.timer_start_source = None;
+        self.state.scheduled_stop_state = ScheduledStopState::None;
+        self.state.last_transition = Some(Instant::now());
+
+        SessionCompletedPayload {
+            completed_session_type,
+            next_session_type: None,
+            show_continue_dialog: false,
+        }
+    }
+
     /// Returns the remaining rate-limit duration in milliseconds, or None if not rate-limited.
     fn rate_limit_remaining_ms(&self) -> Option<u64> {
         if let Some(t) = self.state.last_transition {
@@ -330,6 +398,60 @@ impl TimerStateManager {
             }
         }
         None
+    }
+
+    fn ensure_idle_for_duration_setting_sync(&self, action_name: &str) -> Result<()> {
+        if self.state.status != TimerStatus::Idle {
+            return Err(PomoliceError::InvalidStateTransition {
+                action: action_name.to_string(),
+                current_state: self.state.status,
+            });
+        }
+
+        Ok(())
+    }
+
+    fn apply_auto_run_settings_update(
+        &mut self,
+        auto_run_feature_enabled: bool,
+        weekly_auto_run_config: WeeklyAutoRunConfig,
+    ) {
+        self.state.auto_run_feature_enabled = auto_run_feature_enabled;
+        self.state.weekly_auto_run_config = weekly_auto_run_config;
+
+        if !self.state.auto_run_feature_enabled {
+            self.state.scheduled_stop_state = ScheduledStopState::None;
+        }
+    }
+
+    /// Marks scheduled stop as pending when the current session is eligible.
+    ///
+    /// Eligibility rules are fixed by start source:
+    /// - `manual_outside_window` does not schedule a stop
+    /// - `manual_inside_window` schedules a stop
+    /// - `scheduled_auto_start` schedules a stop
+    ///
+    /// Returns `true` when the state changed from `none` to `pending`.
+    pub fn mark_scheduled_stop_pending_if_session_is_eligible(&mut self) -> bool {
+        if !matches!(self.state.status, TimerStatus::Working | TimerStatus::OnBreak) {
+            return false;
+        }
+
+        if !self.state.auto_run_feature_enabled {
+            return false;
+        }
+
+        if self.state.scheduled_stop_state == ScheduledStopState::Pending {
+            return false;
+        }
+
+        match self.state.timer_start_source {
+            Some(TimerStartSource::ManualOutsideWindow) | None => false,
+            Some(TimerStartSource::ManualInsideWindow | TimerStartSource::ScheduledAutoStart) => {
+                self.state.scheduled_stop_state = ScheduledStopState::Pending;
+                true
+            }
+        }
     }
 
     /// Cancel the running timer task and extract its JoinHandle.
@@ -514,12 +636,54 @@ mod tests {
             long_break_interval: 4,
         };
 
-        let (payload, duration) = mgr.start_work(settings).unwrap();
+        let (payload, duration) = mgr
+            .start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+            .unwrap();
 
         assert_eq!(mgr.status(), TimerStatus::Working);
         assert_eq!(duration, 1500);
         assert_eq!(payload.remaining_seconds, 1500);
         assert_eq!(payload.status, TimerStatus::Working);
+    }
+
+    #[test]
+    fn test_start_work_with_source_sets_timer_start_source() {
+        let mut mgr = make_manager();
+        let settings = TimerSettings {
+            work_duration_secs: 1500,
+            short_break_duration_secs: 300,
+            long_break_duration_secs: 900,
+            long_break_interval: 4,
+        };
+
+        let _ = mgr
+            .start_work_with_source(settings, TimerStartSource::ManualInsideWindow)
+            .unwrap();
+
+        assert_eq!(
+            mgr.state.timer_start_source,
+            Some(TimerStartSource::ManualInsideWindow)
+        );
+    }
+
+    #[test]
+    fn test_start_work_with_source_sets_manual_outside_window_source() {
+        let mut mgr = make_manager();
+        let settings = TimerSettings {
+            work_duration_secs: 1500,
+            short_break_duration_secs: 300,
+            long_break_duration_secs: 900,
+            long_break_interval: 4,
+        };
+
+        let _ = mgr
+            .start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+            .unwrap();
+
+        assert_eq!(
+            mgr.state.timer_start_source,
+            Some(TimerStartSource::ManualOutsideWindow)
+        );
     }
 
     #[test]
@@ -532,10 +696,13 @@ mod tests {
             long_break_interval: 4,
         };
 
-        mgr.start_work(settings.clone()).unwrap();
+        mgr.start_work_with_source(settings.clone(), TimerStartSource::ManualOutsideWindow)
+            .unwrap();
 
         // Second call must fail
-        let err = mgr.start_work(settings).unwrap_err();
+        let err = mgr
+            .start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+            .unwrap_err();
         assert!(matches!(err, PomoliceError::InvalidStateTransition { .. }));
     }
 
@@ -548,7 +715,8 @@ mod tests {
             long_break_duration_secs: 900,
             long_break_interval: 4,
         };
-        mgr.start_work(settings).unwrap();
+        mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+            .unwrap();
 
         let (should_complete, payload) = mgr.tick();
         assert!(!should_complete);
@@ -564,7 +732,8 @@ mod tests {
             long_break_duration_secs: 900,
             long_break_interval: 4,
         };
-        mgr.start_work(settings).unwrap();
+        mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+            .unwrap();
 
         let (should_complete, _) = mgr.tick();
         assert!(should_complete);
@@ -586,7 +755,8 @@ mod tests {
             long_break_duration_secs: 900,
             long_break_interval: 4,
         };
-        mgr.start_work(settings).unwrap();
+        mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+            .unwrap();
         mgr.transition_to_break();
 
         // Drain some time from the break timer
@@ -608,7 +778,8 @@ mod tests {
             long_break_duration_secs: 900,
             long_break_interval: 4,
         };
-        mgr.start_work(settings).unwrap();
+        mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+            .unwrap();
 
         let (was_fullscreen, payload) = mgr.emergency_stop().unwrap();
         assert!(!was_fullscreen);
@@ -625,7 +796,8 @@ mod tests {
             long_break_duration_secs: 900,
             long_break_interval: 4,
         };
-        mgr.start_work(settings).unwrap();
+        mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+            .unwrap();
         mgr.state.status = TimerStatus::Idle;
         mgr.state.show_continue_dialog = true;
 
@@ -633,6 +805,227 @@ mod tests {
         assert_eq!(mgr.status(), TimerStatus::Idle);
         assert!(!mgr.state.show_continue_dialog);
         assert_eq!(payload.status, TimerStatus::Idle);
+    }
+
+    #[test]
+    fn test_sync_all_settings_updates_timer_duration_and_auto_run_fields_when_idle() {
+        let mut mgr = make_manager();
+        let mut weekly_auto_run_config = WeeklyAutoRunConfig::default();
+        weekly_auto_run_config.mon.enabled = true;
+        weekly_auto_run_config.mon.start_time = "08:30".to_string();
+        weekly_auto_run_config.mon.end_time = "17:30".to_string();
+
+        let payload = mgr
+            .sync_all_settings(
+                TimerSettings {
+                    work_duration_secs: 1800,
+                    short_break_duration_secs: 420,
+                    long_break_duration_secs: 1200,
+                    long_break_interval: 5,
+                },
+                true,
+                weekly_auto_run_config.clone(),
+            )
+            .unwrap();
+
+        assert_eq!(payload.status, TimerStatus::Idle);
+        assert_eq!(mgr.state.settings.work_duration_secs, 1800);
+        assert_eq!(mgr.state.remaining_seconds, 1800);
+        assert!(mgr.state.auto_run_feature_enabled);
+        assert_eq!(mgr.state.weekly_auto_run_config, weekly_auto_run_config);
+    }
+
+    #[test]
+    fn test_sync_all_settings_rejects_non_idle_state() {
+        let mut mgr = make_manager();
+        mgr.state.status = TimerStatus::Working;
+
+        let err = mgr
+            .sync_all_settings(
+                TimerSettings {
+                    work_duration_secs: 1800,
+                    short_break_duration_secs: 420,
+                    long_break_duration_secs: 1200,
+                    long_break_interval: 5,
+                },
+                true,
+                WeeklyAutoRunConfig::default(),
+            )
+            .unwrap_err();
+
+        assert!(matches!(err, PomoliceError::InvalidStateTransition { .. }));
+    }
+
+    #[test]
+    fn test_sync_auto_run_settings_keeps_pending_stop_state_when_feature_remains_enabled() {
+        let mut mgr = make_manager();
+        mgr.state.status = TimerStatus::Working;
+        mgr.state.timer_start_source = Some(crate::types::TimerStartSource::ManualInsideWindow);
+        mgr.state.scheduled_stop_state = ScheduledStopState::Pending;
+
+        let mut weekly_auto_run_config = WeeklyAutoRunConfig::default();
+        weekly_auto_run_config.tue.enabled = true;
+        weekly_auto_run_config.tue.start_time = "10:00".to_string();
+        weekly_auto_run_config.tue.end_time = "19:00".to_string();
+
+        let payload = mgr.sync_auto_run_settings(true, weekly_auto_run_config.clone());
+
+        assert_eq!(payload.status, TimerStatus::Working);
+        assert!(mgr.state.auto_run_feature_enabled);
+        assert_eq!(mgr.state.weekly_auto_run_config, weekly_auto_run_config);
+        assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::Pending);
+        assert_eq!(
+            mgr.state.timer_start_source,
+            Some(crate::types::TimerStartSource::ManualInsideWindow)
+        );
+    }
+
+    #[test]
+    fn test_sync_auto_run_settings_clears_pending_stop_state_when_feature_is_disabled() {
+        let mut mgr = make_manager();
+        mgr.state.status = TimerStatus::OnBreak;
+        mgr.state.scheduled_stop_state = ScheduledStopState::Pending;
+
+        let payload = mgr.sync_auto_run_settings(false, WeeklyAutoRunConfig::default());
+
+        assert_eq!(payload.status, TimerStatus::OnBreak);
+        assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::None);
+    }
+
+    #[test]
+    fn test_manual_inside_window_start_sets_scheduled_stop_pending() {
+        let mut mgr = make_manager();
+        mgr.state.status = TimerStatus::Working;
+        mgr.state.auto_run_feature_enabled = true;
+        mgr.state.timer_start_source = Some(TimerStartSource::ManualInsideWindow);
+        mgr.state.scheduled_stop_state = ScheduledStopState::None;
+
+        let changed = mgr.mark_scheduled_stop_pending_if_session_is_eligible();
+
+        assert!(changed);
+        assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::Pending);
+    }
+
+    #[test]
+    fn test_scheduled_auto_start_sets_scheduled_stop_pending() {
+        let mut mgr = make_manager();
+        mgr.state.status = TimerStatus::Working;
+        mgr.state.auto_run_feature_enabled = true;
+        mgr.state.timer_start_source = Some(TimerStartSource::ScheduledAutoStart);
+        mgr.state.scheduled_stop_state = ScheduledStopState::None;
+
+        let changed = mgr.mark_scheduled_stop_pending_if_session_is_eligible();
+
+        assert!(changed);
+        assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::Pending);
+    }
+
+    #[test]
+    fn test_manual_outside_window_start_does_not_set_scheduled_stop_pending() {
+        let mut mgr = make_manager();
+        mgr.state.status = TimerStatus::Working;
+        mgr.state.auto_run_feature_enabled = true;
+        mgr.state.timer_start_source = Some(TimerStartSource::ManualOutsideWindow);
+        mgr.state.scheduled_stop_state = ScheduledStopState::None;
+
+        let changed = mgr.mark_scheduled_stop_pending_if_session_is_eligible();
+
+        assert!(!changed);
+        assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::None);
+    }
+
+    #[test]
+    fn test_mark_scheduled_stop_pending_does_not_change_when_idle() {
+        let mut mgr = make_manager();
+        mgr.state.status = TimerStatus::Idle;
+        mgr.state.auto_run_feature_enabled = true;
+        mgr.state.timer_start_source = Some(TimerStartSource::ManualInsideWindow);
+        mgr.state.scheduled_stop_state = ScheduledStopState::None;
+
+        let changed = mgr.mark_scheduled_stop_pending_if_session_is_eligible();
+
+        assert!(!changed);
+        assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::None);
+    }
+
+    #[test]
+    fn test_mark_scheduled_stop_pending_keeps_pending_when_called_repeatedly() {
+        let mut mgr = make_manager();
+        mgr.state.status = TimerStatus::OnBreak;
+        mgr.state.auto_run_feature_enabled = true;
+        mgr.state.timer_start_source = Some(TimerStartSource::ManualInsideWindow);
+        mgr.state.scheduled_stop_state = ScheduledStopState::Pending;
+
+        let changed = mgr.mark_scheduled_stop_pending_if_session_is_eligible();
+
+        assert!(!changed);
+        assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::Pending);
+    }
+
+    #[test]
+    fn test_mark_scheduled_stop_pending_uses_timer_start_source_after_auto_run_config_change() {
+        let mut mgr = make_manager();
+        mgr.state.status = TimerStatus::Working;
+        mgr.state.auto_run_feature_enabled = true;
+        mgr.state.timer_start_source = Some(TimerStartSource::ManualInsideWindow);
+        mgr.state.scheduled_stop_state = ScheduledStopState::None;
+
+        let mut weekly_auto_run_config = WeeklyAutoRunConfig::default();
+        weekly_auto_run_config.fri.enabled = true;
+        weekly_auto_run_config.fri.start_time = "23:00".to_string();
+        weekly_auto_run_config.fri.end_time = "02:00".to_string();
+        let _ = mgr.sync_auto_run_settings(true, weekly_auto_run_config);
+
+        let changed = mgr.mark_scheduled_stop_pending_if_session_is_eligible();
+
+        assert!(changed);
+        assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::Pending);
+    }
+
+    #[test]
+    fn test_transition_to_idle_due_to_scheduled_stop_from_work_cleans_up_and_skips_dialog() {
+        let mut mgr = make_manager();
+        mgr.state.status = TimerStatus::Working;
+        mgr.state.session_type = SessionType::Work;
+        mgr.state.remaining_seconds = 0;
+        mgr.state.current_cycle = 2;
+        mgr.state.completed_pomodoros = 3;
+        mgr.state.show_continue_dialog = false;
+        mgr.state.timer_start_source = Some(TimerStartSource::ManualInsideWindow);
+        mgr.state.scheduled_stop_state = ScheduledStopState::Pending;
+
+        let payload = mgr.transition_to_idle_due_to_scheduled_stop(SessionType::Work);
+
+        assert_eq!(payload.completed_session_type, SessionType::Work);
+        assert!(!payload.show_continue_dialog);
+        assert_eq!(mgr.state.status, TimerStatus::Idle);
+        assert_eq!(mgr.state.session_type, SessionType::Work);
+        assert_eq!(mgr.state.remaining_seconds, mgr.state.settings.work_duration_secs);
+        assert_eq!(mgr.state.completed_pomodoros, 4);
+        assert!(!mgr.state.show_continue_dialog);
+        assert_eq!(mgr.state.timer_start_source, None);
+        assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::None);
+    }
+
+    #[test]
+    fn test_transition_to_idle_due_to_scheduled_stop_from_long_break_resets_cycle() {
+        let mut mgr = make_manager();
+        mgr.state.status = TimerStatus::OnBreak;
+        mgr.state.session_type = SessionType::LongBreak;
+        mgr.state.current_cycle = 4;
+        mgr.state.show_continue_dialog = false;
+        mgr.state.timer_start_source = Some(TimerStartSource::ScheduledAutoStart);
+        mgr.state.scheduled_stop_state = ScheduledStopState::Pending;
+
+        let payload = mgr.transition_to_idle_due_to_scheduled_stop(SessionType::LongBreak);
+
+        assert_eq!(payload.completed_session_type, SessionType::LongBreak);
+        assert!(!payload.show_continue_dialog);
+        assert_eq!(mgr.state.status, TimerStatus::Idle);
+        assert_eq!(mgr.state.session_type, SessionType::Work);
+        assert_eq!(mgr.state.current_cycle, 0);
+        assert_eq!(mgr.state.timer_start_source, None);
+        assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::None);
     }
 
     #[test]
@@ -671,7 +1064,8 @@ mod tests {
             long_break_duration_secs: 900,
             long_break_interval: 4,
         };
-        mgr.start_work(settings).unwrap();
+        mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+            .unwrap();
 
         // Called immediately after start_work sets last_transition
         let remaining = mgr.rate_limit_remaining_ms();
@@ -690,7 +1084,8 @@ mod tests {
             long_break_duration_secs: 900,
             long_break_interval: 4,
         };
-        mgr.start_work(settings.clone()).unwrap();
+        mgr.start_work_with_source(settings.clone(), TimerStartSource::ManualOutsideWindow)
+            .unwrap();
 
         // Immediately call emergency_stop to reset to Idle, preserving last_transition timing
         mgr.state.status = TimerStatus::Idle;
@@ -698,13 +1093,38 @@ mod tests {
         // Second start_work must be rate-limited.
         // remaining_ms reflects actual elapsed time: close to 300ms when called immediately,
         // so we assert it is in (0, 300] rather than strictly < 300.
-        let err = mgr.start_work(settings).unwrap_err();
+        let err = mgr
+            .start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+            .unwrap_err();
         match err {
             PomoliceError::RateLimited { remaining_ms } => {
                 assert!(remaining_ms > 0, "remaining_ms should be > 0");
-                assert!(remaining_ms <= 300, "remaining_ms should be <= 300, got {}", remaining_ms);
+                assert!(
+                    remaining_ms <= 300,
+                    "remaining_ms should be <= 300, got {}",
+                    remaining_ms
+                );
             }
             other => panic!("Expected RateLimited, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_start_work_with_scheduled_auto_start_skips_rate_limit() {
+        let mut mgr = make_manager();
+        let settings = TimerSettings {
+            work_duration_secs: 1500,
+            short_break_duration_secs: 300,
+            long_break_duration_secs: 900,
+            long_break_interval: 4,
+        };
+        mgr.start_work_with_source(settings.clone(), TimerStartSource::ManualOutsideWindow)
+            .unwrap();
+
+        // Simulate returning to idle immediately while keeping last_transition fresh.
+        mgr.state.status = TimerStatus::Idle;
+
+        let result = mgr.start_work_with_source(settings, TimerStartSource::ScheduledAutoStart);
+        assert!(result.is_ok());
     }
 }

@@ -36,6 +36,10 @@ describe("Timer Store - Penalty System", () => {
       isFullscreenBreak: false,
       breakInteractionCount: 0,
       isConnected: false,
+      shouldPromptStartOnBoot: false,
+      activeWindowSummary: null,
+      infoMessage: null,
+      infoMessageShownAtById: {},
     });
 
     useSettingsStore.setState({
@@ -179,6 +183,8 @@ describe("Timer Store - Penalty System", () => {
         break_interaction_count: 7,
         is_fullscreen_break: true,
         show_continue_dialog: false,
+        should_prompt_start_on_boot: false,
+        active_window_summary: null,
         settings: {
           work_duration_secs: 1500,
           short_break_duration_secs: 300,

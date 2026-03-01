@@ -34,7 +34,8 @@ export type CommandContext =
   | "continue_to_next_session"
   | "end_cycle"
   | "emergency_stop"
-  | "get_full_state";
+  | "get_full_state"
+  | "resolve_boot_auto_start_prompt";
 
 /**
  * Parse the error string serialized by PomoliceError::serialize() in the Rust backend

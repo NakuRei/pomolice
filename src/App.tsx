@@ -6,9 +6,11 @@ import {
 } from './components/icons';
 import { TimerDisplay, TimerControls, SessionIndicator, CycleProgress } from './components/Timer';
 import { ContinueDialog } from './components/ContinueDialog';
+import { AutoStartConfirmDialog } from './components/AutoStartConfirmDialog';
 import { SettingsModal } from './components/Settings';
 import { FullscreenBreak } from './components/BreakScreen/FullscreenBreak';
 import { ConnectionBanner } from './components/shared/ConnectionBanner';
+import { InfoMessageBanner } from './components/shared/InfoMessageBanner';
 import { useTimerSync } from './hooks/useTimerSync';
 import { useTimerStore } from './store/timerStore';
 import { useSettingsStore } from './store/settingsStore';
@@ -36,6 +38,7 @@ function App() {
     <div className="flex flex-col min-h-screen p-8 space-y-8">
       {/* Backend connection error banner — only visible when connection fails */}
       <ConnectionBanner />
+      <InfoMessageBanner />
 
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold text-gray-800">Pomolice</h1>
@@ -83,6 +86,9 @@ function App() {
 
       {/* Continue dialog - shown after break completion */}
       <ContinueDialog />
+
+      {/* Startup auto-start confirmation dialog */}
+      <AutoStartConfirmDialog />
 
       {/* Settings modal */}
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />

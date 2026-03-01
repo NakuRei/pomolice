@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useTimerStore, TimerStatus, SessionType } from "../timerStore";
 import { useSettingsStore } from "../settingsStore";
 
@@ -15,6 +15,10 @@ describe("timerStore", () => {
       isFullscreenBreak: false,
       showContinueDialog: false,
       isConnected: false,
+      shouldPromptStartOnBoot: false,
+      activeWindowSummary: null,
+      infoMessage: null,
+      infoMessageShownAtById: {},
     });
     useSettingsStore.getState().resetToDefaults();
   });
@@ -150,6 +154,8 @@ describe("timerStore", () => {
           break_interaction_count: 0,
           is_fullscreen_break: false,
           show_continue_dialog: false,
+          should_prompt_start_on_boot: false,
+          active_window_summary: null,
           settings: {
             work_duration_secs: 1500,
             short_break_duration_secs: 300,
@@ -165,6 +171,43 @@ describe("timerStore", () => {
         expect(state.completedPomodoros).toBe(2);
         expect(state.isConnected).toBe(true);
       });
+
+      it("should keep startup prompt state from backend full payload", () => {
+        const { handleFullState } = useTimerStore.getState();
+
+        handleFullState({
+          status: TimerStatus.IDLE,
+          remaining_seconds: 1500,
+          session_type: SessionType.WORK,
+          current_cycle: 1,
+          completed_pomodoros: 0,
+          break_interaction_count: 0,
+          is_fullscreen_break: false,
+          show_continue_dialog: false,
+          should_prompt_start_on_boot: true,
+          active_window_summary: {
+            weekday_key: "mon",
+            start_time: "09:00",
+            end_time: "18:00",
+            crosses_midnight: false,
+          },
+          settings: {
+            work_duration_secs: 1500,
+            short_break_duration_secs: 300,
+            long_break_duration_secs: 900,
+            long_break_interval: 4,
+          },
+        });
+
+        const state = useTimerStore.getState();
+        expect(state.shouldPromptStartOnBoot).toBe(true);
+        expect(state.activeWindowSummary).toEqual({
+          weekday_key: "mon",
+          start_time: "09:00",
+          end_time: "18:00",
+          crosses_midnight: false,
+        });
+      });
     });
 
     describe("setConnected()", () => {
@@ -178,6 +221,66 @@ describe("timerStore", () => {
 
         setConnected(false);
         expect(useTimerStore.getState().isConnected).toBe(false);
+      });
+    });
+
+    describe("Info Message", () => {
+      it("should show stop-pending info message", () => {
+        const { showAutoRunStopPendingInfo } = useTimerStore.getState();
+
+        showAutoRunStopPendingInfo();
+
+        const state = useTimerStore.getState();
+        expect(state.infoMessage).not.toBeNull();
+        expect(state.infoMessage?.id).toBe("auto_run_stop_pending");
+        expect(state.infoMessage?.message).toBe("現在セッション終了後に停止予定");
+        expect(state.infoMessage?.ttlMs).toBe(5000);
+      });
+
+      it("should suppress duplicate stop-pending info within ttl", () => {
+        const { showAutoRunStopPendingInfo } = useTimerStore.getState();
+        const dateNowSpy = vi.spyOn(Date, "now");
+
+        dateNowSpy.mockReturnValue(1000);
+        showAutoRunStopPendingInfo();
+        expect(useTimerStore.getState().infoMessageShownAtById.auto_run_stop_pending).toBe(
+          1000
+        );
+
+        dateNowSpy.mockReturnValue(2000);
+        showAutoRunStopPendingInfo();
+        expect(useTimerStore.getState().infoMessageShownAtById.auto_run_stop_pending).toBe(
+          1000
+        );
+
+        dateNowSpy.mockReturnValue(7001);
+        showAutoRunStopPendingInfo();
+        expect(useTimerStore.getState().infoMessageShownAtById.auto_run_stop_pending).toBe(
+          7001
+        );
+
+        dateNowSpy.mockRestore();
+      });
+
+      it("should show auto-run stopped info message", () => {
+        const { showAutoRunStoppedInfo } = useTimerStore.getState();
+
+        showAutoRunStoppedInfo();
+
+        const state = useTimerStore.getState();
+        expect(state.infoMessage).not.toBeNull();
+        expect(state.infoMessage?.id).toBe("auto_run_stopped");
+      });
+
+      it("should clear info message only when expected id matches", () => {
+        const { showAutoRunStoppedInfo, clearInfoMessage } = useTimerStore.getState();
+
+        showAutoRunStoppedInfo();
+        clearInfoMessage("auto_run_stop_pending");
+        expect(useTimerStore.getState().infoMessage?.id).toBe("auto_run_stopped");
+
+        clearInfoMessage("auto_run_stopped");
+        expect(useTimerStore.getState().infoMessage).toBeNull();
       });
     });
   });

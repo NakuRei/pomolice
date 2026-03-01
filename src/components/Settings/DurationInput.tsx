@@ -12,6 +12,7 @@ interface DurationInputProps {
   max: number;
   unit?: string;
   testId?: string;
+  disabled?: boolean;
 }
 
 export function DurationInput({
@@ -22,6 +23,7 @@ export function DurationInput({
   max,
   unit = '分',
   testId,
+  disabled = false,
 }: DurationInputProps) {
   const [inputValue, setInputValue] = useState(
     value !== null && Number.isFinite(value) ? String(value) : ""
@@ -77,6 +79,7 @@ export function DurationInput({
           min={min}
           max={max}
           step="0.01"
+          disabled={disabled}
           className={`flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
             isValid
               ? 'border-gray-300 focus:ring-blue-500'

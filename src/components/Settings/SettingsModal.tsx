@@ -1,9 +1,20 @@
 import { useState, useEffect, useRef, useId, type KeyboardEvent } from "react";
-import { useSettingsStore, VALIDATION_RULES } from "../../store/settingsStore";
+import {
+  useSettingsStore,
+  VALIDATION_RULES,
+  WEEKDAY_KEYS,
+  parseHhMm,
+  validateWeeklyAutoRunConfig,
+  type DayScheduleValidationError,
+  type WeeklyAutoRunConfig,
+  type WeeklyScheduleValidationError,
+  type WeekdayKey,
+} from "../../store/settingsStore";
 import {
   playNotificationSoundPreview,
   type NotificationSoundType,
 } from "../../services/notifications";
+import { TimerStatus, useTimerStore } from "../../store/timerStore";
 import { VolumeMutedIcon, VolumeOnIcon } from "../icons";
 import { DurationInput } from "./DurationInput";
 import "./SettingsModal.css";
@@ -13,15 +24,40 @@ interface SettingsModalProps {
   onClose: () => void;
 }
 
+const WEEKDAY_LABEL_BY_KEY: Record<WeekdayKey, string> = {
+  mon: "月",
+  tue: "火",
+  wed: "水",
+  thu: "木",
+  fri: "金",
+  sat: "土",
+  sun: "日",
+};
+
+function cloneWeeklyConfig(config: WeeklyAutoRunConfig): WeeklyAutoRunConfig {
+  return {
+    mon: { ...config.mon },
+    tue: { ...config.tue },
+    wed: { ...config.wed },
+    thu: { ...config.thu },
+    fri: { ...config.fri },
+    sat: { ...config.sat },
+    sun: { ...config.sun },
+  };
+}
+
+function isOvernightDaySlot(daySlot: WeeklyAutoRunConfig[WeekdayKey]): boolean {
+  const parsedStart = parseHhMm(daySlot.startTime);
+  const parsedEnd = parseHhMm(daySlot.endTime);
+  if (!parsedStart || !parsedEnd) {
+    return false;
+  }
+  return parsedStart.minutesSinceStartOfDay > parsedEnd.minutesSinceStartOfDay;
+}
+
 /**
  * SettingsModal Component
- * Modal dialog for configuring timer durations
- *
- * Allows users to customize:
- * - Work session duration (1-120 minutes)
- * - Short break duration (1-60 minutes)
- * - Long break duration (5-60 minutes)
- * - Long break interval (2-10 cycles)
+ * Modal dialog for configuring timer and weekly schedule settings.
  */
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -44,7 +80,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const notificationSoundMutedStore = useSettingsStore(
     (state) => state.notificationSoundMuted,
   );
+  const autoRunFeatureEnabledStore = useSettingsStore(
+    (state) => state.autoRunFeatureEnabled,
+  );
+  const weeklyAutoRunConfigStore = useSettingsStore(
+    (state) => state.weeklyAutoRunConfig,
+  );
   const updateSettings = useSettingsStore((state) => state.updateSettings);
+  const timerStatus = useTimerStore((state) => state.status);
 
   const isFiniteNumber = (value: number | null): value is number =>
     typeof value === "number" && Number.isFinite(value);
@@ -68,20 +111,49 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     useState<NotificationSoundType>("work");
   const [notificationSoundPreviewStatusText, setNotificationSoundPreviewStatusText] =
     useState<string>("");
+  const [autoRunFeatureEnabled, setAutoRunFeatureEnabled] = useState<boolean>(
+    autoRunFeatureEnabledStore,
+  );
+  const [weeklyAutoRunConfig, setWeeklyAutoRunConfig] =
+    useState<WeeklyAutoRunConfig>(cloneWeeklyConfig(weeklyAutoRunConfigStore));
+  const [dayScheduleValidationErrors, setDayScheduleValidationErrors] = useState<
+    Partial<Record<WeekdayKey, DayScheduleValidationError>>
+  >({});
+  const [weeklyScheduleValidationErrors, setWeeklyScheduleValidationErrors] =
+    useState<WeeklyScheduleValidationError[]>([]);
 
   // Sync local state with store when modal opens
   useEffect(() => {
-    if (isOpen) {
-      setWorkDuration(workDurationStore);
-      setShortBreakDuration(shortBreakDurationStore);
-      setLongBreakDuration(longBreakDurationStore);
-      setLongBreakInterval(longBreakIntervalStore);
-      setNotificationSoundVolumePercent(notificationSoundVolumePercentStore);
-      setNotificationSoundMuted(notificationSoundMutedStore);
-      setNotificationSoundPreviewType("work");
-      setNotificationSoundPreviewStatusText("");
+    if (!isOpen) {
+      return;
     }
-  }, [isOpen]);
+
+    const weeklyConfigClone = cloneWeeklyConfig(weeklyAutoRunConfigStore);
+    const validationResult = validateWeeklyAutoRunConfig(weeklyConfigClone);
+
+    setWorkDuration(workDurationStore);
+    setShortBreakDuration(shortBreakDurationStore);
+    setLongBreakDuration(longBreakDurationStore);
+    setLongBreakInterval(longBreakIntervalStore);
+    setNotificationSoundVolumePercent(notificationSoundVolumePercentStore);
+    setNotificationSoundMuted(notificationSoundMutedStore);
+    setAutoRunFeatureEnabled(autoRunFeatureEnabledStore);
+    setWeeklyAutoRunConfig(weeklyConfigClone);
+    setDayScheduleValidationErrors(validationResult.dayScheduleValidationErrors);
+    setWeeklyScheduleValidationErrors(validationResult.weeklyScheduleValidationErrors);
+    setNotificationSoundPreviewType("work");
+    setNotificationSoundPreviewStatusText("");
+  }, [
+    isOpen,
+    workDurationStore,
+    shortBreakDurationStore,
+    longBreakDurationStore,
+    longBreakIntervalStore,
+    notificationSoundVolumePercentStore,
+    notificationSoundMutedStore,
+    autoRunFeatureEnabledStore,
+    weeklyAutoRunConfigStore,
+  ]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -184,15 +256,46 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       VALIDATION_RULES.notificationSoundVolumePercent.min &&
     notificationSoundVolumePercent <=
       VALIDATION_RULES.notificationSoundVolumePercent.max;
+  const hasDayScheduleValidationErrors =
+    Object.keys(dayScheduleValidationErrors).length > 0;
+  const hasWeeklyScheduleValidationErrors =
+    weeklyScheduleValidationErrors.length > 0;
 
   const isFormValid =
     isWorkDurationValid &&
     isShortBreakValid &&
     isLongBreakValid &&
     isIntervalValid &&
-    isNotificationSoundVolumeValid;
+    isNotificationSoundVolumeValid &&
+    !hasDayScheduleValidationErrors &&
+    !hasWeeklyScheduleValidationErrors;
+  const isTimerIdle = timerStatus === TimerStatus.IDLE;
+
+  const updateWeeklyConfig = (updater: (draftConfig: WeeklyAutoRunConfig) => void) => {
+    setWeeklyAutoRunConfig((previousConfig) => {
+      const nextConfig = cloneWeeklyConfig(previousConfig);
+      updater(nextConfig);
+
+      const validationResult = validateWeeklyAutoRunConfig(nextConfig);
+      setDayScheduleValidationErrors(validationResult.dayScheduleValidationErrors);
+      setWeeklyScheduleValidationErrors(validationResult.weeklyScheduleValidationErrors);
+
+      return nextConfig;
+    });
+  };
 
   const handleSave = () => {
+    const validationResult = validateWeeklyAutoRunConfig(weeklyAutoRunConfig);
+    setDayScheduleValidationErrors(validationResult.dayScheduleValidationErrors);
+    setWeeklyScheduleValidationErrors(validationResult.weeklyScheduleValidationErrors);
+
+    if (
+      Object.keys(validationResult.dayScheduleValidationErrors).length > 0 ||
+      validationResult.weeklyScheduleValidationErrors.length > 0
+    ) {
+      return;
+    }
+
     if (
       !isWorkDurationValid ||
       !isShortBreakValid ||
@@ -215,19 +318,28 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       longBreakInterval,
       notificationSoundVolumePercent,
       notificationSoundMuted,
+      autoRunFeatureEnabled,
+      weeklyAutoRunConfig,
     });
 
     onClose();
   };
 
   const handleCancel = () => {
-    // Reset to current settings
+    const weeklyConfigClone = cloneWeeklyConfig(weeklyAutoRunConfigStore);
+    const validationResult = validateWeeklyAutoRunConfig(weeklyConfigClone);
+
     setWorkDuration(workDurationStore);
     setShortBreakDuration(shortBreakDurationStore);
     setLongBreakDuration(longBreakDurationStore);
     setLongBreakInterval(longBreakIntervalStore);
     setNotificationSoundVolumePercent(notificationSoundVolumePercentStore);
     setNotificationSoundMuted(notificationSoundMutedStore);
+    setAutoRunFeatureEnabled(autoRunFeatureEnabledStore);
+    setWeeklyAutoRunConfig(weeklyConfigClone);
+    setDayScheduleValidationErrors(validationResult.dayScheduleValidationErrors);
+    setWeeklyScheduleValidationErrors(validationResult.weeklyScheduleValidationErrors);
+
     onClose();
   };
 
@@ -264,10 +376,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   };
 
   return (
-    <div
-      className="settingsModalOverlay"
-      data-testid="settings-modal"
-    >
+    <div className="settingsModalOverlay" data-testid="settings-modal">
       <div
         ref={dialogRef}
         role="dialog"
@@ -292,6 +401,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             min={VALIDATION_RULES.workDuration.min}
             max={VALIDATION_RULES.workDuration.max}
             testId="settings-work-duration"
+            disabled={!isTimerIdle}
           />
 
           <DurationInput
@@ -301,6 +411,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             min={VALIDATION_RULES.shortBreakDuration.min}
             max={VALIDATION_RULES.shortBreakDuration.max}
             testId="settings-short-break"
+            disabled={!isTimerIdle}
           />
 
           <DurationInput
@@ -310,6 +421,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             min={VALIDATION_RULES.longBreakDuration.min}
             max={VALIDATION_RULES.longBreakDuration.max}
             testId="settings-long-break"
+            disabled={!isTimerIdle}
           />
 
           <DurationInput
@@ -320,10 +432,154 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             max={VALIDATION_RULES.longBreakInterval.max}
             unit="回"
             testId="settings-interval"
+            disabled={!isTimerIdle}
           />
 
+          {!isTimerIdle && (
+            <p
+              className="text-xs text-amber-700"
+              data-testid="settings-duration-edit-disabled-message"
+            >
+              タイマー実行中は時間長設定を変更できません。曜日別スケジュールのみ編集できます。
+            </p>
+          )}
+
+          <section
+            className="rounded-lg border border-gray-200 p-3"
+            data-testid="settings-auto-run-section"
+          >
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-800">曜日別自動実行</h3>
+                <p className="text-xs text-gray-600">
+                  曜日ごとに開始時刻と終了時刻を設定します。
+                </p>
+              </div>
+              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={autoRunFeatureEnabled}
+                  onChange={(event) => setAutoRunFeatureEnabled(event.target.checked)}
+                  data-testid="settings-auto-run-feature-toggle"
+                  aria-label="曜日別自動実行の全体切り替え"
+                />
+                有効化
+              </label>
+            </div>
+
+            {weeklyScheduleValidationErrors.length > 0 && (
+              <div
+                className="mb-3 rounded-md border border-red-200 bg-red-50 p-2"
+                data-testid="settings-auto-run-weekly-errors"
+                role="alert"
+              >
+                {weeklyScheduleValidationErrors.map((error) => (
+                  <p
+                    key={`${error.primaryWeekday}-${error.secondaryWeekday}`}
+                    className="text-xs text-red-700"
+                  >
+                    {error.message}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            <div className="grid gap-2">
+              {WEEKDAY_KEYS.map((weekday) => {
+                const daySlot = weeklyAutoRunConfig[weekday];
+                const dayError = dayScheduleValidationErrors[weekday];
+                const isOvernight = daySlot.enabled && isOvernightDaySlot(daySlot);
+                const isDayTimeInputDisabled =
+                  !autoRunFeatureEnabled || !daySlot.enabled;
+                const dayTimeInputClass = `rounded border px-2 py-1 text-sm transition-colors ${
+                  isDayTimeInputDisabled
+                    ? "cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400"
+                    : "border-gray-300 bg-white text-gray-900"
+                }`;
+
+                return (
+                  <div
+                    key={weekday}
+                    className={`rounded-md border px-2 py-2 transition-colors ${
+                      isDayTimeInputDisabled
+                        ? "border-gray-100 bg-gray-50"
+                        : "border-gray-100 bg-white"
+                    }`}
+                    data-testid={`settings-auto-run-day-row-${weekday}`}
+                  >
+                    <div className="grid grid-cols-[3rem_1fr_1fr_auto] items-center gap-2">
+                      <label className="inline-flex items-center gap-1 text-xs text-gray-700">
+                        <input
+                          type="checkbox"
+                          checked={daySlot.enabled}
+                          disabled={!autoRunFeatureEnabled}
+                          onChange={(event) =>
+                            updateWeeklyConfig((draftConfig) => {
+                              draftConfig[weekday].enabled = event.target.checked;
+                            })
+                          }
+                          data-testid={`settings-auto-run-day-enabled-${weekday}`}
+                          aria-label={`${WEEKDAY_LABEL_BY_KEY[weekday]}曜日の自動実行を有効にする`}
+                        />
+                        <span>{WEEKDAY_LABEL_BY_KEY[weekday]}</span>
+                      </label>
+
+                      <input
+                        type="time"
+                        step={60}
+                        value={daySlot.startTime}
+                        onChange={(event) =>
+                          updateWeeklyConfig((draftConfig) => {
+                            draftConfig[weekday].startTime = event.target.value;
+                          })
+                        }
+                        disabled={isDayTimeInputDisabled}
+                        className={dayTimeInputClass}
+                        data-testid={`settings-auto-run-day-start-${weekday}`}
+                        aria-label={`${WEEKDAY_LABEL_BY_KEY[weekday]}曜日の開始時刻`}
+                      />
+
+                      <input
+                        type="time"
+                        step={60}
+                        value={daySlot.endTime}
+                        onChange={(event) =>
+                          updateWeeklyConfig((draftConfig) => {
+                            draftConfig[weekday].endTime = event.target.value;
+                          })
+                        }
+                        disabled={isDayTimeInputDisabled}
+                        className={dayTimeInputClass}
+                        data-testid={`settings-auto-run-day-end-${weekday}`}
+                        aria-label={`${WEEKDAY_LABEL_BY_KEY[weekday]}曜日の終了時刻`}
+                      />
+
+                      <span
+                        className={`text-xs ${
+                          isOvernight ? "text-blue-700" : "text-transparent"
+                        }`}
+                        data-testid={`settings-auto-run-day-overnight-${weekday}`}
+                      >
+                        翌日まで
+                      </span>
+                    </div>
+                    {dayError && (
+                      <p
+                        className="mt-1 text-xs text-red-700"
+                        data-testid={`settings-auto-run-day-error-${weekday}`}
+                        role="alert"
+                      >
+                        {dayError.message}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
           <div>
-            <div className="flex items-center justify-between mb-2">
+            <div className="mb-2 flex items-center justify-between">
               <label
                 htmlFor="settings-notification-sound-volume"
                 className="text-sm font-medium text-gray-700"
@@ -360,9 +616,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 aria-label={notificationSoundMuted ? "通知音をオンにする" : "通知音をミュートする"}
               >
                 {notificationSoundMuted ? (
-                  <VolumeMutedIcon className="w-5 h-5" />
+                  <VolumeMutedIcon className="h-5 w-5" />
                 ) : (
-                  <VolumeOnIcon className="w-5 h-5" />
+                  <VolumeOnIcon className="h-5 w-5" />
                 )}
               </button>
 
@@ -376,7 +632,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 onChange={(event) =>
                   setNotificationSoundVolumePercent(Number(event.target.value))
                 }
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-200 accent-blue-600"
                 data-testid="settings-notification-sound-volume"
                 aria-label="通知音量"
                 disabled={notificationSoundMuted}

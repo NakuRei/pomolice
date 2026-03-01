@@ -26,6 +26,9 @@ pub enum PomoliceError {
     #[error("Input monitoring failed: {0}")]
     #[allow(dead_code)]
     InputMonitorFailed(String),
+
+    #[error("Invalid auto-run schedule: {reason}")]
+    InvalidAutoRunSchedule { reason: String },
 }
 
 /// Result type alias for Pomolice operations
@@ -89,6 +92,17 @@ mod tests {
         let result: Result<i32> = Ok(42);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 42);
+    }
+
+    #[test]
+    fn test_invalid_auto_run_schedule_error() {
+        let err = PomoliceError::InvalidAutoRunSchedule {
+            reason: "overlapping schedule windows between mon and tue".to_string(),
+        };
+        assert_eq!(
+            err.to_string(),
+            "Invalid auto-run schedule: overlapping schedule windows between mon and tue"
+        );
     }
 
 }

@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { playNotificationSoundPreview } from "../../services/notifications";
 import { SettingsModal } from "../Settings/SettingsModal";
 import { useSettingsStore } from "../../store/settingsStore";
+import { SessionType, TimerStatus, useTimerStore } from "../../store/timerStore";
 
 vi.mock("../../services/notifications", () => ({
   playNotificationSoundPreview: vi.fn(async () => ({ status: "played" })),
@@ -13,6 +14,21 @@ describe("SettingsModal", () => {
 
   beforeEach(() => {
     useSettingsStore.getState().reset();
+    useTimerStore.setState({
+      status: TimerStatus.IDLE,
+      remainingSeconds: 25 * 60,
+      sessionType: SessionType.WORK,
+      currentCycle: 0,
+      completedPomodoros: 0,
+      breakInteractionCount: 0,
+      isFullscreenBreak: false,
+      showContinueDialog: false,
+      isConnected: true,
+      shouldPromptStartOnBoot: false,
+      activeWindowSummary: null,
+      infoMessage: null,
+      infoMessageShownAtById: {},
+    });
     mockOnClose.mockClear();
     vi.mocked(playNotificationSoundPreview).mockResolvedValue({ status: "played" });
   });
@@ -361,6 +377,149 @@ describe("SettingsModal", () => {
 
       const workInputAfter = screen.getByTestId("settings-work-duration-input") as HTMLInputElement;
       expect(workInputAfter).toHaveValue(25); // Reset to original
+    });
+  });
+
+  describe("Weekly Auto-Run Schedule", () => {
+    it("should save weekday toggle and time inputs", () => {
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByTestId("settings-auto-run-feature-toggle"));
+      fireEvent.click(screen.getByTestId("settings-auto-run-day-enabled-mon"));
+
+      const mondayStartInput = screen.getByTestId(
+        "settings-auto-run-day-start-mon",
+      ) as HTMLInputElement;
+      const mondayEndInput = screen.getByTestId(
+        "settings-auto-run-day-end-mon",
+      ) as HTMLInputElement;
+
+      fireEvent.change(mondayStartInput, { target: { value: "08:30" } });
+      fireEvent.change(mondayEndInput, { target: { value: "17:30" } });
+
+      fireEvent.click(screen.getByTestId("settings-save"));
+
+      const settings = useSettingsStore.getState();
+      expect(settings.autoRunFeatureEnabled).toBe(true);
+      expect(settings.weeklyAutoRunConfig.mon.enabled).toBe(true);
+      expect(settings.weeklyAutoRunConfig.mon.startTime).toBe("08:30");
+      expect(settings.weeklyAutoRunConfig.mon.endTime).toBe("17:30");
+    });
+
+    it("should block save and show error when time text fails parseHhMm revalidation", () => {
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByTestId("settings-auto-run-feature-toggle"));
+      fireEvent.click(screen.getByTestId("settings-auto-run-day-enabled-mon"));
+      fireEvent.change(screen.getByTestId("settings-auto-run-day-start-mon"), {
+        target: { value: "9:00" },
+      });
+
+      expect(
+        screen.getByTestId("settings-auto-run-day-error-mon"),
+      ).toHaveTextContent("Start time for mon must use HH:MM (24-hour).");
+      expect(screen.getByTestId("settings-save")).toBeDisabled();
+    });
+
+    it("should show start==end validation and disable save", () => {
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByTestId("settings-auto-run-feature-toggle"));
+      fireEvent.click(screen.getByTestId("settings-auto-run-day-enabled-mon"));
+      fireEvent.change(screen.getByTestId("settings-auto-run-day-start-mon"), {
+        target: { value: "12:00" },
+      });
+      fireEvent.change(screen.getByTestId("settings-auto-run-day-end-mon"), {
+        target: { value: "12:00" },
+      });
+
+      expect(
+        screen.getByTestId("settings-auto-run-day-error-mon"),
+      ).toHaveTextContent("Start and end time cannot be identical for mon.");
+      expect(screen.getByTestId("settings-save")).toBeDisabled();
+    });
+
+    it("should show weekly overlap error for overlapping weekdays", () => {
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByTestId("settings-auto-run-feature-toggle"));
+      fireEvent.click(screen.getByTestId("settings-auto-run-day-enabled-mon"));
+      fireEvent.change(screen.getByTestId("settings-auto-run-day-start-mon"), {
+        target: { value: "22:00" },
+      });
+      fireEvent.change(screen.getByTestId("settings-auto-run-day-end-mon"), {
+        target: { value: "02:00" },
+      });
+
+      fireEvent.click(screen.getByTestId("settings-auto-run-day-enabled-tue"));
+      fireEvent.change(screen.getByTestId("settings-auto-run-day-start-tue"), {
+        target: { value: "01:00" },
+      });
+      fireEvent.change(screen.getByTestId("settings-auto-run-day-end-tue"), {
+        target: { value: "05:00" },
+      });
+
+      expect(screen.getByTestId("settings-auto-run-weekly-errors")).toBeInTheDocument();
+      expect(screen.getByText("Schedule windows overlap between mon and tue.")).toBeInTheDocument();
+    });
+
+    it("should show overnight label when start time is after end time", () => {
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByTestId("settings-auto-run-feature-toggle"));
+      fireEvent.click(screen.getByTestId("settings-auto-run-day-enabled-mon"));
+      fireEvent.change(screen.getByTestId("settings-auto-run-day-start-mon"), {
+        target: { value: "22:00" },
+      });
+      fireEvent.change(screen.getByTestId("settings-auto-run-day-end-mon"), {
+        target: { value: "02:00" },
+      });
+
+      expect(
+        screen.getByTestId("settings-auto-run-day-overnight-mon"),
+      ).toHaveTextContent("翌日まで");
+    });
+
+    it("should disable only duration inputs while non-idle and keep schedule editable", () => {
+      useTimerStore.setState({ status: TimerStatus.WORKING });
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+
+      expect(screen.getByTestId("settings-work-duration-input")).toBeDisabled();
+      expect(screen.getByTestId("settings-short-break-input")).toBeDisabled();
+      expect(screen.getByTestId("settings-long-break-input")).toBeDisabled();
+      expect(screen.getByTestId("settings-interval-input")).toBeDisabled();
+      expect(
+        screen.getByTestId("settings-duration-edit-disabled-message"),
+      ).toBeInTheDocument();
+
+      const featureToggle = screen.getByTestId("settings-auto-run-feature-toggle");
+      expect(featureToggle).not.toBeDisabled();
+      fireEvent.click(featureToggle);
+
+      const mondayEnabledToggle = screen.getByTestId("settings-auto-run-day-enabled-mon");
+      expect(mondayEnabledToggle).not.toBeDisabled();
+      fireEvent.click(mondayEnabledToggle);
+      expect(mondayEnabledToggle).toBeChecked();
+    });
+
+    it("should gray out weekday time inputs while the weekday is not enabled", () => {
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByTestId("settings-auto-run-feature-toggle"));
+
+      const mondayStartInput = screen.getByTestId(
+        "settings-auto-run-day-start-mon",
+      ) as HTMLInputElement;
+      const mondayEndInput = screen.getByTestId(
+        "settings-auto-run-day-end-mon",
+      ) as HTMLInputElement;
+      const mondayDayRow = screen.getByTestId("settings-auto-run-day-row-mon");
+
+      expect(mondayStartInput).toBeDisabled();
+      expect(mondayEndInput).toBeDisabled();
+      expect(mondayStartInput).toHaveClass("text-gray-400");
+      expect(mondayEndInput).toHaveClass("text-gray-400");
+      expect(mondayDayRow).toHaveClass("bg-gray-50");
     });
   });
 

@@ -18,6 +18,8 @@ vi.mock("@tauri-apps/api/core", () => ({
     break_interaction_count: 0,
     is_fullscreen_break: false,
     show_continue_dialog: false,
+    should_prompt_start_on_boot: false,
+    active_window_summary: null,
     settings: {
       work_duration_secs: 1500,
       short_break_duration_secs: 300,
