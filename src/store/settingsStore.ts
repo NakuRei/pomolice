@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { devtools, persist } from "zustand/middleware";
 import { immer } from "zustand/middleware/immer";
+import type { PostBreakTransitionPolicy } from "../types/sessionTransitionPolicy";
 import {
   WEEKDAY_KEYS,
   convertChronoWeekdayTokenToWeekdayKey,
@@ -54,6 +55,8 @@ interface SettingsState {
   notificationSoundMuted: boolean;
   /** Global toggle for scheduled auto-run behavior. */
   autoRunFeatureEnabled: boolean;
+  /** Policy used when a break session completes. */
+  post_break_transition_policy: PostBreakTransitionPolicy;
   /** Weekly auto-run schedule keyed by weekday. */
   weeklyAutoRunConfig: WeeklyAutoRunConfig;
   /** Validation errors scoped to each weekday row. */
@@ -74,6 +77,7 @@ type SettingsEditableValues = Pick<
   | "notificationSoundVolumePercent"
   | "notificationSoundMuted"
   | "autoRunFeatureEnabled"
+  | "post_break_transition_policy"
   | "weeklyAutoRunConfig"
 >;
 
@@ -95,6 +99,8 @@ interface SettingsActions {
   toggleNotificationSoundMuted: () => void;
   /** Enable or disable scheduled auto-run globally. */
   setAutoRunFeatureEnabled: (enabled: boolean) => void;
+  /** Set policy for transition behavior after break completion. */
+  setPostBreakTransitionPolicy: (policy: PostBreakTransitionPolicy) => void;
   /** Enable or disable one weekday slot. */
   setDayAutoRunEnabled: (weekday: WeekdayKey, enabled: boolean) => void;
   /** Update one weekday start time in `HH:MM` format. */
@@ -126,6 +132,7 @@ function createDefaultSettingsState(): SettingsState {
     notificationSoundVolumePercent: 50,
     notificationSoundMuted: false,
     autoRunFeatureEnabled: false,
+    post_break_transition_policy: "require_manual_continue",
     weeklyAutoRunConfig: createWeeklyAutoRunConfigAllDaysDisabled(),
     dayScheduleValidationErrors: {},
     weeklyScheduleValidationErrors: [],
@@ -504,6 +511,11 @@ export const useSettingsStore = create<SettingsStore>()(
             state.autoRunFeatureEnabled = enabled;
           }),
 
+        setPostBreakTransitionPolicy: (policy: PostBreakTransitionPolicy) =>
+          set((state) => {
+            state.post_break_transition_policy = policy;
+          }),
+
         setDayAutoRunEnabled: (weekday: WeekdayKey, enabled: boolean) =>
           set((state) => {
             state.weeklyAutoRunConfig[weekday].enabled = enabled;
@@ -565,6 +577,10 @@ export const useSettingsStore = create<SettingsStore>()(
 
             if (settings.autoRunFeatureEnabled !== undefined) {
               state.autoRunFeatureEnabled = settings.autoRunFeatureEnabled;
+            }
+            if (settings.post_break_transition_policy !== undefined) {
+              state.post_break_transition_policy =
+                settings.post_break_transition_policy;
             }
 
             if (settings.weeklyAutoRunConfig !== undefined) {

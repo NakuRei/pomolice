@@ -13,8 +13,11 @@ import {
   SessionCompletedPayload,
   FullStatePayload,
 } from "../store/timerStore";
-import { notifyWorkComplete, notifyBreakComplete, notifyLongBreakComplete } from "../services/notifications";
-import { SessionType } from "../store/timerStore";
+import {
+  notifyWorkComplete,
+  notifyBreakAutoStarted,
+  notifyBreakComplete,
+} from "../services/notifications";
 import { useErrorStore } from "../store/errorStore";
 
 /** Maximum number of automatic retry attempts before giving up and showing the error banner. */
@@ -69,14 +72,14 @@ export function useTimerSync() {
             if (mounted) {
               handleSessionCompleted(event.payload);
 
-              // Show notification based on completed session type
-              const { completed_session_type, next_session_type } = event.payload;
-              if (completed_session_type === SessionType.WORK) {
+              // Notification routing is decided only by transition_reason.
+              const { transition_reason, next_session_type } = event.payload;
+              if (transition_reason === "work_to_break") {
                 notifyWorkComplete(next_session_type);
-              } else if (completed_session_type === SessionType.SHORT_BREAK) {
+              } else if (transition_reason === "break_waiting_decision") {
                 notifyBreakComplete();
-              } else if (completed_session_type === SessionType.LONG_BREAK) {
-                notifyLongBreakComplete();
+              } else if (transition_reason === "break_auto_started") {
+                notifyBreakAutoStarted();
               }
             }
           }

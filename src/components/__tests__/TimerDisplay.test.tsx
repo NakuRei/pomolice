@@ -14,7 +14,7 @@ describe("TimerDisplay", () => {
       completedPomodoros: 0,
       breakInteractionCount: 0,
       isFullscreenBreak: false,
-      showContinueDialog: false,
+      requiresManualContinueDecision: false,
       isConnected: false,
     });
   });

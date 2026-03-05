@@ -278,6 +278,17 @@ export async function notifyBreakComplete(): Promise<void> {
 }
 
 /**
+ * Show notification when break session auto-starts the next work session.
+ */
+export async function notifyBreakAutoStarted(): Promise<void> {
+  await sendSessionCompleteNotification({
+    title: '休憩終了',
+    body: '休憩終了。次の作業を自動開始しました。',
+    soundType: 'work',
+  });
+}
+
+/**
  * Show notification when long break session is complete
  */
 export async function notifyLongBreakComplete(): Promise<void> {

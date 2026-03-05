@@ -10,8 +10,8 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { useTimerStore, TimerStatus, SessionType } from "../../store/timerStore";
 import {
   notifyWorkComplete,
+  notifyBreakAutoStarted,
   notifyBreakComplete,
-  notifyLongBreakComplete,
 } from "../../services/notifications";
 
 // Mock Tauri APIs
@@ -34,8 +34,8 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
 
 vi.mock("../../services/notifications", () => ({
   notifyWorkComplete: vi.fn(),
+  notifyBreakAutoStarted: vi.fn(),
   notifyBreakComplete: vi.fn(),
-  notifyLongBreakComplete: vi.fn(),
 }));
 
 // Import after mocking
@@ -54,7 +54,7 @@ describe("useTimerSync", () => {
       completedPomodoros: 0,
       breakInteractionCount: 0,
       isFullscreenBreak: false,
-      showContinueDialog: false,
+      requiresManualContinueDecision: false,
       isConnected: false,
       shouldPromptStartOnBoot: false,
       activeWindowSummary: null,
@@ -72,7 +72,7 @@ describe("useTimerSync", () => {
       completed_pomodoros: 0,
       break_interaction_count: 0,
       is_fullscreen_break: false,
-      show_continue_dialog: false,
+      post_break_decision_pending: false,
       should_prompt_start_on_boot: false,
       active_window_summary: null,
       settings: {
@@ -80,6 +80,7 @@ describe("useTimerSync", () => {
         short_break_duration_secs: 300,
         long_break_duration_secs: 900,
         long_break_interval: 4,
+        post_break_transition_policy: "require_manual_continue",
       },
     });
   });
@@ -167,13 +168,16 @@ describe("useTimerSync", () => {
     // Simulate session completed from backend
     sessionHandler!({
       payload: {
+        transition_reason: "break_waiting_decision",
         completed_session_type: "short_break",
-        next_session_type: null,
-        show_continue_dialog: true,
+        next_status: "idle",
+        next_session_type: "work",
+        requires_manual_continue_decision: true,
+        post_break_decision_pending: true,
       },
     });
 
-    expect(useTimerStore.getState().showContinueDialog).toBe(true);
+    expect(useTimerStore.getState().requiresManualContinueDecision).toBe(true);
   });
 
   it("should call notifyWorkComplete with next_session_type", async () => {
@@ -194,16 +198,22 @@ describe("useTimerSync", () => {
 
     sessionHandler!({
       payload: {
+        transition_reason: "work_to_break",
         completed_session_type: "work",
+        next_status: "on_break",
         next_session_type: "long_break",
-        show_continue_dialog: false,
+        requires_manual_continue_decision: false,
+        post_break_decision_pending: false,
       },
     });
 
     expect(notifyWorkComplete).toHaveBeenCalledWith("long_break");
+    expect(notifyWorkComplete).toHaveBeenCalledTimes(1);
+    expect(notifyBreakComplete).not.toHaveBeenCalled();
+    expect(notifyBreakAutoStarted).not.toHaveBeenCalled();
   });
 
-  it("should call break completion notifications for completed breaks", async () => {
+  it("should call notifyBreakComplete when transition_reason is break_waiting_decision", async () => {
     let sessionHandler: ((event: { payload: unknown }) => void) | undefined;
 
     mockListen.mockImplementation((event: string, handler: (event: { payload: unknown }) => void) => {
@@ -221,22 +231,82 @@ describe("useTimerSync", () => {
 
     sessionHandler!({
       payload: {
-        completed_session_type: "short_break",
-        next_session_type: null,
-        show_continue_dialog: true,
+        transition_reason: "break_waiting_decision",
+        completed_session_type: "long_break",
+        next_status: "idle",
+        next_session_type: "work",
+        requires_manual_continue_decision: true,
+        post_break_decision_pending: true,
       },
+    });
+
+    expect(notifyBreakComplete).toHaveBeenCalledTimes(1);
+    expect(notifyBreakAutoStarted).not.toHaveBeenCalled();
+    expect(notifyWorkComplete).not.toHaveBeenCalled();
+  });
+
+  it("should call notifyBreakAutoStarted when transition_reason is break_auto_started", async () => {
+    let sessionHandler: ((event: { payload: unknown }) => void) | undefined;
+
+    mockListen.mockImplementation((event: string, handler: (event: { payload: unknown }) => void) => {
+      if (event === "session_completed") {
+        sessionHandler = handler;
+      }
+      return Promise.resolve(() => {});
+    });
+
+    renderHook(() => useTimerSync());
+
+    await waitFor(() => {
+      expect(sessionHandler).toBeDefined();
     });
 
     sessionHandler!({
       payload: {
-        completed_session_type: "long_break",
-        next_session_type: null,
-        show_continue_dialog: true,
+        transition_reason: "break_auto_started",
+        completed_session_type: "short_break",
+        next_status: "working",
+        next_session_type: "work",
+        requires_manual_continue_decision: false,
+        post_break_decision_pending: false,
       },
     });
 
-    expect(notifyBreakComplete).toHaveBeenCalled();
-    expect(notifyLongBreakComplete).toHaveBeenCalled();
+    expect(notifyBreakAutoStarted).toHaveBeenCalledTimes(1);
+    expect(notifyBreakComplete).not.toHaveBeenCalled();
+    expect(notifyWorkComplete).not.toHaveBeenCalled();
+  });
+
+  it("should not call work-resume notifications for scheduled_stop_executed", async () => {
+    let sessionHandler: ((event: { payload: unknown }) => void) | undefined;
+
+    mockListen.mockImplementation((event: string, handler: (event: { payload: unknown }) => void) => {
+      if (event === "session_completed") {
+        sessionHandler = handler;
+      }
+      return Promise.resolve(() => {});
+    });
+
+    renderHook(() => useTimerSync());
+
+    await waitFor(() => {
+      expect(sessionHandler).toBeDefined();
+    });
+
+    sessionHandler!({
+      payload: {
+        transition_reason: "scheduled_stop_executed",
+        completed_session_type: "short_break",
+        next_status: "idle",
+        next_session_type: "work",
+        requires_manual_continue_decision: false,
+        post_break_decision_pending: false,
+      },
+    });
+
+    expect(notifyWorkComplete).not.toHaveBeenCalled();
+    expect(notifyBreakComplete).not.toHaveBeenCalled();
+    expect(notifyBreakAutoStarted).not.toHaveBeenCalled();
   });
 
   it("should clean up listeners on unmount", async () => {
@@ -302,12 +372,19 @@ describe("useTimerSync", () => {
 
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith(
-        "sync_all_settings",
+        "sync_timer_duration_settings",
         expect.objectContaining({
           workDurationSecs: expect.any(Number),
           shortBreakDurationSecs: expect.any(Number),
           longBreakDurationSecs: expect.any(Number),
           longBreakInterval: expect.any(Number),
+        })
+      );
+
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "sync_automation_policies",
+        expect.objectContaining({
+          postBreakTransitionPolicy: "require_manual_continue",
           autoRunFeatureEnabled: expect.any(Boolean),
           weeklyAutoRunConfig: expect.any(Object),
         })
@@ -315,3 +392,4 @@ describe("useTimerSync", () => {
     });
   });
 });
+

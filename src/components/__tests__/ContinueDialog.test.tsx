@@ -20,20 +20,20 @@ describe("ContinueDialog", () => {
       completedPomodoros: 0,
       breakInteractionCount: 0,
       isFullscreenBreak: false,
-      showContinueDialog: false,
+      requiresManualContinueDecision: false,
       isConnected: false,
     });
   });
 
   describe("Visibility", () => {
-    it("should not render when showContinueDialog is false", () => {
+    it("should not render when requiresManualContinueDecision is false", () => {
       render(<ContinueDialog />);
       const dialog = screen.queryByTestId("continue-dialog");
       expect(dialog).not.toBeInTheDocument();
     });
 
-    it("should render when showContinueDialog is true", () => {
-      useTimerStore.setState({ showContinueDialog: true });
+    it("should render when requiresManualContinueDecision is true", () => {
+      useTimerStore.setState({ requiresManualContinueDecision: true });
       render(<ContinueDialog />);
       const dialog = screen.getByTestId("continue-dialog");
       expect(dialog).toBeInTheDocument();
@@ -43,7 +43,7 @@ describe("ContinueDialog", () => {
   describe("Dialog Content", () => {
     beforeEach(() => {
       useTimerStore.setState({
-        showContinueDialog: true,
+        requiresManualContinueDecision: true,
         completedPomodoros: 3,
       });
     });
@@ -69,6 +69,15 @@ describe("ContinueDialog", () => {
       expect(screen.getByText("次のポモドーロを続けますか？")).toBeInTheDocument();
     });
 
+    it("should display manual decision pending explanation", () => {
+      render(<ContinueDialog />);
+      expect(
+        screen.getByTestId("continue-dialog-manual-decision-message")
+      ).toHaveTextContent(
+        "現在、手動判断待ちです。続けるか終了を選んでください。"
+      );
+    });
+
     it("should have continue and end buttons", () => {
       render(<ContinueDialog />);
       expect(screen.getByTestId("continue-dialog-continue")).toBeInTheDocument();
@@ -79,14 +88,14 @@ describe("ContinueDialog", () => {
   describe("Button Actions", () => {
     beforeEach(() => {
       useTimerStore.setState({
-        showContinueDialog: true,
+        requiresManualContinueDecision: true,
         status: TimerStatus.IDLE,
         currentCycle: 2,
         completedPomodoros: 2,
       });
     });
 
-    it("should call continueToNextSession when continue button is clicked", async () => {
+    it("should call resolvePostBreakDecision with continue when continue button is clicked", async () => {
       const { invoke } = await import("@tauri-apps/api/core");
       const user = userEvent.setup();
       render(<ContinueDialog />);
@@ -94,11 +103,13 @@ describe("ContinueDialog", () => {
       const continueButton = screen.getByTestId("continue-dialog-continue");
       await user.click(continueButton);
 
-      // Backend receives the command to start next session
-      expect(invoke).toHaveBeenCalledWith("continue_to_next_session");
+      // Backend receives the unified manual decision command.
+      expect(invoke).toHaveBeenCalledWith("resolve_post_break_decision", {
+        action: "continue",
+      });
     });
 
-    it("should call endCycle when end button is clicked", async () => {
+    it("should call resolvePostBreakDecision with stop_cycle when end button is clicked", async () => {
       const { invoke } = await import("@tauri-apps/api/core");
       const user = userEvent.setup();
       render(<ContinueDialog />);
@@ -106,15 +117,17 @@ describe("ContinueDialog", () => {
       const endButton = screen.getByTestId("continue-dialog-end");
       await user.click(endButton);
 
-      // Backend receives the command to end cycle
-      expect(invoke).toHaveBeenCalledWith("end_cycle");
+      // Backend receives the unified manual decision command.
+      expect(invoke).toHaveBeenCalledWith("resolve_post_break_decision", {
+        action: "stop_cycle",
+      });
     });
   });
 
   describe("Dynamic Updates", () => {
     it("should update pomodoro count display", () => {
       useTimerStore.setState({
-        showContinueDialog: true,
+        requiresManualContinueDecision: true,
         completedPomodoros: 5,
       });
       const { rerender } = render(<ContinueDialog />);
@@ -130,15 +143,15 @@ describe("ContinueDialog", () => {
       expect(screen.getByText("10")).toBeInTheDocument();
     });
 
-    it("should hide when showContinueDialog becomes false", () => {
-      useTimerStore.setState({ showContinueDialog: true });
+    it("should hide when requiresManualContinueDecision becomes false", () => {
+      useTimerStore.setState({ requiresManualContinueDecision: true });
       const { rerender } = render(<ContinueDialog />);
 
       expect(screen.getByTestId("continue-dialog")).toBeInTheDocument();
 
       // Hide dialog
       act(() => {
-        useTimerStore.setState({ showContinueDialog: false });
+        useTimerStore.setState({ requiresManualContinueDecision: false });
       });
       rerender(<ContinueDialog />);
 
@@ -148,7 +161,7 @@ describe("ContinueDialog", () => {
 
   describe("Button Labels", () => {
     beforeEach(() => {
-      useTimerStore.setState({ showContinueDialog: true });
+      useTimerStore.setState({ requiresManualContinueDecision: true });
     });
 
     it("should have correct text on continue button", () => {
@@ -166,7 +179,7 @@ describe("ContinueDialog", () => {
 
   describe("Dialog Styling", () => {
     beforeEach(() => {
-      useTimerStore.setState({ showContinueDialog: true });
+      useTimerStore.setState({ requiresManualContinueDecision: true });
     });
 
     it("should have overlay background", () => {
@@ -192,7 +205,7 @@ describe("ContinueDialog", () => {
   describe("Edge Cases", () => {
     it("should handle zero completed pomodoros", () => {
       useTimerStore.setState({
-        showContinueDialog: true,
+        requiresManualContinueDecision: true,
         completedPomodoros: 0,
       });
       render(<ContinueDialog />);
@@ -202,7 +215,7 @@ describe("ContinueDialog", () => {
 
     it("should handle large pomodoro counts", () => {
       useTimerStore.setState({
-        showContinueDialog: true,
+        requiresManualContinueDecision: true,
         completedPomodoros: 100,
       });
       render(<ContinueDialog />);

@@ -104,5 +104,4 @@ mod tests {
             "Invalid auto-run schedule: overlapping schedule windows between mon and tue"
         );
     }
-
 }

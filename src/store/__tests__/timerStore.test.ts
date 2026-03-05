@@ -13,7 +13,7 @@ describe("timerStore", () => {
       completedPomodoros: 0,
       breakInteractionCount: 0,
       isFullscreenBreak: false,
-      showContinueDialog: false,
+      requiresManualContinueDecision: false,
       isConnected: false,
       shouldPromptStartOnBoot: false,
       activeWindowSummary: null,
@@ -51,7 +51,7 @@ describe("timerStore", () => {
 
     it("should not show continue dialog initially", () => {
       const state = useTimerStore.getState();
-      expect(state.showContinueDialog).toBe(false);
+      expect(state.requiresManualContinueDecision).toBe(false);
     });
   });
 
@@ -118,26 +118,66 @@ describe("timerStore", () => {
         const { handleSessionCompleted } = useTimerStore.getState();
 
         handleSessionCompleted({
+          transition_reason: "break_waiting_decision",
           completed_session_type: SessionType.SHORT_BREAK,
-          next_session_type: null,
-          show_continue_dialog: true,
+          next_status: TimerStatus.IDLE,
+          next_session_type: SessionType.WORK,
+          requires_manual_continue_decision: true,
+          post_break_decision_pending: true,
         });
 
         const state = useTimerStore.getState();
-        expect(state.showContinueDialog).toBe(true);
+        expect(state.requiresManualContinueDecision).toBe(true);
       });
 
       it("should not show continue dialog when work completes", () => {
         const { handleSessionCompleted } = useTimerStore.getState();
 
         handleSessionCompleted({
+          transition_reason: "work_to_break",
           completed_session_type: SessionType.WORK,
+          next_status: TimerStatus.ON_BREAK,
           next_session_type: SessionType.SHORT_BREAK,
-          show_continue_dialog: false,
+          requires_manual_continue_decision: false,
+          post_break_decision_pending: false,
         });
 
         const state = useTimerStore.getState();
-        expect(state.showContinueDialog).toBe(false);
+        expect(state.requiresManualContinueDecision).toBe(false);
+      });
+
+      it("should keep continue dialog hidden when break auto-starts next work", () => {
+        const { handleSessionCompleted } = useTimerStore.getState();
+        useTimerStore.setState({ requiresManualContinueDecision: true });
+
+        handleSessionCompleted({
+          transition_reason: "break_auto_started",
+          completed_session_type: SessionType.SHORT_BREAK,
+          next_status: TimerStatus.WORKING,
+          next_session_type: SessionType.WORK,
+          requires_manual_continue_decision: false,
+          post_break_decision_pending: false,
+        });
+
+        const state = useTimerStore.getState();
+        expect(state.requiresManualContinueDecision).toBe(false);
+      });
+
+      it("should keep continue dialog hidden when scheduled stop executes", () => {
+        const { handleSessionCompleted } = useTimerStore.getState();
+        useTimerStore.setState({ requiresManualContinueDecision: true });
+
+        handleSessionCompleted({
+          transition_reason: "scheduled_stop_executed",
+          completed_session_type: SessionType.SHORT_BREAK,
+          next_status: TimerStatus.IDLE,
+          next_session_type: SessionType.WORK,
+          requires_manual_continue_decision: false,
+          post_break_decision_pending: false,
+        });
+
+        const state = useTimerStore.getState();
+        expect(state.requiresManualContinueDecision).toBe(false);
       });
     });
 
@@ -153,7 +193,7 @@ describe("timerStore", () => {
           completed_pomodoros: 2,
           break_interaction_count: 0,
           is_fullscreen_break: false,
-          show_continue_dialog: false,
+          post_break_decision_pending: false,
           should_prompt_start_on_boot: false,
           active_window_summary: null,
           settings: {
@@ -161,6 +201,7 @@ describe("timerStore", () => {
             short_break_duration_secs: 300,
             long_break_duration_secs: 900,
             long_break_interval: 4,
+            post_break_transition_policy: "require_manual_continue",
           },
         });
 
@@ -183,7 +224,7 @@ describe("timerStore", () => {
           completed_pomodoros: 0,
           break_interaction_count: 0,
           is_fullscreen_break: false,
-          show_continue_dialog: false,
+          post_break_decision_pending: false,
           should_prompt_start_on_boot: true,
           active_window_summary: {
             weekday_key: "mon",
@@ -196,6 +237,7 @@ describe("timerStore", () => {
             short_break_duration_secs: 300,
             long_break_duration_secs: 900,
             long_break_interval: 4,
+            post_break_transition_policy: "require_manual_continue",
           },
         });
 
@@ -315,3 +357,5 @@ describe("timerStore", () => {
     });
   });
 });
+
+

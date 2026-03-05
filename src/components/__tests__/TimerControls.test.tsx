@@ -20,7 +20,7 @@ describe("TimerControls", () => {
       completedPomodoros: 0,
       breakInteractionCount: 0,
       isFullscreenBreak: false,
-      showContinueDialog: false,
+      requiresManualContinueDecision: false,
       isConnected: false,
     });
   });
@@ -54,6 +54,7 @@ describe("TimerControls", () => {
           shortBreakDurationSecs: expect.any(Number),
           longBreakDurationSecs: expect.any(Number),
           longBreakInterval: expect.any(Number),
+          postBreakTransitionPolicy: "require_manual_continue",
         })
       );
     });

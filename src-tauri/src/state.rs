@@ -64,10 +64,7 @@ impl AppState {
     }
 
     /// Create a new AppState instance with an injected clock implementation.
-    pub fn new_with_clock(
-        app_handle: AppHandle,
-        clock: Arc<dyn Clock + Send + Sync>,
-    ) -> Self {
+    pub fn new_with_clock(app_handle: AppHandle, clock: Arc<dyn Clock + Send + Sync>) -> Self {
         info!("Creating new AppState");
         let persistence = Arc::new(PersistenceManager::new(clock.clone()));
 
@@ -84,20 +81,21 @@ impl AppState {
             info!("No persisted state found, using defaults");
         }
 
-        let restored_running_saved_at_local = match (
-            initial_timer_state.as_ref(),
-            restored_saved_at_utc,
-        ) {
-            (Some(timer_state), Some(saved_at_utc))
-                if matches!(timer_state.status, TimerStatus::Working | TimerStatus::OnBreak) =>
-            {
-                let saved_at_local = saved_at_utc.with_timezone(&Local);
-                let now_local = clock.now_local();
-                let lookback_floor_local = now_local - ChronoDuration::days(7);
-                Some(saved_at_local.max(lookback_floor_local))
-            }
-            _ => None,
-        };
+        let restored_running_saved_at_local =
+            match (initial_timer_state.as_ref(), restored_saved_at_utc) {
+                (Some(timer_state), Some(saved_at_utc))
+                    if matches!(
+                        timer_state.status,
+                        TimerStatus::Working | TimerStatus::OnBreak
+                    ) =>
+                {
+                    let saved_at_local = saved_at_utc.with_timezone(&Local);
+                    let now_local = clock.now_local();
+                    let lookback_floor_local = now_local - ChronoDuration::days(7);
+                    Some(saved_at_local.max(lookback_floor_local))
+                }
+                _ => None,
+            };
 
         let app_for_escape = app_handle.clone();
         let app_for_input = app_handle.clone();

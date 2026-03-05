@@ -32,7 +32,7 @@ describe("Timer Store - Penalty System", () => {
       sessionType: SessionType.WORK,
       completedPomodoros: 0,
       currentCycle: 0,
-      showContinueDialog: false,
+      requiresManualContinueDecision: false,
       isFullscreenBreak: false,
       breakInteractionCount: 0,
       isConnected: false,
@@ -182,7 +182,7 @@ describe("Timer Store - Penalty System", () => {
         completed_pomodoros: 4,
         break_interaction_count: 7,
         is_fullscreen_break: true,
-        show_continue_dialog: false,
+        post_break_decision_pending: false,
         should_prompt_start_on_boot: false,
         active_window_summary: null,
         settings: {
@@ -190,6 +190,7 @@ describe("Timer Store - Penalty System", () => {
           short_break_duration_secs: 300,
           long_break_duration_secs: 900,
           long_break_interval: 4,
+          post_break_transition_policy: "require_manual_continue",
         },
       });
 
@@ -234,3 +235,5 @@ describe("Timer Store - Penalty System", () => {
     });
   });
 });
+
+

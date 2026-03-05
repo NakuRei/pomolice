@@ -6,6 +6,11 @@ import { useSettingsStore } from "./settingsStore";
 import { useErrorStore } from "./errorStore";
 import { classifyBackendError } from "../errors/classifyBackendError";
 import type { WeekdayKey } from "../types/weeklyAutoRun";
+import type {
+  PostBreakDecisionAction,
+  PostBreakTransitionPolicy,
+  SessionTransitionOutcome,
+} from "../types/sessionTransitionPolicy";
 
 /**
  * Timer status constants matching backend TimerStatus enum
@@ -45,22 +50,22 @@ export interface TimerTickPayload {
 /**
  * Payload received from backend session_completed events
  */
-export interface SessionCompletedPayload {
-  completed_session_type: SessionTypeValue;
-  next_session_type: SessionTypeValue | null;
-  show_continue_dialog: boolean;
+export interface SessionCompletedPayload extends SessionTransitionOutcome {
+  // Temporary compatibility alias; mirrors requires_manual_continue_decision.
+  post_break_decision_pending: boolean;
 }
 
 /**
  * Full state payload from backend get_full_state command
  */
 export interface FullStatePayload extends TimerTickPayload {
-  show_continue_dialog: boolean;
+  post_break_decision_pending: boolean;
   settings: {
     work_duration_secs: number;
     short_break_duration_secs: number;
     long_break_duration_secs: number;
     long_break_interval: number;
+    post_break_transition_policy: PostBreakTransitionPolicy;
   };
   should_prompt_start_on_boot: boolean;
   active_window_summary: ActiveWindowSummaryPayload | null;
@@ -102,7 +107,7 @@ interface TimerState {
   isFullscreenBreak: boolean;
 
   // UI-only state
-  showContinueDialog: boolean;
+  requiresManualContinueDecision: boolean;
   isConnected: boolean;
   shouldPromptStartOnBoot: boolean;
   activeWindowSummary: ActiveWindowSummaryPayload | null;
@@ -117,8 +122,7 @@ interface TimerState {
 interface TimerActions {
   // User actions (send commands to backend)
   start: () => Promise<void>;
-  startNextSession: () => Promise<void>;
-  endCycle: () => Promise<void>;
+  resolvePostBreakDecision: (action: PostBreakDecisionAction) => Promise<void>;
   emergencyStop: () => Promise<void>;
   syncSettings: () => Promise<void>;
   resolveBootAutoStartPrompt: (startNow: boolean) => Promise<void>;
@@ -140,37 +144,35 @@ interface TimerActions {
 
 type TimerStore = TimerState & TimerActions;
 
-type SyncAllSettingsCommandPayload = Record<string, unknown> & {
+type SyncTimerDurationSettingsCommandPayload = Record<string, unknown> & {
   workDurationSecs: number;
   shortBreakDurationSecs: number;
   longBreakDurationSecs: number;
   longBreakInterval: number;
+};
+
+type SyncAutomationPoliciesCommandPayload = Record<string, unknown> & {
+  postBreakTransitionPolicy: PostBreakTransitionPolicy;
   autoRunFeatureEnabled: boolean;
   weeklyAutoRunConfig: ReturnType<typeof useSettingsStore.getState>["weeklyAutoRunConfig"];
 };
 
-type SyncAutoRunSettingsCommandPayload = Record<string, unknown> & {
-  autoRunFeatureEnabled: boolean;
-  weeklyAutoRunConfig: ReturnType<typeof useSettingsStore.getState>["weeklyAutoRunConfig"];
-};
-
-function createSyncAllSettingsCommandPayload(
+function createSyncTimerDurationSettingsCommandPayload(
   settings: ReturnType<typeof useSettingsStore.getState>
-): SyncAllSettingsCommandPayload {
+): SyncTimerDurationSettingsCommandPayload {
   return {
     workDurationSecs: settings.workDuration * 60,
     shortBreakDurationSecs: settings.shortBreakDuration * 60,
     longBreakDurationSecs: settings.longBreakDuration * 60,
     longBreakInterval: settings.longBreakInterval,
-    autoRunFeatureEnabled: settings.autoRunFeatureEnabled,
-    weeklyAutoRunConfig: settings.weeklyAutoRunConfig,
   };
 }
 
-function createSyncAutoRunSettingsCommandPayload(
+function createSyncAutomationPoliciesCommandPayload(
   settings: ReturnType<typeof useSettingsStore.getState>
-): SyncAutoRunSettingsCommandPayload {
+): SyncAutomationPoliciesCommandPayload {
   return {
+    postBreakTransitionPolicy: settings.post_break_transition_policy,
     autoRunFeatureEnabled: settings.autoRunFeatureEnabled,
     weeklyAutoRunConfig: settings.weeklyAutoRunConfig,
   };
@@ -211,7 +213,7 @@ const initialState: TimerState = {
   completedPomodoros: 0,
   breakInteractionCount: 0,
   isFullscreenBreak: false,
-  showContinueDialog: false,
+  requiresManualContinueDecision: false,
   isConnected: false,
   shouldPromptStartOnBoot: false,
   activeWindowSummary: null,
@@ -244,6 +246,7 @@ export const useTimerStore = create<TimerStore>()(
             shortBreakDurationSecs: settings.shortBreakDuration * 60,
             longBreakDurationSecs: settings.longBreakDuration * 60,
             longBreakInterval: settings.longBreakInterval,
+            postBreakTransitionPolicy: settings.post_break_transition_policy,
           });
           useErrorStore.getState().clearError("start_work");
         } catch (error) {
@@ -263,48 +266,32 @@ export const useTimerStore = create<TimerStore>()(
         }
       },
 
-      // Continue to next work session after break
-      startNextSession: async () => {
+      // Resolve manual decision after break (continue or stop cycle).
+      resolvePostBreakDecision: async (action: PostBreakDecisionAction) => {
         try {
-          await invoke("continue_to_next_session");
-          set((state) => { state.showContinueDialog = false; });
-          useErrorStore.getState().clearError("continue_to_next_session");
+          await invoke("resolve_post_break_decision", { action });
+          set((state) => {
+            state.requiresManualContinueDecision = false;
+          });
+          useErrorStore.getState().clearError("resolve_post_break_decision");
         } catch (error) {
           const detail = String(error);
-          const { userMessage, severity } = classifyBackendError(detail, "continue_to_next_session");
+          const { userMessage, severity } = classifyBackendError(
+            detail,
+            "resolve_post_break_decision"
+          );
           useErrorStore.getState().reportError({
-            id: "continue_to_next_session",
+            id: "resolve_post_break_decision",
             message: userMessage,
             technicalDetail: detail,
             severity,
             origin: "backend_command",
             canRetry: true,
-            retryFn: null,
+            retryFn: async () => {
+              await get().resolvePostBreakDecision(action);
+            },
           });
-          console.error("Failed to continue to next session:", error);
-          throw error;
-        }
-      },
-
-      // End current cycle
-      endCycle: async () => {
-        try {
-          await invoke("end_cycle");
-          set((state) => { state.showContinueDialog = false; });
-          useErrorStore.getState().clearError("end_cycle");
-        } catch (error) {
-          const detail = String(error);
-          const { userMessage, severity } = classifyBackendError(detail, "end_cycle");
-          useErrorStore.getState().reportError({
-            id: "end_cycle",
-            message: userMessage,
-            technicalDetail: detail,
-            severity,
-            origin: "backend_command",
-            canRetry: true,
-            retryFn: null,
-          });
-          console.error("Failed to end cycle:", error);
+          console.error(`Failed to resolve post-break decision (${action}):`, error);
           throw error;
         }
       },
@@ -336,17 +323,15 @@ export const useTimerStore = create<TimerStore>()(
         const settings = useSettingsStore.getState();
         const timerStatus = get().status;
         try {
+          const automationPoliciesPayload =
+            createSyncAutomationPoliciesCommandPayload(settings);
           if (timerStatus === TimerStatus.IDLE) {
             await invoke(
-              "sync_all_settings",
-              createSyncAllSettingsCommandPayload(settings)
-            );
-          } else {
-            await invoke(
-              "sync_auto_run_settings",
-              createSyncAutoRunSettingsCommandPayload(settings)
+              "sync_timer_duration_settings",
+              createSyncTimerDurationSettingsCommandPayload(settings)
             );
           }
+          await invoke("sync_automation_policies", automationPoliciesPayload);
         } catch (error) {
           // Silently fail - settings sync is not critical
           console.debug("Settings sync failed (timer may be running):", error);
@@ -442,7 +427,7 @@ export const useTimerStore = create<TimerStore>()(
       // Handle session completed event from backend
       handleSessionCompleted: (payload: SessionCompletedPayload) =>
         set((state) => {
-          state.showContinueDialog = payload.show_continue_dialog;
+          state.requiresManualContinueDecision = payload.requires_manual_continue_decision;
           // Session type will be updated via timer_tick event
         }),
 
@@ -456,7 +441,7 @@ export const useTimerStore = create<TimerStore>()(
           state.completedPomodoros = payload.completed_pomodoros;
           state.breakInteractionCount = payload.break_interaction_count;
           state.isFullscreenBreak = payload.is_fullscreen_break;
-          state.showContinueDialog = payload.show_continue_dialog;
+          state.requiresManualContinueDecision = payload.post_break_decision_pending;
           state.shouldPromptStartOnBoot = payload.should_prompt_start_on_boot;
           state.activeWindowSummary = payload.active_window_summary;
           state.isConnected = true;

@@ -2,11 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Persisted state schema version without auto-run fields.
-pub const PERSISTED_STATE_SCHEMA_VERSION_V1: u32 = 1;
-
-/// Persisted state schema version with auto-run related fields.
-pub const PERSISTED_STATE_SCHEMA_VERSION_V2: u32 = 2;
+/// Persisted state schema version currently supported by this binary.
+pub const PERSISTED_STATE_SCHEMA_VERSION_V3: u32 = 3;
 
 /// Timer status representing the current phase
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -33,6 +30,8 @@ pub struct TimerSettings {
     pub short_break_duration_secs: u64,
     pub long_break_duration_secs: u64,
     pub long_break_interval: u32,
+    #[serde(default)]
+    pub post_break_transition_policy: PostBreakTransitionPolicy,
 }
 
 impl Default for TimerSettings {
@@ -42,6 +41,7 @@ impl Default for TimerSettings {
             short_break_duration_secs: 5 * 60, // 5 minutes
             long_break_duration_secs: 15 * 60, // 15 minutes
             long_break_interval: 4,
+            post_break_transition_policy: PostBreakTransitionPolicy::RequireManualContinue,
         }
     }
 }
@@ -181,6 +181,134 @@ impl Default for ScheduledStopState {
     }
 }
 
+/// Policy for deciding what happens when a break session finishes.
+///
+/// Usage example:
+/// ```rust,ignore
+/// let policy = PostBreakTransitionPolicy::RequireManualContinue;
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
+pub enum PostBreakTransitionPolicy {
+    RequireManualContinue,
+    StartNextWorkAutomatically,
+}
+
+impl Default for PostBreakTransitionPolicy {
+    fn default() -> Self {
+        Self::RequireManualContinue
+    }
+}
+
+/// Action selected while a post-break manual decision is pending.
+///
+/// Usage example:
+/// ```rust,ignore
+/// let action = PostBreakDecisionAction::Continue;
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
+pub enum PostBreakDecisionAction {
+    Continue,
+    StopCycle,
+}
+
+/// Reason emitted for a session-boundary transition.
+///
+/// Usage example:
+/// ```rust,ignore
+/// let reason = SessionTransitionReason::BreakAutoStarted;
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
+pub enum SessionTransitionReason {
+    WorkToBreak,
+    BreakWaitingDecision,
+    BreakAutoStarted,
+    ScheduledStopExecuted,
+}
+
+/// Unified contract for session-boundary transition results.
+/// This contract centralizes transition reason and next state information.
+///
+/// Usage example:
+/// ```rust,ignore
+/// let outcome = SessionTransitionOutcome {
+///     transition_reason: SessionTransitionReason::BreakAutoStarted,
+///     completed_session_type: SessionType::ShortBreak,
+///     next_status: TimerStatus::Working,
+///     next_session_type: SessionType::Work,
+///     requires_manual_continue_decision: false,
+/// };
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct SessionTransitionOutcome {
+    pub transition_reason: SessionTransitionReason,
+    pub completed_session_type: SessionType,
+    pub next_status: TimerStatus,
+    pub next_session_type: SessionType,
+    pub requires_manual_continue_decision: bool,
+}
+
+#[allow(dead_code)]
+impl SessionTransitionOutcome {
+    pub fn work_to_break(next_session_type: SessionType) -> Self {
+        debug_assert!(matches!(
+            next_session_type,
+            SessionType::ShortBreak | SessionType::LongBreak
+        ));
+        Self {
+            transition_reason: SessionTransitionReason::WorkToBreak,
+            completed_session_type: SessionType::Work,
+            next_status: TimerStatus::OnBreak,
+            next_session_type,
+            requires_manual_continue_decision: false,
+        }
+    }
+
+    pub fn break_waiting_decision(completed_session_type: SessionType) -> Self {
+        debug_assert!(matches!(
+            completed_session_type,
+            SessionType::ShortBreak | SessionType::LongBreak
+        ));
+        Self {
+            transition_reason: SessionTransitionReason::BreakWaitingDecision,
+            completed_session_type,
+            next_status: TimerStatus::Idle,
+            next_session_type: SessionType::Work,
+            requires_manual_continue_decision: true,
+        }
+    }
+
+    pub fn break_auto_started(completed_session_type: SessionType) -> Self {
+        debug_assert!(matches!(
+            completed_session_type,
+            SessionType::ShortBreak | SessionType::LongBreak
+        ));
+        Self {
+            transition_reason: SessionTransitionReason::BreakAutoStarted,
+            completed_session_type,
+            next_status: TimerStatus::Working,
+            next_session_type: SessionType::Work,
+            requires_manual_continue_decision: false,
+        }
+    }
+
+    pub fn scheduled_stop_executed(completed_session_type: SessionType) -> Self {
+        Self {
+            transition_reason: SessionTransitionReason::ScheduledStopExecuted,
+            completed_session_type,
+            next_status: TimerStatus::Idle,
+            next_session_type: SessionType::Work,
+            requires_manual_continue_decision: false,
+        }
+    }
+}
+
 /// Unique boundary identifier used to deduplicate processed schedule boundaries.
 ///
 /// Usage example:
@@ -236,9 +364,27 @@ pub struct TimerTickPayload {
 /// Payload sent to frontend when a session completes
 #[derive(Debug, Clone, Serialize)]
 pub struct SessionCompletedPayload {
+    pub transition_reason: SessionTransitionReason,
     pub completed_session_type: SessionType,
-    pub next_session_type: Option<SessionType>,
-    pub show_continue_dialog: bool,
+    pub next_status: TimerStatus,
+    pub next_session_type: SessionType,
+    pub requires_manual_continue_decision: bool,
+    /// Compatibility alias for already-migrated frontend fields.
+    /// This mirrors `requires_manual_continue_decision`.
+    pub post_break_decision_pending: bool,
+}
+
+impl SessionCompletedPayload {
+    pub fn from_transition_outcome(outcome: SessionTransitionOutcome) -> Self {
+        Self {
+            transition_reason: outcome.transition_reason,
+            completed_session_type: outcome.completed_session_type,
+            next_status: outcome.next_status,
+            next_session_type: outcome.next_session_type,
+            requires_manual_continue_decision: outcome.requires_manual_continue_decision,
+            post_break_decision_pending: outcome.requires_manual_continue_decision,
+        }
+    }
 }
 
 /// Full timer state sent on initial sync
@@ -251,7 +397,7 @@ pub struct FullStatePayload {
     pub completed_pomodoros: u32,
     pub break_interaction_count: u32,
     pub is_fullscreen_break: bool,
-    pub show_continue_dialog: bool,
+    pub post_break_decision_pending: bool,
     pub settings: TimerSettings,
     pub should_prompt_start_on_boot: bool,
     pub active_window_summary: Option<ActiveWindowSummaryPayload>,
@@ -293,7 +439,7 @@ pub struct TimerState {
     pub scheduled_stop_state: ScheduledStopState,
 
     // UI state
-    pub show_continue_dialog: bool,
+    pub post_break_decision_pending: bool,
     pub is_fullscreen_break: bool,
 
     // Internal
@@ -317,7 +463,7 @@ impl Default for TimerState {
             weekly_auto_run_config: WeeklyAutoRunConfig::default(),
             timer_start_source: None,
             scheduled_stop_state: ScheduledStopState::None,
-            show_continue_dialog: false,
+            post_break_decision_pending: false,
             is_fullscreen_break: false,
             last_transition: None,
         }
@@ -346,7 +492,7 @@ impl TimerState {
             completed_pomodoros: self.completed_pomodoros,
             break_interaction_count: self.break_interaction_count,
             is_fullscreen_break: self.is_fullscreen_break,
-            show_continue_dialog: self.show_continue_dialog,
+            post_break_decision_pending: self.post_break_decision_pending,
             settings: self.settings.clone(),
             should_prompt_start_on_boot: false,
             active_window_summary: None,
@@ -387,6 +533,10 @@ mod tests {
         assert_eq!(settings.short_break_duration_secs, 5 * 60);
         assert_eq!(settings.long_break_duration_secs, 15 * 60);
         assert_eq!(settings.long_break_interval, 4);
+        assert_eq!(
+            settings.post_break_transition_policy,
+            PostBreakTransitionPolicy::RequireManualContinue
+        );
     }
 
     #[test]
@@ -452,6 +602,14 @@ mod tests {
     }
 
     #[test]
+    fn test_post_break_transition_policy_default() {
+        assert_eq!(
+            PostBreakTransitionPolicy::default(),
+            PostBreakTransitionPolicy::RequireManualContinue
+        );
+    }
+
+    #[test]
     fn test_boundary_occurrence_id_default_and_constructor() {
         let default_id = BoundaryOccurrenceId::default();
         assert_eq!(default_id.0, "");
@@ -478,6 +636,8 @@ mod tests {
             scheduled_stop_state: ScheduledStopState,
             #[serde(default)]
             boot_prompt_runtime_state: BootPromptRuntimeState,
+            #[serde(default)]
+            post_break_transition_policy: PostBreakTransitionPolicy,
         }
 
         let wrapper: EnumDefaultsWrapper =
@@ -492,5 +652,39 @@ mod tests {
             wrapper.boot_prompt_runtime_state,
             BootPromptRuntimeState::NotApplicable
         );
+        assert_eq!(
+            wrapper.post_break_transition_policy,
+            PostBreakTransitionPolicy::RequireManualContinue
+        );
+    }
+
+    #[test]
+    fn test_session_transition_outcome_work_to_break_contract() {
+        let outcome = SessionTransitionOutcome::work_to_break(SessionType::LongBreak);
+
+        assert_eq!(
+            outcome.transition_reason,
+            SessionTransitionReason::WorkToBreak
+        );
+        assert_eq!(outcome.completed_session_type, SessionType::Work);
+        assert_eq!(outcome.next_status, TimerStatus::OnBreak);
+        assert_eq!(outcome.next_session_type, SessionType::LongBreak);
+        assert!(!outcome.requires_manual_continue_decision);
+    }
+
+    #[test]
+    fn test_session_completed_payload_from_outcome_maps_manual_decision_flag() {
+        let outcome = SessionTransitionOutcome::break_waiting_decision(SessionType::ShortBreak);
+        let payload = SessionCompletedPayload::from_transition_outcome(outcome);
+
+        assert_eq!(
+            payload.transition_reason,
+            SessionTransitionReason::BreakWaitingDecision
+        );
+        assert_eq!(payload.completed_session_type, SessionType::ShortBreak);
+        assert_eq!(payload.next_status, TimerStatus::Idle);
+        assert_eq!(payload.next_session_type, SessionType::Work);
+        assert!(payload.requires_manual_continue_decision);
+        assert!(payload.post_break_decision_pending);
     }
 }

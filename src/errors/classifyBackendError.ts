@@ -31,8 +31,7 @@ export interface BackendErrorClassification {
  */
 export type CommandContext =
   | "start_work"
-  | "continue_to_next_session"
-  | "end_cycle"
+  | "resolve_post_break_decision"
   | "emergency_stop"
   | "get_full_state"
   | "resolve_boot_auto_start_prompt";

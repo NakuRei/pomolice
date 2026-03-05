@@ -22,10 +22,7 @@ mod types;
 use crate::managers::weekly_schedule::{
     collect_crossed_end_boundaries, collect_crossed_start_boundaries,
 };
-use crate::types::{
-    BootPromptRuntimeState, BoundaryOccurrenceId, ScheduledStopState, TimerStartSource,
-    TimerStatus,
-};
+use crate::types::{BootPromptRuntimeState, BoundaryOccurrenceId, TimerStartSource, TimerStatus};
 
 const SCHEDULER_INTERVAL_SECONDS: u64 = 1;
 const PROCESSED_BOUNDARY_RETENTION_DAYS: i64 = 8;
@@ -35,6 +32,35 @@ struct SchedulerRuntimeState {
     last_checked_local: DateTime<Local>,
     start_boundaries_blocked_until_idle: bool,
     last_seen_config_revision: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionCompletionEmitEvent {
+    SessionCompleted,
+    AutoRunStopped,
+    TimerTick,
+}
+
+const SESSION_COMPLETION_EMIT_ORDER_DEFAULT: [SessionCompletionEmitEvent; 2] = [
+    SessionCompletionEmitEvent::SessionCompleted,
+    SessionCompletionEmitEvent::TimerTick,
+];
+
+const SESSION_COMPLETION_EMIT_ORDER_SCHEDULED_STOP: [SessionCompletionEmitEvent; 3] = [
+    SessionCompletionEmitEvent::SessionCompleted,
+    SessionCompletionEmitEvent::AutoRunStopped,
+    SessionCompletionEmitEvent::TimerTick,
+];
+
+fn session_completion_emit_order(
+    transition_reason: types::SessionTransitionReason,
+) -> &'static [SessionCompletionEmitEvent] {
+    match transition_reason {
+        types::SessionTransitionReason::ScheduledStopExecuted => {
+            &SESSION_COMPLETION_EMIT_ORDER_SCHEDULED_STOP
+        }
+        _ => &SESSION_COMPLETION_EMIT_ORDER_DEFAULT,
+    }
 }
 
 /// Handle timer tick event
@@ -59,127 +85,121 @@ pub async fn lib_handle_timer_tick(app: AppHandle) {
     tray::update_tray_icon(&app, &tick_payload);
 
     if should_complete_session {
+        // Awaiting this transition blocks the current timer-task tick loop until
+        // completion handling finishes, preventing overlap with the next tick.
         lib_handle_session_complete(app).await;
     }
 }
 
 /// Handle session completion
 pub async fn lib_handle_session_complete(app: AppHandle) {
-    use types::SessionType;
+    use types::{SessionTransitionOutcome, SessionTransitionReason, SessionType};
 
     let state_handle = app.state::<state::AppState>();
+    let (
+        completed_payload,
+        transition_outcome,
+        requires_enter_break_mode,
+        requires_exit_break_mode,
+    ) = {
+        let mut timer = state_handle.timer_manager.lock().await;
+        let completed_payload = match timer.get_state().session_type {
+            SessionType::Work => timer.complete_work_session_transition(),
+            SessionType::ShortBreak | SessionType::LongBreak => {
+                timer.complete_break_session_transition()
+            }
+        };
 
-    let (session_type, scheduled_stop_state) = {
-        let timer = state_handle.timer_manager.lock().await;
-        (timer.get_state().session_type, timer.get_state().scheduled_stop_state)
+        let transition_outcome = SessionTransitionOutcome {
+            transition_reason: completed_payload.transition_reason,
+            completed_session_type: completed_payload.completed_session_type,
+            next_status: completed_payload.next_status,
+            next_session_type: completed_payload.next_session_type,
+            requires_manual_continue_decision: completed_payload.requires_manual_continue_decision,
+        };
+
+        if matches!(
+            transition_outcome.transition_reason,
+            SessionTransitionReason::BreakWaitingDecision
+                | SessionTransitionReason::ScheduledStopExecuted
+        ) {
+            // NOTE: this path runs inside the timer task. We only cancel and
+            // drop the JoinHandle here. Awaiting it here would self-join.
+            let _ = timer.cancel_and_take_task();
+        }
+
+        let requires_enter_break_mode =
+            transition_outcome.transition_reason == SessionTransitionReason::WorkToBreak;
+        let requires_exit_break_mode = matches!(
+            transition_outcome.completed_session_type,
+            SessionType::ShortBreak | SessionType::LongBreak
+        );
+
+        (
+            completed_payload,
+            transition_outcome,
+            requires_enter_break_mode,
+            requires_exit_break_mode,
+        )
     };
-    let has_pending_scheduled_stop = scheduled_stop_state == ScheduledStopState::Pending;
 
-    match session_type {
-        SessionType::Work => {
-            if has_pending_scheduled_stop {
-                let (completed_payload, tick_payload) = {
-                    let mut timer = state_handle.timer_manager.lock().await;
-                    // This runs inside the timer task; cancel and drop handle without awaiting.
-                    let _ = timer.cancel_and_take_task();
-                    let payload =
-                        timer.transition_to_idle_due_to_scheduled_stop(SessionType::Work);
-                    let tick = timer.get_state().to_tick_payload();
-                    (payload, tick)
-                };
+    debug_assert!(
+        !(requires_enter_break_mode && requires_exit_break_mode),
+        "session transition cannot enter and exit fullscreen break mode at the same time"
+    );
 
+    if requires_enter_break_mode {
+        enter_break_mode(app.clone()).await;
+    } else if requires_exit_break_mode {
+        exit_break_mode(app.clone()).await;
+    }
+
+    let (
+        final_tick_payload,
+        final_post_break_transition_policy,
+        final_post_break_decision_pending,
+        final_scheduled_stop_state,
+        final_timer_start_source,
+    ) = {
+        let timer = state_handle.timer_manager.lock().await;
+        let state = timer.get_state();
+        (
+            state.to_tick_payload(),
+            state.settings.post_break_transition_policy,
+            state.post_break_decision_pending,
+            state.scheduled_stop_state,
+            state.timer_start_source,
+        )
+    };
+
+    info!(
+        transition_reason = ?transition_outcome.transition_reason,
+        post_break_transition_policy = ?final_post_break_transition_policy,
+        post_break_decision_pending = final_post_break_decision_pending,
+        scheduled_stop_state = ?final_scheduled_stop_state,
+        timer_start_source = ?final_timer_start_source,
+        "Session completion pipeline finalized transition state"
+    );
+
+    for emit_event in session_completion_emit_order(transition_outcome.transition_reason) {
+        match emit_event {
+            SessionCompletionEmitEvent::SessionCompleted => {
                 let _ = app.emit("session_completed", &completed_payload);
-                let _ = app.emit("timer_tick", &tick_payload);
+            }
+            SessionCompletionEmitEvent::AutoRunStopped => {
                 let _ = app.emit("auto_run_stopped", serde_json::json!({}));
-                tray::update_tray_icon(&app, &tick_payload);
-
-                {
-                    let timer = state_handle.timer_manager.lock().await;
-                    state_handle.persistence.save_state(timer.get_state());
-                }
-            } else {
-                // Work session completed - transition to break.
-                // The break timer is driven by the same task that just fired this
-                // completion, so we reuse it (no cancel/respawn needed here).
-                let (_break_type, payload) = {
-                    let mut timer = state_handle.timer_manager.lock().await;
-                    timer.transition_to_break()
-                };
-
-                let _ = app.emit("session_completed", &payload);
-
-                // Update tray icon for break state
-                {
-                    let timer = state_handle.timer_manager.lock().await;
-                    tray::update_tray_icon(&app, &timer.get_state().to_tick_payload());
-                }
-
-                // Save state
-                {
-                    let timer = state_handle.timer_manager.lock().await;
-                    state_handle.persistence.save_state(timer.get_state());
-                }
-
-                // Enter fullscreen break mode
-                enter_break_mode(app.clone()).await;
+            }
+            SessionCompletionEmitEvent::TimerTick => {
+                // Emit exactly one final timer_tick for every session-boundary transition.
+                let _ = app.emit("timer_tick", &final_tick_payload);
+                tray::update_tray_icon(&app, &final_tick_payload);
             }
         }
-        SessionType::ShortBreak | SessionType::LongBreak => {
-            if has_pending_scheduled_stop {
-                let (completed_payload, tick_payload) = {
-                    let mut timer = state_handle.timer_manager.lock().await;
-                    // This runs inside the timer task; cancel and drop handle without awaiting.
-                    let _ = timer.cancel_and_take_task();
-                    let payload = timer.transition_to_idle_due_to_scheduled_stop(session_type);
-                    let tick = timer.get_state().to_tick_payload();
-                    (payload, tick)
-                };
+    }
 
-                let _ = app.emit("session_completed", &completed_payload);
-                let _ = app.emit("timer_tick", &tick_payload);
-                let _ = app.emit("auto_run_stopped", serde_json::json!({}));
-                tray::update_tray_icon(&app, &tick_payload);
-
-                {
-                    let timer = state_handle.timer_manager.lock().await;
-                    state_handle.persistence.save_state(timer.get_state());
-                }
-
-                // Exit fullscreen break mode
-                exit_break_mode(app.clone()).await;
-            } else {
-                // Break session completed - transition to idle and stop the task.
-                //
-                // IMPORTANT: This code runs INSIDE the timer task spawned by
-                // spawn_timer_task() (via lib_handle_timer_tick → here).
-                // cancel_and_take_task() cancels the token and extracts the
-                // JoinHandle, but we must NOT await that handle because it is
-                // our own task — awaiting it would deadlock (self-join).
-                // The task will exit naturally after this function returns:
-                // the select! loop checks token.is_cancelled() and breaks.
-                let (completed_payload, tick_payload) = {
-                    let mut timer = state_handle.timer_manager.lock().await;
-                    // Cancel token and drop the JoinHandle (do not await)
-                    let _ = timer.cancel_and_take_task();
-                    let payload = timer.transition_to_idle_after_break();
-                    let tick = timer.get_state().to_tick_payload();
-                    (payload, tick)
-                };
-
-                let _ = app.emit("session_completed", &completed_payload);
-                let _ = app.emit("timer_tick", &tick_payload);
-                tray::update_tray_icon(&app, &tick_payload);
-
-                // Save state
-                {
-                    let timer = state_handle.timer_manager.lock().await;
-                    state_handle.persistence.save_state(timer.get_state());
-                }
-
-                // Exit fullscreen break mode
-                exit_break_mode(app.clone()).await;
-            }
-        }
+    {
+        let timer = state_handle.timer_manager.lock().await;
+        state_handle.persistence.save_state(timer.get_state());
     }
 }
 
@@ -248,17 +268,11 @@ async fn exit_break_mode(app: AppHandle) {
         info!("Exited fullscreen mode on all monitors");
     }
 
-    // Update state and notify frontend that fullscreen break ended
-    let tick_payload = {
+    // Update state and notify frontend that fullscreen break ended.
+    {
         let mut timer = state_handle.timer_manager.lock().await;
         timer.set_fullscreen_break(false);
-        timer.get_state().to_tick_payload()
-    };
-
-    // Emit timer_tick with is_fullscreen_break: false so the frontend
-    // switches from FullscreenBreak back to the normal timer view.
-    let _ = app.emit("timer_tick", &tick_payload);
-    tray::update_tray_icon(&app, &tick_payload);
+    }
 
     let _ = app.emit("break_completed", serde_json::json!({}));
 }
@@ -313,7 +327,10 @@ pub async fn lib_start_scheduler_task(app: AppHandle) {
     let mut start_boundaries_blocked_until_idle = false;
     let mut initial_previous_local = now_local;
 
-    if matches!(startup_timer_status, TimerStatus::Working | TimerStatus::OnBreak) {
+    if matches!(
+        startup_timer_status,
+        TimerStatus::Working | TimerStatus::OnBreak
+    ) {
         start_boundaries_blocked_until_idle = true;
         initial_previous_local = state_handle
             .restored_running_saved_at_local
@@ -325,9 +342,8 @@ pub async fn lib_start_scheduler_task(app: AppHandle) {
     let scheduler_app = app.clone();
 
     let scheduler_join_handle = tauri::async_runtime::spawn(async move {
-        let mut scheduler_interval = tokio::time::interval(Duration::from_secs(
-            SCHEDULER_INTERVAL_SECONDS,
-        ));
+        let mut scheduler_interval =
+            tokio::time::interval(Duration::from_secs(SCHEDULER_INTERVAL_SECONDS));
         scheduler_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         let state_handle = scheduler_app.state::<state::AppState>();
@@ -340,8 +356,7 @@ pub async fn lib_start_scheduler_task(app: AppHandle) {
 
         info!(
             "Weekly scheduler started (previous_local: {}, blocked_until_idle: {})",
-            runtime_state.last_checked_local,
-            runtime_state.start_boundaries_blocked_until_idle
+            runtime_state.last_checked_local, runtime_state.start_boundaries_blocked_until_idle
         );
 
         loop {
@@ -434,7 +449,9 @@ async fn lib_run_scheduler_tick(app: AppHandle, runtime_state: &mut SchedulerRun
     let auto_start_boundary_enabled = state_handle
         .auto_start_boundary_enabled
         .load(Ordering::Acquire);
-    let boot_prompt_check_pending = state_handle.boot_prompt_check_pending.load(Ordering::Acquire);
+    let boot_prompt_check_pending = state_handle
+        .boot_prompt_check_pending
+        .load(Ordering::Acquire);
     let boot_prompt_runtime_state = match state_handle.boot_prompt_runtime_state.lock() {
         Ok(guard) => *guard,
         Err(_) => BootPromptRuntimeState::NotApplicable,
@@ -456,7 +473,10 @@ async fn lib_run_scheduler_tick(app: AppHandle, runtime_state: &mut SchedulerRun
                 .processed_boundary_occurrences
                 .insert(start_boundary.clone())
             {
-                info!("Weekly scheduler crossed start boundary: {}", start_boundary.0);
+                info!(
+                    "Weekly scheduler crossed start boundary: {}",
+                    start_boundary.0
+                );
                 let did_start = start_work_from_scheduler_when_idle(
                     app.clone(),
                     timer_status,
@@ -483,8 +503,8 @@ fn trim_old_processed_boundaries(
     processed_boundary_occurrences: &mut HashSet<BoundaryOccurrenceId>,
     now_local: DateTime<Local>,
 ) {
-    let oldest_epoch_to_keep = (now_local - ChronoDuration::days(PROCESSED_BOUNDARY_RETENTION_DAYS))
-        .timestamp();
+    let oldest_epoch_to_keep =
+        (now_local - ChronoDuration::days(PROCESSED_BOUNDARY_RETENTION_DAYS)).timestamp();
 
     processed_boundary_occurrences.retain(|boundary_id| {
         extract_boundary_epoch_seconds(boundary_id)
@@ -509,7 +529,9 @@ async fn mark_scheduled_stop_pending_for_current_session(app: AppHandle) -> bool
         let _ = app.emit("auto_run_stop_pending", serde_json::json!({}));
         {
             let timer_manager = state_handle.timer_manager.lock().await;
-            state_handle.persistence.save_state(timer_manager.get_state());
+            state_handle
+                .persistence
+                .save_state(timer_manager.get_state());
         }
     }
 
@@ -565,7 +587,9 @@ async fn start_work_from_scheduler_when_idle(
 
     {
         let timer_manager = state_handle.timer_manager.lock().await;
-        state_handle.persistence.save_state(timer_manager.get_state());
+        state_handle
+            .persistence
+            .save_state(timer_manager.get_state());
     }
 
     true
@@ -648,11 +672,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // New commands using dependency injection
             commands::timer::start_work,
-            commands::timer::continue_to_next_session,
-            commands::timer::end_cycle,
+            commands::timer::resolve_post_break_decision,
             commands::timer::emergency_stop,
-            commands::timer::sync_all_settings,
-            commands::timer::sync_auto_run_settings,
+            commands::timer::sync_timer_duration_settings,
+            commands::timer::sync_automation_policies,
             commands::timer::get_full_state,
             commands::timer::resolve_boot_auto_start_prompt,
             commands::timer::get_timer_status,
@@ -660,6 +683,43 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod emit_order_tests {
+    use super::{
+        session_completion_emit_order, SessionCompletionEmitEvent,
+        SESSION_COMPLETION_EMIT_ORDER_DEFAULT, SESSION_COMPLETION_EMIT_ORDER_SCHEDULED_STOP,
+    };
+    use crate::types::SessionTransitionReason;
+
+    #[test]
+    fn test_session_completion_emit_order_for_non_scheduled_stop() {
+        let emit_order = session_completion_emit_order(SessionTransitionReason::BreakAutoStarted);
+        assert_eq!(emit_order, &SESSION_COMPLETION_EMIT_ORDER_DEFAULT);
+        assert_eq!(
+            emit_order,
+            &[
+                SessionCompletionEmitEvent::SessionCompleted,
+                SessionCompletionEmitEvent::TimerTick,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_session_completion_emit_order_for_scheduled_stop() {
+        let emit_order =
+            session_completion_emit_order(SessionTransitionReason::ScheduledStopExecuted);
+        assert_eq!(emit_order, &SESSION_COMPLETION_EMIT_ORDER_SCHEDULED_STOP);
+        assert_eq!(
+            emit_order,
+            &[
+                SessionCompletionEmitEvent::SessionCompleted,
+                SessionCompletionEmitEvent::AutoRunStopped,
+                SessionCompletionEmitEvent::TimerTick,
+            ]
+        );
+    }
 }
 
 #[cfg(test)]

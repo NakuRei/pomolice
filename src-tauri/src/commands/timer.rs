@@ -12,8 +12,8 @@ use crate::managers::weekly_schedule::{
 };
 use crate::state::AppState;
 use crate::types::{
-    ActiveWindowSummaryPayload, BootPromptRuntimeState, FullStatePayload, TimerSettings,
-    TimerStartSource, TimerStatus, WeeklyAutoRunConfig,
+    ActiveWindowSummaryPayload, BootPromptRuntimeState, FullStatePayload, PostBreakDecisionAction,
+    PostBreakTransitionPolicy, TimerSettings, TimerStartSource, TimerStatus, WeeklyAutoRunConfig,
 };
 
 /// Start a work session with settings
@@ -25,6 +25,7 @@ pub async fn start_work(
     short_break_duration_secs: u64,
     long_break_duration_secs: u64,
     long_break_interval: u32,
+    post_break_transition_policy: PostBreakTransitionPolicy,
 ) -> Result<()> {
     info!(
         "Command: start_work called from window '{}'",
@@ -45,6 +46,7 @@ pub async fn start_work(
         short_break_duration_secs,
         long_break_duration_secs,
         long_break_interval,
+        post_break_transition_policy,
     };
     let now_local = state.clock.now_local();
 
@@ -56,11 +58,8 @@ pub async fn start_work(
             timer_state.weekly_auto_run_config.clone(),
         )
     };
-    let manual_start_source = determine_manual_start_source(
-        now_local,
-        auto_run_feature_enabled,
-        &weekly_auto_run_config,
-    );
+    let manual_start_source =
+        determine_manual_start_source(now_local, auto_run_feature_enabled, &weekly_auto_run_config);
 
     // Step 1: Update state and cancel the old task inside the lock.
     // cancel_and_take_task() only signals cancellation (non-blocking),
@@ -103,21 +102,34 @@ pub async fn start_work(
     Ok(())
 }
 
-/// Continue to next work session after break
+/// Resolve manual post-break decision from continue dialog.
+///
+/// This command is valid only while `post_break_decision_pending = true`.
 #[tauri::command]
-pub async fn continue_to_next_session(
+pub async fn resolve_post_break_decision(
     window: WebviewWindow,
     state: State<'_, AppState>,
+    action: PostBreakDecisionAction,
 ) -> Result<()> {
     if window.label() != "main" {
         return Err(PomoliceError::Unauthorized(window.label().to_string()));
     }
 
-    let (old_task, tick_payload) = {
+    let (old_task, tick_payload, should_spawn_timer_task) = {
         let mut timer = state.timer_manager.lock().await;
-        let old = timer.cancel_and_take_task();
-        let payload = timer.continue_to_next_session()?;
-        (old, payload)
+        validate_post_break_decision_command_state(
+            timer.status(),
+            timer.get_state().post_break_decision_pending,
+        )?;
+        let tick_payload = timer.resolve_post_break_decision(action)?;
+        let should_spawn_timer_task = action == PostBreakDecisionAction::Continue;
+        let old_task = if should_spawn_timer_task {
+            // Take/cancel under lock, but never await under lock.
+            timer.cancel_and_take_task()
+        } else {
+            None
+        };
+        (old_task, tick_payload, should_spawn_timer_task)
     };
 
     let app = window.app_handle();
@@ -125,37 +137,15 @@ pub async fn continue_to_next_session(
     crate::tray::update_tray_icon(app, &tick_payload);
 
     if let Some(handle) = old_task {
+        // Await outside the lock to avoid lock-held await deadlocks.
         let _ = handle.await;
     }
 
-    {
+    if should_spawn_timer_task {
         let mut timer = state.timer_manager.lock().await;
+        // Continue action always starts a fresh timer task.
         timer.spawn_timer_task(app.clone());
     }
-
-    // Save state
-    {
-        let timer = state.timer_manager.lock().await;
-        state.persistence.save_state(timer.get_state());
-    }
-
-    Ok(())
-}
-
-/// End the current cycle (from continue dialog)
-#[tauri::command]
-pub async fn end_cycle(window: WebviewWindow, state: State<'_, AppState>) -> Result<()> {
-    if window.label() != "main" {
-        return Err(PomoliceError::Unauthorized(window.label().to_string()));
-    }
-
-    let tick_payload = {
-        let mut timer = state.timer_manager.lock().await;
-        timer.end_cycle()?
-    };
-
-    let _ = window.app_handle().emit("timer_tick", &tick_payload);
-    crate::tray::update_tray_icon(window.app_handle(), &tick_payload);
 
     // Save state
     {
@@ -184,6 +174,7 @@ pub async fn emergency_stop(window: WebviewWindow, state: State<'_, AppState>) -
 
     let (was_fullscreen_break, tick_payload, old_task) = {
         let mut timer = state.timer_manager.lock().await;
+        // Take/cancel under the lock, but never await under the lock.
         let old = timer.cancel_and_take_task();
         let (was_fullscreen, payload) = timer.emergency_stop()?;
         (was_fullscreen, payload, old)
@@ -193,6 +184,7 @@ pub async fn emergency_stop(window: WebviewWindow, state: State<'_, AppState>) -
     crate::tray::update_tray_icon(window.app_handle(), &tick_payload);
 
     if let Some(handle) = old_task {
+        // Await outside the lock to avoid lock-held await deadlocks.
         let _ = handle.await;
     }
 
@@ -216,34 +208,28 @@ pub async fn emergency_stop(window: WebviewWindow, state: State<'_, AppState>) -
     Ok(())
 }
 
-/// Sync settings from frontend
+/// Sync timer duration settings from frontend (idle only)
 #[tauri::command]
-pub async fn sync_all_settings(
+pub async fn sync_timer_duration_settings(
     window: WebviewWindow,
     state: State<'_, AppState>,
     work_duration_secs: u64,
     short_break_duration_secs: u64,
     long_break_duration_secs: u64,
     long_break_interval: u32,
-    auto_run_feature_enabled: bool,
-    weekly_auto_run_config: WeeklyAutoRunConfig,
 ) -> Result<()> {
     if window.label() != "main" {
         return Err(PomoliceError::Unauthorized(window.label().to_string()));
     }
 
-    validate_weekly_auto_run_config_for_sync(&weekly_auto_run_config)?;
-
-    let settings = TimerSettings {
-        work_duration_secs,
-        short_break_duration_secs,
-        long_break_duration_secs,
-        long_break_interval,
-    };
-
     let tick_payload = {
         let mut timer = state.timer_manager.lock().await;
-        timer.sync_all_settings(settings, auto_run_feature_enabled, weekly_auto_run_config)?
+        timer.sync_timer_duration_settings(
+            work_duration_secs,
+            short_break_duration_secs,
+            long_break_duration_secs,
+            long_break_interval,
+        )?
     };
 
     let _ = window.app_handle().emit("timer_tick", &tick_payload);
@@ -258,13 +244,14 @@ pub async fn sync_all_settings(
     Ok(())
 }
 
-/// Sync only auto-run settings from frontend
+/// Sync automation policies from frontend
 #[tauri::command]
-pub async fn sync_auto_run_settings(
+pub async fn sync_automation_policies(
     window: WebviewWindow,
     state: State<'_, AppState>,
     auto_run_feature_enabled: bool,
     weekly_auto_run_config: WeeklyAutoRunConfig,
+    post_break_transition_policy: PostBreakTransitionPolicy,
 ) -> Result<()> {
     if window.label() != "main" {
         return Err(PomoliceError::Unauthorized(window.label().to_string()));
@@ -272,12 +259,29 @@ pub async fn sync_auto_run_settings(
 
     validate_weekly_auto_run_config_for_sync(&weekly_auto_run_config)?;
 
-    let tick_payload = {
+    let (tick_payload, should_bump_config_revision) = {
         let mut timer = state.timer_manager.lock().await;
-        timer.sync_auto_run_settings(auto_run_feature_enabled, weekly_auto_run_config)
+        let previous_auto_run_feature_enabled = timer.get_state().auto_run_feature_enabled;
+        let previous_weekly_auto_run_config = timer.get_state().weekly_auto_run_config.clone();
+        let should_bump_config_revision = did_scheduler_topology_change(
+            previous_auto_run_feature_enabled,
+            &previous_weekly_auto_run_config,
+            auto_run_feature_enabled,
+            &weekly_auto_run_config,
+        );
+
+        let tick_payload = timer.sync_automation_policies(
+            auto_run_feature_enabled,
+            weekly_auto_run_config,
+            post_break_transition_policy,
+        );
+
+        (tick_payload, should_bump_config_revision)
     };
 
-    state.config_revision.fetch_add(1, Ordering::AcqRel);
+    if should_bump_config_revision {
+        state.config_revision.fetch_add(1, Ordering::AcqRel);
+    }
 
     let _ = window.app_handle().emit("timer_tick", &tick_payload);
     crate::tray::update_tray_icon(window.app_handle(), &tick_payload);
@@ -288,6 +292,16 @@ pub async fn sync_auto_run_settings(
     }
 
     Ok(())
+}
+
+pub(crate) fn did_scheduler_topology_change(
+    previous_auto_run_feature_enabled: bool,
+    previous_weekly_auto_run_config: &WeeklyAutoRunConfig,
+    next_auto_run_feature_enabled: bool,
+    next_weekly_auto_run_config: &WeeklyAutoRunConfig,
+) -> bool {
+    previous_auto_run_feature_enabled != next_auto_run_feature_enabled
+        || previous_weekly_auto_run_config != next_weekly_auto_run_config
 }
 
 fn to_active_window_summary_payload(active_window: &ActiveWindow) -> ActiveWindowSummaryPayload {
@@ -311,6 +325,20 @@ fn determine_manual_start_source(
     } else {
         TimerStartSource::ManualOutsideWindow
     }
+}
+
+fn validate_post_break_decision_command_state(
+    timer_status: TimerStatus,
+    post_break_decision_pending: bool,
+) -> Result<()> {
+    if timer_status == TimerStatus::Idle && post_break_decision_pending {
+        return Ok(());
+    }
+
+    Err(PomoliceError::InvalidStateTransition {
+        action: "resolve post-break decision".to_string(),
+        current_state: timer_status,
+    })
 }
 
 fn validate_weekly_auto_run_config_for_sync(
@@ -353,7 +381,9 @@ fn evaluate_initial_boot_prompt_decision(
 #[tauri::command]
 pub async fn get_full_state(state: State<'_, AppState>) -> Result<FullStatePayload> {
     let now_local = state.clock.now_local();
-    let is_first_get_full_state = state.boot_prompt_check_pending.swap(false, Ordering::AcqRel);
+    let is_first_get_full_state = state
+        .boot_prompt_check_pending
+        .swap(false, Ordering::AcqRel);
 
     let (mut full_state_payload, timer_status, auto_run_feature_enabled, weekly_auto_run_config) = {
         let timer_manager = state.timer_manager.lock().await;
@@ -389,7 +419,9 @@ pub async fn get_full_state(state: State<'_, AppState>) -> Result<FullStatePaylo
     }
 
     if should_enable_auto_start {
-        state.auto_start_boundary_enabled.store(true, Ordering::Release);
+        state
+            .auto_start_boundary_enabled
+            .store(true, Ordering::Release);
     }
 
     full_state_payload.should_prompt_start_on_boot = should_prompt_start_on_boot;
@@ -423,7 +455,9 @@ pub async fn resolve_boot_auto_start_prompt(
             if let Ok(mut runtime_state) = state.boot_prompt_runtime_state.lock() {
                 *runtime_state = BootPromptRuntimeState::NotApplicable;
             }
-            state.auto_start_boundary_enabled.store(true, Ordering::Release);
+            state
+                .auto_start_boundary_enabled
+                .store(true, Ordering::Release);
         }
         return Ok(BootPromptRuntimeState::NotApplicable);
     }
@@ -455,7 +489,9 @@ pub async fn resolve_boot_auto_start_prompt(
                     *runtime_state = BootPromptRuntimeState::NotApplicable;
                 }
             }
-            state.auto_start_boundary_enabled.store(true, Ordering::Release);
+            state
+                .auto_start_boundary_enabled
+                .store(true, Ordering::Release);
             return Ok(BootPromptRuntimeState::NotApplicable);
         };
 
@@ -483,14 +519,18 @@ pub async fn resolve_boot_auto_start_prompt(
         if let Ok(mut runtime_state) = state.boot_prompt_runtime_state.lock() {
             *runtime_state = BootPromptRuntimeState::ResolvedStart;
         }
-        state.auto_start_boundary_enabled.store(true, Ordering::Release);
+        state
+            .auto_start_boundary_enabled
+            .store(true, Ordering::Release);
 
         Ok(BootPromptRuntimeState::ResolvedStart)
     } else {
         if let Ok(mut runtime_state) = state.boot_prompt_runtime_state.lock() {
             *runtime_state = BootPromptRuntimeState::ResolvedLater;
         }
-        state.auto_start_boundary_enabled.store(true, Ordering::Release);
+        state
+            .auto_start_boundary_enabled
+            .store(true, Ordering::Release);
         Ok(BootPromptRuntimeState::ResolvedLater)
     }
 }
@@ -641,5 +681,63 @@ mod tests {
 
         let validation_result = validate_weekly_auto_run_config_for_sync(&weekly_auto_run_config);
         assert!(validation_result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_post_break_decision_command_state_accepts_idle_pending_state() {
+        let result = validate_post_break_decision_command_state(TimerStatus::Idle, true);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_post_break_decision_command_state_rejects_idle_without_pending() {
+        let result = validate_post_break_decision_command_state(TimerStatus::Idle, false);
+        assert!(matches!(
+            result,
+            Err(PomoliceError::InvalidStateTransition { .. })
+        ));
+    }
+
+    #[test]
+    fn test_validate_post_break_decision_command_state_rejects_non_idle_even_when_pending() {
+        let result = validate_post_break_decision_command_state(TimerStatus::Working, true);
+        assert!(matches!(
+            result,
+            Err(PomoliceError::InvalidStateTransition { .. })
+        ));
+    }
+
+    #[test]
+    fn test_did_scheduler_topology_change_returns_false_when_schedule_fields_are_identical() {
+        let previous_config = make_enabled_daytime_monday_config();
+        let next_config = previous_config.clone();
+
+        let changed =
+            did_scheduler_topology_change(true, &previous_config, true, &next_config);
+
+        assert!(!changed);
+    }
+
+    #[test]
+    fn test_did_scheduler_topology_change_returns_true_when_auto_run_feature_enabled_changes() {
+        let previous_config = make_enabled_daytime_monday_config();
+        let next_config = previous_config.clone();
+
+        let changed =
+            did_scheduler_topology_change(false, &previous_config, true, &next_config);
+
+        assert!(changed);
+    }
+
+    #[test]
+    fn test_did_scheduler_topology_change_returns_true_when_weekly_auto_run_config_changes() {
+        let previous_config = make_enabled_daytime_monday_config();
+        let mut next_config = previous_config.clone();
+        next_config.mon.start_time = "10:00".to_string();
+
+        let changed =
+            did_scheduler_topology_change(true, &previous_config, true, &next_config);
+
+        assert!(changed);
     }
 }

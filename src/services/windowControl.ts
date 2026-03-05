@@ -6,6 +6,10 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import type {
+  PostBreakDecisionAction,
+  PostBreakTransitionPolicy,
+} from "../types/sessionTransitionPolicy";
 
 /**
  * Start a work session with settings
@@ -17,22 +21,24 @@ export async function startWork(settings: {
   shortBreakDurationSecs: number;
   longBreakDurationSecs: number;
   longBreakInterval: number;
+  post_break_transition_policy: PostBreakTransitionPolicy;
 }): Promise<void> {
-  await invoke("start_work", settings);
+  await invoke("start_work", {
+    workDurationSecs: settings.workDurationSecs,
+    shortBreakDurationSecs: settings.shortBreakDurationSecs,
+    longBreakDurationSecs: settings.longBreakDurationSecs,
+    longBreakInterval: settings.longBreakInterval,
+    postBreakTransitionPolicy: settings.post_break_transition_policy,
+  });
 }
 
 /**
- * Continue to next work session after break
+ * Resolve manual post-break decision.
  */
-export async function continueToNextSession(): Promise<void> {
-  await invoke("continue_to_next_session");
-}
-
-/**
- * End the current cycle
- */
-export async function endCycle(): Promise<void> {
-  await invoke("end_cycle");
+export async function resolvePostBreakDecision(
+  action: PostBreakDecisionAction
+): Promise<void> {
+  await invoke("resolve_post_break_decision", { action });
 }
 
 /**
@@ -50,10 +56,21 @@ export async function syncSettings(settings: {
   shortBreakDurationSecs: number;
   longBreakDurationSecs: number;
   longBreakInterval: number;
+  post_break_transition_policy: PostBreakTransitionPolicy;
   autoRunFeatureEnabled: boolean;
   weeklyAutoRunConfig: Record<string, unknown>;
 }): Promise<void> {
-  await invoke("sync_all_settings", settings);
+  await invoke("sync_timer_duration_settings", {
+    workDurationSecs: settings.workDurationSecs,
+    shortBreakDurationSecs: settings.shortBreakDurationSecs,
+    longBreakDurationSecs: settings.longBreakDurationSecs,
+    longBreakInterval: settings.longBreakInterval,
+  });
+  await invoke("sync_automation_policies", {
+    postBreakTransitionPolicy: settings.post_break_transition_policy,
+    autoRunFeatureEnabled: settings.autoRunFeatureEnabled,
+    weeklyAutoRunConfig: settings.weeklyAutoRunConfig,
+  });
 }
 
 /**

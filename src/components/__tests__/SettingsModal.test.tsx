@@ -22,7 +22,7 @@ describe("SettingsModal", () => {
       completedPomodoros: 0,
       breakInteractionCount: 0,
       isFullscreenBreak: false,
-      showContinueDialog: false,
+      requiresManualContinueDecision: false,
       isConnected: true,
       shouldPromptStartOnBoot: false,
       activeWindowSummary: null,
@@ -55,6 +55,7 @@ describe("SettingsModal", () => {
         longBreakDuration: 20,
         longBreakInterval: 3,
         notificationSoundVolumePercent: 35,
+        post_break_transition_policy: "start_next_work_automatically",
       });
 
       render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
@@ -66,12 +67,16 @@ describe("SettingsModal", () => {
       const notificationSoundVolume = screen.getByTestId(
         "settings-notification-sound-volume"
       ) as HTMLInputElement;
+      const postBreakPolicyAuto = screen.getByTestId(
+        "settings-post-break-policy-auto"
+      ) as HTMLInputElement;
 
       expect(workInput).toHaveValue(30);
       expect(shortBreakInput).toHaveValue(10);
       expect(longBreakInput).toHaveValue(20);
       expect(intervalInput).toHaveValue(3);
       expect(notificationSoundVolume).toHaveValue("35");
+      expect(postBreakPolicyAuto).toBeChecked();
     });
 
     it("should display default settings", () => {
@@ -84,12 +89,16 @@ describe("SettingsModal", () => {
       const notificationSoundVolume = screen.getByTestId(
         "settings-notification-sound-volume"
       ) as HTMLInputElement;
+      const postBreakPolicyManual = screen.getByTestId(
+        "settings-post-break-policy-manual"
+      ) as HTMLInputElement;
 
       expect(workInput).toHaveValue(25);
       expect(shortBreakInput).toHaveValue(5);
       expect(longBreakInput).toHaveValue(15);
       expect(intervalInput).toHaveValue(4);
       expect(notificationSoundVolume).toHaveValue("50");
+      expect(postBreakPolicyManual).toBeChecked();
     });
   });
 
@@ -106,6 +115,49 @@ describe("SettingsModal", () => {
       expect(screen.getByText("長い休憩")).toBeInTheDocument();
       expect(screen.getByText("長い休憩の間隔")).toBeInTheDocument();
       expect(screen.getByText("通知音量")).toBeInTheDocument();
+      expect(screen.getByText("休憩後の遷移")).toBeInTheDocument();
+      expect(screen.getByText("毎回確認する")).toBeInTheDocument();
+      expect(
+        screen.getByText("休憩後に自動で次の作業を開始する")
+      ).toBeInTheDocument();
+    });
+
+    it("should render post-break policy radio group with fixed test ids", () => {
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+
+      expect(
+        screen.getByTestId("settings-post-break-policy-group")
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("settings-post-break-policy-manual")
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("settings-post-break-policy-auto")
+      ).toBeInTheDocument();
+    });
+
+    it("should show enabled label when auto-continue policy is selected", () => {
+      useSettingsStore.setState({
+        post_break_transition_policy: "start_next_work_automatically",
+      });
+
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+
+      expect(
+        screen.getByTestId("settings-post-break-policy-enabled-label")
+      ).toBeInTheDocument();
+    });
+
+    it("should hide enabled label when manual policy is selected", () => {
+      useSettingsStore.setState({
+        post_break_transition_policy: "require_manual_continue",
+      });
+
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+
+      expect(
+        screen.queryByTestId("settings-post-break-policy-enabled-label")
+      ).not.toBeInTheDocument();
     });
 
     it("should have save and cancel buttons", () => {
@@ -174,6 +226,25 @@ describe("SettingsModal", () => {
       expect(
         screen.getByTestId("settings-notification-sound-volume-value")
       ).toHaveTextContent("25%");
+    });
+
+    it("should switch post-break transition policy radio", () => {
+      render(<SettingsModal isOpen={true} onClose={mockOnClose} />);
+
+      const manualRadio = screen.getByTestId(
+        "settings-post-break-policy-manual"
+      ) as HTMLInputElement;
+      const autoRadio = screen.getByTestId(
+        "settings-post-break-policy-auto"
+      ) as HTMLInputElement;
+
+      expect(manualRadio).toBeChecked();
+      expect(autoRadio).not.toBeChecked();
+
+      fireEvent.click(autoRadio);
+
+      expect(manualRadio).not.toBeChecked();
+      expect(autoRadio).toBeChecked();
     });
 
     it("should toggle notification mute button and save muted state", () => {
@@ -327,12 +398,16 @@ describe("SettingsModal", () => {
       const soundVolumeInput = screen.getByTestId(
         "settings-notification-sound-volume"
       ) as HTMLInputElement;
+      const autoPolicyRadio = screen.getByTestId(
+        "settings-post-break-policy-auto"
+      ) as HTMLInputElement;
 
       fireEvent.change(workInput, { target: { value: "40" } });
       fireEvent.change(shortBreakInput, { target: { value: "8" } });
       fireEvent.change(longBreakInput, { target: { value: "20" } });
       fireEvent.change(intervalInput, { target: { value: "3" } });
       fireEvent.change(soundVolumeInput, { target: { value: "70" } });
+      fireEvent.click(autoPolicyRadio);
 
       const saveButton = screen.getByTestId("settings-save");
       fireEvent.click(saveButton);
@@ -343,6 +418,9 @@ describe("SettingsModal", () => {
       expect(state.longBreakDuration).toBe(20);
       expect(state.longBreakInterval).toBe(3);
       expect(state.notificationSoundVolumePercent).toBe(70);
+      expect(state.post_break_transition_policy).toBe(
+        "start_next_work_automatically"
+      );
     });
   });
 

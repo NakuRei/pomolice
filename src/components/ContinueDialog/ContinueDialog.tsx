@@ -10,23 +10,24 @@ import { InlineError } from '../shared/InlineError';
  * - "終了" button: Returns to idle state
  */
 export function ContinueDialog() {
-  const showContinueDialog = useTimerStore((state) => state.showContinueDialog);
+  const requiresManualContinueDecision = useTimerStore((state) => state.requiresManualContinueDecision);
   const completedPomodoros = useTimerStore((state) => state.completedPomodoros);
-  const startNextSession = useTimerStore((state) => state.startNextSession);
-  const endCycle = useTimerStore((state) => state.endCycle);
+  const resolvePostBreakDecision = useTimerStore(
+    (state) => state.resolvePostBreakDecision
+  );
 
-  if (!showContinueDialog) {
+  if (!requiresManualContinueDecision) {
     return null;
   }
 
   const handleContinue = () => {
     // Errors are reported to errorStore by timerStore — InlineError handles display
-    startNextSession().catch(() => undefined);
+    resolvePostBreakDecision("continue").catch(() => undefined);
   };
 
   const handleEnd = () => {
     // Errors are reported to errorStore by timerStore — InlineError handles display
-    endCycle().catch(() => undefined);
+    resolvePostBreakDecision("stop_cycle").catch(() => undefined);
   };
 
   return (
@@ -47,10 +48,15 @@ export function ContinueDialog() {
         <p className="text-gray-700 font-medium mb-4">
           次のポモドーロを続けますか？
         </p>
-        {/* Error area: shown when continue or end operation fails */}
-        <div className="mb-4 space-y-2">
-          <InlineError errorId="continue_to_next_session" onRetry={handleContinue} />
-          <InlineError errorId="end_cycle" onRetry={handleEnd} />
+        <p
+          className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-4"
+          data-testid="continue-dialog-manual-decision-message"
+        >
+          現在、手動判断待ちです。続けるか終了を選んでください。
+        </p>
+        {/* Error area: shown when manual decision command fails */}
+        <div className="mb-4">
+          <InlineError errorId="resolve_post_break_decision" />
         </div>
         <div className="flex gap-4">
           <button

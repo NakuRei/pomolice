@@ -415,7 +415,10 @@ fn create_local_naive_datetime(date: NaiveDate, total_minutes: u32) -> NaiveDate
     date.and_time(time)
 }
 
-fn most_recent_weekday_on_or_before(reference_date: NaiveDate, target_weekday: Weekday) -> NaiveDate {
+fn most_recent_weekday_on_or_before(
+    reference_date: NaiveDate,
+    target_weekday: Weekday,
+) -> NaiveDate {
     let current = reference_date.weekday().num_days_from_monday() as i64;
     let target = target_weekday.num_days_from_monday() as i64;
     let offset_days = (current - target + 7) % 7;
@@ -869,7 +872,9 @@ mod tests {
             .iter()
             .map(parse_epoch_seconds_from_boundary_id)
             .collect();
-        assert!(matched_epochs.windows(2).all(|window| window[0] < window[1]));
+        assert!(matched_epochs
+            .windows(2)
+            .all(|window| window[0] < window[1]));
     }
 
     #[test]

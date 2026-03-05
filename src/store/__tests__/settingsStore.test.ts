@@ -49,6 +49,11 @@ describe("settingsStore", () => {
       expect(state.autoRunFeatureEnabled).toBe(false);
     });
 
+    it("should require manual continue after break by default", () => {
+      const state = useSettingsStore.getState();
+      expect(state.post_break_transition_policy).toBe("require_manual_continue");
+    });
+
     it("should default all weekday auto-run slots to disabled", () => {
       const state = useSettingsStore.getState();
       expect(state.weeklyAutoRunConfig).toEqual(
@@ -225,6 +230,16 @@ describe("settingsStore", () => {
         setAutoRunFeatureEnabled(true);
         setAutoRunFeatureEnabled(false);
         expect(useSettingsStore.getState().autoRunFeatureEnabled).toBe(false);
+      });
+    });
+
+    describe("setPostBreakTransitionPolicy()", () => {
+      it("should update post-break transition policy", () => {
+        const { setPostBreakTransitionPolicy } = useSettingsStore.getState();
+        setPostBreakTransitionPolicy("start_next_work_automatically");
+        expect(useSettingsStore.getState().post_break_transition_policy).toBe(
+          "start_next_work_automatically"
+        );
       });
     });
 
@@ -406,6 +421,9 @@ describe("settingsStore", () => {
         expect(state.autoRunFeatureEnabled).toBe(
           DEFAULT_SETTINGS.autoRunFeatureEnabled
         );
+        expect(state.post_break_transition_policy).toBe(
+          DEFAULT_SETTINGS.post_break_transition_policy
+        );
         expect(state.weeklyAutoRunConfig).toEqual(
           DEFAULT_SETTINGS.weeklyAutoRunConfig
         );
@@ -439,6 +457,7 @@ describe("settingsStore", () => {
         notificationSoundVolumePercent: 50,
         notificationSoundMuted: false,
         autoRunFeatureEnabled: false,
+        post_break_transition_policy: "require_manual_continue",
         weeklyAutoRunConfig: createWeeklyAutoRunConfigAllDaysDisabled(),
         dayScheduleValidationErrors: {},
         weeklyScheduleValidationErrors: [],

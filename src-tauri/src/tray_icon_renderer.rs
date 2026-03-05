@@ -41,33 +41,53 @@ const ACTIVE_IDLE_GLYPH_INDEX: usize = 0;
 /// Each digit is represented as 7 rows of 5 bits (stored as u8 bitmasks, MSB = left pixel).
 const DIGIT_BITMAPS: [[u8; 7]; 10] = [
     // 0
-    [0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110],
+    [
+        0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110,
+    ],
     // 1
-    [0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
+    [
+        0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
+    ],
     // 2
-    [0b01110, 0b10001, 0b00001, 0b00110, 0b01000, 0b10000, 0b11111],
+    [
+        0b01110, 0b10001, 0b00001, 0b00110, 0b01000, 0b10000, 0b11111,
+    ],
     // 3
-    [0b01110, 0b10001, 0b00001, 0b00110, 0b00001, 0b10001, 0b01110],
+    [
+        0b01110, 0b10001, 0b00001, 0b00110, 0b00001, 0b10001, 0b01110,
+    ],
     // 4
-    [0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010],
+    [
+        0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010,
+    ],
     // 5
-    [0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110],
+    [
+        0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110,
+    ],
     // 6
-    [0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110],
+    [
+        0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110,
+    ],
     // 7
-    [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000],
+    [
+        0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000,
+    ],
     // 8
-    [0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110],
+    [
+        0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110,
+    ],
     // 9
-    [0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100],
+    [
+        0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100,
+    ],
 ];
 
 /// Background color for each timer status: [R, G, B, A]
 fn background_color(status: TimerStatus) -> [u8; 4] {
     match status {
-        TimerStatus::Working => [200, 50, 50, 255],   // Red
-        TimerStatus::OnBreak => [50, 170, 80, 255],    // Green
-        TimerStatus::Idle => IDLE_BACKGROUND_COLOR,     // Grey
+        TimerStatus::Working => [200, 50, 50, 255], // Red
+        TimerStatus::OnBreak => [50, 170, 80, 255], // Green
+        TimerStatus::Idle => IDLE_BACKGROUND_COLOR, // Grey
     }
 }
 
@@ -219,10 +239,30 @@ fn draw_idle_power_standby(buf: &mut [u8]) {
 
 fn draw_idle_pause_bars(buf: &mut [u8]) {
     for y in 1..=6 {
-        set_pixel(buf, IDLE_GLYPH_ORIGIN_X + 1, IDLE_GLYPH_ORIGIN_Y + y, &FONT_COLOR);
-        set_pixel(buf, IDLE_GLYPH_ORIGIN_X + 2, IDLE_GLYPH_ORIGIN_Y + y, &FONT_COLOR);
-        set_pixel(buf, IDLE_GLYPH_ORIGIN_X + 5, IDLE_GLYPH_ORIGIN_Y + y, &FONT_COLOR);
-        set_pixel(buf, IDLE_GLYPH_ORIGIN_X + 6, IDLE_GLYPH_ORIGIN_Y + y, &FONT_COLOR);
+        set_pixel(
+            buf,
+            IDLE_GLYPH_ORIGIN_X + 1,
+            IDLE_GLYPH_ORIGIN_Y + y,
+            &FONT_COLOR,
+        );
+        set_pixel(
+            buf,
+            IDLE_GLYPH_ORIGIN_X + 2,
+            IDLE_GLYPH_ORIGIN_Y + y,
+            &FONT_COLOR,
+        );
+        set_pixel(
+            buf,
+            IDLE_GLYPH_ORIGIN_X + 5,
+            IDLE_GLYPH_ORIGIN_Y + y,
+            &FONT_COLOR,
+        );
+        set_pixel(
+            buf,
+            IDLE_GLYPH_ORIGIN_X + 6,
+            IDLE_GLYPH_ORIGIN_Y + y,
+            &FONT_COLOR,
+        );
     }
 }
 
@@ -251,7 +291,9 @@ mod tests {
     use std::collections::VecDeque;
 
     fn count_white_pixels(buf: &[u8]) -> usize {
-        buf.chunks_exact(4).filter(|pixel| *pixel == FONT_COLOR).count()
+        buf.chunks_exact(4)
+            .filter(|pixel| *pixel == FONT_COLOR)
+            .count()
     }
 
     fn count_connected_white_components(buf: &[u8]) -> usize {
@@ -373,10 +415,7 @@ mod tests {
     fn test_single_digit_has_white_pixels() {
         let buf = render_tray_icon(5, TimerStatus::Working);
         // There should be at least some white pixels (the digit)
-        let white_count = buf
-            .chunks_exact(4)
-            .filter(|p| p == &FONT_COLOR)
-            .count();
+        let white_count = buf.chunks_exact(4).filter(|p| p == &FONT_COLOR).count();
         assert!(white_count > 0, "Expected white pixels for digit rendering");
     }
 

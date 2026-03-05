@@ -13,7 +13,7 @@ describe("InfoMessageBanner", () => {
       completedPomodoros: 0,
       breakInteractionCount: 0,
       isFullscreenBreak: false,
-      showContinueDialog: false,
+      requiresManualContinueDecision: false,
       isConnected: false,
       shouldPromptStartOnBoot: false,
       activeWindowSummary: null,

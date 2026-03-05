@@ -83,6 +83,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const autoRunFeatureEnabledStore = useSettingsStore(
     (state) => state.autoRunFeatureEnabled,
   );
+  const postBreakTransitionPolicyStore = useSettingsStore(
+    (state) => state.post_break_transition_policy,
+  );
   const weeklyAutoRunConfigStore = useSettingsStore(
     (state) => state.weeklyAutoRunConfig,
   );
@@ -114,6 +117,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [autoRunFeatureEnabled, setAutoRunFeatureEnabled] = useState<boolean>(
     autoRunFeatureEnabledStore,
   );
+  const [postBreakTransitionPolicy, setPostBreakTransitionPolicy] = useState(
+    postBreakTransitionPolicyStore,
+  );
   const [weeklyAutoRunConfig, setWeeklyAutoRunConfig] =
     useState<WeeklyAutoRunConfig>(cloneWeeklyConfig(weeklyAutoRunConfigStore));
   const [dayScheduleValidationErrors, setDayScheduleValidationErrors] = useState<
@@ -138,6 +144,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setNotificationSoundVolumePercent(notificationSoundVolumePercentStore);
     setNotificationSoundMuted(notificationSoundMutedStore);
     setAutoRunFeatureEnabled(autoRunFeatureEnabledStore);
+    setPostBreakTransitionPolicy(postBreakTransitionPolicyStore);
     setWeeklyAutoRunConfig(weeklyConfigClone);
     setDayScheduleValidationErrors(validationResult.dayScheduleValidationErrors);
     setWeeklyScheduleValidationErrors(validationResult.weeklyScheduleValidationErrors);
@@ -152,6 +159,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     notificationSoundVolumePercentStore,
     notificationSoundMutedStore,
     autoRunFeatureEnabledStore,
+    postBreakTransitionPolicyStore,
     weeklyAutoRunConfigStore,
   ]);
 
@@ -319,6 +327,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       notificationSoundVolumePercent,
       notificationSoundMuted,
       autoRunFeatureEnabled,
+      post_break_transition_policy: postBreakTransitionPolicy,
       weeklyAutoRunConfig,
     });
 
@@ -336,6 +345,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setNotificationSoundVolumePercent(notificationSoundVolumePercentStore);
     setNotificationSoundMuted(notificationSoundMutedStore);
     setAutoRunFeatureEnabled(autoRunFeatureEnabledStore);
+    setPostBreakTransitionPolicy(postBreakTransitionPolicyStore);
     setWeeklyAutoRunConfig(weeklyConfigClone);
     setDayScheduleValidationErrors(validationResult.dayScheduleValidationErrors);
     setWeeklyScheduleValidationErrors(validationResult.weeklyScheduleValidationErrors);
@@ -576,6 +586,61 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 );
               })}
             </div>
+          </section>
+
+          <section className="settingsPostBreakPolicySection">
+            <div>
+              <div className="settingsPostBreakPolicyHeader">
+                <h3 className="text-sm font-semibold text-gray-800">休憩後の遷移</h3>
+                {postBreakTransitionPolicy === "start_next_work_automatically" && (
+                  <span
+                    className="settingsPostBreakPolicyEnabledLabel"
+                    data-testid="settings-post-break-policy-enabled-label"
+                  >
+                    自動継続ON
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-gray-600">
+                休憩が終わったあとの作業開始方法を選択します。
+              </p>
+            </div>
+            <fieldset
+              className="settingsPostBreakPolicyGroup"
+              data-testid="settings-post-break-policy-group"
+              aria-label="休憩後の遷移ポリシー"
+            >
+              <label className="settingsPostBreakPolicyOption">
+                <input
+                  type="radio"
+                  name="settings-post-break-policy"
+                  value="require_manual_continue"
+                  checked={postBreakTransitionPolicy === "require_manual_continue"}
+                  onChange={() =>
+                    setPostBreakTransitionPolicy("require_manual_continue")
+                  }
+                  data-testid="settings-post-break-policy-manual"
+                  aria-label="毎回確認する"
+                />
+                <span>毎回確認する</span>
+              </label>
+              <label className="settingsPostBreakPolicyOption">
+                <input
+                  type="radio"
+                  name="settings-post-break-policy"
+                  value="start_next_work_automatically"
+                  checked={
+                    postBreakTransitionPolicy === "start_next_work_automatically"
+                  }
+                  onChange={() =>
+                    setPostBreakTransitionPolicy("start_next_work_automatically")
+                  }
+                  data-testid="settings-post-break-policy-auto"
+                  aria-label="休憩後に自動で次の作業を開始する"
+                />
+                <span>休憩後に自動で次の作業を開始する</span>
+              </label>
+            </fieldset>
           </section>
 
           <div>

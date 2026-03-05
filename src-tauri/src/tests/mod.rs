@@ -37,7 +37,11 @@ mod scheduler_boundary_runtime_tests {
     use crate::types::BoundaryOccurrenceId;
     use crate::{extract_boundary_epoch_seconds, trim_old_processed_boundaries};
 
-    fn boundary_id(slot_key: &str, boundary_type: &str, epoch_seconds: i64) -> BoundaryOccurrenceId {
+    fn boundary_id(
+        slot_key: &str,
+        boundary_type: &str,
+        epoch_seconds: i64,
+    ) -> BoundaryOccurrenceId {
         BoundaryOccurrenceId(format!("{slot_key}|{boundary_type}|{epoch_seconds}"))
     }
 
@@ -56,10 +60,7 @@ mod scheduler_boundary_runtime_tests {
         let valid = boundary_id("mon", "end", 1_736_154_400);
         let invalid = BoundaryOccurrenceId("invalid-boundary-id".to_string());
 
-        assert_eq!(
-            extract_boundary_epoch_seconds(&valid),
-            Some(1_736_154_400)
-        );
+        assert_eq!(extract_boundary_epoch_seconds(&valid), Some(1_736_154_400));
         assert_eq!(extract_boundary_epoch_seconds(&invalid), None);
     }
 
@@ -87,5 +88,48 @@ mod scheduler_boundary_runtime_tests {
         assert!(processed.contains(&recent_boundary));
         assert!(!processed.contains(&stale_boundary));
         assert_eq!(processed.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod scheduler_config_revision_scope_tests {
+    use crate::commands::timer::did_scheduler_topology_change;
+    use crate::types::WeeklyAutoRunConfig;
+
+    fn make_enabled_monday_config() -> WeeklyAutoRunConfig {
+        let mut config = WeeklyAutoRunConfig::default();
+        config.mon.enabled = true;
+        config.mon.start_time = "09:00".to_string();
+        config.mon.end_time = "18:00".to_string();
+        config
+    }
+
+    #[test]
+    fn test_post_break_policy_only_update_does_not_require_scheduler_revision() {
+        let previous_config = make_enabled_monday_config();
+        let next_config = previous_config.clone();
+
+        let requires_revision =
+            did_scheduler_topology_change(true, &previous_config, true, &next_config);
+
+        assert!(
+            !requires_revision,
+            "scheduler revision must not change when schedule fields are unchanged"
+        );
+    }
+
+    #[test]
+    fn test_schedule_update_requires_scheduler_revision() {
+        let previous_config = make_enabled_monday_config();
+        let mut next_config = previous_config.clone();
+        next_config.mon.end_time = "19:00".to_string();
+
+        let requires_revision =
+            did_scheduler_topology_change(true, &previous_config, true, &next_config);
+
+        assert!(
+            requires_revision,
+            "scheduler revision must change when weekly schedule is updated"
+        );
     }
 }

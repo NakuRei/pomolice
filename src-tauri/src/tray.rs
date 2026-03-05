@@ -162,7 +162,11 @@ fn compose_tray_visual_spec(status: TimerStatus, remaining_seconds: u64) -> Tray
     TrayVisualSpec { icon_rgba, tooltip }
 }
 
-fn render_icon_rgba(glyph_mode: TrayGlyphMode, status: TimerStatus, remaining_seconds: u64) -> Vec<u8> {
+fn render_icon_rgba(
+    glyph_mode: TrayGlyphMode,
+    status: TimerStatus,
+    remaining_seconds: u64,
+) -> Vec<u8> {
     match glyph_mode {
         TrayGlyphMode::IdleSymbol => tray_icon_renderer::render_idle_icon(),
         TrayGlyphMode::RemainingMinutes => {
@@ -269,12 +273,22 @@ mod tests {
 
         let working_spec = compose_tray_visual_spec(TimerStatus::Working, 125);
         let working_presentation = status_presentation(TimerStatus::Working);
-        assert_eq!(working_presentation.glyph_mode, TrayGlyphMode::RemainingMinutes);
-        assert!(working_spec.tooltip.contains(working_presentation.status_label));
+        assert_eq!(
+            working_presentation.glyph_mode,
+            TrayGlyphMode::RemainingMinutes
+        );
+        assert!(working_spec
+            .tooltip
+            .contains(working_presentation.status_label));
 
         let on_break_spec = compose_tray_visual_spec(TimerStatus::OnBreak, 125);
         let on_break_presentation = status_presentation(TimerStatus::OnBreak);
-        assert_eq!(on_break_presentation.glyph_mode, TrayGlyphMode::RemainingMinutes);
-        assert!(on_break_spec.tooltip.contains(on_break_presentation.status_label));
+        assert_eq!(
+            on_break_presentation.glyph_mode,
+            TrayGlyphMode::RemainingMinutes
+        );
+        assert!(on_break_spec
+            .tooltip
+            .contains(on_break_presentation.status_label));
     }
 }

@@ -36,10 +36,7 @@ struct IconExportInstruction {
 enum IconRenderAction {
     ActiveIdle,
     Idle(IdleGlyphVariant),
-    RemainingMinutes {
-        status: TimerStatus,
-        minutes: u32,
-    },
+    RemainingMinutes { status: TimerStatus, minutes: u32 },
 }
 
 fn main() -> Result<(), String> {
@@ -109,7 +106,9 @@ fn main() -> Result<(), String> {
 fn render_rgba(render_action: IconRenderAction) -> Vec<u8> {
     match render_action {
         IconRenderAction::ActiveIdle => tray_icon_renderer::render_idle_icon(),
-        IconRenderAction::Idle(variant) => tray_icon_renderer::render_idle_icon_for_variant(variant),
+        IconRenderAction::Idle(variant) => {
+            tray_icon_renderer::render_idle_icon_for_variant(variant)
+        }
         IconRenderAction::RemainingMinutes { status, minutes } => {
             tray_icon_renderer::render_tray_icon(minutes, status)
         }
@@ -124,12 +123,7 @@ fn idle_variant_file_label(variant: IdleGlyphVariant) -> &'static str {
     }
 }
 
-fn write_png_rgba(
-    output_path: &Path,
-    width: u32,
-    height: u32,
-    rgba: &[u8],
-) -> Result<(), String> {
+fn write_png_rgba(output_path: &Path, width: u32, height: u32, rgba: &[u8]) -> Result<(), String> {
     let file = File::create(output_path)
         .map_err(|error| format!("Failed to create {}: {error}", output_path.display()))?;
     let writer = BufWriter::new(file);
@@ -137,12 +131,18 @@ fn write_png_rgba(
     let mut encoder = png::Encoder::new(writer, width, height);
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
-    let mut png_writer = encoder
-        .write_header()
-        .map_err(|error| format!("Failed to write PNG header {}: {error}", output_path.display()))?;
-    png_writer
-        .write_image_data(rgba)
-        .map_err(|error| format!("Failed to write PNG pixels {}: {error}", output_path.display()))?;
+    let mut png_writer = encoder.write_header().map_err(|error| {
+        format!(
+            "Failed to write PNG header {}: {error}",
+            output_path.display()
+        )
+    })?;
+    png_writer.write_image_data(rgba).map_err(|error| {
+        format!(
+            "Failed to write PNG pixels {}: {error}",
+            output_path.display()
+        )
+    })?;
 
     Ok(())
 }

@@ -21,7 +21,7 @@ describe("timerStore syncSettings command routing", () => {
       completedPomodoros: 0,
       breakInteractionCount: 0,
       isFullscreenBreak: false,
-      showContinueDialog: false,
+      requiresManualContinueDecision: false,
       isConnected: false,
       shouldPromptStartOnBoot: false,
       activeWindowSummary: null,
@@ -36,18 +36,27 @@ describe("timerStore syncSettings command routing", () => {
     useSettingsStore.getState().setDayEndTime("mon", "17:00");
   });
 
-  it("should invoke sync_all_settings while idle", async () => {
+  it("should invoke duration and automation sync commands while idle", async () => {
     useTimerStore.setState({ status: TimerStatus.IDLE, isConnected: true });
 
     await useTimerStore.getState().syncSettings();
 
-    expect(mockInvoke).toHaveBeenCalledWith(
-      "sync_all_settings",
+    expect(mockInvoke).toHaveBeenNthCalledWith(
+      1,
+      "sync_timer_duration_settings",
       expect.objectContaining({
         workDurationSecs: expect.any(Number),
         shortBreakDurationSecs: expect.any(Number),
         longBreakDurationSecs: expect.any(Number),
         longBreakInterval: expect.any(Number),
+      })
+    );
+
+    expect(mockInvoke).toHaveBeenNthCalledWith(
+      2,
+      "sync_automation_policies",
+      expect.objectContaining({
+        postBreakTransitionPolicy: "require_manual_continue",
         autoRunFeatureEnabled: true,
         weeklyAutoRunConfig: expect.objectContaining({
           mon: expect.objectContaining({
@@ -60,14 +69,16 @@ describe("timerStore syncSettings command routing", () => {
     );
   });
 
-  it("should invoke sync_auto_run_settings while running", async () => {
+  it("should invoke automation sync command only while running", async () => {
     useTimerStore.setState({ status: TimerStatus.WORKING, isConnected: true });
 
     await useTimerStore.getState().syncSettings();
 
+    expect(mockInvoke).toHaveBeenCalledTimes(1);
     expect(mockInvoke).toHaveBeenCalledWith(
-      "sync_auto_run_settings",
+      "sync_automation_policies",
       expect.objectContaining({
+        postBreakTransitionPolicy: "require_manual_continue",
         autoRunFeatureEnabled: true,
         weeklyAutoRunConfig: expect.objectContaining({
           mon: expect.objectContaining({
@@ -84,6 +95,23 @@ describe("timerStore syncSettings command routing", () => {
     expect(commandPayload.shortBreakDurationSecs).toBeUndefined();
     expect(commandPayload.longBreakDurationSecs).toBeUndefined();
     expect(commandPayload.longBreakInterval).toBeUndefined();
+    expect(commandPayload.postBreakTransitionPolicy).toBe("require_manual_continue");
+  });
+
+  it("should sync auto post-break transition policy value to automation command", async () => {
+    useTimerStore.setState({ status: TimerStatus.IDLE, isConnected: true });
+    useSettingsStore
+      .getState()
+      .setPostBreakTransitionPolicy("start_next_work_automatically");
+
+    await useTimerStore.getState().syncSettings();
+
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "sync_automation_policies",
+      expect.objectContaining({
+        postBreakTransitionPolicy: "start_next_work_automatically",
+      })
+    );
   });
 
   it("should swallow backend errors during sync", async () => {
