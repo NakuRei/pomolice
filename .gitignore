@@ -29,3 +29,4 @@ dist-ssr
 .cspell/
 *.code-workspace
 /coverage/
+.playwright-cli/
