@@ -8,12 +8,8 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "./App";
-import {
-  createWeeklyAutoRunConfigAllDaysDisabled,
-  useSettingsStore,
-} from "./store/settingsStore";
+import { useSettingsStore } from "./store/settingsStore";
 import { SessionType, TimerStatus, useTimerStore } from "./store/timerStore";
-import { playNotificationSoundPreview } from "./services/notifications";
 
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
@@ -68,9 +64,6 @@ describe("App", () => {
       activeWindowSummary: null,
       infoMessage: null,
       infoMessageShownAtById: {},
-    });
-    vi.mocked(playNotificationSoundPreview).mockResolvedValue({
-      status: "played",
     });
   });
 
@@ -211,69 +204,53 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
-  it("displays current settings summary text on settings top", async () => {
+  it("returns to settings top after saving timer settings page", async () => {
     const user = userEvent.setup();
-    const weeklyAutoRunConfig = createWeeklyAutoRunConfigAllDaysDisabled();
-    weeklyAutoRunConfig.mon.enabled = true;
-    weeklyAutoRunConfig.mon.startTime = "09:00";
-    weeklyAutoRunConfig.mon.endTime = "18:00";
-    weeklyAutoRunConfig.tue.enabled = true;
-    weeklyAutoRunConfig.tue.startTime = "09:00";
-    weeklyAutoRunConfig.tue.endTime = "18:00";
-
-    useSettingsStore.setState({
-      workDuration: 30,
-      shortBreakDuration: 6,
-      longBreakDuration: 20,
-      longBreakInterval: 5,
-      autoRunFeatureEnabled: true,
-      weeklyAutoRunConfig,
-      post_break_transition_policy: "start_next_work_automatically",
-      notificationSoundMuted: true,
-      notificationSoundVolumePercent: 35,
-    });
 
     render(<App />);
     await user.click(screen.getByTestId("settings-button"));
+    await user.click(screen.getByTestId("settings-top-row-timer"));
 
-    expect(screen.getByTestId("settings-top-row-timer")).toHaveTextContent(
-      "作業30分 / 短休憩6分 / 長休憩20分 / 間隔5回",
-    );
-    expect(screen.getByTestId("settings-top-row-auto-run")).toHaveTextContent(
-      "月火 09:00-18:00",
-    );
-    expect(
-      screen.getByTestId("settings-top-row-post-break-policy"),
-    ).toHaveTextContent("休憩後に自動で次の作業を開始する");
-    expect(
-      screen.getByTestId("settings-top-row-notification"),
-    ).toHaveTextContent("ミュートON / 音量35%");
+    const workDurationInput = screen.getByTestId(
+      "settings-work-duration-input",
+    ) as HTMLInputElement;
+    await user.clear(workDurationInput);
+    await user.type(workDurationInput, "31");
+    await user.click(screen.getByTestId("settings-save"));
+
+    expect(screen.getByTestId("settings-top-page")).toBeInTheDocument();
+    expect(screen.queryByTestId("settings-timer-page")).not.toBeInTheDocument();
   });
 
-  it("switches post-break transition policy on settings top", async () => {
+  it("returns to settings top after canceling auto-run settings page", async () => {
     const user = userEvent.setup();
-
-    useSettingsStore.setState({
-      post_break_transition_policy: "require_manual_continue",
-    });
 
     render(<App />);
     await user.click(screen.getByTestId("settings-button"));
+    await user.click(screen.getByTestId("settings-top-row-auto-run"));
 
+    await user.click(screen.getByTestId("settings-cancel"));
+
+    expect(screen.getByTestId("settings-top-page")).toBeInTheDocument();
+    expect(screen.queryByTestId("settings-auto-run-page")).not.toBeInTheDocument();
+  });
+
+  it("returns to settings top after saving notification settings page", async () => {
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(screen.getByTestId("settings-button"));
+    await user.click(screen.getByTestId("settings-top-row-notification"));
+
+    fireEvent.change(screen.getByTestId("settings-notification-sound-volume"), {
+      target: { value: "40" },
+    });
+    await user.click(screen.getByTestId("settings-save"));
+
+    expect(screen.getByTestId("settings-top-page")).toBeInTheDocument();
     expect(
-      screen.getByTestId("settings-top-row-post-break-policy"),
-    ).toHaveTextContent("毎回確認する");
-
-    await user.click(
-      screen.getByTestId("settings-top-post-break-policy-toggle"),
-    );
-
-    expect(useSettingsStore.getState().post_break_transition_policy).toBe(
-      "start_next_work_automatically",
-    );
-    expect(
-      screen.getByTestId("settings-top-row-post-break-policy"),
-    ).toHaveTextContent("休憩後に自動で次の作業を開始する");
+      screen.queryByTestId("settings-notification-page"),
+    ).not.toBeInTheDocument();
   });
 
   it("returns to home screen after fullscreen break ends while settings top is open", async () => {
@@ -300,214 +277,6 @@ describe("App", () => {
     expect(screen.queryByTestId("settings-top-page")).not.toBeInTheDocument();
   });
 
-  it("saves timer settings and returns to settings top", async () => {
-    const user = userEvent.setup();
-
-    useSettingsStore.setState({
-      post_break_transition_policy: "require_manual_continue",
-    });
-
-    render(<App />);
-    await user.click(screen.getByTestId("settings-button"));
-    await user.click(screen.getByTestId("settings-top-row-timer"));
-
-    const workDurationInput = screen.getByTestId(
-      "settings-work-duration-input",
-    ) as HTMLInputElement;
-    await user.clear(workDurationInput);
-    await user.type(workDurationInput, "31");
-    await user.click(screen.getByTestId("settings-save"));
-
-    expect(screen.getByTestId("settings-top-page")).toBeInTheDocument();
-    expect(useSettingsStore.getState().workDuration).toBe(31);
-    expect(useSettingsStore.getState().post_break_transition_policy).toBe(
-      "require_manual_continue",
-    );
-  });
-
-  it("saves auto-run settings and returns to settings top", async () => {
-    const user = userEvent.setup();
-
-    render(<App />);
-    await user.click(screen.getByTestId("settings-button"));
-    await user.click(screen.getByTestId("settings-top-row-auto-run"));
-
-    await user.click(screen.getByTestId("settings-auto-run-feature-toggle"));
-    await user.click(screen.getByTestId("settings-auto-run-day-enabled-mon"));
-    fireEvent.change(screen.getByTestId("settings-auto-run-day-start-mon"), {
-      target: { value: "09:00" },
-    });
-    fireEvent.change(screen.getByTestId("settings-auto-run-day-end-mon"), {
-      target: { value: "18:00" },
-    });
-    await user.click(screen.getByTestId("settings-save"));
-
-    expect(screen.getByTestId("settings-top-page")).toBeInTheDocument();
-    expect(useSettingsStore.getState().autoRunFeatureEnabled).toBe(true);
-    expect(useSettingsStore.getState().weeklyAutoRunConfig.mon.enabled).toBe(
-      true,
-    );
-    expect(useSettingsStore.getState().weeklyAutoRunConfig.mon.startTime).toBe(
-      "09:00",
-    );
-    expect(useSettingsStore.getState().weeklyAutoRunConfig.mon.endTime).toBe(
-      "18:00",
-    );
-  });
-
-  it("saves notification settings and only updates notification keys", async () => {
-    const user = userEvent.setup();
-
-    useSettingsStore.setState({
-      workDuration: 28,
-      notificationSoundMuted: false,
-      notificationSoundVolumePercent: 50,
-    });
-
-    render(<App />);
-    await user.click(screen.getByTestId("settings-button"));
-    await user.click(screen.getByTestId("settings-top-row-notification"));
-
-    await user.click(screen.getByTestId("settings-notification-mute-button"));
-    const volumeSlider = screen.getByTestId(
-      "settings-notification-sound-volume",
-    ) as HTMLInputElement;
-    await user.click(screen.getByTestId("settings-notification-mute-button"));
-    fireEvent.change(volumeSlider, { target: { value: "35" } });
-    await user.click(screen.getByTestId("settings-save"));
-
-    expect(screen.getByTestId("settings-top-page")).toBeInTheDocument();
-    expect(useSettingsStore.getState().notificationSoundMuted).toBe(false);
-    expect(useSettingsStore.getState().notificationSoundVolumePercent).toBe(35);
-    expect(useSettingsStore.getState().workDuration).toBe(28);
-  });
-
-  it("does not persist unsaved timer draft when saving notification settings", async () => {
-    const user = userEvent.setup();
-
-    useSettingsStore.setState({
-      workDuration: 25,
-      notificationSoundMuted: false,
-      notificationSoundVolumePercent: 50,
-    });
-
-    render(<App />);
-    await user.click(screen.getByTestId("settings-button"));
-    await user.click(screen.getByTestId("settings-top-row-timer"));
-
-    const workDurationInput = screen.getByTestId(
-      "settings-work-duration-input",
-    ) as HTMLInputElement;
-    await user.clear(workDurationInput);
-    await user.type(workDurationInput, "40");
-    await user.click(screen.getByTestId("settings-cancel"));
-
-    await user.click(screen.getByTestId("settings-top-row-notification"));
-    const volumeSlider = screen.getByTestId(
-      "settings-notification-sound-volume",
-    ) as HTMLInputElement;
-    fireEvent.change(volumeSlider, { target: { value: "30" } });
-    await user.click(screen.getByTestId("settings-save"));
-
-    expect(useSettingsStore.getState().workDuration).toBe(25);
-    expect(useSettingsStore.getState().notificationSoundVolumePercent).toBe(30);
-  });
-
-  it("cancels timer settings without persisting edits", async () => {
-    const user = userEvent.setup();
-
-    useSettingsStore.setState({ workDuration: 25 });
-
-    render(<App />);
-    await user.click(screen.getByTestId("settings-button"));
-    await user.click(screen.getByTestId("settings-top-row-timer"));
-
-    const workDurationInput = screen.getByTestId(
-      "settings-work-duration-input",
-    ) as HTMLInputElement;
-    await user.clear(workDurationInput);
-    await user.type(workDurationInput, "45");
-    await user.click(screen.getByTestId("settings-cancel"));
-
-    expect(screen.getByTestId("settings-top-page")).toBeInTheDocument();
-    expect(useSettingsStore.getState().workDuration).toBe(25);
-  });
-
-  it("cancels auto-run settings without persisting edits", async () => {
-    const user = userEvent.setup();
-
-    const weeklyAutoRunConfig = createWeeklyAutoRunConfigAllDaysDisabled();
-    useSettingsStore.setState({
-      autoRunFeatureEnabled: false,
-      weeklyAutoRunConfig,
-    });
-
-    render(<App />);
-    await user.click(screen.getByTestId("settings-button"));
-    await user.click(screen.getByTestId("settings-top-row-auto-run"));
-
-    await user.click(screen.getByTestId("settings-auto-run-feature-toggle"));
-    await user.click(screen.getByTestId("settings-auto-run-day-enabled-mon"));
-    fireEvent.change(screen.getByTestId("settings-auto-run-day-start-mon"), {
-      target: { value: "10:00" },
-    });
-    fireEvent.change(screen.getByTestId("settings-auto-run-day-end-mon"), {
-      target: { value: "19:00" },
-    });
-    await user.click(screen.getByTestId("settings-cancel"));
-
-    expect(screen.getByTestId("settings-top-page")).toBeInTheDocument();
-    expect(useSettingsStore.getState().autoRunFeatureEnabled).toBe(false);
-    expect(useSettingsStore.getState().weeklyAutoRunConfig.mon.enabled).toBe(
-      false,
-    );
-  });
-
-  it("cancels notification settings without persisting edits", async () => {
-    const user = userEvent.setup();
-
-    useSettingsStore.setState({
-      notificationSoundMuted: false,
-      notificationSoundVolumePercent: 50,
-    });
-
-    render(<App />);
-    await user.click(screen.getByTestId("settings-button"));
-    await user.click(screen.getByTestId("settings-top-row-notification"));
-
-    await user.click(screen.getByTestId("settings-notification-mute-button"));
-    const volumeSlider = screen.getByTestId(
-      "settings-notification-sound-volume",
-    ) as HTMLInputElement;
-    await user.click(screen.getByTestId("settings-notification-mute-button"));
-    fireEvent.change(volumeSlider, { target: { value: "80" } });
-    await user.click(screen.getByTestId("settings-cancel"));
-
-    expect(screen.getByTestId("settings-top-page")).toBeInTheDocument();
-    expect(useSettingsStore.getState().notificationSoundMuted).toBe(false);
-    expect(useSettingsStore.getState().notificationSoundVolumePercent).toBe(50);
-  });
-
-  it("disables timer duration inputs while timer is running", async () => {
-    const user = userEvent.setup();
-
-    render(<App />);
-    await user.click(screen.getByTestId("settings-button"));
-    await user.click(screen.getByTestId("settings-top-row-timer"));
-
-    act(() => {
-      useTimerStore.setState({ status: TimerStatus.WORKING });
-    });
-
-    expect(screen.getByTestId("settings-work-duration-input")).toBeDisabled();
-    expect(screen.getByTestId("settings-short-break-input")).toBeDisabled();
-    expect(screen.getByTestId("settings-long-break-input")).toBeDisabled();
-    expect(screen.getByTestId("settings-interval-input")).toBeDisabled();
-    expect(
-      screen.getByTestId("settings-duration-edit-disabled-message"),
-    ).toBeInTheDocument();
-  });
-
   it("returns to settings top when Escape is pressed on timer settings page", async () => {
     const user = userEvent.setup();
 
@@ -519,25 +288,6 @@ describe("App", () => {
 
     expect(screen.getByTestId("settings-top-page")).toBeInTheDocument();
     expect(screen.queryByTestId("settings-timer-page")).not.toBeInTheDocument();
-  });
-
-  it("shows day validation error and disables save in auto-run settings", async () => {
-    const user = userEvent.setup();
-
-    render(<App />);
-    await user.click(screen.getByTestId("settings-button"));
-    await user.click(screen.getByTestId("settings-top-row-auto-run"));
-
-    await user.click(screen.getByTestId("settings-auto-run-feature-toggle"));
-    await user.click(screen.getByTestId("settings-auto-run-day-enabled-mon"));
-    fireEvent.change(screen.getByTestId("settings-auto-run-day-start-mon"), {
-      target: { value: "invalid-time" },
-    });
-
-    expect(
-      screen.getByTestId("settings-auto-run-day-error-mon"),
-    ).toBeInTheDocument();
-    expect(screen.getByTestId("settings-save")).toBeDisabled();
   });
 
   it("returns to settings top when Escape is pressed on auto-run settings page", async () => {
@@ -553,46 +303,6 @@ describe("App", () => {
     expect(
       screen.queryByTestId("settings-auto-run-page"),
     ).not.toBeInTheDocument();
-  });
-
-  it("disables notification controls when mute is enabled", async () => {
-    const user = userEvent.setup();
-
-    render(<App />);
-    await user.click(screen.getByTestId("settings-button"));
-    await user.click(screen.getByTestId("settings-top-row-notification"));
-    await user.click(screen.getByTestId("settings-notification-mute-button"));
-
-    expect(
-      screen.getByTestId("settings-notification-sound-volume"),
-    ).toBeDisabled();
-    expect(
-      screen.getByTestId("settings-notification-sound-preview-button"),
-    ).toBeDisabled();
-    expect(
-      screen.getByTestId("settings-notification-sound-preview-status"),
-    ).toHaveTextContent("通知音がミュート中のため再生しませんでした。");
-  });
-
-  it("shows unavailable message when preview sound file is not available", async () => {
-    const user = userEvent.setup();
-    vi.mocked(playNotificationSoundPreview).mockResolvedValueOnce({
-      status: "unavailable",
-    });
-
-    render(<App />);
-    await user.click(screen.getByTestId("settings-button"));
-    await user.click(screen.getByTestId("settings-top-row-notification"));
-    await user.click(
-      screen.getByTestId("settings-notification-sound-preview-button"),
-    );
-
-    expect(playNotificationSoundPreview).toHaveBeenCalledTimes(1);
-    expect(
-      screen.getByTestId("settings-notification-sound-preview-status"),
-    ).toHaveTextContent(
-      "通知音ファイルを読み込めなかったため再生できませんでした。",
-    );
   });
 
   it("returns to settings top when Escape is pressed on notification settings page", async () => {

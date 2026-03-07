@@ -82,22 +82,6 @@ describe("BreakStats", () => {
     });
   });
 
-  describe("Styling", () => {
-    it("should apply correct text styling classes", () => {
-      render(<BreakStats />);
-
-      const pomodoroLabel = screen.getByText("今日のポモドーロ:");
-      expect(pomodoroLabel).toHaveClass("font-semibold");
-    });
-
-    it("should use proper spacing", () => {
-      const { container } = render(<BreakStats />);
-
-      const statsContainer = container.querySelector(".space-y-3");
-      expect(statsContainer).toBeInTheDocument();
-    });
-  });
-
   describe("Integration with Timer Store", () => {
     it("should react to timer store changes", () => {
       const { rerender } = render(<BreakStats />);

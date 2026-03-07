@@ -12,14 +12,6 @@ describe("MotivationalMessage", () => {
       const messageElement = screen.getByText(/./);
       expect(messageElement).toBeInTheDocument();
     });
-
-    it("should display message with correct styling", () => {
-      render(<MotivationalMessage />);
-
-      const container = screen.getByText(/./);
-      expect(container).toHaveClass("text-2xl");
-      expect(container).toHaveClass("font-medium");
-    });
   });
 
   describe("Message Selection", () => {

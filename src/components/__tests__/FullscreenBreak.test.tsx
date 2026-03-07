@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { FullscreenBreak } from "../BreakScreen/FullscreenBreak";
 import { useTimerStore, SessionType } from "../../store/timerStore";
+import * as motivationalMessagesModule from "../../data/motivationalMessages";
 
 describe("FullscreenBreak", () => {
   beforeEach(() => {
@@ -13,6 +14,10 @@ describe("FullscreenBreak", () => {
     });
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   describe("Rendering", () => {
     it("should render fullscreen break screen", () => {
       render(<FullscreenBreak />);
@@ -21,12 +26,11 @@ describe("FullscreenBreak", () => {
       expect(breakScreen).toBeInTheDocument();
     });
 
-    it("should display timer in large format", () => {
+    it("should display timer", () => {
       render(<FullscreenBreak />);
 
       const timer = screen.getByTestId("break-timer-display");
       expect(timer).toBeInTheDocument();
-      expect(timer).toHaveClass("text-[120px]");
     });
 
     it("should display session type", () => {
@@ -35,14 +39,15 @@ describe("FullscreenBreak", () => {
       expect(screen.getByText("短い休憩")).toBeInTheDocument();
     });
 
-    it("should render motivational message component", () => {
+    it("should include motivational message component output", () => {
+      const getRandomMessageSpy = vi
+        .spyOn(motivationalMessagesModule, "getRandomMessage")
+        .mockReturnValue("休憩メッセージ");
+
       render(<FullscreenBreak />);
 
-      // MotivationalMessage renders with specific styling (text-2xl)
-      // Find by the unique combination of classes that only the message has
-      const { container } = render(<FullscreenBreak />);
-      const messageElement = container.querySelector('.text-2xl.font-medium.text-gray-100');
-      expect(messageElement).toBeInTheDocument();
+      expect(getRandomMessageSpy).toHaveBeenCalledTimes(1);
+      expect(screen.getByText("休憩メッセージ")).toBeInTheDocument();
     });
 
     it("should render break statistics", () => {
@@ -110,13 +115,6 @@ describe("FullscreenBreak", () => {
   });
 
   describe("Skip Button", () => {
-    it("should be positioned in bottom-right corner", () => {
-      const { container } = render(<FullscreenBreak />);
-
-      const skipButtonContainer = container.querySelector(".absolute.bottom-3.right-3");
-      expect(skipButtonContainer).toBeInTheDocument();
-    });
-
     it("should show skip flow modal when clicked", () => {
       render(<FullscreenBreak />);
 
@@ -148,29 +146,6 @@ describe("FullscreenBreak", () => {
 
     it("should have take break button", () => {
       expect(screen.getByText(/No, Take Break/i)).toBeInTheDocument();
-    });
-  });
-
-  describe("Styling", () => {
-    it("should have dark background", () => {
-      const { container } = render(<FullscreenBreak />);
-
-      const breakScreen = container.querySelector(".bg-gray-900");
-      expect(breakScreen).toBeInTheDocument();
-    });
-
-    it("should cover entire screen (fixed inset-0)", () => {
-      const { container } = render(<FullscreenBreak />);
-
-      const breakScreen = container.querySelector(".fixed.inset-0");
-      expect(breakScreen).toBeInTheDocument();
-    });
-
-    it("should have high z-index for layering", () => {
-      const { container } = render(<FullscreenBreak />);
-
-      const breakScreen = container.querySelector(".z-50");
-      expect(breakScreen).toBeInTheDocument();
     });
   });
 

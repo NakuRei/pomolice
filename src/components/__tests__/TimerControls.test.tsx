@@ -65,12 +65,6 @@ describe("TimerControls", () => {
       useTimerStore.setState({ status: TimerStatus.WORKING });
     });
 
-    it("should not render any button when timer is working", () => {
-      render(<TimerControls />);
-      const startButton = screen.queryByTestId("start-button");
-      expect(startButton).not.toBeInTheDocument();
-    });
-
     it("should not render start button when timer is working", () => {
       render(<TimerControls />);
       const startButton = screen.queryByTestId("start-button");

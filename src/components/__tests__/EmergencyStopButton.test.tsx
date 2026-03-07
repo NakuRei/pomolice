@@ -54,14 +54,6 @@ describe("EmergencyStopButton", () => {
       const button = screen.getByTestId("emergency-stop-button");
       expect(button).toHaveAttribute("aria-label", "緊急停止");
     });
-
-    it("should have small, subtle styling", () => {
-      useTimerStore.setState({ status: TimerStatus.WORKING });
-      render(<EmergencyStopButton />);
-      const button = screen.getByTestId("emergency-stop-button");
-      expect(button).toHaveClass("text-xs");
-      expect(button).toHaveClass("text-gray-400");
-    });
   });
 
   describe("Confirmation Dialog", () => {
@@ -138,24 +130,6 @@ describe("EmergencyStopButton", () => {
       await user.click(screen.getByTestId("emergency-stop-cancel"));
 
       expect(useTimerStore.getState().status).toBe(TimerStatus.WORKING);
-    });
-
-    it("should call emergencyStop when confirm is clicked", async () => {
-      const user = userEvent.setup();
-      useTimerStore.setState({ status: TimerStatus.WORKING });
-      render(<EmergencyStopButton />);
-
-      await user.click(screen.getByTestId("emergency-stop-button"));
-      await user.click(screen.getByTestId("emergency-stop-confirm"));
-
-      // emergencyStop calls invoke, which is mocked
-      // The actual state change comes from backend via events
-      // Here we just verify the dialog closes
-      await waitFor(() => {
-        expect(
-          screen.queryByTestId("emergency-stop-dialog")
-        ).not.toBeInTheDocument();
-      });
     });
 
     it("should close dialog after confirming", async () => {

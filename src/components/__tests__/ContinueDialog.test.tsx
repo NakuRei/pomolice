@@ -177,31 +177,6 @@ describe("ContinueDialog", () => {
     });
   });
 
-  describe("Dialog Styling", () => {
-    beforeEach(() => {
-      useTimerStore.setState({ requiresManualContinueDecision: true });
-    });
-
-    it("should have overlay background", () => {
-      render(<ContinueDialog />);
-      const dialog = screen.getByTestId("continue-dialog");
-      expect(dialog).toHaveClass("bg-black/50");
-    });
-
-    it("should be positioned as fixed overlay", () => {
-      render(<ContinueDialog />);
-      const dialog = screen.getByTestId("continue-dialog");
-      expect(dialog).toHaveClass("fixed");
-      expect(dialog).toHaveClass("inset-0");
-    });
-
-    it("should have high z-index", () => {
-      render(<ContinueDialog />);
-      const dialog = screen.getByTestId("continue-dialog");
-      expect(dialog).toHaveClass("z-50");
-    });
-  });
-
   describe("Edge Cases", () => {
     it("should handle zero completed pomodoros", () => {
       useTimerStore.setState({

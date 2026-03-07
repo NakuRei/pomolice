@@ -59,8 +59,9 @@ describe("Settings Pages", () => {
       longBreakInterval: 5,
       autoRunFeatureEnabled: true,
       weeklyAutoRunConfig,
-      notificationSoundMuted: false,
-      notificationSoundVolumePercent: 45,
+      post_break_transition_policy: "start_next_work_automatically",
+      notificationSoundMuted: true,
+      notificationSoundVolumePercent: 35,
     });
 
     render(
@@ -77,6 +78,12 @@ describe("Settings Pages", () => {
     );
     expect(screen.getByTestId("settings-top-row-auto-run")).toHaveTextContent(
       "月火 09:00-18:00",
+    );
+    expect(
+      screen.getByTestId("settings-top-row-post-break-policy"),
+    ).toHaveTextContent("休憩後に自動で次の作業を開始する");
+    expect(screen.getByTestId("settings-top-row-notification")).toHaveTextContent(
+      "ミュートON / 音量35%",
     );
   });
 
@@ -234,6 +241,35 @@ describe("Settings Pages", () => {
     expect(openSettingsTopScreen).toHaveBeenCalledTimes(1);
   });
 
+  it("discards auto-run draft on cancel", async () => {
+    const user = userEvent.setup();
+    const openSettingsTopScreen = vi.fn();
+
+    const weeklyAutoRunConfig = createWeeklyAutoRunConfigAllDaysDisabled();
+    useSettingsStore.setState({
+      autoRunFeatureEnabled: false,
+      weeklyAutoRunConfig,
+    });
+
+    render(
+      <SettingsAutoRunPage openSettingsTopScreen={openSettingsTopScreen} />,
+    );
+
+    await user.click(screen.getByTestId("settings-auto-run-feature-toggle"));
+    await user.click(screen.getByTestId("settings-auto-run-day-enabled-mon"));
+    fireEvent.change(screen.getByTestId("settings-auto-run-day-start-mon"), {
+      target: { value: "10:00" },
+    });
+    fireEvent.change(screen.getByTestId("settings-auto-run-day-end-mon"), {
+      target: { value: "19:00" },
+    });
+    await user.click(screen.getByTestId("settings-cancel"));
+
+    expect(useSettingsStore.getState().autoRunFeatureEnabled).toBe(false);
+    expect(useSettingsStore.getState().weeklyAutoRunConfig.mon.enabled).toBe(false);
+    expect(openSettingsTopScreen).toHaveBeenCalledTimes(1);
+  });
+
   it("blocks auto-run save when day time text is invalid", async () => {
     const user = userEvent.setup();
     const openSettingsTopScreen = vi.fn();
@@ -282,6 +318,34 @@ describe("Settings Pages", () => {
     expect(openSettingsTopScreen).toHaveBeenCalledTimes(1);
   });
 
+  it("discards notification draft on cancel", async () => {
+    const user = userEvent.setup();
+    const openSettingsTopScreen = vi.fn();
+
+    useSettingsStore.setState({
+      notificationSoundMuted: false,
+      notificationSoundVolumePercent: 50,
+    });
+
+    render(
+      <SettingsNotificationPage
+        openSettingsTopScreen={openSettingsTopScreen}
+      />,
+    );
+
+    await user.click(screen.getByTestId("settings-notification-mute-button"));
+    const volumeSlider = screen.getByTestId(
+      "settings-notification-sound-volume",
+    ) as HTMLInputElement;
+    await user.click(screen.getByTestId("settings-notification-mute-button"));
+    fireEvent.change(volumeSlider, { target: { value: "80" } });
+    await user.click(screen.getByTestId("settings-cancel"));
+
+    expect(useSettingsStore.getState().notificationSoundMuted).toBe(false);
+    expect(useSettingsStore.getState().notificationSoundVolumePercent).toBe(50);
+    expect(openSettingsTopScreen).toHaveBeenCalledTimes(1);
+  });
+
   it("disables volume and preview button when notification is muted", async () => {
     const user = userEvent.setup();
 
@@ -326,5 +390,56 @@ describe("Settings Pages", () => {
     expect(
       screen.getByTestId("settings-notification-sound-preview-status"),
     ).toHaveTextContent("");
+  });
+
+  it("shows unavailable message when preview sound file is not available", async () => {
+    const user = userEvent.setup();
+    vi.mocked(playNotificationSoundPreview).mockResolvedValueOnce({
+      status: "unavailable",
+    });
+
+    render(
+      <SettingsNotificationPage openSettingsTopScreen={() => undefined} />,
+    );
+
+    await user.click(screen.getByTestId("settings-notification-sound-preview-button"));
+
+    expect(playNotificationSoundPreview).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByTestId("settings-notification-sound-preview-status"),
+    ).toHaveTextContent("通知音ファイルを読み込めなかったため再生できませんでした。");
+  });
+
+  it("does not persist unsaved timer draft when notification settings are saved", async () => {
+    const user = userEvent.setup();
+
+    useSettingsStore.setState({
+      workDuration: 25,
+      notificationSoundMuted: false,
+      notificationSoundVolumePercent: 50,
+    });
+
+    const timerPageRenderResult = render(
+      <SettingsTimerPage openSettingsTopScreen={() => undefined} />,
+    );
+    const workInput = screen.getByTestId(
+      "settings-work-duration-input",
+    ) as HTMLInputElement;
+    await user.clear(workInput);
+    await user.type(workInput, "40");
+    await user.click(screen.getByTestId("settings-cancel"));
+    timerPageRenderResult.unmount();
+
+    render(
+      <SettingsNotificationPage openSettingsTopScreen={() => undefined} />,
+    );
+    const volumeSlider = screen.getByTestId(
+      "settings-notification-sound-volume",
+    ) as HTMLInputElement;
+    fireEvent.change(volumeSlider, { target: { value: "30" } });
+    await user.click(screen.getByTestId("settings-save"));
+
+    expect(useSettingsStore.getState().workDuration).toBe(25);
+    expect(useSettingsStore.getState().notificationSoundVolumePercent).toBe(30);
   });
 });

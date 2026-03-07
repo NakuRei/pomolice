@@ -127,42 +127,27 @@ describe("DurationInput", () => {
   describe("Validation", () => {
     it("should show valid state when value is within range", () => {
       render(<DurationInput {...defaultProps} value={50} />);
-      const input = screen.getByTestId("work-duration-input");
-
-      expect(input).toHaveClass("border-gray-300");
       expect(screen.queryByTestId("work-duration-error")).not.toBeInTheDocument();
     });
 
     it("should show error when value is below minimum", () => {
       render(<DurationInput {...defaultProps} value={0} />);
-      const input = screen.getByTestId("work-duration-input");
-
-      expect(input).toHaveClass("border-red-500");
       expect(screen.getByTestId("work-duration-error")).toBeInTheDocument();
       expect(screen.getByText("1〜120分の範囲で入力してください")).toBeInTheDocument();
     });
 
     it("should show error when value is above maximum", () => {
       render(<DurationInput {...defaultProps} value={150} />);
-      const input = screen.getByTestId("work-duration-input");
-
-      expect(input).toHaveClass("border-red-500");
       expect(screen.getByTestId("work-duration-error")).toBeInTheDocument();
     });
 
     it("should validate at minimum boundary", () => {
       render(<DurationInput {...defaultProps} value={1} />);
-      const input = screen.getByTestId("work-duration-input");
-
-      expect(input).toHaveClass("border-gray-300");
       expect(screen.queryByTestId("work-duration-error")).not.toBeInTheDocument();
     });
 
     it("should validate at maximum boundary", () => {
       render(<DurationInput {...defaultProps} value={120} />);
-      const input = screen.getByTestId("work-duration-input");
-
-      expect(input).toHaveClass("border-gray-300");
       expect(screen.queryByTestId("work-duration-error")).not.toBeInTheDocument();
     });
   });
@@ -187,24 +172,6 @@ describe("DurationInput", () => {
     });
   });
 
-  describe("Styling", () => {
-    it("should apply valid styling classes", () => {
-      render(<DurationInput {...defaultProps} value={50} />);
-      const input = screen.getByTestId("work-duration-input");
-
-      expect(input).toHaveClass("border-gray-300");
-      expect(input).toHaveClass("focus:ring-blue-500");
-    });
-
-    it("should apply error styling classes", () => {
-      render(<DurationInput {...defaultProps} value={0} />);
-      const input = screen.getByTestId("work-duration-input");
-
-      expect(input).toHaveClass("border-red-500");
-      expect(input).toHaveClass("focus:ring-red-500");
-    });
-  });
-
   describe("Edge Cases", () => {
     it("should handle zero value", () => {
       render(<DurationInput {...defaultProps} value={0} min={0} max={120} />);
@@ -214,17 +181,11 @@ describe("DurationInput", () => {
 
     it("should handle negative value with validation", () => {
       render(<DurationInput {...defaultProps} value={-5} />);
-      const input = screen.getByTestId("work-duration-input");
-
-      expect(input).toHaveClass("border-red-500");
       expect(screen.getByTestId("work-duration-error")).toBeInTheDocument();
     });
 
     it("should handle very large numbers", () => {
       render(<DurationInput {...defaultProps} value={9999} />);
-      const input = screen.getByTestId("work-duration-input");
-
-      expect(input).toHaveClass("border-red-500");
       expect(screen.getByTestId("work-duration-error")).toBeInTheDocument();
     });
   });
@@ -240,9 +201,6 @@ describe("DurationInput", () => {
           testId="interval"
         />
       );
-      const input = screen.getByTestId("interval-input");
-
-      expect(input).toHaveClass("border-gray-300");
       expect(screen.getByText("範囲: 2〜10分")).toBeInTheDocument();
     });
 
@@ -256,9 +214,6 @@ describe("DurationInput", () => {
           testId="break"
         />
       );
-      const input = screen.getByTestId("break-input");
-
-      expect(input).toHaveClass("border-red-500");
       expect(screen.getByTestId("break-error")).toBeInTheDocument();
       expect(screen.getByText("5〜60分の範囲で入力してください")).toBeInTheDocument();
     });

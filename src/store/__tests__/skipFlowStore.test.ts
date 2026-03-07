@@ -3,13 +3,20 @@
  * Phase 5: Multi-step skip confirmation flow
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useSkipFlowStore, SKIP_FLOW_STEPS, TOTAL_STEPS } from "../skipFlowStore";
 
 describe("skipFlowStore", () => {
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+
     // Reset store before each test
     useSkipFlowStore.getState().resetSkipFlow();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   describe("Initial state", () => {
@@ -181,20 +188,12 @@ describe("skipFlowStore", () => {
       const { startSkipFlow, completeSkipFlow } = useSkipFlowStore.getState();
 
       startSkipFlow();
-
-      // Wait a bit (simulate time passing)
-      // Note: In real tests, we would mock Date.now()
-      const startTime = Date.now();
-
-      // Simulate 1 second delay
-      while (Date.now() - startTime < 1000) {
-        // Busy wait
-      }
+      vi.setSystemTime(new Date("2026-01-01T00:00:01Z"));
 
       completeSkipFlow();
 
       const state = useSkipFlowStore.getState();
-      expect(state.totalTimeSpent).toBeGreaterThan(0);
+      expect(state.totalTimeSpent).toBe(1);
     });
   });
 
@@ -212,17 +211,12 @@ describe("skipFlowStore", () => {
       const { startSkipFlow, updateTimeSpent } = useSkipFlowStore.getState();
 
       startSkipFlow();
-
-      // Wait a bit
-      const startTime = Date.now();
-      while (Date.now() - startTime < 1000) {
-        // Busy wait
-      }
+      vi.setSystemTime(new Date("2026-01-01T00:00:01Z"));
 
       updateTimeSpent();
 
       const state = useSkipFlowStore.getState();
-      expect(state.totalTimeSpent).toBeGreaterThan(0);
+      expect(state.totalTimeSpent).toBe(1);
     });
   });
 

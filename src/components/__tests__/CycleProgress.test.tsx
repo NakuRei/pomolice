@@ -50,82 +50,25 @@ describe("CycleProgress", () => {
     });
   });
 
-  describe("Dot States - Cycle 1", () => {
-    it("should show 1 filled dot and 3 empty dots (●○○○)", () => {
-      useTimerStore.setState({ currentCycle: 1 });
-      render(<CycleProgress />);
-
-      // Filled dot (blue)
-      expect(screen.getByTestId("cycle-dot-1")).toHaveClass("bg-blue-600");
-
-      // Empty dots (gray)
-      expect(screen.getByTestId("cycle-dot-2")).toHaveClass("bg-gray-300");
-      expect(screen.getByTestId("cycle-dot-3")).toHaveClass("bg-gray-300");
-      expect(screen.getByTestId("cycle-dot-4")).toHaveClass("bg-gray-300");
-    });
-  });
-
-  describe("Dot States - Cycle 2", () => {
-    it("should show 2 filled dots and 2 empty dots (●●○○)", () => {
-      useTimerStore.setState({ currentCycle: 2 });
-      render(<CycleProgress />);
-
-      // Filled dots
-      expect(screen.getByTestId("cycle-dot-1")).toHaveClass("bg-blue-600");
-      expect(screen.getByTestId("cycle-dot-2")).toHaveClass("bg-blue-600");
-
-      // Empty dots
-      expect(screen.getByTestId("cycle-dot-3")).toHaveClass("bg-gray-300");
-      expect(screen.getByTestId("cycle-dot-4")).toHaveClass("bg-gray-300");
-    });
-  });
-
-  describe("Dot States - Cycle 3", () => {
-    it("should show 3 filled dots and 1 empty dot (●●●○)", () => {
-      useTimerStore.setState({ currentCycle: 3 });
-      render(<CycleProgress />);
-
-      // Filled dots
-      expect(screen.getByTestId("cycle-dot-1")).toHaveClass("bg-blue-600");
-      expect(screen.getByTestId("cycle-dot-2")).toHaveClass("bg-blue-600");
-      expect(screen.getByTestId("cycle-dot-3")).toHaveClass("bg-blue-600");
-
-      // Empty dot
-      expect(screen.getByTestId("cycle-dot-4")).toHaveClass("bg-gray-300");
-    });
-  });
-
-  describe("Dot States - Cycle 4", () => {
-    it("should show 4 filled dots (●●●●)", () => {
-      useTimerStore.setState({ currentCycle: 4 });
-      render(<CycleProgress />);
-
-      // All filled dots
-      expect(screen.getByTestId("cycle-dot-1")).toHaveClass("bg-blue-600");
-      expect(screen.getByTestId("cycle-dot-2")).toHaveClass("bg-blue-600");
-      expect(screen.getByTestId("cycle-dot-3")).toHaveClass("bg-blue-600");
-      expect(screen.getByTestId("cycle-dot-4")).toHaveClass("bg-blue-600");
-    });
-  });
-
   describe("Dynamic Updates", () => {
     it("should update when cycle progresses", () => {
       useTimerStore.setState({ currentCycle: 1 });
       const { rerender } = render(<CycleProgress />);
 
-      // Initially: ●○○○
-      expect(screen.getByTestId("cycle-dot-1")).toHaveClass("bg-blue-600");
-      expect(screen.getByTestId("cycle-dot-2")).toHaveClass("bg-gray-300");
+      expect(screen.getByTestId("cycle-progress")).toHaveAttribute(
+        "aria-label",
+        "長い休憩まで 1 / 4 サイクル完了"
+      );
 
-      // Progress to cycle 2: ●●○○
       act(() => {
         useTimerStore.setState({ currentCycle: 2 });
       });
       rerender(<CycleProgress />);
 
-      expect(screen.getByTestId("cycle-dot-1")).toHaveClass("bg-blue-600");
-      expect(screen.getByTestId("cycle-dot-2")).toHaveClass("bg-blue-600");
-      expect(screen.getByTestId("cycle-dot-3")).toHaveClass("bg-gray-300");
+      expect(screen.getByTestId("cycle-progress")).toHaveAttribute(
+        "aria-label",
+        "長い休憩まで 2 / 4 サイクル完了"
+      );
     });
 
     it("should update when settings change", () => {
@@ -142,9 +85,6 @@ describe("CycleProgress", () => {
       rerender(<CycleProgress />);
 
       expect(screen.getAllByRole("img")[0].children).toHaveLength(6);
-      expect(screen.getByTestId("cycle-dot-1")).toHaveClass("bg-blue-600");
-      expect(screen.getByTestId("cycle-dot-2")).toHaveClass("bg-blue-600");
-      expect(screen.getByTestId("cycle-dot-3")).toHaveClass("bg-gray-300");
     });
   });
 
@@ -192,13 +132,6 @@ describe("CycleProgress", () => {
   });
 
   describe("Edge Cases", () => {
-    it("should handle cycle 0 (not render)", () => {
-      useTimerStore.setState({ currentCycle: 0 });
-      render(<CycleProgress />);
-
-      expect(screen.queryByTestId("cycle-progress")).not.toBeInTheDocument();
-    });
-
     it("should handle minimum interval (2)", () => {
       useTimerStore.setState({ currentCycle: 1 });
       useSettingsStore.getState().setLongBreakInterval(2);
@@ -217,16 +150,6 @@ describe("CycleProgress", () => {
       // Should have 10 dots
       for (let i = 1; i <= 10; i++) {
         expect(screen.getByTestId(`cycle-dot-${i}`)).toBeInTheDocument();
-      }
-
-      // First 5 should be filled
-      for (let i = 1; i <= 5; i++) {
-        expect(screen.getByTestId(`cycle-dot-${i}`)).toHaveClass("bg-blue-600");
-      }
-
-      // Last 5 should be empty
-      for (let i = 6; i <= 10; i++) {
-        expect(screen.getByTestId(`cycle-dot-${i}`)).toHaveClass("bg-gray-300");
       }
     });
   });

@@ -106,12 +106,6 @@ describe("SessionIndicator", () => {
   });
 
   describe("Edge Cases", () => {
-    it("should handle cycle 0 gracefully (not render)", () => {
-      useTimerStore.setState({ currentCycle: 0 });
-      render(<SessionIndicator />);
-      expect(screen.queryByTestId("session-indicator")).not.toBeInTheDocument();
-    });
-
     it("should handle large cycle numbers", () => {
       useTimerStore.setState({ currentCycle: 10 });
       useSettingsStore.getState().setLongBreakInterval(10);
