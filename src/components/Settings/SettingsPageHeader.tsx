@@ -1,5 +1,6 @@
 import type { RefObject } from "react";
 import { BackArrowIcon } from "../icons";
+import { ActionIconButton } from "../shared/ActionIconButton";
 
 interface SettingsPageHeaderProps {
   title: string;
@@ -23,16 +24,14 @@ export function SettingsPageHeader({
   return (
     <header className="mb-6 space-y-2">
       <div className="flex items-center gap-3">
-        <button
-          type="button"
+        <ActionIconButton
+          label={backButtonLabel}
+          testId={backButtonTestId}
           onClick={onBackButtonClick}
-          data-testid={backButtonTestId}
-          aria-label={backButtonLabel}
-          title={backButtonLabel}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-transparent text-gray-600 transition-colors hover:text-gray-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+          className="shrink-0"
         >
           <BackArrowIcon className="h-5 w-5" />
-        </button>
+        </ActionIconButton>
 
         <h1
           ref={headingRef}

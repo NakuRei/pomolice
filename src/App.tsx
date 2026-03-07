@@ -19,6 +19,7 @@ import { FullscreenBreak } from "./components/BreakScreen/FullscreenBreak";
 import { ConnectionBanner } from "./components/shared/ConnectionBanner";
 import { InfoMessageBanner } from "./components/shared/InfoMessageBanner";
 import { NotificationMuteToggleButton } from "./components/shared/NotificationMuteToggleButton";
+import { ActionIconButton } from "./components/shared/ActionIconButton";
 import { useTimerSync } from "./hooks/useTimerSync";
 import { useTimerStore } from "./store/timerStore";
 import { useSettingsStore } from "./store/settingsStore";
@@ -48,7 +49,7 @@ function App() {
     postBreakTransitionPolicy === "start_next_work_automatically";
   const requiresManualContinue =
     postBreakTransitionPolicy === "require_manual_continue";
-  const headerIconButtonClassName =
+  const headerToggleIconButtonClassName =
     "flex h-11 w-11 items-center justify-center rounded-full bg-transparent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500";
 
   const moveToSettingsTopScreen = () => {
@@ -257,18 +258,16 @@ function App() {
             onToggle={toggleNotificationSoundMuted}
             testId="notification-mute-button"
             iconClassName="h-6 w-6"
-            className={headerIconButtonClassName}
+            className={headerToggleIconButtonClassName}
           />
 
-          <button
+          <ActionIconButton
             onClick={moveToSettingsTopScreen}
-            className={`${headerIconButtonClassName} text-gray-600 transition-colors hover:text-gray-800`}
-            title="設定"
-            aria-label="設定を開く"
-            data-testid="settings-button"
+            label="設定を開く"
+            testId="settings-button"
           >
             <SettingsGearIcon className="w-6 h-6" />
-          </button>
+          </ActionIconButton>
         </div>
       </div>
 
