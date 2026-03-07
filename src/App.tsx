@@ -11,6 +11,7 @@ import { AutoStartConfirmDialog } from "./components/AutoStartConfirmDialog";
 import {
   SettingsAutoRunPage,
   SettingsNotificationPage,
+  SettingsScreenLayout,
   SettingsTopPage,
   SettingsTimerPage,
 } from "./components/Settings";
@@ -172,66 +173,40 @@ function App() {
 
   if (currentScreen === "settingsTop") {
     return (
-      <div className="flex min-h-screen flex-col p-8 space-y-6">
-        {/* Backend connection error banner — only visible when connection fails */}
-        <ConnectionBanner />
-        <InfoMessageBanner />
-
-        <main className="flex-1" data-testid="settings-top-main">
-          <SettingsTopPage
-            openHomeScreen={moveToHomeScreen}
-            openTimerSettings={moveToSettingsTimerScreen}
-            openAutoRunSettings={moveToSettingsAutoRunScreen}
-            openNotificationSettings={moveToSettingsNotificationScreen}
-          />
-        </main>
-      </div>
+      <SettingsScreenLayout mainTestId="settings-top-main">
+        <SettingsTopPage
+          openHomeScreen={moveToHomeScreen}
+          openTimerSettings={moveToSettingsTimerScreen}
+          openAutoRunSettings={moveToSettingsAutoRunScreen}
+          openNotificationSettings={moveToSettingsNotificationScreen}
+        />
+      </SettingsScreenLayout>
     );
   }
 
   if (currentScreen === "settingsTimer") {
     return (
-      <div className="flex min-h-screen flex-col p-8 space-y-6">
-        {/* Backend connection error banner — only visible when connection fails */}
-        <ConnectionBanner />
-        <InfoMessageBanner />
-
-        <main className="flex-1" data-testid="settings-timer-main">
-          <SettingsTimerPage openSettingsTopScreen={moveToSettingsTopScreen} />
-        </main>
-      </div>
+      <SettingsScreenLayout mainTestId="settings-timer-main">
+        <SettingsTimerPage openSettingsTopScreen={moveToSettingsTopScreen} />
+      </SettingsScreenLayout>
     );
   }
 
   if (currentScreen === "settingsAutoRun") {
     return (
-      <div className="flex min-h-screen flex-col p-8 space-y-6">
-        {/* Backend connection error banner — only visible when connection fails */}
-        <ConnectionBanner />
-        <InfoMessageBanner />
-
-        <main className="flex-1" data-testid="settings-auto-run-main">
-          <SettingsAutoRunPage
-            openSettingsTopScreen={moveToSettingsTopScreen}
-          />
-        </main>
-      </div>
+      <SettingsScreenLayout mainTestId="settings-auto-run-main">
+        <SettingsAutoRunPage openSettingsTopScreen={moveToSettingsTopScreen} />
+      </SettingsScreenLayout>
     );
   }
 
   if (currentScreen === "settingsNotification") {
     return (
-      <div className="flex min-h-screen flex-col p-8 space-y-6">
-        {/* Backend connection error banner — only visible when connection fails */}
-        <ConnectionBanner />
-        <InfoMessageBanner />
-
-        <main className="flex-1" data-testid="settings-notification-main">
-          <SettingsNotificationPage
-            openSettingsTopScreen={moveToSettingsTopScreen}
-          />
-        </main>
-      </div>
+      <SettingsScreenLayout mainTestId="settings-notification-main">
+        <SettingsNotificationPage
+          openSettingsTopScreen={moveToSettingsTopScreen}
+        />
+      </SettingsScreenLayout>
     );
   }
 
