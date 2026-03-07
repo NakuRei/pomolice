@@ -1,9 +1,5 @@
 import { useEffect, useState } from "react";
-import {
-  SettingsGearIcon,
-  VolumeMutedIcon,
-  VolumeOnIcon,
-} from "./components/icons";
+import { SettingsGearIcon } from "./components/icons";
 import {
   TimerDisplay,
   TimerControls,
@@ -21,6 +17,7 @@ import {
 import { FullscreenBreak } from "./components/BreakScreen/FullscreenBreak";
 import { ConnectionBanner } from "./components/shared/ConnectionBanner";
 import { InfoMessageBanner } from "./components/shared/InfoMessageBanner";
+import { NotificationMuteToggleButton } from "./components/shared/NotificationMuteToggleButton";
 import { useTimerSync } from "./hooks/useTimerSync";
 import { useTimerStore } from "./store/timerStore";
 import { useSettingsStore } from "./store/settingsStore";
@@ -278,27 +275,12 @@ function App() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <button
-            onClick={toggleNotificationSoundMuted}
-            className={`transition-colors ${
-              notificationSoundMuted
-                ? "text-red-600 hover:text-red-700"
-                : "text-gray-600 hover:text-gray-800"
-            }`}
-            title={notificationSoundMuted ? "通知音ミュート中" : "通知音オン"}
-            data-testid="notification-mute-button"
-            aria-label={
-              notificationSoundMuted
-                ? "通知音をオンにする"
-                : "通知音をミュートする"
-            }
-          >
-            {notificationSoundMuted ? (
-              <VolumeMutedIcon className="w-6 h-6" />
-            ) : (
-              <VolumeOnIcon className="w-6 h-6" />
-            )}
-          </button>
+          <NotificationMuteToggleButton
+            muted={notificationSoundMuted}
+            onToggle={toggleNotificationSoundMuted}
+            testId="notification-mute-button"
+            iconClassName="h-6 w-6"
+          />
 
           <button
             onClick={moveToSettingsTopScreen}

@@ -4,7 +4,7 @@ import {
   type NotificationSoundType,
 } from "../../services/notifications";
 import { useSettingsStore, VALIDATION_RULES } from "../../store/settingsStore";
-import { VolumeMutedIcon, VolumeOnIcon } from "../icons";
+import { NotificationMuteToggleButton } from "../shared/NotificationMuteToggleButton";
 
 interface SettingsNotificationPageProps {
   openSettingsTopScreen: () => void;
@@ -148,30 +148,11 @@ export function SettingsNotificationPage({
           </div>
 
           <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={toggleNotificationMuteDraft}
-              className={`transition-colors ${
-                notificationSoundMutedDraft
-                  ? "text-red-600 hover:text-red-700"
-                  : "text-gray-600 hover:text-gray-800"
-              }`}
-              title={
-                notificationSoundMutedDraft ? "通知音ミュート中" : "通知音オン"
-              }
-              data-testid="settings-notification-mute-button"
-              aria-label={
-                notificationSoundMutedDraft
-                  ? "通知音をオンにする"
-                  : "通知音をミュートする"
-              }
-            >
-              {notificationSoundMutedDraft ? (
-                <VolumeMutedIcon className="h-5 w-5" />
-              ) : (
-                <VolumeOnIcon className="h-5 w-5" />
-              )}
-            </button>
+            <NotificationMuteToggleButton
+              muted={notificationSoundMutedDraft}
+              onToggle={toggleNotificationMuteDraft}
+              testId="settings-notification-mute-button"
+            />
 
             <input
               id="settings-notification-sound-volume"
