@@ -114,7 +114,7 @@ function SettingsTopRowButton({
       type="button"
       onClick={openCategoryPage}
       data-testid={testId}
-      className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-left transition-colors hover:border-gray-300 hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+      className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-left transition-colors hover:border-gray-300 hover:bg-gray-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
     >
       <span className="block text-sm font-semibold text-gray-800">{label}</span>
       <span className="mt-1 block truncate text-sm text-gray-600">
@@ -160,7 +160,7 @@ function SettingsTopPostBreakPolicyRow({
           onClick={switchPostBreakPolicyOnTopScreen}
           data-testid="settings-top-post-break-policy-toggle"
           aria-pressed={autoContinueIsEnabled}
-          className="shrink-0 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+          className="shrink-0 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
         >
           {postBreakToggleButtonText}
         </button>
@@ -257,7 +257,7 @@ export function SettingsTopPage({
           type="button"
           onClick={openHomeScreen}
           data-testid="settings-top-back-home"
-          className="shrink-0 rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+          className="shrink-0 rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
         >
           ホームへ戻る
         </button>
