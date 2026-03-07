@@ -208,6 +208,17 @@ describe("App", () => {
     expect(screen.queryByTestId("timer-display")).not.toBeInTheDocument();
   });
 
+  it("returns to home screen when the settings top header back button is clicked", async () => {
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(screen.getByTestId("settings-button"));
+    await user.click(screen.getByTestId("settings-top-back-home"));
+
+    expect(screen.getByTestId("timer-display")).toBeInTheDocument();
+    expect(screen.queryByTestId("settings-top-page")).not.toBeInTheDocument();
+  });
+
   it("opens timer settings page from settings top", async () => {
     const user = userEvent.setup();
 
@@ -267,6 +278,18 @@ describe("App", () => {
     expect(screen.queryByTestId("settings-timer-page")).not.toBeInTheDocument();
   });
 
+  it("returns to settings top when the timer header back button is clicked", async () => {
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(screen.getByTestId("settings-button"));
+    await user.click(screen.getByTestId("settings-top-row-timer"));
+    await user.click(screen.getByTestId("settings-timer-back"));
+
+    expect(screen.getByTestId("settings-top-page")).toBeInTheDocument();
+    expect(screen.queryByTestId("settings-timer-page")).not.toBeInTheDocument();
+  });
+
   it("returns to settings top after canceling auto-run settings page", async () => {
     const user = userEvent.setup();
 
@@ -280,6 +303,20 @@ describe("App", () => {
     expect(screen.queryByTestId("settings-auto-run-page")).not.toBeInTheDocument();
   });
 
+  it("returns to settings top when the auto-run header back button is clicked", async () => {
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(screen.getByTestId("settings-button"));
+    await user.click(screen.getByTestId("settings-top-row-auto-run"));
+    await user.click(screen.getByTestId("settings-auto-run-back"));
+
+    expect(screen.getByTestId("settings-top-page")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("settings-auto-run-page"),
+    ).not.toBeInTheDocument();
+  });
+
   it("returns to settings top after saving notification settings page", async () => {
     const user = userEvent.setup();
 
@@ -291,6 +328,20 @@ describe("App", () => {
       target: { value: "40" },
     });
     await user.click(screen.getByTestId("settings-save"));
+
+    expect(screen.getByTestId("settings-top-page")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("settings-notification-page"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("returns to settings top when the notification header back button is clicked", async () => {
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(screen.getByTestId("settings-button"));
+    await user.click(screen.getByTestId("settings-top-row-notification"));
+    await user.click(screen.getByTestId("settings-notification-back"));
 
     expect(screen.getByTestId("settings-top-page")).toBeInTheDocument();
     expect(

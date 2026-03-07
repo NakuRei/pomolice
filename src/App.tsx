@@ -48,6 +48,8 @@ function App() {
     postBreakTransitionPolicy === "start_next_work_automatically";
   const requiresManualContinue =
     postBreakTransitionPolicy === "require_manual_continue";
+  const headerIconButtonClassName =
+    "flex h-11 w-11 items-center justify-center rounded-full bg-transparent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500";
 
   const moveToSettingsTopScreen = () => {
     setCurrentScreen("settingsTop");
@@ -255,12 +257,14 @@ function App() {
             onToggle={toggleNotificationSoundMuted}
             testId="notification-mute-button"
             iconClassName="h-6 w-6"
+            className={headerIconButtonClassName}
           />
 
           <button
             onClick={moveToSettingsTopScreen}
-            className="text-gray-600 hover:text-gray-800 transition-colors"
+            className={`${headerIconButtonClassName} text-gray-600 transition-colors hover:text-gray-800`}
             title="設定"
+            aria-label="設定を開く"
             data-testid="settings-button"
           >
             <SettingsGearIcon className="w-6 h-6" />
