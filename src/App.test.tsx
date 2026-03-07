@@ -101,7 +101,24 @@ describe("App", () => {
     expect(useSettingsStore.getState().notificationSoundMuted).toBe(true);
   });
 
-  it("shows auto-run badge when scheduled auto-run is enabled", () => {
+  it("shows manual-continue badge when post-break policy requires confirmation", () => {
+    useSettingsStore.setState({
+      autoRunFeatureEnabled: false,
+      post_break_transition_policy: "require_manual_continue",
+    });
+
+    render(<App />);
+
+    expect(
+      screen.getByTestId("header-badge-require-manual-continue"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("header-badge-auto-continue"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("header-badge-auto-run")).not.toBeInTheDocument();
+  });
+
+  it("shows auto-run badge together with manual-continue badge when scheduled auto-run is enabled", () => {
     useSettingsStore.setState({
       autoRunFeatureEnabled: true,
       post_break_transition_policy: "require_manual_continue",
@@ -110,6 +127,9 @@ describe("App", () => {
     render(<App />);
 
     expect(screen.getByTestId("header-badge-auto-run")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("header-badge-require-manual-continue"),
+    ).toBeInTheDocument();
     expect(
       screen.queryByTestId("header-badge-auto-continue"),
     ).not.toBeInTheDocument();
@@ -128,6 +148,9 @@ describe("App", () => {
     ).toBeInTheDocument();
     expect(
       screen.queryByTestId("header-badge-auto-run"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("header-badge-require-manual-continue"),
     ).not.toBeInTheDocument();
   });
 
@@ -150,6 +173,28 @@ describe("App", () => {
     expect(badgeIds).toEqual([
       "header-badge-auto-run",
       "header-badge-auto-continue",
+    ]);
+  });
+
+  it("shows auto-run badge before manual-continue badge", () => {
+    useSettingsStore.setState({
+      autoRunFeatureEnabled: true,
+      post_break_transition_policy: "require_manual_continue",
+    });
+
+    render(<App />);
+
+    const badgeContainer = screen.getByTestId("header-status-badges");
+    const badges = badgeContainer.querySelectorAll(
+      '[data-testid^="header-badge-"]',
+    );
+    const badgeIds = Array.from(badges).map((badgeElement) =>
+      badgeElement.getAttribute("data-testid"),
+    );
+
+    expect(badgeIds).toEqual([
+      "header-badge-auto-run",
+      "header-badge-require-manual-continue",
     ]);
   });
 

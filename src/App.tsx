@@ -48,6 +48,8 @@ function App() {
   );
   const isAutoContinueEnabled =
     postBreakTransitionPolicy === "start_next_work_automatically";
+  const requiresManualContinue =
+    postBreakTransitionPolicy === "require_manual_continue";
 
   const moveToSettingsTopScreen = () => {
     setCurrentScreen("settingsTop");
@@ -245,29 +247,35 @@ function App() {
       <div className="flex justify-between items-center">
         <div className="flex flex-col gap-2">
           <h1 className="text-3xl font-bold text-gray-800">Pomolice</h1>
-          {(autoRunFeatureEnabled || isAutoContinueEnabled) && (
-            <div
-              className="flex items-center gap-2"
-              data-testid="header-status-badges"
-            >
-              {autoRunFeatureEnabled && (
-                <span
-                  className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800"
-                  data-testid="header-badge-auto-run"
-                >
-                  自動実行ON
-                </span>
-              )}
-              {isAutoContinueEnabled && (
-                <span
-                  className="inline-flex items-center rounded-full border border-cyan-300 bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-800"
-                  data-testid="header-badge-auto-continue"
-                >
-                  自動継続ON
-                </span>
-              )}
-            </div>
-          )}
+          <div
+            className="flex items-center gap-2"
+            data-testid="header-status-badges"
+          >
+            {autoRunFeatureEnabled && (
+              <span
+                className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800"
+                data-testid="header-badge-auto-run"
+              >
+                自動実行ON
+              </span>
+            )}
+            {isAutoContinueEnabled && (
+              <span
+                className="inline-flex items-center rounded-full border border-cyan-300 bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-800"
+                data-testid="header-badge-auto-continue"
+              >
+                自動継続ON
+              </span>
+            )}
+            {requiresManualContinue && (
+              <span
+                className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800"
+                data-testid="header-badge-require-manual-continue"
+              >
+                毎回確認
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <button
