@@ -1,5 +1,6 @@
 import type { SVGProps } from "react";
 import {
+  ArrowLeft,
   LoaderCircle,
   Settings,
   TriangleAlert,
@@ -22,6 +23,16 @@ type AppIconProps = Omit<SVGProps<SVGSVGElement>, "children">;
 export function VolumeMutedIcon(props: AppIconProps) {
   return (
     <VolumeX
+      strokeWidth={DEFAULT_ICON_STROKE_WIDTH}
+      aria-hidden="true"
+      {...props}
+    />
+  );
+}
+
+export function BackArrowIcon(props: AppIconProps) {
+  return (
+    <ArrowLeft
       strokeWidth={DEFAULT_ICON_STROKE_WIDTH}
       aria-hidden="true"
       {...props}

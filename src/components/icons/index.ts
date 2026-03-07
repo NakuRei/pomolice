@@ -1,4 +1,5 @@
 export {
+  BackArrowIcon,
   LoadingSpinnerIcon,
   SettingsGearIcon,
   VolumeMutedIcon,

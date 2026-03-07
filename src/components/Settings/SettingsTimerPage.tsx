@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSettingsStore, VALIDATION_RULES } from "../../store/settingsStore";
 import { TimerStatus, useTimerStore } from "../../store/timerStore";
 import { DurationInput } from "./DurationInput";
+import { SettingsPageHeader } from "./SettingsPageHeader";
 
 interface SettingsTimerPageProps {
   openSettingsTopScreen: () => void;
@@ -98,16 +99,14 @@ export function SettingsTimerPage({
       className="mx-auto w-full max-w-2xl"
       data-testid="settings-timer-page"
     >
-      <header className="mb-5">
-        <h1
-          ref={headingReference}
-          tabIndex={-1}
-          data-testid="settings-timer-heading"
-          className="text-2xl font-bold text-gray-900"
-        >
-          タイマー設定
-        </h1>
-      </header>
+      <SettingsPageHeader
+        title="タイマー設定"
+        headingRef={headingReference}
+        headingTestId="settings-timer-heading"
+        backButtonLabel="設定一覧へ戻る"
+        backButtonTestId="settings-timer-back"
+        onBackButtonClick={openSettingsTopScreen}
+      />
 
       <div className="space-y-6">
         <DurationInput

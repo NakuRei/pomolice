@@ -87,6 +87,27 @@ describe("Settings Pages", () => {
     );
   });
 
+  it("renders the shared back button on settings top and calls home navigation", async () => {
+    const user = userEvent.setup();
+    const openHomeScreen = vi.fn();
+
+    render(
+      <SettingsTopPage
+        openHomeScreen={openHomeScreen}
+        openTimerSettings={() => undefined}
+        openAutoRunSettings={() => undefined}
+        openNotificationSettings={() => undefined}
+      />,
+    );
+
+    const backButton = screen.getByTestId("settings-top-back-home");
+    expect(backButton).toHaveAccessibleName("ホームへ戻る");
+
+    await user.click(backButton);
+
+    expect(openHomeScreen).toHaveBeenCalledTimes(1);
+  });
+
   it("shows compact auto-run summary when enabled weekdays have multiple windows", () => {
     const weeklyAutoRunConfig = createWeeklyAutoRunConfigAllDaysDisabled();
     weeklyAutoRunConfig.mon.enabled = true;

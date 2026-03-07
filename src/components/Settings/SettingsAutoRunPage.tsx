@@ -9,6 +9,7 @@ import {
   type WeeklyScheduleValidationError,
   type WeekdayKey,
 } from "../../store/settingsStore";
+import { SettingsPageHeader } from "./SettingsPageHeader";
 
 interface SettingsAutoRunPageProps {
   openSettingsTopScreen: () => void;
@@ -148,16 +149,14 @@ export function SettingsAutoRunPage({
       className="mx-auto w-full max-w-2xl"
       data-testid="settings-auto-run-page"
     >
-      <header className="mb-5">
-        <h1
-          ref={headingReference}
-          tabIndex={-1}
-          data-testid="settings-auto-run-heading"
-          className="text-2xl font-bold text-gray-900"
-        >
-          曜日別自動実行設定
-        </h1>
-      </header>
+      <SettingsPageHeader
+        title="曜日別自動実行設定"
+        headingRef={headingReference}
+        headingTestId="settings-auto-run-heading"
+        backButtonLabel="設定一覧へ戻る"
+        backButtonTestId="settings-auto-run-back"
+        onBackButtonClick={openSettingsTopScreen}
+      />
 
       <section
         className="rounded-lg border border-gray-200 p-3"

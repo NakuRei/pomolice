@@ -5,6 +5,7 @@ import {
 } from "../../services/notifications";
 import { useSettingsStore, VALIDATION_RULES } from "../../store/settingsStore";
 import { NotificationMuteToggleButton } from "../shared/NotificationMuteToggleButton";
+import { SettingsPageHeader } from "./SettingsPageHeader";
 
 interface SettingsNotificationPageProps {
   openSettingsTopScreen: () => void;
@@ -119,16 +120,14 @@ export function SettingsNotificationPage({
       className="mx-auto w-full max-w-2xl"
       data-testid="settings-notification-page"
     >
-      <header className="mb-5">
-        <h1
-          ref={headingReference}
-          tabIndex={-1}
-          data-testid="settings-notification-heading"
-          className="text-2xl font-bold text-gray-900"
-        >
-          通知設定
-        </h1>
-      </header>
+      <SettingsPageHeader
+        title="通知設定"
+        headingRef={headingReference}
+        headingTestId="settings-notification-heading"
+        backButtonLabel="設定一覧へ戻る"
+        backButtonTestId="settings-notification-back"
+        onBackButtonClick={openSettingsTopScreen}
+      />
 
       <div className="space-y-5 rounded-lg border border-gray-200 bg-white p-4">
         <div>

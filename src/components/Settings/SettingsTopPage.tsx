@@ -6,6 +6,7 @@ import {
   type WeeklyAutoRunConfig,
 } from "../../store/settingsStore";
 import type { PostBreakTransitionPolicy } from "../../types/sessionTransitionPolicy";
+import { SettingsPageHeader } from "./SettingsPageHeader";
 
 interface SettingsTopPageProps {
   openHomeScreen: () => void;
@@ -239,29 +240,15 @@ export function SettingsTopPage({
       className="mx-auto w-full max-w-2xl"
       data-testid="settings-top-page"
     >
-      <header className="mb-5 flex items-start justify-between gap-4">
-        <div>
-          <h1
-            ref={topHeadingReference}
-            tabIndex={-1}
-            data-testid="settings-top-heading"
-            className="text-2xl font-bold text-gray-900"
-          >
-            設定
-          </h1>
-          <p className="mt-2 text-sm text-gray-600">
-            ここでは現在値の要約を表示します。編集したいカテゴリを選択してください。
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={openHomeScreen}
-          data-testid="settings-top-back-home"
-          className="shrink-0 rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
-        >
-          ホームへ戻る
-        </button>
-      </header>
+      <SettingsPageHeader
+        title="設定"
+        description="ここでは現在値の要約を表示します。編集したいカテゴリを選択してください。"
+        headingRef={topHeadingReference}
+        headingTestId="settings-top-heading"
+        backButtonLabel="ホームへ戻る"
+        backButtonTestId="settings-top-back-home"
+        onBackButtonClick={openHomeScreen}
+      />
 
       <div className="space-y-3">
         <SettingsTopRowButton
