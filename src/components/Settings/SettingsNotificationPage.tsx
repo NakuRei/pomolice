@@ -6,6 +6,7 @@ import {
 import { useSettingsStore, VALIDATION_RULES } from "../../store/settingsStore";
 import { NotificationMuteToggleButton } from "../shared/NotificationMuteToggleButton";
 import { SettingsPageHeader } from "./SettingsPageHeader";
+import { SettingsSaveCancelFooter } from "./SettingsSaveCancelFooter";
 
 interface SettingsNotificationPageProps {
   openSettingsTopScreen: () => void;
@@ -221,32 +222,13 @@ export function SettingsNotificationPage({
           </p>
         </div>
 
-        <footer
-          className="flex gap-3 pt-2"
-          data-testid="settings-notification-footer"
-        >
-          <button
-            type="button"
-            onClick={cancelNotificationSettingsPage}
-            className="flex-1 rounded-lg border border-gray-300 bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-400"
-            data-testid="settings-cancel"
-          >
-            キャンセル
-          </button>
-          <button
-            type="button"
-            onClick={saveNotificationSettingsPage}
-            disabled={!notificationSoundVolumeDraftIsValid}
-            className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 ${
-              notificationSoundVolumeDraftIsValid
-                ? "bg-blue-600 hover:bg-blue-700 focus-visible:outline-blue-500"
-                : "cursor-not-allowed bg-gray-400 focus-visible:outline-gray-400"
-            }`}
-            data-testid="settings-save"
-          >
-            保存
-          </button>
-        </footer>
+        <SettingsSaveCancelFooter
+          onCancelButtonClick={cancelNotificationSettingsPage}
+          onSaveButtonClick={saveNotificationSettingsPage}
+          saveButtonDisabled={!notificationSoundVolumeDraftIsValid}
+          footerTestId="settings-notification-footer"
+          footerClassName="pt-2"
+        />
       </div>
     </section>
   );

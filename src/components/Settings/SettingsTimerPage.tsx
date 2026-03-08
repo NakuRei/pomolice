@@ -3,6 +3,7 @@ import { useSettingsStore, VALIDATION_RULES } from "../../store/settingsStore";
 import { TimerStatus, useTimerStore } from "../../store/timerStore";
 import { DurationInput } from "./DurationInput";
 import { SettingsPageHeader } from "./SettingsPageHeader";
+import { SettingsSaveCancelFooter } from "./SettingsSaveCancelFooter";
 
 interface SettingsTimerPageProps {
   openSettingsTopScreen: () => void;
@@ -159,29 +160,13 @@ export function SettingsTimerPage({
           </p>
         )}
 
-        <footer className="flex gap-3 pt-2" data-testid="settings-timer-footer">
-          <button
-            type="button"
-            onClick={cancelTimerSettingsPage}
-            className="flex-1 rounded-lg border border-gray-300 bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-400"
-            data-testid="settings-cancel"
-          >
-            キャンセル
-          </button>
-          <button
-            type="button"
-            onClick={saveTimerSettingsPage}
-            disabled={!timerDurationDraftValuesAreValid}
-            className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 ${
-              timerDurationDraftValuesAreValid
-                ? "bg-blue-600 hover:bg-blue-700 focus-visible:outline-blue-500"
-                : "cursor-not-allowed bg-gray-400 focus-visible:outline-gray-400"
-            }`}
-            data-testid="settings-save"
-          >
-            保存
-          </button>
-        </footer>
+        <SettingsSaveCancelFooter
+          onCancelButtonClick={cancelTimerSettingsPage}
+          onSaveButtonClick={saveTimerSettingsPage}
+          saveButtonDisabled={!timerDurationDraftValuesAreValid}
+          footerTestId="settings-timer-footer"
+          footerClassName="pt-2"
+        />
       </div>
     </section>
   );

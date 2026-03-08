@@ -1,6 +1,7 @@
 // Barrel export for Settings components
 export { DurationInput } from "./DurationInput";
 export { SettingsPageHeader } from "./SettingsPageHeader";
+export { SettingsSaveCancelFooter } from "./SettingsSaveCancelFooter";
 export { SettingsScreenLayout } from "./SettingsScreenLayout";
 export { SettingsTopPage } from "./SettingsTopPage";
 export { SettingsTimerPage } from "./SettingsTimerPage";

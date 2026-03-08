@@ -221,6 +221,7 @@ describe("Settings Pages", () => {
 
     render(<SettingsTimerPage openSettingsTopScreen={() => undefined} />);
 
+    expect(screen.getByTestId("settings-timer-footer")).toBeInTheDocument();
     expect(screen.getByTestId("settings-work-duration-input")).toBeDisabled();
     expect(screen.getByTestId("settings-short-break-input")).toBeDisabled();
     expect(screen.getByTestId("settings-long-break-input")).toBeDisabled();
@@ -308,6 +309,7 @@ describe("Settings Pages", () => {
     expect(
       screen.getByTestId("settings-auto-run-day-error-mon"),
     ).toBeInTheDocument();
+    expect(screen.getByTestId("settings-auto-run-footer")).toBeInTheDocument();
     expect(screen.getByTestId("settings-save")).toBeDisabled();
     expect(openSettingsTopScreen).not.toHaveBeenCalled();
   });
@@ -376,6 +378,9 @@ describe("Settings Pages", () => {
 
     await user.click(screen.getByTestId("settings-notification-mute-button"));
 
+    expect(
+      screen.getByTestId("settings-notification-footer"),
+    ).toBeInTheDocument();
     expect(
       screen.getByTestId("settings-notification-sound-volume"),
     ).toBeDisabled();
