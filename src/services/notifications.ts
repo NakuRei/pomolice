@@ -19,6 +19,10 @@ const notificationSoundResourcePathByType = {
   long_break: 'resources/sounds/long_break.wav',
 } as const;
 
+// Keep persisted 0-100% settings, but map them onto a dB curve so
+// low-volume adjustments have finer audible resolution than linear gain.
+const MIN_NOTIFICATION_VOLUME_DB = -45;
+
 /**
  * Notification sound categories used by both timer notifications and settings preview.
  *
@@ -32,12 +36,6 @@ const resolvedNotificationSoundPathByType: Partial<
   Record<NotificationSoundType, string>
 > = {};
 let currentNotificationPreviewAudio: HTMLAudioElement | null = null;
-
-const windowsSoundEventByType: Record<NotificationSoundType, string> = {
-  work: 'ms-winsoundevent:Notification.IM',
-  short_break: 'ms-winsoundevent:Notification.Mail',
-  long_break: 'ms-winsoundevent:Notification.Reminder',
-};
 
 /**
  * Input for previewing notification sounds from settings without using persisted store values.
@@ -75,6 +73,29 @@ function isWindowsPlatform(): boolean {
   );
 }
 
+/**
+ * Convert the persisted notification volume percentage into audio gain.
+ *
+ * Conversion rules:
+ * - `0%` always returns `0` for complete silence.
+ * - `1-100%` are interpreted as positions on a dB curve, not linear gain.
+ * - `db = minDb * (1 - percent / 100)`
+ * - `gain = 10 ** (db / 20)`
+ */
+export function convertNotificationVolumePercentToGain(
+  volumePercent: number
+): number {
+  const clampedVolumePercent = Math.max(0, Math.min(100, volumePercent));
+
+  if (clampedVolumePercent === 0) {
+    return 0;
+  }
+
+  const normalizedVolumePercent = clampedVolumePercent / 100;
+  const gainDb = MIN_NOTIFICATION_VOLUME_DB * (1 - normalizedVolumePercent);
+  return 10 ** (gainDb / 20);
+}
+
 export async function resolveNotificationSoundResourcePath(
   notificationSoundType: NotificationSoundType
 ): Promise<string | undefined> {
@@ -95,6 +116,17 @@ export async function resolveNotificationSoundResourcePath(
     });
     return undefined;
   }
+}
+
+async function playNotificationAudioAtGain(
+  resolvedPath: string,
+  gain: number
+): Promise<HTMLAudioElement> {
+  const soundAssetUrl = convertFileSrc(resolvedPath.replace(/\\/g, '/'));
+  const notificationAudio = new Audio(soundAssetUrl);
+  notificationAudio.volume = gain;
+  await notificationAudio.play();
+  return notificationAudio;
 }
 
 function stopCurrentNotificationPreviewAudio(): void {
@@ -124,14 +156,15 @@ export async function playNotificationSoundPreview(
   }
 
   try {
-    const normalizedVolume = Math.max(0, Math.min(100, options.volumePercent)) / 100;
-    const soundAssetUrl = convertFileSrc(resolvedPath.replace(/\\/g, '/'));
-    const previewAudio = new Audio(soundAssetUrl);
-
-    previewAudio.volume = normalizedVolume;
+    const previewGain = convertNotificationVolumePercentToGain(
+      options.volumePercent
+    );
     stopCurrentNotificationPreviewAudio();
+    const previewAudio = await playNotificationAudioAtGain(
+      resolvedPath,
+      previewGain
+    );
     currentNotificationPreviewAudio = previewAudio;
-    await previewAudio.play();
     return { status: 'played' };
   } catch (error) {
     console.warn('Failed to play notification sound preview:', {
@@ -142,60 +175,30 @@ export async function playNotificationSoundPreview(
   }
 }
 
-async function resolveNotificationSound(
-  notificationSoundType: NotificationSoundType
-): Promise<string | undefined> {
-  if (useSettingsStore.getState().notificationSoundMuted) {
-    return undefined;
-  }
-
-  if (isWindowsPlatform()) {
-    return windowsSoundEventByType[notificationSoundType];
-  }
-
-  return resolveNotificationSoundResourcePath(notificationSoundType);
-}
-
-async function playInAppSoundFallback(
-  notificationSoundType: NotificationSoundType
-): Promise<void> {
-  if (!isWindowsPlatform()) {
-    return;
-  }
-
-  if (useSettingsStore.getState().notificationSoundMuted) {
-    return;
-  }
-
-  try {
-    const resolvedPath = await resolveNotificationSoundResourcePath(notificationSoundType);
-    if (!resolvedPath) {
-      return;
-    }
-
-    const volumePercent = useSettingsStore.getState().notificationSoundVolumePercent;
-    const normalizedVolume = Math.max(0, Math.min(100, volumePercent)) / 100;
-    const soundAssetUrl = convertFileSrc(resolvedPath.replace(/\\/g, '/'));
-    const soundAudio = new Audio(soundAssetUrl);
-    soundAudio.volume = normalizedVolume;
-    await soundAudio.play();
-  } catch (error) {
-    console.warn('Failed to play in-app sound fallback:', {
-      notificationSoundType,
-      error,
+function showSessionCompleteNotificationBanner(
+  notificationTitle: string,
+  notificationBody: string,
+  notificationSound?: string
+): void {
+  if (notificationSound === undefined) {
+    sendNotification({
+      title: notificationTitle,
+      body: notificationBody,
     });
+    return;
   }
+
+  sendNotification({
+    title: notificationTitle,
+    body: notificationBody,
+    sound: notificationSound,
+  });
 }
 
 /**
  * Check if we're running in Tauri environment
  */
 function isTauriEnvironment(): boolean {
-  // Skip notifications in vitest environment
-  if (typeof import.meta !== 'undefined' && import.meta.env?.VITEST) {
-    return false;
-  }
-
   // In Tauri v2, check if we're in a Tauri context by checking if window.__TAURI_INTERNALS__ exists
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
@@ -249,15 +252,33 @@ async function sendSessionCompleteNotification(
   }
 
   try {
-    const soundPath = await resolveNotificationSound(payload.soundType);
+    const settingsState = useSettingsStore.getState();
+    const shouldUseManagedWindowsSound =
+      isWindowsPlatform() && !settingsState.notificationSoundMuted;
+    const bannerSound =
+      isWindowsPlatform() || settingsState.notificationSoundMuted
+        ? undefined
+        : await resolveNotificationSoundResourcePath(payload.soundType);
 
-    sendNotification({
-      title: payload.title,
-      body: payload.body,
-      sound: soundPath,
-    });
+    showSessionCompleteNotificationBanner(
+      payload.title,
+      payload.body,
+      bannerSound
+    );
 
-    await playInAppSoundFallback(payload.soundType);
+    if (!shouldUseManagedWindowsSound) {
+      return;
+    }
+
+    const resolvedPath = await resolveNotificationSoundResourcePath(payload.soundType);
+    if (!resolvedPath) {
+      return;
+    }
+
+    const notificationGain = convertNotificationVolumePercentToGain(
+      settingsState.notificationSoundVolumePercent
+    );
+    await playNotificationAudioAtGain(resolvedPath, notificationGain);
   } catch (error) {
     console.error('Failed to show session complete notification:', {
       payload,
