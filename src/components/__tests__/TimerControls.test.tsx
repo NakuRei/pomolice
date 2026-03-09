@@ -70,6 +70,23 @@ describe("TimerControls", () => {
       const startButton = screen.queryByTestId("start-button");
       expect(startButton).not.toBeInTheDocument();
     });
+
+    it("should render emergency stop button when timer is working", () => {
+      render(<TimerControls />);
+      const emergencyStopButton = screen.getByTestId("emergency-stop-button");
+      expect(emergencyStopButton).toBeInTheDocument();
+      expect(emergencyStopButton).toHaveTextContent("緊急停止");
+    });
+
+    it("should open emergency stop dialog when button is clicked", async () => {
+      const user = userEvent.setup();
+      render(<TimerControls />);
+
+      await user.click(screen.getByTestId("emergency-stop-button"));
+
+      expect(screen.getByTestId("emergency-stop-dialog")).toBeInTheDocument();
+      expect(screen.getByText("緊急停止しますか？")).toBeInTheDocument();
+    });
   });
 
   describe("Button Accessibility", () => {
