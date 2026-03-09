@@ -10,6 +10,8 @@
  */
 
 import { useState, useRef, useEffect } from "react";
+import SkipFlowCancelButton from "../SkipFlowCancelButton";
+import SkipFlowStepFrame from "../SkipFlowStepFrame";
 
 interface LongPressButtonProps {
   onComplete: () => void;
@@ -30,7 +32,7 @@ export default function LongPressButton({
   const [progress, setProgress] = useState(0);
   const [hasReleased, setHasReleased] = useState(false);
   const startTimeRef = useRef<number>(0);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -49,7 +51,10 @@ export default function LongPressButton({
     // Update progress continuously
     intervalRef.current = setInterval(() => {
       const elapsed = Date.now() - startTimeRef.current;
-      const currentProgress = Math.min((elapsed / REQUIRED_DURATION) * 100, 100);
+      const currentProgress = Math.min(
+        (elapsed / REQUIRED_DURATION) * 100,
+        100,
+      );
       setProgress(currentProgress);
 
       // Check if completed
@@ -101,23 +106,39 @@ export default function LongPressButton({
 
   // Remaining time in seconds
   const remainingSeconds = Math.ceil(
-    ((100 - progress) / 100) * (REQUIRED_DURATION / 1000)
+    ((100 - progress) / 100) * (REQUIRED_DURATION / 1000),
   );
 
   return (
-    <div className="space-y-8">
-      {/* Instructions */}
-      <div className="text-center">
-        <h2 className="mb-2 text-2xl font-bold text-white">
-          Long Press Challenge
-        </h2>
-        <p className="text-gray-400">
-          Press and hold the button below for{" "}
-          <strong>15 seconds</strong> without releasing.
-        </p>
-      </div>
-
-      {/* Long press button with progress */}
+    <SkipFlowStepFrame
+      title="Long Press Challenge"
+      description={
+        <>
+          Press and hold the button below for <strong>15 seconds</strong>{" "}
+          without releasing.
+        </>
+      }
+      notice={
+        hasReleased ? (
+          <div className="rounded-lg bg-red-900 bg-opacity-50 p-4 text-center text-red-300">
+            <p className="font-semibold">You released too early! Try again.</p>
+          </div>
+        ) : null
+      }
+      footer={
+        <>
+          <p>Tip: Keep your finger or mouse button pressed continuously.</p>
+          <p className="mt-1">
+            Releasing before 15 seconds will restart the timer.
+          </p>
+        </>
+      }
+      actions={
+        <div className="flex justify-center">
+          <SkipFlowCancelButton onCancel={onCancel} />
+        </div>
+      }
+    >
       <div className="flex flex-col items-center space-y-4">
         <button
           onMouseDown={handleMouseDown}
@@ -131,7 +152,6 @@ export default function LongPressButton({
               : "bg-gray-700 hover:bg-gray-600 focus:ring-gray-500"
           }`}
         >
-          {/* Progress bar background */}
           <div className="absolute inset-0 overflow-hidden">
             <svg
               className="absolute inset-0 h-full w-full"
@@ -147,7 +167,6 @@ export default function LongPressButton({
             </svg>
           </div>
 
-          {/* Button text */}
           <div className="relative z-10 flex h-full items-center justify-center">
             {isPressing ? (
               <div className="text-center">
@@ -160,36 +179,10 @@ export default function LongPressButton({
           </div>
         </button>
 
-        {/* Progress percentage */}
         <div className="text-center text-sm text-gray-400">
           Progress: {Math.floor(progress)}%
         </div>
       </div>
-
-      {/* Release warning */}
-      {hasReleased && (
-        <div className="rounded-lg bg-red-900 bg-opacity-50 p-4 text-center text-red-300">
-          <p className="font-semibold">You released too early! Try again.</p>
-        </div>
-      )}
-
-      {/* Hint */}
-      <div className="text-center text-sm text-gray-500">
-        <p>Tip: Keep your finger or mouse button pressed continuously.</p>
-        <p className="mt-1">
-          Releasing before 15 seconds will restart the timer.
-        </p>
-      </div>
-
-      {/* Cancel button */}
-      <div className="flex justify-center">
-        <button
-          onClick={onCancel}
-          className="rounded-lg bg-gray-700 px-6 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 focus:ring-offset-gray-900"
-        >
-          Cancel and Take Break
-        </button>
-      </div>
-    </div>
+    </SkipFlowStepFrame>
   );
 }

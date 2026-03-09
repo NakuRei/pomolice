@@ -18,6 +18,8 @@ import {
   validateTypedPhrase,
   getCharacterValidation,
 } from "../../../utils/phraseGenerator";
+import SkipFlowCancelButton from "../SkipFlowCancelButton";
+import SkipFlowStepFrame from "../SkipFlowStepFrame";
 
 interface TypingChallengeProps {
   difficulty: "short" | "long";
@@ -114,18 +116,32 @@ export default function TypingChallenge({
   const characterValidation = getCharacterValidation(userInput, targetPhrase);
 
   return (
-    <div className="space-y-8">
-      {/* Instructions */}
-      <div className="text-center">
-        <h2 className="mb-2 text-2xl font-bold text-white">
-          Typing Challenge
-        </h2>
-        <p className="text-gray-400">
+    <SkipFlowStepFrame
+      title="Typing Challenge"
+      description={
+        <>
           Type the following phrase <strong>exactly</strong> as shown:
-        </p>
-      </div>
-
-      {/* Target phrase with character highlighting */}
+        </>
+      }
+      notice={
+        hasTypo ? (
+          <div className="rounded-lg bg-red-900 bg-opacity-50 p-4 text-center text-red-300">
+            <p className="font-semibold">Typo detected! Starting over...</p>
+          </div>
+        ) : null
+      }
+      footer={
+        <>
+          <p>Tip: Type carefully. Any typo will restart this step.</p>
+          <p className="mt-1">Case-sensitive. All letters must be UPPERCASE.</p>
+        </>
+      }
+      actions={
+        <div className="flex justify-center">
+          <SkipFlowCancelButton onCancel={onCancel} />
+        </div>
+      }
+    >
       <div className="rounded-lg bg-gray-800 p-6">
         <div className="font-mono text-lg tracking-wider">
           {Array.from(targetPhrase).map((char, index) => {
@@ -147,7 +163,6 @@ export default function TypingChallenge({
         </div>
       </div>
 
-      {/* Input field */}
       <div>
         <input
           ref={inputRef}
@@ -169,29 +184,6 @@ export default function TypingChallenge({
           }`}
         />
       </div>
-
-      {/* Error message */}
-      {hasTypo && (
-        <div className="rounded-lg bg-red-900 bg-opacity-50 p-4 text-center text-red-300">
-          <p className="font-semibold">Typo detected! Starting over...</p>
-        </div>
-      )}
-
-      {/* Hint */}
-      <div className="text-center text-sm text-gray-500">
-        <p>Tip: Type carefully. Any typo will restart this step.</p>
-        <p className="mt-1">Case-sensitive. All letters must be UPPERCASE.</p>
-      </div>
-
-      {/* Cancel button */}
-      <div className="flex justify-center">
-        <button
-          onClick={onCancel}
-          className="rounded-lg bg-gray-700 px-6 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 focus:ring-offset-gray-900"
-        >
-          Cancel and Take Break
-        </button>
-      </div>
-    </div>
+    </SkipFlowStepFrame>
   );
 }

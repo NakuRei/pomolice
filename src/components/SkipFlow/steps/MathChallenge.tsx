@@ -18,6 +18,8 @@ import {
   validateAnswer,
   type MathProblem,
 } from "../../../utils/mathGenerator";
+import SkipFlowCancelButton from "../SkipFlowCancelButton";
+import SkipFlowStepFrame from "../SkipFlowStepFrame";
 
 interface MathChallengeProps {
   difficulty: "easy" | "hard";
@@ -92,23 +94,40 @@ export default function MathChallenge({
   }
 
   return (
-    <div className="space-y-8">
-      {/* Instructions */}
-      <div className="text-center">
-        <h2 className="mb-2 text-2xl font-bold text-white">Math Challenge</h2>
-        <p className="text-gray-400">
+    <SkipFlowStepFrame
+      title="Math Challenge"
+      description={
+        <>
           Solve the following {difficulty === "easy" ? "simple" : "challenging"}{" "}
           math problem:
-        </p>
-      </div>
-
-      {/* Math problem display */}
+        </>
+      }
+      notice={
+        showError ? (
+          <div className="rounded-lg bg-red-900 bg-opacity-50 p-4 text-center text-red-300">
+            <p className="font-semibold">
+              Incorrect! Generating new problem...
+            </p>
+          </div>
+        ) : null
+      }
+      footer={
+        <>
+          <p>Tip: Take your time to calculate correctly.</p>
+          <p className="mt-1">Wrong answers will generate a new problem.</p>
+        </>
+      }
+      actions={
+        <div className="flex justify-center">
+          <SkipFlowCancelButton onCancel={onCancel} />
+        </div>
+      }
+    >
       <div className="rounded-lg bg-gray-800 p-8 text-center">
         <div className="mb-4 font-mono text-4xl font-bold text-white">
           {problem.question}
         </div>
 
-        {/* Answer input form */}
         <form onSubmit={handleSubmit} className="mt-6">
           <div className="flex items-center justify-center space-x-4">
             <input
@@ -136,29 +155,6 @@ export default function MathChallenge({
           </div>
         </form>
       </div>
-
-      {/* Error message */}
-      {showError && (
-        <div className="rounded-lg bg-red-900 bg-opacity-50 p-4 text-center text-red-300">
-          <p className="font-semibold">Incorrect! Generating new problem...</p>
-        </div>
-      )}
-
-      {/* Hint */}
-      <div className="text-center text-sm text-gray-500">
-        <p>Tip: Take your time to calculate correctly.</p>
-        <p className="mt-1">Wrong answers will generate a new problem.</p>
-      </div>
-
-      {/* Cancel button */}
-      <div className="flex justify-center">
-        <button
-          onClick={onCancel}
-          className="rounded-lg bg-gray-700 px-6 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 focus:ring-offset-gray-900"
-        >
-          Cancel and Take Break
-        </button>
-      </div>
-    </div>
+    </SkipFlowStepFrame>
   );
 }
