@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { EmergencyStopButton } from "../EmergencyStop/EmergencyStopButton";
+import { useErrorStore } from "../../store/errorStore";
 import { useTimerStore, TimerStatus, SessionType } from "../../store/timerStore";
 
 // Mock Tauri invoke
@@ -11,7 +12,9 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 describe("EmergencyStopButton", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     // Reset store to initial state
+    useErrorStore.getState().clearAllErrors();
     useTimerStore.setState({
       status: TimerStatus.IDLE,
       remainingSeconds: 25 * 60,
@@ -79,6 +82,19 @@ describe("EmergencyStopButton", () => {
       expect(screen.getByText("緊急停止しますか？")).toBeInTheDocument();
     });
 
+    it("should expose the confirmation panel as an accessible dialog", async () => {
+      const user = userEvent.setup();
+      useTimerStore.setState({ status: TimerStatus.WORKING });
+      render(<EmergencyStopButton />);
+
+      await user.click(screen.getByTestId("emergency-stop-button"));
+
+      const dialog = screen.getByRole("dialog");
+
+      expect(dialog).toHaveAttribute("aria-modal", "true");
+      expect(dialog).toHaveAttribute("aria-labelledby", "emergency-stop-dialog-title");
+    });
+
     it("should show warning message", async () => {
       const user = userEvent.setup();
       useTimerStore.setState({ status: TimerStatus.WORKING });
@@ -121,6 +137,35 @@ describe("EmergencyStopButton", () => {
       });
     });
 
+    it("should focus the cancel button when the dialog opens", async () => {
+      const user = userEvent.setup();
+      useTimerStore.setState({ status: TimerStatus.WORKING });
+      render(<EmergencyStopButton />);
+
+      await user.click(screen.getByTestId("emergency-stop-button"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("emergency-stop-cancel")).toHaveFocus();
+      });
+    });
+
+    it("should close the dialog on Escape without calling the backend", async () => {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const user = userEvent.setup();
+      useTimerStore.setState({ status: TimerStatus.WORKING });
+      render(<EmergencyStopButton />);
+
+      await user.click(screen.getByTestId("emergency-stop-button"));
+      fireEvent.keyDown(window, { key: "Escape" });
+
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId("emergency-stop-dialog")
+        ).not.toBeInTheDocument();
+      });
+      expect(invoke).not.toHaveBeenCalled();
+    });
+
     it("should not change timer status when cancel is clicked", async () => {
       const user = userEvent.setup();
       useTimerStore.setState({ status: TimerStatus.WORKING });
@@ -145,6 +190,25 @@ describe("EmergencyStopButton", () => {
           screen.queryByTestId("emergency-stop-dialog")
         ).not.toBeInTheDocument();
       });
+    });
+
+    it("should keep the dialog open and show an error when confirm fails", async () => {
+      const { invoke } = await import("@tauri-apps/api/core");
+      vi.mocked(invoke).mockRejectedValueOnce("Failed to lock state: busy");
+
+      const user = userEvent.setup();
+      useTimerStore.setState({ status: TimerStatus.WORKING });
+      render(<EmergencyStopButton />);
+
+      await user.click(screen.getByTestId("emergency-stop-button"));
+      await user.click(screen.getByTestId("emergency-stop-confirm"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("emergency-stop-dialog")).toBeInTheDocument();
+      });
+      expect(screen.getByTestId("inline-error-emergency_stop")).toHaveTextContent(
+        "緊急停止に失敗しました。もう一度試してください"
+      );
     });
   });
 

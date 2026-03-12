@@ -1,5 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTimerStore, TimerStatus } from "../../store/timerStore";
+import { DialogActionRow } from "../shared/DialogActionRow";
+import { DialogOverlay } from "../shared/DialogOverlay";
+import { DialogPanel } from "../shared/DialogPanel";
 import { InlineError } from "../shared/InlineError";
 
 /**
@@ -15,6 +18,7 @@ export function EmergencyStopButton() {
   const status = useTimerStore((state) => state.status);
   const emergencyStop = useTimerStore((state) => state.emergencyStop);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const cancelButtonReference = useRef<HTMLButtonElement>(null);
 
   const isWorking = status === TimerStatus.WORKING;
 
@@ -30,6 +34,35 @@ export function EmergencyStopButton() {
   const handleCancel = () => {
     setShowConfirmDialog(false);
   };
+
+  useEffect(() => {
+    if (!showConfirmDialog || !isWorking) {
+      return;
+    }
+
+    cancelButtonReference.current?.focus();
+  }, [isWorking, showConfirmDialog]);
+
+  useEffect(() => {
+    if (!showConfirmDialog || !isWorking) {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+      event.preventDefault();
+      setShowConfirmDialog(false);
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isWorking, showConfirmDialog]);
 
   // Don't show button if timer is not working
   if (!isWorking) {
@@ -48,12 +81,15 @@ export function EmergencyStopButton() {
       </button>
 
       {showConfirmDialog && (
-        <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
-          data-testid="emergency-stop-dialog"
-        >
-          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
-            <h2 className="text-xl font-bold mb-4 text-gray-900">
+        <DialogOverlay testId="emergency-stop-dialog">
+          <DialogPanel
+            labelledBy="emergency-stop-dialog-title"
+            className="p-6"
+          >
+            <h2
+              id="emergency-stop-dialog-title"
+              className="text-xl font-bold mb-4 text-gray-900"
+            >
               緊急停止しますか？
             </h2>
             <p className="text-gray-600 mb-4">
@@ -65,8 +101,9 @@ export function EmergencyStopButton() {
             <div className="mb-4">
               <InlineError errorId="emergency_stop" onRetry={handleConfirm} />
             </div>
-            <div className="flex gap-3 justify-end">
+            <DialogActionRow className="justify-end gap-3">
               <button
+                ref={cancelButtonReference}
                 onClick={handleCancel}
                 className="px-4 py-2 text-gray-700 bg-gray-200 rounded hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition-colors"
                 data-testid="emergency-stop-cancel"
@@ -80,9 +117,9 @@ export function EmergencyStopButton() {
               >
                 停止する
               </button>
-            </div>
-          </div>
-        </div>
+            </DialogActionRow>
+          </DialogPanel>
+        </DialogOverlay>
       )}
     </>
   );

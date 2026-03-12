@@ -73,8 +73,11 @@ describe("AutoStartConfirmDialog", () => {
     setDialogVisible();
     render(<AutoStartConfirmDialog />);
 
+    const dialog = screen.getByRole("dialog");
+
     expect(screen.getByTestId("auto-start-confirm-dialog")).toBeInTheDocument();
-    expect(screen.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog).toHaveAttribute("aria-labelledby", "auto-start-confirm-dialog-title");
     expect(screen.getByText(/現在は 月曜日 09:00 - 18:00/)).toBeInTheDocument();
     expect(
       screen.getByText("開始すると終了時刻連動でセッション区切り停止されます。")

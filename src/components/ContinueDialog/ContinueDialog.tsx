@@ -1,5 +1,9 @@
-import { useTimerStore } from '../../store/timerStore';
-import { InlineError } from '../shared/InlineError';
+import { useEffect, useRef } from "react";
+import { useTimerStore } from "../../store/timerStore";
+import { DialogActionRow } from "../shared/DialogActionRow";
+import { DialogOverlay } from "../shared/DialogOverlay";
+import { DialogPanel } from "../shared/DialogPanel";
+import { InlineError } from "../shared/InlineError";
 
 /**
  * ContinueDialog Component
@@ -15,10 +19,7 @@ export function ContinueDialog() {
   const resolvePostBreakDecision = useTimerStore(
     (state) => state.resolvePostBreakDecision
   );
-
-  if (!requiresManualContinueDecision) {
-    return null;
-  }
+  const continueButtonReference = useRef<HTMLButtonElement>(null);
 
   const handleContinue = () => {
     // Errors are reported to errorStore by timerStore — InlineError handles display
@@ -30,13 +31,46 @@ export function ContinueDialog() {
     resolvePostBreakDecision("stop_cycle").catch(() => undefined);
   };
 
+  useEffect(() => {
+    if (!requiresManualContinueDecision) {
+      return;
+    }
+
+    continueButtonReference.current?.focus();
+  }, [requiresManualContinueDecision]);
+
+  useEffect(() => {
+    if (!requiresManualContinueDecision) {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+      event.preventDefault();
+      handleEnd();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [requiresManualContinueDecision, resolvePostBreakDecision]);
+
+  if (!requiresManualContinueDecision) {
+    return null;
+  }
+
   return (
-    <div
-      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
-      data-testid="continue-dialog"
-    >
-      <div className="bg-white rounded-lg shadow-xl p-8 max-w-md w-full mx-4">
-        <h2 className="text-2xl font-bold mb-4 text-gray-900">
+    <DialogOverlay testId="continue-dialog">
+      <DialogPanel labelledBy="continue-dialog-title">
+        <h2
+          id="continue-dialog-title"
+          className="text-2xl font-bold mb-4 text-gray-900"
+        >
           1サイクル完了しました！
         </h2>
         <p className="text-gray-600 mb-2">
@@ -58,7 +92,7 @@ export function ContinueDialog() {
         <div className="mb-4">
           <InlineError errorId="resolve_post_break_decision" />
         </div>
-        <div className="flex gap-4">
+        <DialogActionRow>
           <button
             onClick={handleEnd}
             className="flex-1 px-6 py-3 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition-colors"
@@ -67,14 +101,15 @@ export function ContinueDialog() {
             終了
           </button>
           <button
+            ref={continueButtonReference}
             onClick={handleContinue}
             className="flex-1 px-6 py-3 text-white bg-blue-600 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
             data-testid="continue-dialog-continue"
           >
             続ける
           </button>
-        </div>
-      </div>
-    </div>
+        </DialogActionRow>
+      </DialogPanel>
+    </DialogOverlay>
   );
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ContinueDialog } from "../ContinueDialog/ContinueDialog";
 import { useTimerStore, TimerStatus, SessionType } from "../../store/timerStore";
@@ -37,6 +37,16 @@ describe("ContinueDialog", () => {
       render(<ContinueDialog />);
       const dialog = screen.getByTestId("continue-dialog");
       expect(dialog).toBeInTheDocument();
+    });
+
+    it("should expose the panel as an accessible dialog with a labelled title", () => {
+      useTimerStore.setState({ requiresManualContinueDecision: true });
+      render(<ContinueDialog />);
+
+      const dialog = screen.getByRole("dialog");
+
+      expect(dialog).toHaveAttribute("aria-modal", "true");
+      expect(dialog).toHaveAttribute("aria-labelledby", "continue-dialog-title");
     });
   });
 
@@ -120,6 +130,35 @@ describe("ContinueDialog", () => {
       // Backend receives the unified manual decision command.
       expect(invoke).toHaveBeenCalledWith("resolve_post_break_decision", {
         action: "stop_cycle",
+      });
+    });
+
+    it("should focus the continue button when the dialog opens", async () => {
+      useTimerStore.setState({
+        requiresManualContinueDecision: true,
+      });
+      render(<ContinueDialog />);
+
+      const continueButton = screen.getByTestId("continue-dialog-continue");
+
+      await waitFor(() => {
+        expect(continueButton).toHaveFocus();
+      });
+    });
+
+    it("should treat Escape as choosing stop_cycle", async () => {
+      const { invoke } = await import("@tauri-apps/api/core");
+      useTimerStore.setState({
+        requiresManualContinueDecision: true,
+      });
+      render(<ContinueDialog />);
+
+      fireEvent.keyDown(window, { key: "Escape" });
+
+      await waitFor(() => {
+        expect(invoke).toHaveBeenCalledWith("resolve_post_break_decision", {
+          action: "stop_cycle",
+        });
       });
     });
   });

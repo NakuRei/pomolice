@@ -1,6 +1,9 @@
 import { useEffect, useRef } from "react";
 import { useTimerStore } from "../store/timerStore";
 import type { WeekdayKey } from "../types/weeklyAutoRun";
+import { DialogActionRow } from "./shared/DialogActionRow";
+import { DialogOverlay } from "./shared/DialogOverlay";
+import { DialogPanel } from "./shared/DialogPanel";
 import { InlineError } from "./shared/InlineError";
 
 const WEEKDAY_LABELS: Record<WeekdayKey, string> = {
@@ -59,16 +62,10 @@ export function AutoStartConfirmDialog() {
   const crossesMidnightSuffix = activeWindowSummary.crosses_midnight ? "（日跨ぎ）" : "";
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      data-testid="auto-start-confirm-dialog-overlay"
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="auto-start-confirm-dialog-title"
-        className="mx-4 w-full max-w-md rounded-lg bg-white p-8 shadow-xl"
-        data-testid="auto-start-confirm-dialog"
+    <DialogOverlay testId="auto-start-confirm-dialog-overlay">
+      <DialogPanel
+        labelledBy="auto-start-confirm-dialog-title"
+        testId="auto-start-confirm-dialog"
       >
         <h2
           id="auto-start-confirm-dialog-title"
@@ -91,7 +88,7 @@ export function AutoStartConfirmDialog() {
             }}
           />
         </div>
-        <div className="flex gap-4">
+        <DialogActionRow>
           <button
             ref={startButtonRef}
             onClick={() => {
@@ -111,8 +108,8 @@ export function AutoStartConfirmDialog() {
           >
             あとで開始する
           </button>
-        </div>
-      </div>
-    </div>
+        </DialogActionRow>
+      </DialogPanel>
+    </DialogOverlay>
   );
 }
