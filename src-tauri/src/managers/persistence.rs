@@ -118,6 +118,8 @@ impl PersistedState {
         let mut normalized_status = status;
         let mut normalized_session_type = session_type;
         let mut normalized_remaining_seconds = remaining_seconds;
+        let mut normalized_current_cycle = current_cycle;
+        let mut normalized_completed_pomodoros = completed_pomodoros;
         let mut normalized_timer_start_source = timer_start_source;
         let mut normalized_scheduled_stop_state = scheduled_stop_state;
 
@@ -142,6 +144,23 @@ impl PersistedState {
             normalized_scheduled_stop_state = ScheduledStopState::None;
         }
 
+        if normalized_status == TimerStatus::OnBreak {
+            warn!(
+                persisted_session_type = ?session_type,
+                persisted_remaining_seconds = remaining_seconds,
+                persisted_completed_pomodoros = completed_pomodoros,
+                "Persisted break session cannot be resumed safely. Resetting to idle work preview."
+            );
+
+            normalized_status = TimerStatus::Idle;
+            normalized_session_type = SessionType::Work;
+            normalized_remaining_seconds = settings.work_duration_secs;
+            normalized_current_cycle = current_cycle;
+            normalized_completed_pomodoros = completed_pomodoros.saturating_sub(1);
+            normalized_timer_start_source = None;
+            normalized_scheduled_stop_state = ScheduledStopState::None;
+        }
+
         let adjusted_remaining_seconds = if normalized_status == TimerStatus::Working
             || normalized_status == TimerStatus::OnBreak
         {
@@ -161,8 +180,8 @@ impl PersistedState {
             status: normalized_status,
             remaining_seconds: adjusted_remaining_seconds,
             session_type: normalized_session_type,
-            current_cycle,
-            completed_pomodoros,
+            current_cycle: normalized_current_cycle,
+            completed_pomodoros: normalized_completed_pomodoros,
             break_interaction_count: 0,
             last_penalty_time: None,
             skip_attempts: 0,
@@ -675,6 +694,45 @@ mod tests {
         assert_eq!(restored_state.session_type, SessionType::Work);
         assert_eq!(restored_state.remaining_seconds, 1500);
         assert!(restored_state.post_break_decision_pending);
+        assert!(restored_state.timer_start_source.is_none());
+        assert_eq!(
+            restored_state.scheduled_stop_state,
+            ScheduledStopState::None
+        );
+    }
+
+    #[test]
+    fn test_on_break_restore_rewinds_to_idle_work_preview_and_reverts_completed_count() {
+        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
+        let fixed_clock =
+            create_fixed_clock_for_utc_datetime(saved_at_utc + chrono::Duration::seconds(45));
+
+        let persisted = PersistedState {
+            schema_version: PERSISTED_STATE_SCHEMA_VERSION_V3,
+            status: TimerStatus::OnBreak,
+            remaining_seconds: 120,
+            session_type: SessionType::LongBreak,
+            current_cycle: 4,
+            completed_pomodoros: 4,
+            post_break_decision_pending: false,
+            settings: TimerSettings {
+                work_duration_secs: 1500,
+                ..TimerSettings::default()
+            },
+            saved_at: saved_at_utc,
+            auto_run_feature_enabled: true,
+            weekly_auto_run_config: WeeklyAutoRunConfig::default(),
+            timer_start_source: Some(TimerStartSource::ManualInsideWindow),
+            scheduled_stop_state: ScheduledStopState::Pending,
+        };
+
+        let restored_state = persisted.into_timer_state(fixed_clock.as_ref());
+        assert_eq!(restored_state.status, TimerStatus::Idle);
+        assert_eq!(restored_state.session_type, SessionType::Work);
+        assert_eq!(restored_state.remaining_seconds, 1500);
+        assert_eq!(restored_state.current_cycle, 4);
+        assert_eq!(restored_state.completed_pomodoros, 3);
+        assert!(!restored_state.post_break_decision_pending);
         assert!(restored_state.timer_start_source.is_none());
         assert_eq!(
             restored_state.scheduled_stop_state,
