@@ -67,10 +67,6 @@ describe("App", () => {
     });
   });
 
-  it("renders without crashing", () => {
-    render(<App />);
-  });
-
   it("displays 'Pomolice' title", () => {
     render(<App />);
     const heading = screen.getByText(/^Pomolice$/i);
