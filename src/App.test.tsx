@@ -219,6 +219,18 @@ describe("App", () => {
     expect(screen.queryByTestId("settings-top-page")).not.toBeInTheDocument();
   });
 
+  it("returns to home screen when Escape is pressed on settings top page", async () => {
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(screen.getByTestId("settings-button"));
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(screen.getByTestId("timer-display")).toBeInTheDocument();
+    expect(screen.queryByTestId("settings-top-page")).not.toBeInTheDocument();
+  });
+
   it("opens timer settings page from settings top", async () => {
     const user = userEvent.setup();
 

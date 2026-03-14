@@ -25,6 +25,13 @@ import { useTimerStore } from "./store/timerStore";
 import { useSettingsStore } from "./store/settingsStore";
 import type { AppScreen } from "./types/appScreen";
 
+const ESCAPE_BACK_TARGET_BY_SCREEN: Partial<Record<AppScreen, AppScreen>> = {
+  settingsTop: "home",
+  settingsTimer: "settingsTop",
+  settingsAutoRun: "settingsTop",
+  settingsNotification: "settingsTop",
+};
+
 function App() {
   // Initialize timer sync with backend (single source of truth)
   useTimerSync();
@@ -77,94 +84,25 @@ function App() {
   }, [isFullscreenBreak]);
 
   useEffect(() => {
-    if (currentScreen !== "settingsTop") {
+    const escapeBackTarget = ESCAPE_BACK_TARGET_BY_SCREEN[currentScreen];
+    if (!escapeBackTarget) {
       return;
     }
 
-    const closeSettingsTopOnEscapeKey = (keyboardEvent: KeyboardEvent) => {
+    const moveBackOnEscapeKey = (keyboardEvent: KeyboardEvent) => {
       if (keyboardEvent.key !== "Escape") {
         return;
       }
 
       keyboardEvent.preventDefault();
-      setCurrentScreen("home");
+      setCurrentScreen(escapeBackTarget);
     };
 
-    window.addEventListener("keydown", closeSettingsTopOnEscapeKey);
-    return () => {
-      window.removeEventListener("keydown", closeSettingsTopOnEscapeKey);
-    };
-  }, [currentScreen]);
-
-  useEffect(() => {
-    if (currentScreen !== "settingsTimer") {
-      return;
-    }
-
-    const moveBackToSettingsTopOnEscapeKey = (keyboardEvent: KeyboardEvent) => {
-      if (keyboardEvent.key !== "Escape") {
-        return;
-      }
-
-      keyboardEvent.preventDefault();
-      setCurrentScreen("settingsTop");
-    };
-
-    window.addEventListener("keydown", moveBackToSettingsTopOnEscapeKey);
-    return () => {
-      window.removeEventListener("keydown", moveBackToSettingsTopOnEscapeKey);
-    };
-  }, [currentScreen]);
-
-  useEffect(() => {
-    if (currentScreen !== "settingsAutoRun") {
-      return;
-    }
-
-    const moveBackToSettingsTopFromAutoRunScreen = (
-      keyboardEvent: KeyboardEvent,
-    ) => {
-      if (keyboardEvent.key !== "Escape") {
-        return;
-      }
-
-      keyboardEvent.preventDefault();
-      setCurrentScreen("settingsTop");
-    };
-
-    window.addEventListener("keydown", moveBackToSettingsTopFromAutoRunScreen);
+    window.addEventListener("keydown", moveBackOnEscapeKey);
     return () => {
       window.removeEventListener(
         "keydown",
-        moveBackToSettingsTopFromAutoRunScreen,
-      );
-    };
-  }, [currentScreen]);
-
-  useEffect(() => {
-    if (currentScreen !== "settingsNotification") {
-      return;
-    }
-
-    const moveBackToSettingsTopFromNotificationScreen = (
-      keyboardEvent: KeyboardEvent,
-    ) => {
-      if (keyboardEvent.key !== "Escape") {
-        return;
-      }
-
-      keyboardEvent.preventDefault();
-      setCurrentScreen("settingsTop");
-    };
-
-    window.addEventListener(
-      "keydown",
-      moveBackToSettingsTopFromNotificationScreen,
-    );
-    return () => {
-      window.removeEventListener(
-        "keydown",
-        moveBackToSettingsTopFromNotificationScreen,
+        moveBackOnEscapeKey,
       );
     };
   }, [currentScreen]);
