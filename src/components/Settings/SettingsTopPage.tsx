@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
+import { WEEKDAY_LABELS_BY_KEY } from "../../constants/weekdayLabels";
 import {
   useSettingsStore,
   WEEKDAY_KEYS,
-  type WeekdayKey,
   type WeeklyAutoRunConfig,
 } from "../../store/settingsStore";
 import type { PostBreakTransitionPolicy } from "../../types/sessionTransitionPolicy";
@@ -14,16 +14,6 @@ interface SettingsTopPageProps {
   openAutoRunSettings: () => void;
   openNotificationSettings: () => void;
 }
-
-const WEEKDAY_LABEL_BY_KEY: Record<WeekdayKey, string> = {
-  mon: "月",
-  tue: "火",
-  wed: "水",
-  thu: "木",
-  fri: "金",
-  sat: "土",
-  sun: "日",
-};
 
 function buildTimerSummaryText(
   workDuration: number,
@@ -62,7 +52,7 @@ function buildAutoRunSummaryText(
 
   if (allWeekdaysShareOneWindow) {
     const weekdayLabelSummary = enabledWeekdays
-      .map((weekday) => WEEKDAY_LABEL_BY_KEY[weekday])
+      .map((weekday) => WEEKDAY_LABELS_BY_KEY[weekday].short)
       .join("");
     return `${weekdayLabelSummary} ${baseSlot.startTime}-${baseSlot.endTime}`;
   }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { WEEKDAY_LABELS_BY_KEY } from "../../constants/weekdayLabels";
 import {
   useSettingsStore,
   WEEKDAY_KEYS,
@@ -15,16 +16,6 @@ import { SettingsSaveCancelFooter } from "./SettingsSaveCancelFooter";
 interface SettingsAutoRunPageProps {
   openSettingsTopScreen: () => void;
 }
-
-const WEEKDAY_LABEL_BY_KEY: Record<WeekdayKey, string> = {
-  mon: "月",
-  tue: "火",
-  wed: "水",
-  thu: "木",
-  fri: "金",
-  sat: "土",
-  sun: "日",
-};
 
 function cloneWeeklyAutoRunConfigForDraft(
   weeklyAutoRunConfig: WeeklyAutoRunConfig,
@@ -240,9 +231,9 @@ export function SettingsAutoRunPage({
                         })
                       }
                       data-testid={`settings-auto-run-day-enabled-${weekday}`}
-                      aria-label={`${WEEKDAY_LABEL_BY_KEY[weekday]}曜日の自動実行を有効にする`}
+                      aria-label={`${WEEKDAY_LABELS_BY_KEY[weekday].full}の自動実行を有効にする`}
                     />
-                    <span>{WEEKDAY_LABEL_BY_KEY[weekday]}</span>
+                    <span>{WEEKDAY_LABELS_BY_KEY[weekday].short}</span>
                   </label>
 
                   <input
@@ -258,7 +249,7 @@ export function SettingsAutoRunPage({
                     disabled={dayTimeInputIsDisabled}
                     className={dayTimeInputClassName}
                     data-testid={`settings-auto-run-day-start-${weekday}`}
-                    aria-label={`${WEEKDAY_LABEL_BY_KEY[weekday]}曜日の開始時刻`}
+                    aria-label={`${WEEKDAY_LABELS_BY_KEY[weekday].full}の開始時刻`}
                   />
 
                   <input
@@ -274,7 +265,7 @@ export function SettingsAutoRunPage({
                     disabled={dayTimeInputIsDisabled}
                     className={dayTimeInputClassName}
                     data-testid={`settings-auto-run-day-end-${weekday}`}
-                    aria-label={`${WEEKDAY_LABEL_BY_KEY[weekday]}曜日の終了時刻`}
+                    aria-label={`${WEEKDAY_LABELS_BY_KEY[weekday].full}の終了時刻`}
                   />
 
                   <span

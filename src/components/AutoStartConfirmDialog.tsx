@@ -1,20 +1,10 @@
 import { useEffect, useRef } from "react";
+import { WEEKDAY_LABELS_BY_KEY } from "../constants/weekdayLabels";
 import { useTimerStore } from "../store/timerStore";
-import type { WeekdayKey } from "../types/weeklyAutoRun";
 import { DialogActionRow } from "./shared/DialogActionRow";
 import { DialogOverlay } from "./shared/DialogOverlay";
 import { DialogPanel } from "./shared/DialogPanel";
 import { InlineError } from "./shared/InlineError";
-
-const WEEKDAY_LABELS: Record<WeekdayKey, string> = {
-  mon: "月曜日",
-  tue: "火曜日",
-  wed: "水曜日",
-  thu: "木曜日",
-  fri: "金曜日",
-  sat: "土曜日",
-  sun: "日曜日",
-};
 
 export function AutoStartConfirmDialog() {
   const shouldPromptStartOnBoot = useTimerStore((state) => state.shouldPromptStartOnBoot);
@@ -58,7 +48,7 @@ export function AutoStartConfirmDialog() {
     return null;
   }
 
-  const weekdayLabel = WEEKDAY_LABELS[activeWindowSummary.weekday_key];
+  const weekdayLabel = WEEKDAY_LABELS_BY_KEY[activeWindowSummary.weekday_key].full;
   const crossesMidnightSuffix = activeWindowSummary.crosses_midnight ? "（日跨ぎ）" : "";
 
   return (
