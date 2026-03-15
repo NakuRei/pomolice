@@ -6,17 +6,12 @@ import { ToggleIconButton } from "../ToggleIconButton";
 describe("ToggleIconButton", () => {
   it("renders a stable accessible name and exposes pressed state", () => {
     render(
-      <ToggleIconButton
-        label="通知音"
-        pressed={false}
-        onPressedChange={() => undefined}
-        testId="toggle-icon-button"
-      >
+      <ToggleIconButton label="通知音" pressed={false} onPressedChange={() => undefined}>
         <span data-testid="toggle-icon-off">off</span>
       </ToggleIconButton>,
     );
 
-    const button = screen.getByTestId("toggle-icon-button");
+    const button = screen.getByRole("button", { name: "通知音" });
 
     expect(button).toHaveAccessibleName("通知音");
     expect(button).toHaveAttribute("aria-pressed", "false");
@@ -33,14 +28,13 @@ describe("ToggleIconButton", () => {
         pressed
         onPressedChange={handlePressedChange}
         pressedAppearance="danger"
-        testId="toggle-icon-button"
         pressedChildren={<span data-testid="toggle-icon-on">on</span>}
       >
         <span data-testid="toggle-icon-off">off</span>
       </ToggleIconButton>,
     );
 
-    const button = screen.getByTestId("toggle-icon-button");
+    const button = screen.getByRole("button", { name: "通知音" });
 
     expect(button).toHaveAttribute("aria-pressed", "true");
     expect(button).toHaveClass("text-red-600");

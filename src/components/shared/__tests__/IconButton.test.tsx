@@ -9,16 +9,12 @@ describe("IconButton", () => {
     const handleClick = vi.fn();
 
     render(
-      <IconButton
-        label="設定"
-        testId="icon-button"
-        onClick={handleClick}
-      >
+      <IconButton label="設定" onClick={handleClick}>
         <span data-testid="icon-button-glyph">gear</span>
       </IconButton>,
     );
 
-    const button = screen.getByTestId("icon-button");
+    const button = screen.getByRole("button", { name: "設定" });
 
     expect(button).toHaveAccessibleName("設定");
     expect(button).toHaveAttribute("type", "button");
@@ -30,17 +26,12 @@ describe("IconButton", () => {
 
   it("passes through disabled and appearance styling", () => {
     render(
-      <IconButton
-        label="削除"
-        appearance="danger"
-        disabled
-        testId="danger-icon-button"
-      >
+      <IconButton label="削除" appearance="danger" disabled>
         <span>trash</span>
       </IconButton>,
     );
 
-    const button = screen.getByTestId("danger-icon-button");
+    const button = screen.getByRole("button", { name: "削除" });
 
     expect(button).toBeDisabled();
     expect(button).toHaveClass("text-red-600");
