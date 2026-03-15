@@ -17,9 +17,9 @@ import {
 } from "./components/Settings";
 import { FullscreenBreak } from "./components/BreakScreen/FullscreenBreak";
 import { ConnectionBanner } from "./components/shared/ConnectionBanner";
+import { IconButton } from "./components/shared/IconButton";
 import { InfoMessageBanner } from "./components/shared/InfoMessageBanner";
 import { NotificationMuteToggleButton } from "./components/shared/NotificationMuteToggleButton";
-import { ActionIconButton } from "./components/shared/ActionIconButton";
 import { useTimerSync } from "./hooks/useTimerSync";
 import { useTimerStore } from "./store/timerStore";
 import { useSettingsStore } from "./store/settingsStore";
@@ -196,13 +196,13 @@ function App() {
             iconClassName="h-6 w-6"
           />
 
-          <ActionIconButton
+          <IconButton
             onClick={moveToSettingsTopScreen}
             label="設定を開く"
             testId="settings-button"
           >
             <SettingsGearIcon className="w-6 h-6" />
-          </ActionIconButton>
+          </IconButton>
         </div>
       </div>
 
