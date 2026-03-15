@@ -167,7 +167,7 @@ export function SettingsNotificationPage({
                   Number(event.target.value),
                 )
               }
-              className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-200 accent-blue-600"
+              className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-200 accent-primary-600"
               data-testid="settings-notification-sound-volume"
               aria-label="通知音量"
               disabled={notificationSoundMutedDraft}

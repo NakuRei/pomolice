@@ -8,7 +8,7 @@ describe("Button", () => {
   it.each([
     {
       appearance: "primary",
-      expectedClassNames: ["bg-blue-600", "text-white"],
+      expectedClassNames: ["bg-primary-600", "text-white"],
     },
     {
       appearance: "secondary",

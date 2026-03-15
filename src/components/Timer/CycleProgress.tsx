@@ -29,7 +29,7 @@ export function CycleProgress() {
       <div
         key={index}
         className={`w-3 h-3 rounded-full transition-colors ${
-          isCompleted ? 'bg-blue-600' : 'bg-gray-300'
+          isCompleted ? 'bg-primary-600' : 'bg-gray-300'
         }`}
         data-testid={`cycle-dot-${dotNumber}`}
         aria-label={`サイクル ${dotNumber}${isCompleted ? ' 完了' : ''}`}

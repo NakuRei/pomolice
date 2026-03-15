@@ -10,13 +10,13 @@ const BUTTON_BASE_CLASS_NAME =
 const BUTTON_APPEARANCE_CLASS_NAME_BY_VALUE: Record<ButtonAppearance, string> =
   {
     primary:
-      "bg-blue-600 text-white hover:bg-blue-700 focus-visible:outline-blue-500 disabled:bg-gray-400 disabled:text-white disabled:focus-visible:outline-gray-400",
+      "bg-primary-600 text-white hover:bg-primary-700 focus-visible:outline-primary-500 disabled:bg-gray-400 disabled:text-white disabled:focus-visible:outline-gray-400",
     secondary:
       "border border-gray-300 bg-gray-100 text-gray-700 hover:bg-gray-200 focus-visible:outline-gray-400 disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400 disabled:focus-visible:outline-gray-300",
     danger:
       "bg-red-600 text-white hover:bg-red-700 focus-visible:outline-red-500 disabled:bg-red-300 disabled:text-white disabled:focus-visible:outline-red-300",
     subtle:
-      "bg-transparent text-gray-600 hover:bg-gray-100 hover:text-gray-800 focus-visible:outline-blue-500 disabled:text-gray-400 disabled:hover:bg-transparent",
+      "bg-transparent text-gray-600 hover:bg-gray-100 hover:text-gray-800 focus-visible:outline-primary-500 disabled:text-gray-400 disabled:hover:bg-transparent",
   };
 
 const BUTTON_SIZE_CLASS_NAME_BY_VALUE: Record<ButtonSize, string> = {

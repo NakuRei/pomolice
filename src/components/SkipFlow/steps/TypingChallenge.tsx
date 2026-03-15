@@ -180,7 +180,7 @@ export default function TypingChallenge({
           className={`w-full rounded-lg border-2 bg-gray-900 px-4 py-3 font-mono text-lg text-white placeholder-gray-600 focus:outline-none focus:ring-2 ${
             hasTypo
               ? "border-red-500 focus:ring-red-500"
-              : "border-gray-700 focus:ring-blue-500"
+              : "border-gray-700 focus:ring-primary-500"
           }`}
         />
       </div>

@@ -33,7 +33,7 @@ export default function ConfirmationStep({
     } else if (step === 2) {
       return "text-yellow-400 border-yellow-500";
     } else {
-      return "text-blue-400 border-blue-500";
+      return "text-primary-400 border-primary-500";
     }
   };
 

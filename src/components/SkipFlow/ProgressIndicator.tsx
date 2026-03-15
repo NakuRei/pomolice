@@ -31,7 +31,7 @@ export default function ProgressIndicator({
       {/* Progress bar */}
       <div className="h-2 w-full overflow-hidden rounded-full bg-gray-700">
         <div
-          className="h-full bg-blue-500 transition-all duration-300"
+          className="h-full bg-primary-500 transition-all duration-300"
           role="progressbar"
           aria-valuenow={currentStep}
           aria-valuemin={1}
@@ -56,9 +56,9 @@ export default function ProgressIndicator({
               key={stepNumber}
               className={`h-2 w-2 rounded-full transition-all duration-200 ${
                 isCompleted
-                  ? "bg-blue-500"
+                  ? "bg-primary-500"
                   : isCurrent
-                  ? "scale-125 bg-blue-400"
+                  ? "scale-125 bg-primary-400"
                   : "bg-gray-600"
               }`}
               aria-label={`Step ${stepNumber}`}

@@ -57,7 +57,7 @@ function App() {
   const requiresManualContinue =
     postBreakTransitionPolicy === "require_manual_continue";
   const headerToggleIconButtonClassName =
-    "flex h-11 w-11 items-center justify-center rounded-full bg-transparent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500";
+    "flex h-11 w-11 items-center justify-center rounded-full bg-transparent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500";
 
   const moveToSettingsTopScreen = () => {
     setCurrentScreen("settingsTop");

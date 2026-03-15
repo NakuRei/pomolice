@@ -148,11 +148,11 @@ export default function LongPressButton({
           onTouchEnd={handleMouseUp}
           className={`relative h-32 w-full overflow-hidden rounded-lg font-bold text-white shadow-lg transition-all focus:outline-none focus:ring-4 focus:ring-offset-2 focus:ring-offset-gray-900 ${
             isPressing
-              ? "bg-blue-600 focus:ring-blue-500"
+              ? "bg-primary-600 focus:ring-primary-500"
               : "bg-gray-700 hover:bg-gray-600 focus:ring-gray-500"
           }`}
         >
-          <div className="absolute inset-0 overflow-hidden">
+          <div className="absolute inset-0 overflow-hidden text-primary-600">
             <svg
               className="absolute inset-0 h-full w-full"
               xmlns="http://www.w3.org/2000/svg"
@@ -161,7 +161,7 @@ export default function LongPressButton({
               <rect
                 width={`${progress}%`}
                 height="100%"
-                fill="rgb(37, 99, 235)"
+                fill="currentColor"
                 className="transition-all"
               />
             </svg>

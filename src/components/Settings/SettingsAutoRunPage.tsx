@@ -271,7 +271,7 @@ export function SettingsAutoRunPage({
                   <span
                     className={`text-xs ${
                       daySlotShowsOvernightLabel
-                        ? "text-blue-700"
+                        ? "text-primary-700"
                         : "text-transparent"
                     }`}
                     data-testid={`settings-auto-run-day-overnight-${weekday}`}

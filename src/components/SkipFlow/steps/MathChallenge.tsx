@@ -142,13 +142,13 @@ export default function MathChallenge({
               className={`w-32 rounded-lg border-2 bg-gray-900 px-4 py-3 text-center font-mono text-2xl text-white placeholder-gray-600 focus:outline-none focus:ring-2 ${
                 showError
                   ? "border-red-500 focus:ring-red-500"
-                  : "border-gray-700 focus:ring-blue-500"
+                  : "border-gray-700 focus:ring-primary-500"
               }`}
             />
             <button
               type="submit"
               disabled={showError || userAnswer.trim() === ""}
-              className="rounded-lg bg-blue-600 px-6 py-3 font-semibold text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-primary-600 px-6 py-3 font-semibold text-white transition-colors hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 focus:ring-offset-gray-900 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Submit
             </button>
