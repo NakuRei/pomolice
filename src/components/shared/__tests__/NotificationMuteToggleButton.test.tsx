@@ -19,7 +19,9 @@ describe("NotificationMuteToggleButton", () => {
 
     const button = screen.getByTestId("notification-mute-toggle-button");
 
-    expect(button).toHaveAccessibleName("通知音をミュートする");
+    expect(button).toHaveAccessibleName("通知音");
+    expect(button).toHaveAttribute("aria-pressed", "false");
+    expect(button).toHaveAttribute("title", "通知音オン");
 
     await user.click(button);
 
@@ -37,6 +39,8 @@ describe("NotificationMuteToggleButton", () => {
 
     const button = screen.getByTestId("notification-mute-toggle-button");
 
-    expect(button).toHaveAccessibleName("通知音をオンにする");
+    expect(button).toHaveAccessibleName("通知音");
+    expect(button).toHaveAttribute("aria-pressed", "true");
+    expect(button).toHaveAttribute("title", "通知音ミュート中");
   });
 });

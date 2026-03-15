@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { IconButton } from "./IconButton";
 
 interface ActionIconButtonProps {
   label: string;
@@ -8,9 +9,6 @@ interface ActionIconButtonProps {
   className?: string;
 }
 
-const ACTION_ICON_BUTTON_BASE_CLASS_NAME =
-  "flex h-11 w-11 items-center justify-center rounded-full bg-transparent text-gray-600 transition-colors hover:text-gray-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500";
-
 export function ActionIconButton({
   label,
   testId,
@@ -18,19 +16,14 @@ export function ActionIconButton({
   children,
   className = "",
 }: ActionIconButtonProps) {
-  const buttonClassName =
-    `${ACTION_ICON_BUTTON_BASE_CLASS_NAME} ${className}`.trim();
-
   return (
-    <button
-      type="button"
+    <IconButton
       onClick={onClick}
-      className={buttonClassName}
-      title={label}
-      data-testid={testId}
-      aria-label={label}
+      className={className}
+      label={label}
+      testId={testId}
     >
       {children}
-    </button>
+    </IconButton>
   );
 }
