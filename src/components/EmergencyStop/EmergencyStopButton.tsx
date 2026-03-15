@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTimerStore, TimerStatus } from "../../store/timerStore";
+import { Button } from "../shared/Button";
 import { DialogActionRow } from "../shared/DialogActionRow";
 import { DialogOverlay } from "../shared/DialogOverlay";
 import { DialogPanel } from "../shared/DialogPanel";
@@ -28,7 +29,9 @@ export function EmergencyStopButton() {
 
   const handleConfirm = () => {
     // Keep the dialog open on failure so the user can see the error and retry
-    emergencyStop().then(() => setShowConfirmDialog(false)).catch(() => undefined);
+    emergencyStop()
+      .then(() => setShowConfirmDialog(false))
+      .catch(() => undefined);
   };
 
   const handleCancel = () => {
@@ -82,10 +85,7 @@ export function EmergencyStopButton() {
 
       {showConfirmDialog && (
         <DialogOverlay testId="emergency-stop-dialog">
-          <DialogPanel
-            labelledBy="emergency-stop-dialog-title"
-            className="p-6"
-          >
+          <DialogPanel labelledBy="emergency-stop-dialog-title" className="p-6">
             <h2
               id="emergency-stop-dialog-title"
               className="text-xl font-bold mb-4 text-gray-900"
@@ -102,21 +102,23 @@ export function EmergencyStopButton() {
               <InlineError errorId="emergency_stop" onRetry={handleConfirm} />
             </div>
             <DialogActionRow className="justify-end gap-3">
-              <button
+              <Button
                 ref={cancelButtonReference}
+                appearance="secondary"
+                size="sm"
                 onClick={handleCancel}
-                className="px-4 py-2 text-gray-700 bg-gray-200 rounded hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition-colors"
-                data-testid="emergency-stop-cancel"
+                testId="emergency-stop-cancel"
               >
                 キャンセル
-              </button>
-              <button
+              </Button>
+              <Button
+                appearance="danger"
+                size="sm"
                 onClick={handleConfirm}
-                className="px-4 py-2 text-white bg-red-600 rounded hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 transition-colors"
-                data-testid="emergency-stop-confirm"
+                testId="emergency-stop-confirm"
               >
                 停止する
-              </button>
+              </Button>
             </DialogActionRow>
           </DialogPanel>
         </DialogOverlay>

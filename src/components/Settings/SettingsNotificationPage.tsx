@@ -4,6 +4,7 @@ import {
   type NotificationSoundType,
 } from "../../services/notifications";
 import { useSettingsStore, VALIDATION_RULES } from "../../store/settingsStore";
+import { Button } from "../shared/Button";
 import { NotificationMuteToggleButton } from "../shared/NotificationMuteToggleButton";
 import { SettingsPageHeader } from "./SettingsPageHeader";
 import { SettingsSaveCancelFooter } from "./SettingsSaveCancelFooter";
@@ -198,20 +199,16 @@ export function SettingsNotificationPage({
               <option value="short_break">短い休憩終了</option>
               <option value="long_break">長い休憩終了</option>
             </select>
-            <button
-              type="button"
+            <Button
+              appearance="primary"
+              size="sm"
               onClick={runNotificationSoundPreview}
               disabled={notificationSoundMutedDraft}
-              className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${
-                notificationSoundMutedDraft
-                  ? "cursor-not-allowed bg-gray-200 text-gray-500"
-                  : "bg-blue-600 text-white hover:bg-blue-700"
-              }`}
-              data-testid="settings-notification-sound-preview-button"
+              testId="settings-notification-sound-preview-button"
               aria-label="通知音をテスト再生する"
             >
               テスト再生
-            </button>
+            </Button>
           </div>
           <p
             className="text-xs text-gray-600"

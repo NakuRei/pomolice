@@ -6,6 +6,7 @@ import {
   type WeeklyAutoRunConfig,
 } from "../../store/settingsStore";
 import type { PostBreakTransitionPolicy } from "../../types/sessionTransitionPolicy";
+import { Button } from "../shared/Button";
 import { SettingsPageHeader } from "./SettingsPageHeader";
 
 interface SettingsTopPageProps {
@@ -146,15 +147,16 @@ function SettingsTopPostBreakPolicyRow({
             {postBreakPolicySummaryText}
           </span>
         </div>
-        <button
-          type="button"
+        <Button
+          appearance="secondary"
+          size="sm"
           onClick={switchPostBreakPolicyOnTopScreen}
-          data-testid="settings-top-post-break-policy-toggle"
+          testId="settings-top-post-break-policy-toggle"
           aria-pressed={autoContinueIsEnabled}
-          className="shrink-0 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+          className="shrink-0"
         >
           {postBreakToggleButtonText}
-        </button>
+        </Button>
       </div>
     </section>
   );

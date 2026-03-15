@@ -1,15 +1,22 @@
 import { useEffect, useRef } from "react";
 import { WEEKDAY_LABELS_BY_KEY } from "../constants/weekdayLabels";
 import { useTimerStore } from "../store/timerStore";
+import { Button } from "./shared/Button";
 import { DialogActionRow } from "./shared/DialogActionRow";
 import { DialogOverlay } from "./shared/DialogOverlay";
 import { DialogPanel } from "./shared/DialogPanel";
 import { InlineError } from "./shared/InlineError";
 
 export function AutoStartConfirmDialog() {
-  const shouldPromptStartOnBoot = useTimerStore((state) => state.shouldPromptStartOnBoot);
-  const activeWindowSummary = useTimerStore((state) => state.activeWindowSummary);
-  const resolveBootAutoStartPrompt = useTimerStore((state) => state.resolveBootAutoStartPrompt);
+  const shouldPromptStartOnBoot = useTimerStore(
+    (state) => state.shouldPromptStartOnBoot,
+  );
+  const activeWindowSummary = useTimerStore(
+    (state) => state.activeWindowSummary,
+  );
+  const resolveBootAutoStartPrompt = useTimerStore(
+    (state) => state.resolveBootAutoStartPrompt,
+  );
   const startButtonRef = useRef<HTMLButtonElement>(null);
 
   const isVisible = shouldPromptStartOnBoot && activeWindowSummary !== null;
@@ -48,8 +55,11 @@ export function AutoStartConfirmDialog() {
     return null;
   }
 
-  const weekdayLabel = WEEKDAY_LABELS_BY_KEY[activeWindowSummary.weekday_key].full;
-  const crossesMidnightSuffix = activeWindowSummary.crosses_midnight ? "（日跨ぎ）" : "";
+  const weekdayLabel =
+    WEEKDAY_LABELS_BY_KEY[activeWindowSummary.weekday_key].full;
+  const crossesMidnightSuffix = activeWindowSummary.crosses_midnight
+    ? "（日跨ぎ）"
+    : "";
 
   return (
     <DialogOverlay testId="auto-start-confirm-dialog-overlay">
@@ -64,7 +74,8 @@ export function AutoStartConfirmDialog() {
           作業を開始しますか？
         </h2>
         <p className="mb-2 text-gray-700">
-          現在は {weekdayLabel} {activeWindowSummary.start_time} - {activeWindowSummary.end_time}
+          現在は {weekdayLabel} {activeWindowSummary.start_time} -{" "}
+          {activeWindowSummary.end_time}
           {crossesMidnightSuffix} の自動実行枠です。
         </p>
         <p className="mb-4 text-gray-700">
@@ -79,25 +90,29 @@ export function AutoStartConfirmDialog() {
           />
         </div>
         <DialogActionRow>
-          <button
+          <Button
             ref={startButtonRef}
+            appearance="primary"
+            size="md"
             onClick={() => {
               resolvePrompt(true);
             }}
-            className="flex-1 rounded-lg bg-blue-600 px-6 py-3 text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            data-testid="auto-start-confirm-start"
+            className="flex-1"
+            testId="auto-start-confirm-start"
           >
             開始する
-          </button>
-          <button
+          </Button>
+          <Button
+            appearance="secondary"
+            size="md"
             onClick={() => {
               resolvePrompt(false);
             }}
-            className="flex-1 rounded-lg bg-gray-200 px-6 py-3 text-gray-700 transition-colors hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400"
-            data-testid="auto-start-confirm-later"
+            className="flex-1"
+            testId="auto-start-confirm-later"
           >
             あとで開始する
-          </button>
+          </Button>
         </DialogActionRow>
       </DialogPanel>
     </DialogOverlay>

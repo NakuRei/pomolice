@@ -1,3 +1,5 @@
+import { Button } from "../shared/Button";
+
 /**
  * Shared action row for settings editor pages.
  *
@@ -38,27 +40,25 @@ export function SettingsSaveCancelFooter({
 
   return (
     <footer className={combinedFooterClassName} data-testid={footerTestId}>
-      <button
-        type="button"
+      <Button
+        appearance="secondary"
+        size="sm"
         onClick={onCancelButtonClick}
-        className="flex-1 rounded-lg border border-gray-300 bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-400"
-        data-testid={cancelButtonTestId}
+        className="flex-1"
+        testId={cancelButtonTestId}
       >
         {cancelButtonLabel}
-      </button>
-      <button
-        type="button"
+      </Button>
+      <Button
+        appearance="primary"
+        size="sm"
         onClick={onSaveButtonClick}
         disabled={saveButtonDisabled}
-        className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 ${
-          saveButtonDisabled
-            ? "cursor-not-allowed bg-gray-400 focus-visible:outline-gray-400"
-            : "bg-blue-600 hover:bg-blue-700 focus-visible:outline-blue-500"
-        }`}
-        data-testid={saveButtonTestId}
+        className="flex-1"
+        testId={saveButtonTestId}
       >
         {saveButtonLabel}
-      </button>
+      </Button>
     </footer>
   );
 }

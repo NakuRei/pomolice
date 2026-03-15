@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useErrorStore } from "../../store/errorStore";
+import { Button } from "./Button";
 import { LoadingSpinnerIcon, WarningTriangleIcon } from "../icons";
 
 /**
@@ -51,11 +52,13 @@ export function ConnectionBanner() {
       </div>
 
       {error.canRetry && (
-        <button
+        <Button
+          appearance="secondary"
+          size="sm"
           onClick={handleRetry}
           disabled={isRetrying}
-          className="shrink-0 rounded px-3 py-1.5 font-medium bg-red-100 hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          data-testid="connection-banner-retry"
+          className="shrink-0 border-red-200 bg-red-100 text-red-800 hover:bg-red-200 focus-visible:outline-red-500 disabled:border-red-100 disabled:bg-red-100 disabled:text-red-400"
+          testId="connection-banner-retry"
         >
           {isRetrying ? (
             <span className="flex items-center gap-1.5">
@@ -65,7 +68,7 @@ export function ConnectionBanner() {
           ) : (
             "再試行"
           )}
-        </button>
+        </Button>
       )}
     </div>
   );

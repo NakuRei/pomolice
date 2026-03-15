@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useTimerStore } from "../../store/timerStore";
 import { DialogActionRow } from "../shared/DialogActionRow";
+import { Button } from "../shared/Button";
 import { DialogOverlay } from "../shared/DialogOverlay";
 import { DialogPanel } from "../shared/DialogPanel";
 import { InlineError } from "../shared/InlineError";
@@ -93,21 +94,25 @@ export function ContinueDialog() {
           <InlineError errorId="resolve_post_break_decision" />
         </div>
         <DialogActionRow>
-          <button
+          <Button
+            appearance="secondary"
+            size="md"
             onClick={handleEnd}
-            className="flex-1 px-6 py-3 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 transition-colors"
-            data-testid="continue-dialog-end"
+            className="flex-1"
+            testId="continue-dialog-end"
           >
             終了
-          </button>
-          <button
+          </Button>
+          <Button
             ref={continueButtonReference}
+            appearance="primary"
+            size="md"
             onClick={handleContinue}
-            className="flex-1 px-6 py-3 text-white bg-blue-600 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
-            data-testid="continue-dialog-continue"
+            className="flex-1"
+            testId="continue-dialog-continue"
           >
             続ける
-          </button>
+          </Button>
         </DialogActionRow>
       </DialogPanel>
     </DialogOverlay>

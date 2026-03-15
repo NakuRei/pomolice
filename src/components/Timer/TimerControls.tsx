@@ -1,5 +1,6 @@
 import { useTimerStore, TimerStatus } from "../../store/timerStore";
 import { EmergencyStopButton } from "../EmergencyStop/EmergencyStopButton";
+import { Button } from "../shared/Button";
 import { InlineError } from "../shared/InlineError";
 
 /**
@@ -24,14 +25,15 @@ export function TimerControls() {
     <div className="flex flex-col items-center gap-2 min-h-16">
       {isIdle && (
         <>
-          <button
+          <Button
+            appearance="primary"
+            size="lg"
             onClick={handleStart}
-            className="px-8 py-4 text-lg font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
-            data-testid="start-button"
+            testId="start-button"
             aria-label="タイマーを開始"
           >
             開始
-          </button>
+          </Button>
           {/* Shown when start_work fails; auto-clears after 5 seconds */}
           <InlineError errorId="start_work" />
         </>
