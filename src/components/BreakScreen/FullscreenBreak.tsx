@@ -64,17 +64,17 @@ export function FullscreenBreak() {
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-gray-900 flex flex-col items-center justify-center"
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background text-on-background"
       data-testid="fullscreen-break"
     >
       {/* Session type */}
-      <div className="text-3xl font-medium text-gray-300 uppercase tracking-wider mb-6">
+      <div className="mb-6 text-3xl font-medium uppercase tracking-wider text-text-muted">
         {getSessionTypeText()}
       </div>
 
       {/* Large countdown timer */}
       <div
-        className="text-[120px] font-bold text-white tabular-nums tracking-tight font-['Geist_Mono'] mb-8"
+        className="mb-8 text-[120px] font-bold tabular-nums tracking-tight text-text font-['Geist_Mono']"
         data-testid="break-timer-display"
         aria-live="polite"
         aria-atomic="true"

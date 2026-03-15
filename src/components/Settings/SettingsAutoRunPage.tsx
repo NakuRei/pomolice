@@ -151,19 +151,17 @@ export function SettingsAutoRunPage({
       />
 
       <section
-        className="rounded-lg border border-gray-200 p-3"
+        className="rounded-lg border border-border bg-surface p-3"
         data-testid="settings-auto-run-section"
       >
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-sm font-semibold text-gray-800">
-              曜日別自動実行
-            </h2>
-            <p className="text-xs text-gray-600">
+            <h2 className="text-sm font-semibold text-text">曜日別自動実行</h2>
+            <p className="text-xs text-text-muted">
               曜日ごとに開始時刻と終了時刻を設定します。
             </p>
           </div>
-          <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+          <label className="inline-flex items-center gap-2 text-sm text-text">
             <input
               type="checkbox"
               checked={autoRunFeatureEnabledDraft}
@@ -179,14 +177,14 @@ export function SettingsAutoRunPage({
 
         {weeklyScheduleValidationErrors.length > 0 && (
           <div
-            className="mb-3 rounded-md border border-red-200 bg-red-50 p-2"
+            className="mb-3 rounded-md border border-danger-800 bg-danger-950/30 p-2"
             data-testid="settings-auto-run-weekly-errors"
             role="alert"
           >
             {weeklyScheduleValidationErrors.map((weeklyValidationError) => (
               <p
                 key={`${weeklyValidationError.primaryWeekday}-${weeklyValidationError.secondaryWeekday}`}
-                className="text-xs text-red-700"
+                className="text-xs text-danger-200"
               >
                 {weeklyValidationError.message}
               </p>
@@ -204,8 +202,8 @@ export function SettingsAutoRunPage({
               !autoRunFeatureEnabledDraft || !daySlot.enabled;
             const dayTimeInputClassName = `rounded border px-2 py-1 text-sm transition-colors ${
               dayTimeInputIsDisabled
-                ? "cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400"
-                : "border-gray-300 bg-white text-gray-900"
+                ? "cursor-not-allowed border-disabled-border bg-disabled-bg text-disabled-text"
+                : "border-border bg-surface-raised text-on-surface"
             }`;
 
             return (
@@ -213,13 +211,13 @@ export function SettingsAutoRunPage({
                 key={weekday}
                 className={`rounded-md border px-2 py-2 transition-colors ${
                   dayTimeInputIsDisabled
-                    ? "border-gray-100 bg-gray-50"
-                    : "border-gray-100 bg-white"
+                    ? "border-border bg-surface"
+                    : "border-border bg-surface-raised"
                 }`}
                 data-testid={`settings-auto-run-day-row-${weekday}`}
               >
                 <div className="grid grid-cols-[3rem_1fr_1fr_auto] items-center gap-2">
-                  <label className="inline-flex items-center gap-1 text-xs text-gray-700">
+                  <label className="inline-flex items-center gap-1 text-xs text-text">
                     <input
                       type="checkbox"
                       checked={daySlot.enabled}
@@ -271,7 +269,7 @@ export function SettingsAutoRunPage({
                   <span
                     className={`text-xs ${
                       daySlotShowsOvernightLabel
-                        ? "text-primary-700"
+                        ? "text-primary-500"
                         : "text-transparent"
                     }`}
                     data-testid={`settings-auto-run-day-overnight-${weekday}`}
@@ -281,7 +279,7 @@ export function SettingsAutoRunPage({
                 </div>
                 {dayValidationError && (
                   <p
-                    className="mt-1 text-xs text-red-700"
+                    className="mt-1 text-xs text-danger-300"
                     data-testid={`settings-auto-run-day-error-${weekday}`}
                     role="alert"
                   >

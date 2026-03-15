@@ -109,7 +109,7 @@ export function SettingsTimerPage({
         onBackButtonClick={openSettingsTopScreen}
       />
 
-      <div className="space-y-6">
+      <div className="space-y-6 rounded-lg border border-border bg-surface p-4">
         <DurationInput
           label="作業時間"
           value={workDurationDraft}
@@ -153,7 +153,7 @@ export function SettingsTimerPage({
 
         {!isTimerIdle && (
           <p
-            className="text-xs text-amber-700"
+            className="text-xs text-warning-300"
             data-testid="settings-duration-edit-disabled-message"
           >
             タイマー実行中は時間長設定を変更できません。曜日別スケジュールのみ編集できます。

@@ -121,8 +121,8 @@ export default function SkipFlowModal({ onComplete, onCancel }: SkipFlowModalPro
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-90">
-      <div className="w-full max-w-2xl rounded-lg bg-gray-900 p-8 text-white shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-backdrop/90">
+      <div className="w-full max-w-2xl rounded-lg border border-border bg-surface p-8 text-on-surface shadow-2xl shadow-shadow/40">
         {/* Progress Indicator */}
         <ProgressIndicator currentStep={currentStep} totalSteps={10} />
 

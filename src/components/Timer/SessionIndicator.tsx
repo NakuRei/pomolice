@@ -22,7 +22,7 @@ export function SessionIndicator() {
 
   return (
     <div
-      className="text-lg font-medium text-gray-700"
+      className="text-lg font-medium text-text"
       data-testid="session-indicator"
       aria-label={`ポモドーロ ${currentCycle} / ${longBreakInterval}`}
     >

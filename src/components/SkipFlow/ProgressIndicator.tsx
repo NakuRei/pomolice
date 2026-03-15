@@ -24,14 +24,14 @@ export default function ProgressIndicator({
   return (
     <div className="space-y-2">
       {/* Step counter text */}
-      <div className="text-center text-sm font-medium text-gray-400">
+      <div className="text-center text-sm font-medium text-text-muted">
         Step {currentStep} of {totalSteps}
       </div>
 
       {/* Progress bar */}
-      <div className="h-2 w-full overflow-hidden rounded-full bg-gray-700">
+      <div className="h-2 w-full overflow-hidden rounded-full bg-surface-hover">
         <div
-          className="h-full bg-primary-500 transition-all duration-300"
+          className="h-full bg-primary-600 transition-all duration-300"
           role="progressbar"
           aria-valuenow={currentStep}
           aria-valuemin={1}
@@ -39,7 +39,11 @@ export default function ProgressIndicator({
           aria-label={`Progress: ${Math.round(progressPercentage)}%`}
         >
           <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
-            <rect width={`${progressPercentage}%`} height="100%" fill="currentColor" />
+            <rect
+              width={`${progressPercentage}%`}
+              height="100%"
+              fill="currentColor"
+            />
           </svg>
         </div>
       </div>
@@ -56,10 +60,10 @@ export default function ProgressIndicator({
               key={stepNumber}
               className={`h-2 w-2 rounded-full transition-all duration-200 ${
                 isCompleted
-                  ? "bg-primary-500"
+                  ? "bg-primary-600"
                   : isCurrent
-                  ? "scale-125 bg-primary-400"
-                  : "bg-gray-600"
+                    ? "scale-125 bg-primary-500"
+                    : "bg-border-strong"
               }`}
               aria-label={`Step ${stepNumber}`}
             />

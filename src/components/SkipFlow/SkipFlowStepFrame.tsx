@@ -42,8 +42,8 @@ export default function SkipFlowStepFrame({
   return (
     <div className="space-y-8">
       <div className="text-center">
-        <h2 className="mb-2 text-2xl font-bold text-white">{title}</h2>
-        {description ? <p className="text-gray-400">{description}</p> : null}
+        <h2 className="mb-2 text-2xl font-bold text-text">{title}</h2>
+        {description ? <p className="text-text-muted">{description}</p> : null}
       </div>
 
       {children}
@@ -51,7 +51,7 @@ export default function SkipFlowStepFrame({
       {notice}
 
       {footer ? (
-        <div className="text-center text-sm text-gray-500">{footer}</div>
+        <div className="text-center text-sm text-text-muted">{footer}</div>
       ) : null}
 
       {actions}

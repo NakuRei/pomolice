@@ -31,7 +31,7 @@ export function TimerDisplay() {
   return (
     <div className="flex flex-col items-center justify-center space-y-4">
       {/* Session type indicator */}
-      <div className="text-xl font-medium text-gray-600 uppercase tracking-wider">
+      <div className="text-xl font-medium uppercase tracking-wider text-text-muted">
         {getSessionTypeText()}
       </div>
 
@@ -46,7 +46,7 @@ export function TimerDisplay() {
       </div>
 
       {/* Status indicator */}
-      <div className="text-sm text-gray-500 uppercase tracking-wide">
+      <div className="text-sm uppercase tracking-wide text-text-muted">
         {status === 'idle' && '待機中'}
         {status === 'working' && '実行中'}
         {status === 'on_break' && '休憩中'}

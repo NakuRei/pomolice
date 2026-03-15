@@ -39,11 +39,11 @@ export function ConnectionBanner() {
   return (
     <div
       role="alert"
-      className="flex items-center justify-between gap-4 rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-800"
+      className="flex items-center justify-between gap-4 rounded-md border border-danger-800 bg-danger-950/30 px-4 py-3 text-sm text-danger-200"
       data-testid="connection-banner"
     >
       <div className="flex items-center gap-2">
-        <WarningTriangleIcon className="h-5 w-5 shrink-0 text-red-500" />
+        <WarningTriangleIcon className="h-5 w-5 shrink-0 text-danger-400" />
         <span>
           {isRetrying
             ? "接続を試みています..."
@@ -57,7 +57,7 @@ export function ConnectionBanner() {
           size="sm"
           onClick={handleRetry}
           disabled={isRetrying}
-          className="shrink-0 border-red-200 bg-red-100 text-red-800 hover:bg-red-200 focus-visible:outline-red-500 disabled:border-red-100 disabled:bg-red-100 disabled:text-red-400"
+          className="shrink-0 border-danger-800 bg-danger-950/40 text-danger-100 hover:border-danger-700 hover:bg-danger-950/60 focus-visible:outline-danger-500 disabled:border-disabled-border disabled:bg-disabled-bg disabled:text-disabled-text"
           testId="connection-banner-retry"
         >
           {isRetrying ? (

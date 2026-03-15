@@ -104,7 +104,7 @@ export default function MathChallenge({
       }
       notice={
         showError ? (
-          <div className="rounded-lg bg-red-900 bg-opacity-50 p-4 text-center text-red-300">
+          <div className="rounded-lg bg-danger-950/50 p-4 text-center text-danger-300">
             <p className="font-semibold">
               Incorrect! Generating new problem...
             </p>
@@ -123,8 +123,8 @@ export default function MathChallenge({
         </div>
       }
     >
-      <div className="rounded-lg bg-gray-800 p-8 text-center">
-        <div className="mb-4 font-mono text-4xl font-bold text-white">
+      <div className="rounded-lg bg-surface-raised p-8 text-center">
+        <div className="mb-4 font-mono text-4xl font-bold text-text">
           {problem.question}
         </div>
 
@@ -139,16 +139,16 @@ export default function MathChallenge({
               disabled={showError}
               placeholder="Your answer"
               autoComplete="off"
-              className={`w-32 rounded-lg border-2 bg-gray-900 px-4 py-3 text-center font-mono text-2xl text-white placeholder-gray-600 focus:outline-none focus:ring-2 ${
+              className={`w-32 rounded-lg border-2 bg-background px-4 py-3 text-center font-mono text-2xl text-on-background placeholder:text-text-muted focus:outline-none focus:ring-2 ${
                 showError
-                  ? "border-red-500 focus:ring-red-500"
-                  : "border-gray-700 focus:ring-primary-500"
+                  ? "border-danger-500 focus:ring-danger-500"
+                  : "border-border focus:ring-primary-600"
               }`}
             />
             <button
               type="submit"
               disabled={showError || userAnswer.trim() === ""}
-              className="rounded-lg bg-primary-600 px-6 py-3 font-semibold text-white transition-colors hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 focus:ring-offset-gray-900 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-primary-700 px-6 py-3 font-semibold text-on-primary transition-colors hover:bg-primary-800 focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2 focus:ring-offset-surface disabled:cursor-not-allowed disabled:opacity-50"
             >
               Submit
             </button>

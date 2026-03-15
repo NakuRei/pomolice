@@ -131,17 +131,17 @@ export function SettingsNotificationPage({
         onBackButtonClick={openSettingsTopScreen}
       />
 
-      <div className="space-y-5 rounded-lg border border-gray-200 bg-white p-4">
+      <div className="space-y-5 rounded-lg border border-border bg-surface p-4">
         <div>
           <div className="mb-2 flex items-center justify-between">
             <label
               htmlFor="settings-notification-sound-volume"
-              className="text-sm font-medium text-gray-700"
+              className="text-sm font-medium text-text"
             >
               通知音量
             </label>
             <span
-              className="text-sm text-gray-600 tabular-nums"
+              className="text-sm text-text-muted tabular-nums"
               data-testid="settings-notification-sound-volume-value"
             >
               {notificationSoundVolumePercentDraft ?? 0}%
@@ -167,7 +167,7 @@ export function SettingsNotificationPage({
                   Number(event.target.value),
                 )
               }
-              className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-200 accent-primary-600"
+              className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-surface-raised accent-primary-700"
               data-testid="settings-notification-sound-volume"
               aria-label="通知音量"
               disabled={notificationSoundMutedDraft}
@@ -179,7 +179,7 @@ export function SettingsNotificationPage({
           <div className="flex items-center gap-2">
             <label
               htmlFor="settings-notification-sound-preview-type"
-              className="text-sm text-gray-700"
+              className="text-sm text-text"
             >
               音の種類
             </label>
@@ -191,7 +191,7 @@ export function SettingsNotificationPage({
                   event.target.value as NotificationSoundType,
                 )
               }
-              className="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-700"
+              className="rounded-md border border-border bg-surface-raised px-2 py-1 text-sm text-on-surface"
               data-testid="settings-notification-sound-preview-type"
               aria-label="テストする通知音の種類"
             >
@@ -211,7 +211,7 @@ export function SettingsNotificationPage({
             </Button>
           </div>
           <p
-            className="text-xs text-gray-600"
+            className="text-xs text-text-muted"
             data-testid="settings-notification-sound-preview-status"
             aria-live="polite"
           >

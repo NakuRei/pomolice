@@ -21,12 +21,12 @@ export function DurationInput({
   onChange,
   min,
   max,
-  unit = '分',
+  unit = "分",
   testId,
   disabled = false,
 }: DurationInputProps) {
   const [inputValue, setInputValue] = useState(
-    value !== null && Number.isFinite(value) ? String(value) : ""
+    value !== null && Number.isFinite(value) ? String(value) : "",
   );
 
   useEffect(() => {
@@ -68,9 +68,7 @@ export function DurationInput({
 
   return (
     <div className="flex flex-col gap-2" data-testid={testId}>
-      <label className="text-sm font-medium text-gray-700">
-        {label}
-      </label>
+      <label className="text-sm font-medium text-text">{label}</label>
       <div className="flex items-center gap-2">
         <input
           type="number"
@@ -80,22 +78,24 @@ export function DurationInput({
           max={max}
           step="0.01"
           disabled={disabled}
-          className={`flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
+          className={`flex-1 rounded-lg border bg-surface-raised px-3 py-2 text-on-surface focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:border-disabled-border disabled:bg-disabled-bg disabled:text-disabled-text ${
             isValid
-              ? 'border-gray-300 focus:ring-primary-500'
-              : 'border-red-500 focus:ring-red-500'
+              ? "border-border focus:ring-primary-600"
+              : "border-danger-500 focus:ring-danger-500"
           }`}
           data-testid={`${testId}-input`}
         />
-        <span className="text-sm text-gray-600">{unit}</span>
+        <span className="text-sm text-text-muted">{unit}</span>
       </div>
       {!isValid && (
-        <p className="text-xs text-red-600" data-testid={`${testId}-error`}>
-          {min}〜{max}{unit}の範囲で入力してください
+        <p className="text-xs text-danger-300" data-testid={`${testId}-error`}>
+          {min}〜{max}
+          {unit}の範囲で入力してください
         </p>
       )}
-      <p className="text-xs text-gray-500">
-        範囲: {min}〜{max}{unit}
+      <p className="text-xs text-text-muted">
+        範囲: {min}〜{max}
+        {unit}
       </p>
     </div>
   );

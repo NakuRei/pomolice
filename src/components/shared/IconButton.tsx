@@ -10,9 +10,9 @@ const ICON_BUTTON_APPEARANCE_CLASS_NAME_BY_VALUE: Record<
   string
 > = {
   neutral:
-    "text-gray-600 hover:text-gray-800 focus-visible:outline-primary-500 disabled:text-gray-300",
+    "text-text-muted hover:text-text focus-visible:outline-primary-600 disabled:text-disabled-text",
   danger:
-    "text-red-600 hover:text-red-700 focus-visible:outline-red-500 disabled:text-red-300",
+    "text-danger-500 hover:text-danger-400 focus-visible:outline-danger-500 disabled:text-disabled-text",
 };
 
 /**
@@ -29,8 +29,10 @@ const ICON_BUTTON_APPEARANCE_CLASS_NAME_BY_VALUE: Record<
  * </IconButton>
  * ```
  */
-interface IconButtonProps
-  extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "className"> {
+interface IconButtonProps extends Omit<
+  ButtonHTMLAttributes<HTMLButtonElement>,
+  "className"
+> {
   /** Stable accessible name for screen readers and tooltips. */
   label: string;
   /** Shared color token for icon-only buttons. */

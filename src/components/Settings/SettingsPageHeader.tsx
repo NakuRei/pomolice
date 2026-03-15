@@ -37,13 +37,13 @@ export function SettingsPageHeader({
           ref={headingRef}
           tabIndex={-1}
           data-testid={headingTestId}
-          className="text-2xl font-bold tracking-tight text-gray-900"
+          className="text-2xl font-bold tracking-tight text-text"
         >
           {title}
         </h1>
       </div>
       {description ? (
-        <p className="max-w-xl text-sm leading-6 text-gray-600">
+        <p className="max-w-xl text-sm leading-6 text-text-muted">
           {description}
         </p>
       ) : null}

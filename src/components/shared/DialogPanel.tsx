@@ -9,10 +9,10 @@ interface DialogPanelProps {
 }
 
 const DIALOG_PANEL_BASE_CLASS_NAME =
-  "mx-4 w-full max-w-md rounded-lg bg-white p-8 shadow-xl";
+  "mx-4 w-full max-w-md rounded-lg border border-border bg-surface p-8 text-on-surface shadow-xl shadow-shadow/30";
 
 /**
- * Accessible confirmation dialog panel with the shared white-card appearance.
+ * Accessible confirmation dialog panel with the shared surface-card appearance.
  *
  * Usage example:
  * ```tsx

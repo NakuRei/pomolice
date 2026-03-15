@@ -12,13 +12,13 @@ export function BreakStats() {
 
   return (
     <div className="text-center space-y-3">
-      <div className="text-lg text-gray-300">
+      <div className="text-lg text-text-muted">
         <span className="font-semibold">今日のポモドーロ:</span>{" "}
-        <span className="text-white">{completedPomodoros}</span>
+        <span className="text-text">{completedPomodoros}</span>
       </div>
-      <div className="text-lg text-gray-300">
+      <div className="text-lg text-text-muted">
         <span className="font-semibold">現在のサイクル:</span>{" "}
-        <span className="text-white">{currentCycle}</span>
+        <span className="text-text">{currentCycle}</span>
       </div>
     </div>
   );

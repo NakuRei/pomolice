@@ -106,10 +106,10 @@ function SettingsTopRowButton({
       type="button"
       onClick={openCategoryPage}
       data-testid={testId}
-      className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-left transition-colors hover:border-gray-300 hover:bg-gray-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+      className="w-full rounded-lg border border-border bg-surface px-4 py-3 text-left transition-colors hover:border-border-strong hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600"
     >
-      <span className="block text-sm font-semibold text-gray-800">{label}</span>
-      <span className="mt-1 block truncate text-sm text-gray-600">
+      <span className="block text-sm font-semibold text-text">{label}</span>
+      <span className="mt-1 block truncate text-sm text-text-muted">
         {summaryText}
       </span>
     </button>
@@ -135,15 +135,15 @@ function SettingsTopPostBreakPolicyRow({
 
   return (
     <section
-      className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3"
+      className="w-full rounded-lg border border-border bg-surface px-4 py-3"
       data-testid="settings-top-row-post-break-policy"
     >
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <span className="block text-sm font-semibold text-gray-800">
+          <span className="block text-sm font-semibold text-text">
             休憩後遷移
           </span>
-          <span className="mt-1 block truncate text-sm text-gray-600">
+          <span className="mt-1 block truncate text-sm text-text-muted">
             {postBreakPolicySummaryText}
           </span>
         </div>

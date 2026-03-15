@@ -12,7 +12,7 @@ export function SettingsScreenLayout({
   mainTestId,
 }: SettingsScreenLayoutProps) {
   return (
-    <div className="flex min-h-screen flex-col p-8 space-y-6">
+    <div className="flex min-h-screen flex-col space-y-6 bg-background p-8 text-on-background">
       <ConnectionBanner />
       <InfoMessageBanner />
 

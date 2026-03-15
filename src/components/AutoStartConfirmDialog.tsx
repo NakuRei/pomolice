@@ -69,16 +69,16 @@ export function AutoStartConfirmDialog() {
       >
         <h2
           id="auto-start-confirm-dialog-title"
-          className="mb-4 text-2xl font-bold text-gray-900"
+          className="mb-4 text-2xl font-bold text-text"
         >
           作業を開始しますか？
         </h2>
-        <p className="mb-2 text-gray-700">
+        <p className="mb-2 text-text-muted">
           現在は {weekdayLabel} {activeWindowSummary.start_time} -{" "}
           {activeWindowSummary.end_time}
           {crossesMidnightSuffix} の自動実行枠です。
         </p>
-        <p className="mb-4 text-gray-700">
+        <p className="mb-4 text-text-muted">
           開始すると終了時刻連動でセッション区切り停止されます。
         </p>
         <div className="mb-4">

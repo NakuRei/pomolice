@@ -76,7 +76,7 @@ export function EmergencyStopButton() {
     <>
       <button
         onClick={handleEmergencyStopClick}
-        className="text-xs text-gray-400 hover:text-red-600 transition-colors underline"
+        className="text-xs text-text-muted transition-colors underline hover:text-danger-400"
         data-testid="emergency-stop-button"
         aria-label="緊急停止"
       >
@@ -88,11 +88,11 @@ export function EmergencyStopButton() {
           <DialogPanel labelledBy="emergency-stop-dialog-title" className="p-6">
             <h2
               id="emergency-stop-dialog-title"
-              className="text-xl font-bold mb-4 text-gray-900"
+              className="mb-4 text-xl font-bold text-text"
             >
               緊急停止しますか？
             </h2>
-            <p className="text-gray-600 mb-4">
+            <p className="mb-4 text-text-muted">
               現在のポモドーロセッションは記録されません。
               <br />
               緊急時以外は、セッション完了までお待ちください。

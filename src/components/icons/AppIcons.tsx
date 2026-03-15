@@ -15,7 +15,7 @@ const DEFAULT_ICON_STROKE_WIDTH = 1.5;
  *
  * Usage example:
  * ```tsx
- * <VolumeMutedIcon className="h-6 w-6 text-red-600" />
+ * <VolumeMutedIcon className="h-6 w-6 text-danger-500" />
  * ```
  */
 type AppIconProps = Omit<SVGProps<SVGSVGElement>, "children">;

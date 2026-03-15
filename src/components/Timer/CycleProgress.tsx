@@ -1,5 +1,5 @@
-import { useTimerStore } from '../../store/timerStore';
-import { useSettingsStore } from '../../store/settingsStore';
+import { useTimerStore } from "../../store/timerStore";
+import { useSettingsStore } from "../../store/settingsStore";
 
 /**
  * CycleProgress Component
@@ -13,7 +13,9 @@ import { useSettingsStore } from '../../store/settingsStore';
  */
 export function CycleProgress() {
   const currentCycle = useTimerStore((state) => state.currentCycle);
-  const longBreakInterval = useSettingsStore((state) => state.longBreakInterval);
+  const longBreakInterval = useSettingsStore(
+    (state) => state.longBreakInterval,
+  );
 
   // Don't show if cycle hasn't started yet
   if (currentCycle === 0) {
@@ -29,10 +31,10 @@ export function CycleProgress() {
       <div
         key={index}
         className={`w-3 h-3 rounded-full transition-colors ${
-          isCompleted ? 'bg-primary-600' : 'bg-gray-300'
+          isCompleted ? "bg-primary-700" : "bg-border-strong"
         }`}
         data-testid={`cycle-dot-${dotNumber}`}
-        aria-label={`サイクル ${dotNumber}${isCompleted ? ' 完了' : ''}`}
+        aria-label={`サイクル ${dotNumber}${isCompleted ? " 完了" : ""}`}
       />
     );
   });

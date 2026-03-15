@@ -34,6 +34,6 @@ describe("IconButton", () => {
     const button = screen.getByRole("button", { name: "削除" });
 
     expect(button).toBeDisabled();
-    expect(button).toHaveClass("text-red-600");
+    expect(button).toHaveClass("text-danger-500");
   });
 });

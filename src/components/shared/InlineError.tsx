@@ -64,17 +64,17 @@ export function InlineError({ errorId, onRetry }: InlineErrorProps) {
   return (
     <div
       role="alert"
-      className="flex items-start gap-2 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700"
+      className="flex items-start gap-2 rounded-md border border-danger-800 bg-danger-950/30 px-3 py-2 text-sm text-danger-200"
       data-testid={`inline-error-${errorId}`}
     >
-      <WarningTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
+      <WarningTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-danger-400" />
 
       <span className="flex-1">{error.message}</span>
 
       {showRetryButton && (
         <button
           onClick={handleRetry}
-          className="shrink-0 font-medium underline hover:no-underline focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1"
+          className="shrink-0 font-medium underline hover:no-underline focus:outline-none focus:ring-2 focus:ring-danger-500 focus:ring-offset-1"
           data-testid={`inline-error-retry-${errorId}`}
         >
           再試行

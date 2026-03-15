@@ -21,8 +21,8 @@ export function SkipButton({ onClick }: SkipButtonProps) {
       className="
         px-3 py-1.5
         text-xs
-        bg-gray-700 hover:bg-gray-600
-        text-gray-400 hover:text-gray-200
+        bg-surface-raised hover:bg-surface-hover
+        text-text-muted hover:text-text
         rounded
         transition-colors
         opacity-60 hover:opacity-100

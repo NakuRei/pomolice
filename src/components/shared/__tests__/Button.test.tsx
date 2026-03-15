@@ -8,19 +8,24 @@ describe("Button", () => {
   it.each([
     {
       appearance: "primary",
-      expectedClassNames: ["bg-primary-600", "text-white"],
+      expectedClassNames: ["bg-primary-700", "text-on-primary"],
     },
     {
       appearance: "secondary",
-      expectedClassNames: ["border-gray-300", "bg-gray-100", "text-gray-700"],
+      expectedClassNames: [
+        "border-border",
+        "bg-surface-raised",
+        "text-on-surface",
+        "hover:bg-surface-hover",
+      ],
     },
     {
       appearance: "danger",
-      expectedClassNames: ["bg-red-600", "text-white"],
+      expectedClassNames: ["bg-danger-600", "text-on-danger"],
     },
     {
       appearance: "subtle",
-      expectedClassNames: ["bg-transparent", "text-gray-600"],
+      expectedClassNames: ["bg-transparent", "text-text-muted"],
     },
   ] as const)(
     "applies the %s appearance token classes",
@@ -46,8 +51,9 @@ describe("Button", () => {
 
     expect(button).toHaveAttribute("type", "button");
     expect(button).toHaveClass("border");
-    expect(button).toHaveClass("border-gray-300");
-    expect(button).toHaveClass("bg-gray-100");
+    expect(button).toHaveClass("border-border");
+    expect(button).toHaveClass("bg-surface-raised");
+    expect(button).toHaveClass("text-on-surface");
     expect(button).toHaveClass("px-6");
     expect(button).toHaveClass("py-3");
     expect(button).toHaveClass("text-base");
@@ -68,7 +74,7 @@ describe("Button", () => {
 
     const button = screen.getByTestId("danger-button");
 
-    expect(button).toHaveClass("bg-red-600");
+    expect(button).toHaveClass("bg-danger-600");
     expect(button).toHaveClass("px-8");
     expect(button).toHaveClass("py-4");
     expect(button).toHaveClass("text-lg");
@@ -117,6 +123,9 @@ describe("Button", () => {
       </Button>,
     );
 
-    expect(screen.getByTestId("submit-button")).toHaveAttribute("type", "submit");
+    expect(screen.getByTestId("submit-button")).toHaveAttribute(
+      "type",
+      "submit",
+    );
   });
 });

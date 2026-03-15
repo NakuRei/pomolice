@@ -27,13 +27,13 @@ export default function ConfirmationStep({
   // Get warning level for styling (higher step = stronger warning)
   const getWarningStyle = () => {
     if (step === 4) {
-      return "text-red-400 border-red-500";
+      return "text-danger-400 border-danger-500";
     } else if (step === 3) {
-      return "text-orange-400 border-orange-500";
+      return "text-warning-400 border-warning-500";
     } else if (step === 2) {
-      return "text-yellow-400 border-yellow-500";
+      return "text-warning-300 border-warning-400";
     } else {
-      return "text-primary-400 border-primary-500";
+      return "text-primary-500 border-primary-600";
     }
   };
 
@@ -48,7 +48,7 @@ export default function ConfirmationStep({
 
       {/* Health reminder */}
       {step >= 2 && (
-        <div className="rounded-lg bg-gray-800 p-4 text-center text-sm text-gray-300">
+        <div className="rounded-lg bg-surface-raised p-4 text-center text-sm text-text-muted">
           <p>
             💡 Reminder: Regular breaks improve focus, productivity, and health.
           </p>
@@ -59,20 +59,20 @@ export default function ConfirmationStep({
       <div className="flex justify-center space-x-4">
         <button
           onClick={onCancel}
-          className="rounded-lg bg-green-600 px-8 py-3 font-semibold text-white transition-colors hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 focus:ring-offset-gray-900"
+          className="rounded-lg bg-success-700 px-8 py-3 font-semibold text-on-success transition-colors hover:bg-success-800 focus:outline-none focus:ring-2 focus:ring-success-600 focus:ring-offset-2 focus:ring-offset-surface"
         >
           No, Take Break
         </button>
         <button
           onClick={onConfirm}
-          className="rounded-lg bg-gray-700 px-8 py-3 font-semibold text-white transition-colors hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 focus:ring-offset-gray-900"
+          className="rounded-lg bg-surface-raised px-8 py-3 font-semibold text-on-surface transition-colors hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2 focus:ring-offset-surface"
         >
           Yes, Continue
         </button>
       </div>
 
       {/* Skip hint */}
-      <div className="text-center text-xs text-gray-500">
+      <div className="text-center text-xs text-text-muted">
         <p>Pressing any button will reset your break timer</p>
       </div>
     </div>

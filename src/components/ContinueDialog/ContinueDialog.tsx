@@ -70,21 +70,21 @@ export function ContinueDialog() {
       <DialogPanel labelledBy="continue-dialog-title">
         <h2
           id="continue-dialog-title"
-          className="text-2xl font-bold mb-4 text-gray-900"
+          className="mb-4 text-2xl font-bold text-text"
         >
           1サイクル完了しました！
         </h2>
-        <p className="text-gray-600 mb-2">
+        <p className="mb-2 text-text-muted">
           お疲れ様でした。休憩が完了しました。
         </p>
-        <p className="text-gray-600 mb-6">
+        <p className="mb-6 text-text-muted">
           完了したポモドーロ: <span className="font-semibold">{completedPomodoros}</span>
         </p>
-        <p className="text-gray-700 font-medium mb-4">
+        <p className="mb-4 font-medium text-text">
           次のポモドーロを続けますか？
         </p>
         <p
-          className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-4"
+          className="mb-4 rounded-md border border-warning-800 bg-warning-950/30 px-3 py-2 text-sm text-warning-200"
           data-testid="continue-dialog-manual-decision-message"
         >
           現在、手動判断待ちです。続けるか終了を選んでください。

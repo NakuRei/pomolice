@@ -125,7 +125,7 @@ export default function TypingChallenge({
       }
       notice={
         hasTypo ? (
-          <div className="rounded-lg bg-red-900 bg-opacity-50 p-4 text-center text-red-300">
+          <div className="rounded-lg bg-danger-950/50 p-4 text-center text-danger-300">
             <p className="font-semibold">Typo detected! Starting over...</p>
           </div>
         ) : null
@@ -142,16 +142,16 @@ export default function TypingChallenge({
         </div>
       }
     >
-      <div className="rounded-lg bg-gray-800 p-6">
+      <div className="rounded-lg bg-surface-raised p-6">
         <div className="font-mono text-lg tracking-wider">
           {Array.from(targetPhrase).map((char, index) => {
             const validation = characterValidation[index];
-            let colorClass = "text-gray-400";
+            let colorClass = "text-text-muted";
 
             if (validation === true) {
-              colorClass = "text-green-400";
+              colorClass = "text-success-400";
             } else if (validation === false) {
-              colorClass = "text-red-400";
+              colorClass = "text-danger-400";
             }
 
             return (
@@ -177,10 +177,10 @@ export default function TypingChallenge({
           autoCorrect="off"
           autoCapitalize="off"
           spellCheck="false"
-          className={`w-full rounded-lg border-2 bg-gray-900 px-4 py-3 font-mono text-lg text-white placeholder-gray-600 focus:outline-none focus:ring-2 ${
+          className={`w-full rounded-lg border-2 bg-background px-4 py-3 font-mono text-lg text-on-background placeholder:text-text-muted focus:outline-none focus:ring-2 ${
             hasTypo
-              ? "border-red-500 focus:ring-red-500"
-              : "border-gray-700 focus:ring-primary-500"
+              ? "border-danger-500 focus:ring-danger-500"
+              : "border-border focus:ring-primary-600"
           }`}
         />
       </div>

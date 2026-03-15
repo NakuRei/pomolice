@@ -120,7 +120,7 @@ export default function LongPressButton({
       }
       notice={
         hasReleased ? (
-          <div className="rounded-lg bg-red-900 bg-opacity-50 p-4 text-center text-red-300">
+          <div className="rounded-lg bg-danger-950/50 p-4 text-center text-danger-300">
             <p className="font-semibold">You released too early! Try again.</p>
           </div>
         ) : null
@@ -146,13 +146,13 @@ export default function LongPressButton({
           onMouseLeave={handleMouseLeave}
           onTouchStart={handleMouseDown}
           onTouchEnd={handleMouseUp}
-          className={`relative h-32 w-full overflow-hidden rounded-lg font-bold text-white shadow-lg transition-all focus:outline-none focus:ring-4 focus:ring-offset-2 focus:ring-offset-gray-900 ${
+          className={`relative h-32 w-full overflow-hidden rounded-lg font-bold shadow-lg transition-all focus:outline-none focus:ring-4 focus:ring-offset-2 focus:ring-offset-surface ${
             isPressing
-              ? "bg-primary-600 focus:ring-primary-500"
-              : "bg-gray-700 hover:bg-gray-600 focus:ring-gray-500"
+              ? "bg-primary-700 text-on-primary focus:ring-primary-600"
+              : "bg-surface-raised text-on-surface hover:bg-surface-hover focus:ring-primary-600"
           }`}
         >
-          <div className="absolute inset-0 overflow-hidden text-primary-600">
+          <div className="absolute inset-0 overflow-hidden text-primary-700">
             <svg
               className="absolute inset-0 h-full w-full"
               xmlns="http://www.w3.org/2000/svg"
@@ -179,7 +179,7 @@ export default function LongPressButton({
           </div>
         </button>
 
-        <div className="text-center text-sm text-gray-400">
+        <div className="text-center text-sm text-text-muted">
           Progress: {Math.floor(progress)}%
         </div>
       </div>

@@ -17,7 +17,7 @@ export function MotivationalMessage() {
 
   return (
     <div className="text-center mb-8">
-      <p className="text-2xl font-medium text-gray-100">
+      <p className="text-2xl font-medium text-text">
         {message}
       </p>
     </div>

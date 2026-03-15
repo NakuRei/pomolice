@@ -7,7 +7,7 @@ interface DialogOverlayProps {
 }
 
 const DIALOG_OVERLAY_BASE_CLASS_NAME =
-  "fixed inset-0 z-50 flex items-center justify-center bg-black/50";
+  "fixed inset-0 z-50 flex items-center justify-center bg-backdrop/50";
 
 /**
  * Shared overlay shell for confirmation dialogs.

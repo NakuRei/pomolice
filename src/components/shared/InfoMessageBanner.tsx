@@ -31,7 +31,7 @@ export function InfoMessageBanner() {
     <div
       role="status"
       aria-live="polite"
-      className="rounded-md border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900"
+      className="rounded-md border border-info-800 bg-info-950/30 px-4 py-3 text-sm text-info-100"
       data-testid="info-message-banner"
     >
       {infoMessage.message}
