@@ -10,6 +10,7 @@ import {
   type WeeklyScheduleValidationError,
   type WeekdayKey,
 } from "../../store/settingsStore";
+import { StatusNotice } from "../shared/StatusNotice";
 import { SettingsPageHeader } from "./SettingsPageHeader";
 import { SettingsSaveCancelFooter } from "./SettingsSaveCancelFooter";
 
@@ -176,20 +177,23 @@ export function SettingsAutoRunPage({
         </div>
 
         {weeklyScheduleValidationErrors.length > 0 && (
-          <div
-            className="mb-3 rounded-md border border-danger-800 bg-danger-950/30 p-2"
-            data-testid="settings-auto-run-weekly-errors"
+          <StatusNotice
+            tone="danger"
             role="alert"
+            className="mb-3"
+            testId="settings-auto-run-weekly-errors"
           >
-            {weeklyScheduleValidationErrors.map((weeklyValidationError) => (
-              <p
-                key={`${weeklyValidationError.primaryWeekday}-${weeklyValidationError.secondaryWeekday}`}
-                className="text-xs text-danger-200"
-              >
-                {weeklyValidationError.message}
-              </p>
-            ))}
-          </div>
+            <div className="space-y-1">
+              {weeklyScheduleValidationErrors.map((weeklyValidationError) => (
+                <p
+                  key={`${weeklyValidationError.primaryWeekday}-${weeklyValidationError.secondaryWeekday}`}
+                  className="text-xs text-danger-200"
+                >
+                  {weeklyValidationError.message}
+                </p>
+              ))}
+            </div>
+          </StatusNotice>
         )}
 
         <div className="grid gap-2">

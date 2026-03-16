@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useErrorStore } from "../../store/errorStore";
 import { Button } from "./Button";
 import { LoadingSpinnerIcon, WarningTriangleIcon } from "../icons";
+import { StatusNotice } from "./StatusNotice";
 
 /**
  * Displays a top-of-page banner when the backend connection has failed.
@@ -37,39 +38,38 @@ export function ConnectionBanner() {
   };
 
   return (
-    <div
+    <StatusNotice
+      tone="danger"
       role="alert"
-      className="flex items-center justify-between gap-4 rounded-md border border-danger-800 bg-danger-950/30 px-4 py-3 text-sm text-danger-200"
-      data-testid="connection-banner"
-    >
-      <div className="flex items-center gap-2">
+      testId="connection-banner"
+      icon={
         <WarningTriangleIcon className="h-5 w-5 shrink-0 text-danger-400" />
-        <span>
-          {isRetrying
-            ? "接続を試みています..."
-            : "バックエンドに接続できません。アプリが正常に動作しない可能性があります。"}
-        </span>
-      </div>
-
-      {error.canRetry && (
-        <Button
-          appearance="secondary"
-          size="sm"
-          onClick={handleRetry}
-          disabled={isRetrying}
-          className="shrink-0 border-danger-800 bg-danger-950/40 text-danger-100 hover:border-danger-700 hover:bg-danger-950/60 focus-visible:outline-danger-500 disabled:border-disabled-border disabled:bg-disabled-bg disabled:text-disabled-text"
-          testId="connection-banner-retry"
-        >
-          {isRetrying ? (
-            <span className="flex items-center gap-1.5">
-              <LoadingSpinnerIcon className="h-3.5 w-3.5 animate-spin" />
-              接続中
-            </span>
-          ) : (
-            "再試行"
-          )}
-        </Button>
-      )}
-    </div>
+      }
+      actions={
+        error.canRetry ? (
+          <Button
+            appearance="secondary"
+            size="sm"
+            onClick={handleRetry}
+            disabled={isRetrying}
+            className="shrink-0 border-danger-800 bg-danger-950/40 text-danger-100 hover:border-danger-700 hover:bg-danger-950/60 focus-visible:outline-danger-500 disabled:border-disabled-border disabled:bg-disabled-bg disabled:text-disabled-text"
+            testId="connection-banner-retry"
+          >
+            {isRetrying ? (
+              <span className="flex items-center gap-1.5">
+                <LoadingSpinnerIcon className="h-3.5 w-3.5 animate-spin" />
+                接続中
+              </span>
+            ) : (
+              "再試行"
+            )}
+          </Button>
+        ) : undefined
+      }
+    >
+      {isRetrying
+        ? "接続を試みています..."
+        : "バックエンドに接続できません。アプリが正常に動作しない可能性があります。"}
+    </StatusNotice>
   );
 }

@@ -42,7 +42,10 @@ describe("InfoMessageBanner", () => {
 
     render(<InfoMessageBanner />);
 
-    expect(screen.getByTestId("info-message-banner")).toBeInTheDocument();
+    const notice = screen.getByRole("status");
+
+    expect(notice).toBe(screen.getByTestId("info-message-banner"));
+    expect(notice).toHaveAttribute("aria-live", "polite");
     expect(screen.getByText("現在セッション終了後に停止予定")).toBeInTheDocument();
   });
 

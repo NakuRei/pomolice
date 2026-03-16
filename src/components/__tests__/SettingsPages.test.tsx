@@ -82,9 +82,9 @@ describe("Settings Pages", () => {
     expect(
       screen.getByTestId("settings-top-row-post-break-policy"),
     ).toHaveTextContent("休憩後に自動で次の作業を開始する");
-    expect(screen.getByTestId("settings-top-row-notification")).toHaveTextContent(
-      "ミュートON / 音量35%",
-    );
+    expect(
+      screen.getByTestId("settings-top-row-notification"),
+    ).toHaveTextContent("ミュートON / 音量35%");
   });
 
   it("renders the shared back button on settings top and calls home navigation", async () => {
@@ -288,7 +288,9 @@ describe("Settings Pages", () => {
     await user.click(screen.getByTestId("settings-cancel"));
 
     expect(useSettingsStore.getState().autoRunFeatureEnabled).toBe(false);
-    expect(useSettingsStore.getState().weeklyAutoRunConfig.mon.enabled).toBe(false);
+    expect(useSettingsStore.getState().weeklyAutoRunConfig.mon.enabled).toBe(
+      false,
+    );
     expect(openSettingsTopScreen).toHaveBeenCalledTimes(1);
   });
 
@@ -312,6 +314,36 @@ describe("Settings Pages", () => {
     expect(screen.getByTestId("settings-auto-run-footer")).toBeInTheDocument();
     expect(screen.getByTestId("settings-save")).toBeDisabled();
     expect(openSettingsTopScreen).not.toHaveBeenCalled();
+  });
+
+  it("renders weekly auto-run overlap errors inside the shared weekly error notice", () => {
+    const weeklyAutoRunConfig = createWeeklyAutoRunConfigAllDaysDisabled();
+    weeklyAutoRunConfig.mon = {
+      enabled: true,
+      startTime: "23:00",
+      endTime: "02:00",
+    };
+    weeklyAutoRunConfig.tue = {
+      enabled: true,
+      startTime: "01:00",
+      endTime: "03:00",
+    };
+
+    useSettingsStore.setState({
+      autoRunFeatureEnabled: true,
+      weeklyAutoRunConfig,
+    });
+
+    render(<SettingsAutoRunPage openSettingsTopScreen={() => undefined} />);
+
+    const weeklyErrorNotice = screen.getByTestId(
+      "settings-auto-run-weekly-errors",
+    );
+
+    expect(weeklyErrorNotice).toHaveAttribute("role", "alert");
+    expect(weeklyErrorNotice).toHaveTextContent(
+      "Schedule windows overlap between mon and tue.",
+    );
   });
 
   it("saves notification settings and keeps timer settings unchanged", async () => {
@@ -428,12 +460,16 @@ describe("Settings Pages", () => {
       <SettingsNotificationPage openSettingsTopScreen={() => undefined} />,
     );
 
-    await user.click(screen.getByTestId("settings-notification-sound-preview-button"));
+    await user.click(
+      screen.getByTestId("settings-notification-sound-preview-button"),
+    );
 
     expect(playNotificationSoundPreview).toHaveBeenCalledTimes(1);
     expect(
       screen.getByTestId("settings-notification-sound-preview-status"),
-    ).toHaveTextContent("通知音ファイルを読み込めなかったため再生できませんでした。");
+    ).toHaveTextContent(
+      "通知音ファイルを読み込めなかったため再生できませんでした。",
+    );
   });
 
   it("does not persist unsaved timer draft when notification settings are saved", async () => {

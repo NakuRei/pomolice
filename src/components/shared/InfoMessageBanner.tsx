@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useTimerStore } from "../../store/timerStore";
+import { StatusNotice } from "./StatusNotice";
 
 /**
  * Displays short-lived informational messages from timerStore.
@@ -28,13 +29,13 @@ export function InfoMessageBanner() {
   }
 
   return (
-    <div
+    <StatusNotice
+      tone="info"
       role="status"
-      aria-live="polite"
-      className="rounded-md border border-info-800 bg-info-950/30 px-4 py-3 text-sm text-info-100"
-      data-testid="info-message-banner"
+      ariaLive="polite"
+      testId="info-message-banner"
     >
       {infoMessage.message}
-    </div>
+    </StatusNotice>
   );
 }
