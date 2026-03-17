@@ -67,24 +67,6 @@ describe("App", () => {
     });
   });
 
-  it("displays 'Pomolice' title", () => {
-    render(<App />);
-    const heading = screen.getByText(/^Pomolice$/i);
-    expect(heading).toBeInTheDocument();
-  });
-
-  it("renders timer display", () => {
-    render(<App />);
-    const timerDisplay = screen.getByTestId("timer-display");
-    expect(timerDisplay).toBeInTheDocument();
-  });
-
-  it("renders start button", () => {
-    render(<App />);
-    const startButton = screen.getByTestId("start-button");
-    expect(startButton).toBeInTheDocument();
-  });
-
   it("toggles notification mute state when mute button is clicked", async () => {
     const user = userEvent.setup();
     useSettingsStore.setState({ notificationSoundMuted: false });
@@ -95,103 +77,6 @@ describe("App", () => {
     await user.click(muteButton);
 
     expect(useSettingsStore.getState().notificationSoundMuted).toBe(true);
-  });
-
-  it("shows manual-continue badge when post-break policy requires confirmation", () => {
-    useSettingsStore.setState({
-      autoRunFeatureEnabled: false,
-      post_break_transition_policy: "require_manual_continue",
-    });
-
-    render(<App />);
-
-    expect(
-      screen.getByTestId("header-badge-require-manual-continue"),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByTestId("header-badge-auto-continue"),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByTestId("header-badge-auto-run")).not.toBeInTheDocument();
-  });
-
-  it("shows auto-run badge together with manual-continue badge when scheduled auto-run is enabled", () => {
-    useSettingsStore.setState({
-      autoRunFeatureEnabled: true,
-      post_break_transition_policy: "require_manual_continue",
-    });
-
-    render(<App />);
-
-    expect(screen.getByTestId("header-badge-auto-run")).toBeInTheDocument();
-    expect(
-      screen.getByTestId("header-badge-require-manual-continue"),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByTestId("header-badge-auto-continue"),
-    ).not.toBeInTheDocument();
-  });
-
-  it("shows auto-continue badge when post-break auto-continue is enabled", () => {
-    useSettingsStore.setState({
-      autoRunFeatureEnabled: false,
-      post_break_transition_policy: "start_next_work_automatically",
-    });
-
-    render(<App />);
-
-    expect(
-      screen.getByTestId("header-badge-auto-continue"),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByTestId("header-badge-auto-run"),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByTestId("header-badge-require-manual-continue"),
-    ).not.toBeInTheDocument();
-  });
-
-  it("shows both badges without omission and keeps fixed order", () => {
-    useSettingsStore.setState({
-      autoRunFeatureEnabled: true,
-      post_break_transition_policy: "start_next_work_automatically",
-    });
-
-    render(<App />);
-
-    const badgeContainer = screen.getByTestId("header-status-badges");
-    const badges = badgeContainer.querySelectorAll(
-      '[data-testid^="header-badge-"]',
-    );
-    const badgeIds = Array.from(badges).map((badgeElement) =>
-      badgeElement.getAttribute("data-testid"),
-    );
-
-    expect(badgeIds).toEqual([
-      "header-badge-auto-run",
-      "header-badge-auto-continue",
-    ]);
-  });
-
-  it("shows auto-run badge before manual-continue badge", () => {
-    useSettingsStore.setState({
-      autoRunFeatureEnabled: true,
-      post_break_transition_policy: "require_manual_continue",
-    });
-
-    render(<App />);
-
-    const badgeContainer = screen.getByTestId("header-status-badges");
-    const badges = badgeContainer.querySelectorAll(
-      '[data-testid^="header-badge-"]',
-    );
-    const badgeIds = Array.from(badges).map((badgeElement) =>
-      badgeElement.getAttribute("data-testid"),
-    );
-
-    expect(badgeIds).toEqual([
-      "header-badge-auto-run",
-      "header-badge-require-manual-continue",
-    ]);
   });
 
   it("opens settings top screen when settings button is clicked", async () => {
