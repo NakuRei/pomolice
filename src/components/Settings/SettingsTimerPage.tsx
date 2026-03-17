@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import { useFocusHeadingOnMount } from "../../hooks/useFocusHeadingOnMount";
 import { useSettingsStore, VALIDATION_RULES } from "../../store/settingsStore";
 import { TimerStatus, useTimerStore } from "../../store/timerStore";
 import { DurationInput } from "./DurationInput";
@@ -15,7 +16,7 @@ const isFiniteNumberValue = (value: number | null): value is number =>
 export function SettingsTimerPage({
   openSettingsTopScreen,
 }: SettingsTimerPageProps) {
-  const headingReference = useRef<HTMLHeadingElement | null>(null);
+  const headingReference = useFocusHeadingOnMount();
 
   const workDurationFromStore = useSettingsStore((state) => state.workDuration);
   const shortBreakDurationFromStore = useSettingsStore(
@@ -42,10 +43,6 @@ export function SettingsTimerPage({
   const [longBreakIntervalDraft, setLongBreakIntervalDraft] = useState<
     number | null
   >(longBreakIntervalFromStore);
-
-  useEffect(() => {
-    headingReference.current?.focus();
-  }, []);
 
   const isWorkDurationValid =
     isFiniteNumberValue(workDurationDraft) &&

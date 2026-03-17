@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
 import { WEEKDAY_LABELS_BY_KEY } from "../../constants/weekdayLabels";
+import { useFocusHeadingOnMount } from "../../hooks/useFocusHeadingOnMount";
 import {
   useSettingsStore,
   WEEKDAY_KEYS,
@@ -168,7 +168,7 @@ export function SettingsTopPage({
   openAutoRunSettings,
   openNotificationSettings,
 }: SettingsTopPageProps) {
-  const topHeadingReference = useRef<HTMLHeadingElement | null>(null);
+  const topHeadingReference = useFocusHeadingOnMount();
 
   const workDuration = useSettingsStore((state) => state.workDuration);
   const shortBreakDuration = useSettingsStore(
@@ -198,10 +198,6 @@ export function SettingsTopPage({
   const notificationSoundVolumePercent = useSettingsStore(
     (state) => state.notificationSoundVolumePercent,
   );
-
-  useEffect(() => {
-    topHeadingReference.current?.focus();
-  }, []);
 
   const timerSummaryText = buildTimerSummaryText(
     workDuration,

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import { useFocusHeadingOnMount } from "../../hooks/useFocusHeadingOnMount";
 import {
   playNotificationSoundPreview,
   type NotificationSoundType,
@@ -19,7 +20,7 @@ const isFiniteNumberValue = (value: number | null): value is number =>
 export function SettingsNotificationPage({
   openSettingsTopScreen,
 }: SettingsNotificationPageProps) {
-  const headingReference = useRef<HTMLHeadingElement | null>(null);
+  const headingReference = useFocusHeadingOnMount();
 
   const notificationSoundMutedFromStore = useSettingsStore(
     (state) => state.notificationSoundMuted,
@@ -41,10 +42,6 @@ export function SettingsNotificationPage({
     notificationSoundPreviewStatusText,
     setNotificationSoundPreviewStatusText,
   ] = useState<string>("");
-
-  useEffect(() => {
-    headingReference.current?.focus();
-  }, []);
 
   const notificationSoundVolumeDraftIsValid =
     isFiniteNumberValue(notificationSoundVolumePercentDraft) &&

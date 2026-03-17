@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   createWeeklyAutoRunConfigAllDaysDisabled,
@@ -85,6 +85,21 @@ describe("Settings Pages", () => {
     expect(
       screen.getByTestId("settings-top-row-notification"),
     ).toHaveTextContent("ミュートON / 音量35%");
+  });
+
+  it("focuses the settings top heading on mount", async () => {
+    render(
+      <SettingsTopPage
+        openHomeScreen={() => undefined}
+        openTimerSettings={() => undefined}
+        openAutoRunSettings={() => undefined}
+        openNotificationSettings={() => undefined}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-top-heading")).toHaveFocus();
+    });
   });
 
   it("renders the shared back button on settings top and calls home navigation", async () => {
@@ -231,6 +246,14 @@ describe("Settings Pages", () => {
     ).toBeInTheDocument();
   });
 
+  it("focuses the timer heading on mount", async () => {
+    render(<SettingsTimerPage openSettingsTopScreen={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-timer-heading")).toHaveFocus();
+    });
+  });
+
   it("saves auto-run settings and keeps timer settings unchanged", async () => {
     const user = userEvent.setup();
     const openSettingsTopScreen = vi.fn();
@@ -344,6 +367,14 @@ describe("Settings Pages", () => {
     expect(weeklyErrorNotice).toHaveTextContent(
       "Schedule windows overlap between mon and tue.",
     );
+  });
+
+  it("focuses the auto-run heading on mount", async () => {
+    render(<SettingsAutoRunPage openSettingsTopScreen={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-auto-run-heading")).toHaveFocus();
+    });
   });
 
   it("saves notification settings and keeps timer settings unchanged", async () => {
@@ -470,6 +501,16 @@ describe("Settings Pages", () => {
     ).toHaveTextContent(
       "通知音ファイルを読み込めなかったため再生できませんでした。",
     );
+  });
+
+  it("focuses the notification heading on mount", async () => {
+    render(
+      <SettingsNotificationPage openSettingsTopScreen={() => undefined} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-notification-heading")).toHaveFocus();
+    });
   });
 
   it("does not persist unsaved timer draft when notification settings are saved", async () => {

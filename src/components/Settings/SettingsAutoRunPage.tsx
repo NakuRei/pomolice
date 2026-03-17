@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import { useFocusHeadingOnMount } from "../../hooks/useFocusHeadingOnMount";
 import {
   useSettingsStore,
   WEEKDAY_KEYS,
@@ -34,7 +35,7 @@ function cloneWeeklyAutoRunConfigForDraft(
 export function SettingsAutoRunPage({
   openSettingsTopScreen,
 }: SettingsAutoRunPageProps) {
-  const headingReference = useRef<HTMLHeadingElement | null>(null);
+  const headingReference = useFocusHeadingOnMount();
 
   const autoRunFeatureEnabledFromStore = useSettingsStore(
     (state) => state.autoRunFeatureEnabled,
@@ -63,10 +64,6 @@ export function SettingsAutoRunPage({
     useState<WeeklyScheduleValidationError[]>(
       validationResultAtPageOpen.weeklyScheduleValidationErrors,
     );
-
-  useEffect(() => {
-    headingReference.current?.focus();
-  }, []);
 
   const updateWeeklyAutoRunDraft = (
     updateDraftSchedule: (
