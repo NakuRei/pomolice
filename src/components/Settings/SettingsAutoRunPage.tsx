@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { WEEKDAY_LABELS_BY_KEY } from "../../constants/weekdayLabels";
 import {
   useSettingsStore,
   WEEKDAY_KEYS,
-  parseHhMm,
   validateWeeklyAutoRunConfig,
   type DayScheduleValidationError,
   type WeeklyAutoRunConfig,
@@ -11,6 +9,7 @@ import {
   type WeekdayKey,
 } from "../../store/settingsStore";
 import { StatusNotice } from "../shared/StatusNotice";
+import { AutoRunDayRow } from "./AutoRunDayRow";
 import { SettingsPageHeader } from "./SettingsPageHeader";
 import { SettingsSaveCancelFooter } from "./SettingsSaveCancelFooter";
 
@@ -30,20 +29,6 @@ function cloneWeeklyAutoRunConfigForDraft(
     sat: { ...weeklyAutoRunConfig.sat },
     sun: { ...weeklyAutoRunConfig.sun },
   };
-}
-
-function daySlotCrossesMidnight(
-  daySlot: WeeklyAutoRunConfig[WeekdayKey],
-): boolean {
-  const parsedStartTime = parseHhMm(daySlot.startTime);
-  const parsedEndTime = parseHhMm(daySlot.endTime);
-  if (!parsedStartTime || !parsedEndTime) {
-    return false;
-  }
-  return (
-    parsedStartTime.minutesSinceStartOfDay >
-    parsedEndTime.minutesSinceStartOfDay
-  );
 }
 
 export function SettingsAutoRunPage({
@@ -200,97 +185,30 @@ export function SettingsAutoRunPage({
           {WEEKDAY_KEYS.map((weekday) => {
             const daySlot = weeklyAutoRunConfigDraft[weekday];
             const dayValidationError = dayScheduleValidationErrors[weekday];
-            const daySlotShowsOvernightLabel =
-              daySlot.enabled && daySlotCrossesMidnight(daySlot);
-            const dayTimeInputIsDisabled =
-              !autoRunFeatureEnabledDraft || !daySlot.enabled;
-            const dayTimeInputClassName = `rounded border px-2 py-1 text-sm transition-colors ${
-              dayTimeInputIsDisabled
-                ? "cursor-not-allowed border-disabled-border bg-disabled-bg text-disabled-text"
-                : "border-border bg-surface-raised text-on-surface"
-            }`;
 
             return (
-              <div
+              <AutoRunDayRow
                 key={weekday}
-                className={`rounded-md border px-2 py-2 transition-colors ${
-                  dayTimeInputIsDisabled
-                    ? "border-border bg-surface"
-                    : "border-border bg-surface-raised"
-                }`}
-                data-testid={`settings-auto-run-day-row-${weekday}`}
-              >
-                <div className="grid grid-cols-[3rem_1fr_1fr_auto] items-center gap-2">
-                  <label className="inline-flex items-center gap-1 text-xs text-text">
-                    <input
-                      type="checkbox"
-                      checked={daySlot.enabled}
-                      disabled={!autoRunFeatureEnabledDraft}
-                      onChange={(event) =>
-                        updateWeeklyAutoRunDraft((draftWeeklyAutoRunConfig) => {
-                          draftWeeklyAutoRunConfig[weekday].enabled =
-                            event.target.checked;
-                        })
-                      }
-                      data-testid={`settings-auto-run-day-enabled-${weekday}`}
-                      aria-label={`${WEEKDAY_LABELS_BY_KEY[weekday].full}の自動実行を有効にする`}
-                    />
-                    <span>{WEEKDAY_LABELS_BY_KEY[weekday].short}</span>
-                  </label>
-
-                  <input
-                    type="time"
-                    step={60}
-                    value={daySlot.startTime}
-                    onChange={(event) =>
-                      updateWeeklyAutoRunDraft((draftWeeklyAutoRunConfig) => {
-                        draftWeeklyAutoRunConfig[weekday].startTime =
-                          event.target.value;
-                      })
-                    }
-                    disabled={dayTimeInputIsDisabled}
-                    className={dayTimeInputClassName}
-                    data-testid={`settings-auto-run-day-start-${weekday}`}
-                    aria-label={`${WEEKDAY_LABELS_BY_KEY[weekday].full}の開始時刻`}
-                  />
-
-                  <input
-                    type="time"
-                    step={60}
-                    value={daySlot.endTime}
-                    onChange={(event) =>
-                      updateWeeklyAutoRunDraft((draftWeeklyAutoRunConfig) => {
-                        draftWeeklyAutoRunConfig[weekday].endTime =
-                          event.target.value;
-                      })
-                    }
-                    disabled={dayTimeInputIsDisabled}
-                    className={dayTimeInputClassName}
-                    data-testid={`settings-auto-run-day-end-${weekday}`}
-                    aria-label={`${WEEKDAY_LABELS_BY_KEY[weekday].full}の終了時刻`}
-                  />
-
-                  <span
-                    className={`text-xs ${
-                      daySlotShowsOvernightLabel
-                        ? "text-primary-500"
-                        : "text-transparent"
-                    }`}
-                    data-testid={`settings-auto-run-day-overnight-${weekday}`}
-                  >
-                    翌日まで
-                  </span>
-                </div>
-                {dayValidationError && (
-                  <p
-                    className="mt-1 text-xs text-danger-300"
-                    data-testid={`settings-auto-run-day-error-${weekday}`}
-                    role="alert"
-                  >
-                    {dayValidationError.message}
-                  </p>
-                )}
-              </div>
+                weekday={weekday}
+                autoRunFeatureEnabled={autoRunFeatureEnabledDraft}
+                daySlot={daySlot}
+                dayValidationError={dayValidationError}
+                onEnabledChange={(enabled) =>
+                  updateWeeklyAutoRunDraft((draftWeeklyAutoRunConfig) => {
+                    draftWeeklyAutoRunConfig[weekday].enabled = enabled;
+                  })
+                }
+                onStartTimeChange={(timeText) =>
+                  updateWeeklyAutoRunDraft((draftWeeklyAutoRunConfig) => {
+                    draftWeeklyAutoRunConfig[weekday].startTime = timeText;
+                  })
+                }
+                onEndTimeChange={(timeText) =>
+                  updateWeeklyAutoRunDraft((draftWeeklyAutoRunConfig) => {
+                    draftWeeklyAutoRunConfig[weekday].endTime = timeText;
+                  })
+                }
+              />
             );
           })}
         </div>
