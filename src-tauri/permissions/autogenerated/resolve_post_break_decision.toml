@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-resolve-post-break-decision"
+description = "Enables the resolve_post_break_decision command without any pre-configured scope."
+commands.allow = ["resolve_post_break_decision"]
+
+[[permission]]
+identifier = "deny-resolve-post-break-decision"
+description = "Denies the resolve_post_break_decision command without any pre-configured scope."
+commands.deny = ["resolve_post_break_decision"]

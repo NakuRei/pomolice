@@ -257,18 +257,6 @@ impl TimerStateManager {
         Ok(Some(self.state.to_tick_payload()))
     }
 
-    /// Record a skip attempt
-    pub fn record_skip_attempt(&mut self) -> Result<u32> {
-        if self.state.status != TimerStatus::OnBreak {
-            return Err(PomoliceError::InvalidStateTransition {
-                action: "record skip attempt".to_string(),
-                current_state: self.state.status,
-            });
-        }
-        self.state.skip_attempts += 1;
-        Ok(self.state.skip_attempts)
-    }
-
     /// Set fullscreen break state
     pub fn set_fullscreen_break(&mut self, is_fullscreen: bool) {
         self.state.is_fullscreen_break = is_fullscreen;
@@ -695,7 +683,6 @@ mod tests {
         assert_eq!(state.current_cycle, 0);
         assert_eq!(state.completed_pomodoros, 0);
         assert_eq!(state.break_interaction_count, 0);
-        assert_eq!(state.skip_attempts, 0);
         assert!(!state.post_break_decision_pending);
         assert!(!state.is_fullscreen_break);
     }

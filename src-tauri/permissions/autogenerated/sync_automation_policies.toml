@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sync-automation-policies"
+description = "Enables the sync_automation_policies command without any pre-configured scope."
+commands.allow = ["sync_automation_policies"]
+
+[[permission]]
+identifier = "deny-sync-automation-policies"
+description = "Denies the sync_automation_policies command without any pre-configured scope."
+commands.deny = ["sync_automation_policies"]

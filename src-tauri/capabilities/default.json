@@ -5,6 +5,13 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "notification:default"
+    "notification:default",
+    "allow-start-work",
+    "allow-resolve-post-break-decision",
+    "allow-emergency-stop",
+    "allow-sync-timer-duration-settings",
+    "allow-sync-automation-policies",
+    "allow-get-full-state",
+    "allow-resolve-boot-auto-start-prompt"
   ]
 }

@@ -31,15 +31,7 @@ pub async fn start_work(
         "Command: start_work called from window '{}'",
         window.label()
     );
-
-    // Authorization check
-    if window.label() != "main" {
-        warn!(
-            "Unauthorized start_work attempt from window '{}'",
-            window.label()
-        );
-        return Err(PomoliceError::Unauthorized(window.label().to_string()));
-    }
+    authorize_main_window(&window, "start_work")?;
 
     let settings = TimerSettings {
         work_duration_secs,
@@ -111,9 +103,7 @@ pub async fn resolve_post_break_decision(
     state: State<'_, AppState>,
     action: PostBreakDecisionAction,
 ) -> Result<()> {
-    if window.label() != "main" {
-        return Err(PomoliceError::Unauthorized(window.label().to_string()));
-    }
+    authorize_main_window(&window, "resolve_post_break_decision")?;
 
     let (old_task, tick_payload, should_spawn_timer_task) = {
         let mut timer = state.timer_manager.lock().await;
@@ -163,14 +153,7 @@ pub async fn emergency_stop(window: WebviewWindow, state: State<'_, AppState>) -
         "Command: emergency_stop called from window '{}'",
         window.label()
     );
-
-    if window.label() != "main" {
-        warn!(
-            "Unauthorized emergency_stop attempt from window '{}'",
-            window.label()
-        );
-        return Err(PomoliceError::Unauthorized(window.label().to_string()));
-    }
+    authorize_main_window(&window, "emergency_stop")?;
 
     let (was_fullscreen_break, tick_payload, old_task) = {
         let mut timer = state.timer_manager.lock().await;
@@ -218,9 +201,7 @@ pub async fn sync_timer_duration_settings(
     long_break_duration_secs: u64,
     long_break_interval: u32,
 ) -> Result<()> {
-    if window.label() != "main" {
-        return Err(PomoliceError::Unauthorized(window.label().to_string()));
-    }
+    authorize_main_window(&window, "sync_timer_duration_settings")?;
 
     let tick_payload = {
         let mut timer = state.timer_manager.lock().await;
@@ -253,9 +234,7 @@ pub async fn sync_automation_policies(
     weekly_auto_run_config: WeeklyAutoRunConfig,
     post_break_transition_policy: PostBreakTransitionPolicy,
 ) -> Result<()> {
-    if window.label() != "main" {
-        return Err(PomoliceError::Unauthorized(window.label().to_string()));
-    }
+    authorize_main_window(&window, "sync_automation_policies")?;
 
     validate_weekly_auto_run_config_for_sync(&weekly_auto_run_config)?;
 
@@ -302,6 +281,27 @@ pub(crate) fn did_scheduler_topology_change(
 ) -> bool {
     previous_auto_run_feature_enabled != next_auto_run_feature_enabled
         || previous_weekly_auto_run_config != next_weekly_auto_run_config
+}
+
+fn authorize_main_window_label(window_label: &str) -> Result<()> {
+    if window_label == "main" {
+        return Ok(());
+    }
+
+    Err(PomoliceError::Unauthorized(window_label.to_string()))
+}
+
+fn authorize_main_window(window: &WebviewWindow, command_name: &'static str) -> Result<()> {
+    let window_label = window.label();
+    if let Err(error) = authorize_main_window_label(window_label) {
+        warn!(
+            "Unauthorized {command_name} attempt from window '{}'",
+            window_label
+        );
+        return Err(error);
+    }
+
+    Ok(())
 }
 
 fn to_active_window_summary_payload(active_window: &ActiveWindow) -> ActiveWindowSummaryPayload {
@@ -379,7 +379,12 @@ fn evaluate_initial_boot_prompt_decision(
 
 /// Get full timer state for initial sync
 #[tauri::command]
-pub async fn get_full_state(state: State<'_, AppState>) -> Result<FullStatePayload> {
+pub async fn get_full_state(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+) -> Result<FullStatePayload> {
+    authorize_main_window(&window, "get_full_state")?;
+
     let now_local = state.clock.now_local();
     let is_first_get_full_state = state
         .boot_prompt_check_pending
@@ -435,9 +440,7 @@ pub async fn resolve_boot_auto_start_prompt(
     state: State<'_, AppState>,
     start_now: bool,
 ) -> Result<BootPromptRuntimeState> {
-    if window.label() != "main" {
-        return Err(PomoliceError::Unauthorized(window.label().to_string()));
-    }
+    authorize_main_window(&window, "resolve_boot_auto_start_prompt")?;
 
     let current_runtime_state = match state.boot_prompt_runtime_state.lock() {
         Ok(runtime_state) => *runtime_state,
@@ -535,25 +538,6 @@ pub async fn resolve_boot_auto_start_prompt(
     }
 }
 
-/// Record a skip attempt
-#[tauri::command]
-pub async fn record_skip_attempt(state: State<'_, AppState>) -> Result<u32> {
-    let mut timer = state.timer_manager.lock().await;
-    timer.record_skip_attempt()
-}
-
-/// Get current timer status (legacy compatibility)
-#[tauri::command]
-pub async fn get_timer_status(state: State<'_, AppState>) -> Result<String> {
-    let timer = state.timer_manager.lock().await;
-    let status_str = match timer.status() {
-        crate::types::TimerStatus::Idle => "idle",
-        crate::types::TimerStatus::Working => "working",
-        crate::types::TimerStatus::OnBreak => "on_break",
-    };
-    Ok(status_str.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -565,6 +549,31 @@ mod tests {
         weekly_auto_run_config.mon.start_time = "09:00".to_string();
         weekly_auto_run_config.mon.end_time = "18:00".to_string();
         weekly_auto_run_config
+    }
+
+    #[test]
+    fn authorize_main_window_label_accepts_main() {
+        assert!(authorize_main_window_label("main").is_ok());
+    }
+
+    #[test]
+    fn authorize_main_window_label_rejects_break_overlay_window() {
+        let result = authorize_main_window_label("break-overlay-1");
+
+        assert!(matches!(
+            result,
+            Err(PomoliceError::Unauthorized(window_label)) if window_label == "break-overlay-1"
+        ));
+    }
+
+    #[test]
+    fn authorize_main_window_label_rejects_non_main_window() {
+        let result = authorize_main_window_label("settings");
+
+        assert!(matches!(
+            result,
+            Err(PomoliceError::Unauthorized(window_label)) if window_label == "settings"
+        ));
     }
 
     #[test]

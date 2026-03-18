@@ -19,10 +19,6 @@ vi.mock("../../services/notifications", () => ({
   notifyLongBreakComplete: vi.fn(),
 }));
 
-vi.mock("../../services/windowControl", () => ({
-  startWork: vi.fn().mockResolvedValue(undefined),
-}));
-
 describe("Timer Store - Penalty System", () => {
   beforeEach(() => {
     // Reset stores to initial state

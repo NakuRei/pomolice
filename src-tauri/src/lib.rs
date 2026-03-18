@@ -678,8 +678,6 @@ pub fn run() {
             commands::timer::sync_automation_policies,
             commands::timer::get_full_state,
             commands::timer::resolve_boot_auto_start_prompt,
-            commands::timer::get_timer_status,
-            commands::timer::record_skip_attempt,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

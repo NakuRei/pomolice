@@ -429,7 +429,6 @@ pub struct TimerState {
     // Break enforcement
     pub break_interaction_count: u32,
     pub last_penalty_time: Option<std::time::Instant>,
-    pub skip_attempts: u32,
 
     // Settings (synced from frontend)
     pub settings: TimerSettings,
@@ -457,7 +456,6 @@ impl Default for TimerState {
             completed_pomodoros: 0,
             break_interaction_count: 0,
             last_penalty_time: None,
-            skip_attempts: 0,
             settings,
             auto_run_feature_enabled: false,
             weekly_auto_run_config: WeeklyAutoRunConfig::default(),

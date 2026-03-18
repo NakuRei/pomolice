@@ -184,7 +184,6 @@ impl PersistedState {
             completed_pomodoros: normalized_completed_pomodoros,
             break_interaction_count: 0,
             last_penalty_time: None,
-            skip_attempts: 0,
             settings,
             auto_run_feature_enabled,
             weekly_auto_run_config,

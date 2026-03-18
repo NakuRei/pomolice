@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-resolve-boot-auto-start-prompt"
+description = "Enables the resolve_boot_auto_start_prompt command without any pre-configured scope."
+commands.allow = ["resolve_boot_auto_start_prompt"]
+
+[[permission]]
+identifier = "deny-resolve-boot-auto-start-prompt"
+description = "Denies the resolve_boot_auto_start_prompt command without any pre-configured scope."
+commands.deny = ["resolve_boot_auto_start_prompt"]
