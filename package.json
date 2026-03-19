@@ -5,14 +5,29 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "lint:rust": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "format:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml --all",
+    "format:rust:check": "cargo fmt --manifest-path src-tauri/Cargo.toml --all --check",
     "preview": "vite preview",
     "tauri": "tauri",
     "prepare": "husky",
     "test": "vitest --no-watch",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage"
+  },
+  "lint-staged": {
+    "*.{js,cjs,mjs,ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{css,html,json,md,yml,yaml}": "prettier --write"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.18",
@@ -28,6 +43,7 @@
   "devDependencies": {
     "@commitlint/cli": "^20.3.1",
     "@commitlint/config-conventional": "^20.3.1",
+    "@eslint/js": "^9.39.4",
     "@tauri-apps/cli": "^2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.1",
@@ -37,9 +53,19 @@
     "@vitejs/plugin-react": "^4.6.0",
     "@vitest/coverage-v8": "^4.0.16",
     "@vitest/ui": "^4.0.16",
+    "eslint": "^9.39.4",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.4.0",
     "husky": "^9.1.7",
     "jsdom": "^27.4.0",
+    "lint-staged": "^16.4.0",
+    "prettier": "3.8.1",
+    "prettier-plugin-tailwindcss": "^0.7.2",
     "typescript": "~5.8.3",
+    "typescript-eslint": "^8.57.1",
     "vite": "^7.0.4",
     "vitest": "^4.0.16"
   }

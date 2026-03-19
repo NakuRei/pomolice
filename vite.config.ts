@@ -3,10 +3,20 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
-const host = process.env.TAURI_DEV_HOST;
+const tauriDevHost = process.env.TAURI_DEV_HOST;
+const hasTauriDevHost =
+  tauriDevHost !== undefined && tauriDevHost.trim() !== "";
+const serverHost = hasTauriDevHost ? tauriDevHost : false;
+const hmrConfig = hasTauriDevHost
+  ? {
+      protocol: "ws",
+      host: tauriDevHost,
+      port: 1421,
+    }
+  : undefined;
 
 // https://vite.dev/config/
-export default defineConfig(async () => ({
+export default defineConfig(() => ({
   plugins: [react(), tailwindcss()],
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
@@ -17,14 +27,8 @@ export default defineConfig(async () => ({
   server: {
     port: 1420,
     strictPort: true,
-    host: host || false,
-    hmr: host
-      ? {
-          protocol: "ws",
-          host,
-          port: 1421,
-        }
-      : undefined,
+    host: serverHost,
+    hmr: hmrConfig,
     watch: {
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],

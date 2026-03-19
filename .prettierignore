@@ -1,0 +1,11 @@
+coverage
+dist
+docs
+node_modules
+package-lock.json
+src-tauri
+.claude
+.playwright-cli
+AGENTS.md
+CLAUDE.md
+vite.log
