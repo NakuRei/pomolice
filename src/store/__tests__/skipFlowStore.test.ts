@@ -4,7 +4,11 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { useSkipFlowStore, SKIP_FLOW_STEPS, TOTAL_STEPS } from "../skipFlowStore";
+import {
+  useSkipFlowStore,
+  SKIP_FLOW_STEPS,
+  TOTAL_STEPS,
+} from "../skipFlowStore";
 
 describe("skipFlowStore", () => {
   beforeEach(() => {
@@ -131,7 +135,8 @@ describe("skipFlowStore", () => {
     });
 
     it("should track retries for different steps separately", () => {
-      const { startSkipFlow, retryStep, nextStep } = useSkipFlowStore.getState();
+      const { startSkipFlow, retryStep, nextStep } =
+        useSkipFlowStore.getState();
 
       startSkipFlow();
 

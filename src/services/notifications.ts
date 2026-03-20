@@ -7,16 +7,16 @@ import {
   isPermissionGranted,
   requestPermission,
   sendNotification,
-} from '@tauri-apps/plugin-notification';
-import { convertFileSrc } from '@tauri-apps/api/core';
-import { resolveResource } from '@tauri-apps/api/path';
-import { useSettingsStore } from '../store/settingsStore';
-import { SessionTypeValue } from '../store/timerStore';
+} from "@tauri-apps/plugin-notification";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { resolveResource } from "@tauri-apps/api/path";
+import { useSettingsStore } from "../store/settingsStore";
+import type { SessionTypeValue } from "../store/timerStore";
 
 const notificationSoundResourcePathByType = {
-  work: 'resources/sounds/work.wav',
-  short_break: 'resources/sounds/short_break.wav',
-  long_break: 'resources/sounds/long_break.wav',
+  work: "resources/sounds/work.wav",
+  short_break: "resources/sounds/short_break.wav",
+  long_break: "resources/sounds/long_break.wav",
 } as const;
 
 // Keep persisted 0-100% settings, but map them onto a dB curve so
@@ -30,7 +30,8 @@ const MIN_NOTIFICATION_VOLUME_DB = -45;
  * - `const type: NotificationSoundType = "work";`
  * - `await resolveNotificationSoundResourcePath("short_break");`
  */
-export type NotificationSoundType = keyof typeof notificationSoundResourcePathByType;
+export type NotificationSoundType =
+  keyof typeof notificationSoundResourcePathByType;
 
 const resolvedNotificationSoundPathByType: Partial<
   Record<NotificationSoundType, string>
@@ -51,10 +52,10 @@ export interface NotificationSoundPreviewOptions {
 }
 
 export type NotificationSoundPreviewStatus =
-  | 'played'
-  | 'muted'
-  | 'unavailable'
-  | 'error';
+  | "played"
+  | "muted"
+  | "unavailable"
+  | "error";
 
 export interface NotificationSoundPreviewResult {
   status: NotificationSoundPreviewStatus;
@@ -66,10 +67,23 @@ interface SessionCompleteNotificationPayload {
   soundType: NotificationSoundType;
 }
 
+function logNotificationWarning(
+  message: string,
+  context: Record<string, unknown>,
+): void {
+  // eslint-disable-next-line no-console -- Notification diagnostics are non-fatal and only needed for troubleshooting.
+  console.warn(message, context);
+}
+
+function logNotificationError(message: string, context: unknown): void {
+  // eslint-disable-next-line no-console -- Notification diagnostics are non-fatal and only needed for troubleshooting.
+  console.error(message, context);
+}
+
 function isWindowsPlatform(): boolean {
   return (
-    typeof navigator !== 'undefined' &&
-    navigator.userAgent.toLowerCase().includes('windows')
+    typeof navigator !== "undefined" &&
+    navigator.userAgent.toLowerCase().includes("windows")
   );
 }
 
@@ -83,7 +97,7 @@ function isWindowsPlatform(): boolean {
  * - `gain = 10 ** (db / 20)`
  */
 export function convertNotificationVolumePercentToGain(
-  volumePercent: number
+  volumePercent: number,
 ): number {
   const clampedVolumePercent = Math.max(0, Math.min(100, volumePercent));
 
@@ -97,20 +111,28 @@ export function convertNotificationVolumePercentToGain(
 }
 
 export async function resolveNotificationSoundResourcePath(
-  notificationSoundType: NotificationSoundType
+  notificationSoundType: NotificationSoundType,
 ): Promise<string | undefined> {
   const cachedPath = resolvedNotificationSoundPathByType[notificationSoundType];
-  if (cachedPath) {
+  if (cachedPath !== undefined) {
     return cachedPath;
   }
 
   try {
-    const resourcePath = notificationSoundResourcePathByType[notificationSoundType];
+    const resourcePath =
+      notificationSoundResourcePathByType[notificationSoundType];
     const resolvedPath = await resolveResource(resourcePath);
-    resolvedNotificationSoundPathByType[notificationSoundType] = resolvedPath;
+    const latestCachedPath =
+      resolvedNotificationSoundPathByType[notificationSoundType];
+    if (latestCachedPath !== undefined) {
+      return latestCachedPath;
+    }
+    Object.assign(resolvedNotificationSoundPathByType, {
+      [notificationSoundType]: resolvedPath,
+    });
     return resolvedPath;
   } catch (error) {
-    console.warn('Failed to resolve notification sound path:', {
+    logNotificationWarning("Failed to resolve notification sound path:", {
       notificationSoundType,
       error,
     });
@@ -120,9 +142,9 @@ export async function resolveNotificationSoundResourcePath(
 
 async function playNotificationAudioAtGain(
   resolvedPath: string,
-  gain: number
+  gain: number,
 ): Promise<HTMLAudioElement> {
-  const soundAssetUrl = convertFileSrc(resolvedPath.replace(/\\/g, '/'));
+  const soundAssetUrl = convertFileSrc(resolvedPath.replace(/\\/gu, "/"));
   const notificationAudio = new Audio(soundAssetUrl);
   notificationAudio.volume = gain;
   await notificationAudio.play();
@@ -143,42 +165,44 @@ function stopCurrentNotificationPreviewAudio(): void {
  * Play a settings preview tone using caller-provided values instead of persisted settings state.
  */
 export async function playNotificationSoundPreview(
-  options: NotificationSoundPreviewOptions
+  options: NotificationSoundPreviewOptions,
 ): Promise<NotificationSoundPreviewResult> {
   if (options.muted) {
     stopCurrentNotificationPreviewAudio();
-    return { status: 'muted' };
+    return { status: "muted" };
   }
 
-  const resolvedPath = await resolveNotificationSoundResourcePath(options.soundType);
-  if (!resolvedPath) {
-    return { status: 'unavailable' };
+  const resolvedPath = await resolveNotificationSoundResourcePath(
+    options.soundType,
+  );
+  if (resolvedPath === undefined) {
+    return { status: "unavailable" };
   }
 
   try {
     const previewGain = convertNotificationVolumePercentToGain(
-      options.volumePercent
+      options.volumePercent,
     );
     stopCurrentNotificationPreviewAudio();
     const previewAudio = await playNotificationAudioAtGain(
       resolvedPath,
-      previewGain
+      previewGain,
     );
     currentNotificationPreviewAudio = previewAudio;
-    return { status: 'played' };
+    return { status: "played" };
   } catch (error) {
-    console.warn('Failed to play notification sound preview:', {
+    logNotificationWarning("Failed to play notification sound preview:", {
       notificationSoundType: options.soundType,
       error,
     });
-    return { status: 'error' };
+    return { status: "error" };
   }
 }
 
 function showSessionCompleteNotificationBanner(
   notificationTitle: string,
   notificationBody: string,
-  notificationSound?: string
+  notificationSound?: string,
 ): void {
   if (notificationSound === undefined) {
     sendNotification({
@@ -200,7 +224,7 @@ function showSessionCompleteNotificationBanner(
  */
 function isTauriEnvironment(): boolean {
   // In Tauri v2, check if we're in a Tauri context by checking if window.__TAURI_INTERNALS__ exists
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
 /**
@@ -217,34 +241,21 @@ async function ensureNotificationPermission(): Promise<boolean> {
 
     if (!permissionGranted) {
       const permission = await requestPermission();
-      permissionGranted = permission === 'granted';
+      permissionGranted = permission === "granted";
     }
 
     return permissionGranted;
   } catch (error) {
-    console.error('Failed to request notification permission:', error);
+    logNotificationError("Failed to request notification permission:", error);
     return false;
   }
 }
 
 /**
- * Show notification when work session is complete
+ * Show notification after a session transition that should alert the user.
  */
-export async function notifyWorkComplete(
-  nextSessionType: SessionTypeValue | null
-): Promise<void> {
-  const nextSessionSoundType =
-    nextSessionType === 'long_break' ? 'long_break' : 'short_break';
-
-  await sendSessionCompleteNotification({
-    title: '休憩時間です！',
-    body: 'お疲れ様でした。休憩を取りましょう。',
-    soundType: nextSessionSoundType,
-  });
-}
-
 async function sendSessionCompleteNotification(
-  payload: SessionCompleteNotificationPayload
+  payload: SessionCompleteNotificationPayload,
 ): Promise<void> {
   const hasPermission = await ensureNotificationPermission();
   if (!hasPermission) {
@@ -263,24 +274,26 @@ async function sendSessionCompleteNotification(
     showSessionCompleteNotificationBanner(
       payload.title,
       payload.body,
-      bannerSound
+      bannerSound,
     );
 
     if (!shouldUseManagedWindowsSound) {
       return;
     }
 
-    const resolvedPath = await resolveNotificationSoundResourcePath(payload.soundType);
-    if (!resolvedPath) {
+    const resolvedPath = await resolveNotificationSoundResourcePath(
+      payload.soundType,
+    );
+    if (resolvedPath === undefined) {
       return;
     }
 
     const notificationGain = convertNotificationVolumePercentToGain(
-      settingsState.notificationSoundVolumePercent
+      settingsState.notificationSoundVolumePercent,
     );
     await playNotificationAudioAtGain(resolvedPath, notificationGain);
   } catch (error) {
-    console.error('Failed to show session complete notification:', {
+    logNotificationError("Failed to show session complete notification:", {
       payload,
       error,
     });
@@ -288,13 +301,29 @@ async function sendSessionCompleteNotification(
 }
 
 /**
+ * Show notification when work session is complete
+ */
+export async function notifyWorkComplete(
+  nextSessionType: SessionTypeValue | null,
+): Promise<void> {
+  const nextSessionSoundType =
+    nextSessionType === "long_break" ? "long_break" : "short_break";
+
+  await sendSessionCompleteNotification({
+    title: "休憩時間です！",
+    body: "お疲れ様でした。休憩を取りましょう。",
+    soundType: nextSessionSoundType,
+  });
+}
+
+/**
  * Show notification when break session is complete
  */
 export async function notifyBreakComplete(): Promise<void> {
   await sendSessionCompleteNotification({
-    title: '作業に戻りましょう！',
-    body: '休憩が終わりました。次のポモドーロを始めましょう。',
-    soundType: 'work',
+    title: "作業に戻りましょう！",
+    body: "休憩が終わりました。次のポモドーロを始めましょう。",
+    soundType: "work",
   });
 }
 
@@ -303,9 +332,9 @@ export async function notifyBreakComplete(): Promise<void> {
  */
 export async function notifyBreakAutoStarted(): Promise<void> {
   await sendSessionCompleteNotification({
-    title: '休憩終了',
-    body: '休憩終了。次の作業を自動開始しました。',
-    soundType: 'work',
+    title: "休憩終了",
+    body: "休憩終了。次の作業を自動開始しました。",
+    soundType: "work",
   });
 }
 
@@ -314,8 +343,8 @@ export async function notifyBreakAutoStarted(): Promise<void> {
  */
 export async function notifyLongBreakComplete(): Promise<void> {
   await sendSessionCompleteNotification({
-    title: '長い休憩完了！',
-    body: 'サイクルが完了しました。次のサイクルを始めますか？',
-    soundType: 'work',
+    title: "長い休憩完了！",
+    body: "サイクルが完了しました。次のサイクルを始めますか？",
+    soundType: "work",
   });
 }

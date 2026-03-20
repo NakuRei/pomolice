@@ -275,7 +275,9 @@ describe("timerStore", () => {
         const state = useTimerStore.getState();
         expect(state.infoMessage).not.toBeNull();
         expect(state.infoMessage?.id).toBe("auto_run_stop_pending");
-        expect(state.infoMessage?.message).toBe("現在セッション終了後に停止予定");
+        expect(state.infoMessage?.message).toBe(
+          "現在セッション終了後に停止予定",
+        );
         expect(state.infoMessage?.ttlMs).toBe(5000);
       });
 
@@ -285,21 +287,21 @@ describe("timerStore", () => {
 
         dateNowSpy.mockReturnValue(1000);
         showAutoRunStopPendingInfo();
-        expect(useTimerStore.getState().infoMessageShownAtById.auto_run_stop_pending).toBe(
-          1000
-        );
+        expect(
+          useTimerStore.getState().infoMessageShownAtById.auto_run_stop_pending,
+        ).toBe(1000);
 
         dateNowSpy.mockReturnValue(2000);
         showAutoRunStopPendingInfo();
-        expect(useTimerStore.getState().infoMessageShownAtById.auto_run_stop_pending).toBe(
-          1000
-        );
+        expect(
+          useTimerStore.getState().infoMessageShownAtById.auto_run_stop_pending,
+        ).toBe(1000);
 
         dateNowSpy.mockReturnValue(7001);
         showAutoRunStopPendingInfo();
-        expect(useTimerStore.getState().infoMessageShownAtById.auto_run_stop_pending).toBe(
-          7001
-        );
+        expect(
+          useTimerStore.getState().infoMessageShownAtById.auto_run_stop_pending,
+        ).toBe(7001);
 
         dateNowSpy.mockRestore();
       });
@@ -315,11 +317,14 @@ describe("timerStore", () => {
       });
 
       it("should clear info message only when expected id matches", () => {
-        const { showAutoRunStoppedInfo, clearInfoMessage } = useTimerStore.getState();
+        const { showAutoRunStoppedInfo, clearInfoMessage } =
+          useTimerStore.getState();
 
         showAutoRunStoppedInfo();
         clearInfoMessage("auto_run_stop_pending");
-        expect(useTimerStore.getState().infoMessage?.id).toBe("auto_run_stopped");
+        expect(useTimerStore.getState().infoMessage?.id).toBe(
+          "auto_run_stopped",
+        );
 
         clearInfoMessage("auto_run_stopped");
         expect(useTimerStore.getState().infoMessage).toBeNull();
@@ -357,5 +362,3 @@ describe("timerStore", () => {
     });
   });
 });
-
-

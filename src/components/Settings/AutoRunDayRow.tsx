@@ -15,7 +15,7 @@ interface AutoRunDayRowProps {
   onEndTimeChange: (timeText: string) => void;
 }
 
-const TIME_TEXT_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+const TIME_TEXT_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 
 function parseTimeToMinutesSinceStartOfDay(timeText: string): number | null {
   if (!TIME_TEXT_PATTERN.test(timeText)) {
@@ -51,7 +51,7 @@ export function AutoRunDayRow({
   onEnabledChange,
   onStartTimeChange,
   onEndTimeChange,
-}: AutoRunDayRowProps) {
+}: AutoRunDayRowProps): React.ReactElement {
   const daySlotShowsOvernightLabel =
     daySlot.enabled && daySlotCrossesMidnight(daySlot);
   const dayTimeInputIsDisabled = !autoRunFeatureEnabled || !daySlot.enabled;
@@ -76,7 +76,9 @@ export function AutoRunDayRow({
             type="checkbox"
             checked={daySlot.enabled}
             disabled={!autoRunFeatureEnabled}
-            onChange={(event) => onEnabledChange(event.target.checked)}
+            onChange={(event) => {
+              onEnabledChange(event.target.checked);
+            }}
             data-testid={`settings-auto-run-day-enabled-${weekday}`}
             aria-label={`${WEEKDAY_LABELS_BY_KEY[weekday].full}の自動実行を有効にする`}
           />
@@ -87,7 +89,9 @@ export function AutoRunDayRow({
           type="time"
           step={60}
           value={daySlot.startTime}
-          onChange={(event) => onStartTimeChange(event.target.value)}
+          onChange={(event) => {
+            onStartTimeChange(event.target.value);
+          }}
           disabled={dayTimeInputIsDisabled}
           className={dayTimeInputClassName}
           data-testid={`settings-auto-run-day-start-${weekday}`}
@@ -98,7 +102,9 @@ export function AutoRunDayRow({
           type="time"
           step={60}
           value={daySlot.endTime}
-          onChange={(event) => onEndTimeChange(event.target.value)}
+          onChange={(event) => {
+            onEndTimeChange(event.target.value);
+          }}
           disabled={dayTimeInputIsDisabled}
           className={dayTimeInputClassName}
           data-testid={`settings-auto-run-day-end-${weekday}`}

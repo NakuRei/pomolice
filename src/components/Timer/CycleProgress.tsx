@@ -11,7 +11,7 @@ import { useSettingsStore } from "../../store/settingsStore";
  *
  * Example with 4 cycles, 2 completed: ●●○○
  */
-export function CycleProgress() {
+export function CycleProgress(): React.ReactElement | null {
   const currentCycle = useTimerStore((state) => state.currentCycle);
   const longBreakInterval = useSettingsStore(
     (state) => state.longBreakInterval,
@@ -30,11 +30,11 @@ export function CycleProgress() {
     return (
       <div
         key={index}
-        className={`w-3 h-3 rounded-full transition-colors ${
+        className={`h-3 w-3 rounded-full transition-colors ${
           isCompleted ? "bg-primary-700" : "bg-border-strong"
         }`}
-        data-testid={`cycle-dot-${dotNumber}`}
-        aria-label={`サイクル ${dotNumber}${isCompleted ? " 完了" : ""}`}
+        data-testid={`cycle-dot-${String(dotNumber)}`}
+        aria-label={`サイクル ${String(dotNumber)}${isCompleted ? " 完了" : ""}`}
       />
     );
   });
@@ -44,7 +44,7 @@ export function CycleProgress() {
       className="flex items-center justify-center gap-2"
       data-testid="cycle-progress"
       role="img"
-      aria-label={`長い休憩まで ${currentCycle} / ${longBreakInterval} サイクル完了`}
+      aria-label={`長い休憩まで ${String(currentCycle)} / ${String(longBreakInterval)} サイクル完了`}
     >
       {dots}
     </div>

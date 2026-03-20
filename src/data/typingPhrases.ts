@@ -50,6 +50,6 @@ export const CONFIRMATION_MESSAGES = [
 /**
  * Type definitions for type safety
  */
-export type ShortTypingPhrase = typeof SHORT_TYPING_PHRASES[number];
-export type LongTypingPhrase = typeof LONG_TYPING_PHRASES[number];
-export type ConfirmationMessage = typeof CONFIRMATION_MESSAGES[number];
+export type ShortTypingPhrase = (typeof SHORT_TYPING_PHRASES)[number];
+export type LongTypingPhrase = (typeof LONG_TYPING_PHRASES)[number];
+export type ConfirmationMessage = (typeof CONFIRMATION_MESSAGES)[number];

@@ -721,8 +721,7 @@ mod tests {
         let previous_config = make_enabled_daytime_monday_config();
         let next_config = previous_config.clone();
 
-        let changed =
-            did_scheduler_topology_change(true, &previous_config, true, &next_config);
+        let changed = did_scheduler_topology_change(true, &previous_config, true, &next_config);
 
         assert!(!changed);
     }
@@ -732,8 +731,7 @@ mod tests {
         let previous_config = make_enabled_daytime_monday_config();
         let next_config = previous_config.clone();
 
-        let changed =
-            did_scheduler_topology_change(false, &previous_config, true, &next_config);
+        let changed = did_scheduler_topology_change(false, &previous_config, true, &next_config);
 
         assert!(changed);
     }
@@ -744,8 +742,7 @@ mod tests {
         let mut next_config = previous_config.clone();
         next_config.mon.start_time = "10:00".to_string();
 
-        let changed =
-            did_scheduler_topology_change(true, &previous_config, true, &next_config);
+        let changed = did_scheduler_topology_change(true, &previous_config, true, &next_config);
 
         assert!(changed);
     }

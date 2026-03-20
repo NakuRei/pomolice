@@ -21,7 +21,7 @@ import SkipFlowModal from "../SkipFlow/SkipFlowModal";
  * Note: Input monitoring and penalties are handled entirely by the backend.
  * This component is display-only.
  */
-export function FullscreenBreak() {
+export function FullscreenBreak(): React.ReactElement {
   const remainingSeconds = useTimerStore((state) => state.remainingSeconds);
   const sessionType = useTimerStore((state) => state.sessionType);
   const { isActive, startSkipFlow, resetSkipFlow } = useSkipFlowStore();
@@ -30,8 +30,10 @@ export function FullscreenBreak() {
   const formattedTime = formatTime(remainingSeconds);
 
   // Get session type display text
-  const getSessionTypeText = () => {
+  const getSessionTypeText = (): "短い休憩" | "長い休憩" | "休憩" => {
     switch (sessionType) {
+      case SessionType.WORK:
+        return "休憩";
       case SessionType.SHORT_BREAK:
         return "短い休憩";
       case SessionType.LONG_BREAK:
@@ -42,12 +44,12 @@ export function FullscreenBreak() {
   };
 
   // Handle skip button click - start the multi-step skip flow
-  const handleSkipClick = () => {
+  const handleSkipClick = (): void => {
     startSkipFlow();
   };
 
   // Handle skip flow completion - user completed all steps
-  const handleSkipComplete = () => {
+  const handleSkipComplete = (): void => {
     // User successfully completed all steps, skip the break via emergency stop
     // This will exit fullscreen and reset to idle state
     // Errors are reported to errorStore by timerStore
@@ -58,7 +60,7 @@ export function FullscreenBreak() {
   };
 
   // Handle skip flow cancel - user gave up and decided to take break
-  const handleSkipCancel = () => {
+  const handleSkipCancel = (): void => {
     resetSkipFlow();
   };
 
@@ -68,13 +70,13 @@ export function FullscreenBreak() {
       data-testid="fullscreen-break"
     >
       {/* Session type */}
-      <div className="mb-6 text-3xl font-medium uppercase tracking-wider text-text-muted">
+      <div className="mb-6 text-3xl font-medium tracking-wider text-text-muted uppercase">
         {getSessionTypeText()}
       </div>
 
       {/* Large countdown timer */}
       <div
-        className="mb-8 text-[120px] font-bold tabular-nums tracking-tight text-text font-['Geist_Mono']"
+        className="mb-8 font-['Geist_Mono'] text-[120px] font-bold tracking-tight text-text tabular-nums"
         data-testid="break-timer-display"
         aria-live="polite"
         aria-atomic="true"
@@ -91,7 +93,7 @@ export function FullscreenBreak() {
       </div>
 
       {/* Skip button - positioned in bottom-right corner */}
-      <div className="absolute bottom-3 right-3">
+      <div className="absolute right-3 bottom-3">
         <SkipButton onClick={handleSkipClick} />
       </div>
 

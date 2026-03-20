@@ -17,11 +17,10 @@ import { IconButton, type IconButtonAppearance } from "./IconButton";
  * </ToggleIconButton>
  * ```
  */
-interface ToggleIconButtonProps
-  extends Omit<
-    ButtonHTMLAttributes<HTMLButtonElement>,
-    "aria-label" | "aria-pressed" | "children" | "className" | "onClick"
-  > {
+interface ToggleIconButtonProps extends Omit<
+  ButtonHTMLAttributes<HTMLButtonElement>,
+  "aria-label" | "aria-pressed" | "children" | "className" | "onClick"
+> {
   /** Stable accessible name for the toggle. */
   label: string;
   /** Current pressed state exposed through `aria-pressed`. */
@@ -60,7 +59,7 @@ export const ToggleIconButton = forwardRef<
   },
   ref,
 ) {
-  const handleClick = () => {
+  const handleClick = (): void => {
     onPressedChange(!pressed);
   };
 
@@ -75,7 +74,7 @@ export const ToggleIconButton = forwardRef<
       aria-pressed={pressed}
       onClick={handleClick}
     >
-      {pressed ? pressedChildren ?? children : children}
+      {pressed ? (pressedChildren ?? children) : children}
     </IconButton>
   );
 });

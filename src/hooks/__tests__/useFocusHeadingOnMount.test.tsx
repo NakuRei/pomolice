@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { useFocusHeadingOnMount } from "../useFocusHeadingOnMount";
 
-function HeadingHarness() {
+function HeadingHarness(): React.ReactElement {
   const headingRef = useFocusHeadingOnMount();
 
   return (
@@ -12,7 +12,7 @@ function HeadingHarness() {
   );
 }
 
-function UnattachedHeadingRefHarness() {
+function UnattachedHeadingRefHarness(): React.ReactElement {
   useFocusHeadingOnMount();
 
   return <div data-testid="unattached-heading-ref">Settings</div>;

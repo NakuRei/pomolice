@@ -22,7 +22,7 @@ function buildTimerSummaryText(
   longBreakDuration: number,
   longBreakInterval: number,
 ): string {
-  return `作業${workDuration}分 / 短休憩${shortBreakDuration}分 / 長休憩${longBreakDuration}分 / 間隔${longBreakInterval}回`;
+  return `作業${String(workDuration)}分 / 短休憩${String(shortBreakDuration)}分 / 長休憩${String(longBreakDuration)}分 / 間隔${String(longBreakInterval)}回`;
 }
 
 function buildAutoRunSummaryText(
@@ -58,7 +58,7 @@ function buildAutoRunSummaryText(
     return `${weekdayLabelSummary} ${baseSlot.startTime}-${baseSlot.endTime}`;
   }
 
-  return `有効${enabledWeekdays.length}日（詳細参照）`;
+  return `有効${String(enabledWeekdays.length)}日（詳細参照）`;
 }
 
 function buildPostBreakPolicySummaryText(
@@ -85,7 +85,7 @@ function buildNotificationSummaryText(
   notificationSoundMuted: boolean,
   notificationSoundVolumePercent: number,
 ): string {
-  return `ミュート${notificationSoundMuted ? "ON" : "OFF"} / 音量${notificationSoundVolumePercent}%`;
+  return `ミュート${notificationSoundMuted ? "ON" : "OFF"} / 音量${String(notificationSoundVolumePercent)}%`;
 }
 
 interface SettingsTopRowButtonProps {
@@ -100,7 +100,7 @@ function SettingsTopRowButton({
   summaryText,
   testId,
   openCategoryPage,
-}: SettingsTopRowButtonProps) {
+}: SettingsTopRowButtonProps): React.ReactElement {
   return (
     <button
       type="button"
@@ -126,7 +126,7 @@ function SettingsTopPostBreakPolicyRow({
   postBreakPolicySummaryText,
   postBreakTransitionPolicy,
   switchPostBreakPolicyOnTopScreen,
-}: SettingsTopPostBreakPolicyRowProps) {
+}: SettingsTopPostBreakPolicyRowProps): React.ReactElement {
   const autoContinueIsEnabled =
     postBreakTransitionPolicy === "start_next_work_automatically";
   const postBreakToggleButtonText = autoContinueIsEnabled
@@ -167,7 +167,7 @@ export function SettingsTopPage({
   openTimerSettings,
   openAutoRunSettings,
   openNotificationSettings,
-}: SettingsTopPageProps) {
+}: SettingsTopPageProps): React.ReactElement {
   const topHeadingReference = useFocusHeadingOnMount();
 
   const workDuration = useSettingsStore((state) => state.workDuration);
@@ -212,7 +212,7 @@ export function SettingsTopPage({
   const postBreakPolicySummaryText = buildPostBreakPolicySummaryText(
     postBreakTransitionPolicy,
   );
-  const switchPostBreakPolicyOnTopScreen = () => {
+  const switchPostBreakPolicyOnTopScreen = (): void => {
     const switchedPolicy = getSwitchedPostBreakTransitionPolicy(
       postBreakTransitionPolicy,
     );

@@ -214,7 +214,9 @@ export function createWeeklyAutoRunConfigAllDaysDisabled(): WeeklyAutoRunConfig 
  */
 export function convertDateDayIndexToWeekdayKey(dayIndex: number): WeekdayKey {
   if (!Number.isInteger(dayIndex) || dayIndex < 0 || dayIndex > 6) {
-    throw new RangeError(`Date.getDay() index must be 0-6, received ${dayIndex}.`);
+    throw new RangeError(
+      `Date.getDay() index must be 0-6, received ${String(dayIndex)}.`,
+    );
   }
 
   return WEEKDAY_CONVERSION_MAPPER.dateDayIndexToWeekdayKey[dayIndex];
@@ -231,7 +233,7 @@ export function convertWeekdayKeyToDateDayIndex(weekday: WeekdayKey): number {
  * Convert serialized `chrono::Weekday` tokens to normalized `WeekdayKey`.
  */
 export function convertChronoWeekdayTokenToWeekdayKey(
-  weekdayToken: ChronoWeekdayToken | LowercaseChronoWeekdayToken
+  weekdayToken: ChronoWeekdayToken | LowercaseChronoWeekdayToken,
 ): WeekdayKey {
   return WEEKDAY_CONVERSION_MAPPER.chronoWeekdayTokenToWeekdayKey[weekdayToken];
 }
@@ -240,7 +242,7 @@ export function convertChronoWeekdayTokenToWeekdayKey(
  * Convert normalized `WeekdayKey` to serialized `chrono::Weekday` token.
  */
 export function convertWeekdayKeyToChronoWeekdayToken(
-  weekday: WeekdayKey
+  weekday: WeekdayKey,
 ): ChronoWeekdayToken {
   return WEEKDAY_CONVERSION_MAPPER.weekdayKeyToChronoWeekdayToken[weekday];
 }

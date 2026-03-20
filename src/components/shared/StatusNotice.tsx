@@ -1,4 +1,4 @@
-import type { AriaAttributes, AriaRole, ReactNode } from "react";
+import type { AriaAttributes, AriaRole, ReactElement, ReactNode } from "react";
 
 export type StatusNoticeTone = "info" | "warning" | "danger" | "success";
 
@@ -36,9 +36,9 @@ interface StatusNoticeProps {
   /** Main notice content. Keep the user-readable text in this slot. */
   children: ReactNode;
   /** Optional leading visual. It remains decorative and does not contribute accessible text. */
-  icon?: ReactNode;
+  icon?: ReactElement | null;
   /** Optional trailing action area such as retry controls. */
-  actions?: ReactNode;
+  actions?: ReactElement | null;
   /** Optional ARIA role. Callers decide whether the notice is a `status` or `alert`. */
   role?: AriaRole;
   /** Optional live region politeness. Callers opt into announcements explicitly. */
@@ -58,7 +58,7 @@ export function StatusNotice({
   ariaLive,
   className = "",
   testId,
-}: StatusNoticeProps) {
+}: StatusNoticeProps): React.ReactElement {
   const noticeClassName = [
     STATUS_NOTICE_BASE_CLASS_NAME,
     STATUS_NOTICE_TONE_CLASS_NAME_BY_TONE[tone],
@@ -75,9 +75,13 @@ export function StatusNotice({
       data-testid={testId}
     >
       <div className={STATUS_NOTICE_CONTENT_ROW_CLASS_NAME}>
-        {icon ? <div aria-hidden="true">{icon}</div> : null}
+        {icon !== undefined && icon !== null ? (
+          <div aria-hidden="true">{icon}</div>
+        ) : null}
         <div className="min-w-0 flex-1">{children}</div>
-        {actions ? <div className="shrink-0">{actions}</div> : null}
+        {actions !== undefined && actions !== null ? (
+          <div className="shrink-0">{actions}</div>
+        ) : null}
       </div>
     </div>
   );

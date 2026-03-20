@@ -10,19 +10,55 @@ import {
 
 describe("weeklyAutoRun types", () => {
   it("should provide deterministic weekday iteration order", () => {
-    expect(WEEKDAY_KEYS).toEqual(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
+    expect(WEEKDAY_KEYS).toEqual([
+      "mon",
+      "tue",
+      "wed",
+      "thu",
+      "fri",
+      "sat",
+      "sun",
+    ]);
   });
 
   it("should create disabled slots for all weekdays", () => {
     const config = createWeeklyAutoRunConfigAllDaysDisabled();
 
-    expect(config.mon).toEqual({ enabled: false, startTime: "09:00", endTime: "18:00" });
-    expect(config.tue).toEqual({ enabled: false, startTime: "09:00", endTime: "18:00" });
-    expect(config.wed).toEqual({ enabled: false, startTime: "09:00", endTime: "18:00" });
-    expect(config.thu).toEqual({ enabled: false, startTime: "09:00", endTime: "18:00" });
-    expect(config.fri).toEqual({ enabled: false, startTime: "09:00", endTime: "18:00" });
-    expect(config.sat).toEqual({ enabled: false, startTime: "09:00", endTime: "18:00" });
-    expect(config.sun).toEqual({ enabled: false, startTime: "09:00", endTime: "18:00" });
+    expect(config.mon).toEqual({
+      enabled: false,
+      startTime: "09:00",
+      endTime: "18:00",
+    });
+    expect(config.tue).toEqual({
+      enabled: false,
+      startTime: "09:00",
+      endTime: "18:00",
+    });
+    expect(config.wed).toEqual({
+      enabled: false,
+      startTime: "09:00",
+      endTime: "18:00",
+    });
+    expect(config.thu).toEqual({
+      enabled: false,
+      startTime: "09:00",
+      endTime: "18:00",
+    });
+    expect(config.fri).toEqual({
+      enabled: false,
+      startTime: "09:00",
+      endTime: "18:00",
+    });
+    expect(config.sat).toEqual({
+      enabled: false,
+      startTime: "09:00",
+      endTime: "18:00",
+    });
+    expect(config.sun).toEqual({
+      enabled: false,
+      startTime: "09:00",
+      endTime: "18:00",
+    });
   });
 
   it("should return independent slot objects for each weekday", () => {
@@ -43,9 +79,15 @@ describe("weeklyAutoRun types", () => {
   });
 
   it("should reject invalid Date.getDay() index values", () => {
-    expect(() => convertDateDayIndexToWeekdayKey(-1)).toThrow("index must be 0-6");
-    expect(() => convertDateDayIndexToWeekdayKey(7)).toThrow("index must be 0-6");
-    expect(() => convertDateDayIndexToWeekdayKey(1.1)).toThrow("index must be 0-6");
+    expect(() => convertDateDayIndexToWeekdayKey(-1)).toThrow(
+      "index must be 0-6",
+    );
+    expect(() => convertDateDayIndexToWeekdayKey(7)).toThrow(
+      "index must be 0-6",
+    );
+    expect(() => convertDateDayIndexToWeekdayKey(1.1)).toThrow(
+      "index must be 0-6",
+    );
   });
 
   it("should convert weekday key to Date.getDay() index", () => {

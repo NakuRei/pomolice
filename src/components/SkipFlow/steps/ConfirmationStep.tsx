@@ -21,11 +21,15 @@ export default function ConfirmationStep({
   step,
   onConfirm,
   onCancel,
-}: ConfirmationStepProps) {
+}: ConfirmationStepProps): React.ReactElement {
   const message = getConfirmationMessage(step);
 
   // Get warning level for styling (higher step = stronger warning)
-  const getWarningStyle = () => {
+  const getWarningStyle = ():
+    | "text-danger-400 border-danger-500"
+    | "text-warning-400 border-warning-500"
+    | "text-warning-300 border-warning-400"
+    | "text-primary-500 border-primary-600" => {
     if (step === 4) {
       return "text-danger-400 border-danger-500";
     } else if (step === 3) {
@@ -59,13 +63,13 @@ export default function ConfirmationStep({
       <div className="flex justify-center space-x-4">
         <button
           onClick={onCancel}
-          className="rounded-lg bg-success-700 px-8 py-3 font-semibold text-on-success transition-colors hover:bg-success-800 focus:outline-none focus:ring-2 focus:ring-success-600 focus:ring-offset-2 focus:ring-offset-surface"
+          className="rounded-lg bg-success-700 px-8 py-3 font-semibold text-on-success transition-colors hover:bg-success-800 focus:ring-2 focus:ring-success-600 focus:ring-offset-2 focus:ring-offset-surface focus:outline-none"
         >
           No, Take Break
         </button>
         <button
           onClick={onConfirm}
-          className="rounded-lg bg-surface-raised px-8 py-3 font-semibold text-on-surface transition-colors hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2 focus:ring-offset-surface"
+          className="rounded-lg bg-surface-raised px-8 py-3 font-semibold text-on-surface transition-colors hover:bg-surface-hover focus:ring-2 focus:ring-primary-600 focus:ring-offset-2 focus:ring-offset-surface focus:outline-none"
         >
           Yes, Continue
         </button>

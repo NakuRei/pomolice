@@ -87,7 +87,7 @@ const initialState: ErrorState = {
   errors: {},
 };
 
-const noopDevtools = (<T,>(config: T): T => config) as typeof devtools;
+const noopDevtools = (<T>(config: T): T => config) as typeof devtools;
 const conditionalDevtools = import.meta.env.DEV ? devtools : noopDevtools;
 
 export const useErrorStore = create<ErrorStore>()(
@@ -95,32 +95,36 @@ export const useErrorStore = create<ErrorStore>()(
     immer((set) => ({
       ...initialState,
 
-      reportError: (error) =>
+      reportError: (error): void => {
         set((state) => {
           state.errors[error.id] = {
             ...error,
             retryCount: 0,
             timestamp: Date.now(),
           };
-        }),
+        });
+      },
 
-      clearError: (id) =>
+      clearError: (id): void => {
         set((state) => {
-          delete state.errors[id];
-        }),
+          Reflect.deleteProperty(state.errors, id);
+        });
+      },
 
-      clearAllErrors: () =>
+      clearAllErrors: (): void => {
         set((state) => {
           state.errors = {};
-        }),
+        });
+      },
 
-      incrementRetryCount: (id) =>
+      incrementRetryCount: (id): void => {
         set((state) => {
-          if (state.errors[id]) {
+          if (Object.prototype.hasOwnProperty.call(state.errors, id)) {
             state.errors[id].retryCount += 1;
           }
-        }),
+        });
+      },
     })),
-    { name: "ErrorStore" }
-  )
+    { name: "ErrorStore" },
+  ),
 );

@@ -38,19 +38,21 @@ export default function SkipFlowStepFrame({
   notice,
   footer,
   actions,
-}: SkipFlowStepFrameProps) {
+}: SkipFlowStepFrameProps): React.ReactElement {
   return (
     <div className="space-y-8">
       <div className="text-center">
         <h2 className="mb-2 text-2xl font-bold text-text">{title}</h2>
-        {description ? <p className="text-text-muted">{description}</p> : null}
+        {description !== undefined && description !== null ? (
+          <p className="text-text-muted">{description}</p>
+        ) : null}
       </div>
 
       {children}
 
       {notice}
 
-      {footer ? (
+      {footer !== undefined && footer !== null ? (
         <div className="text-center text-sm text-text-muted">{footer}</div>
       ) : null}
 

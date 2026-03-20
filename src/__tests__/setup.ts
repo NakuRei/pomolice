@@ -2,41 +2,48 @@ import "@testing-library/jest-dom";
 import { afterEach } from "vitest";
 import { cleanup } from "@testing-library/react";
 
-// Cleanup after each test
-afterEach(() => {
-  cleanup();
-});
+function doNothing(): void {
+  return undefined;
+}
+
+function noopCleanup(): void {
+  return undefined;
+}
+
+afterEach(cleanup);
 
 // Mock Tauri API
-// @ts-expect-error - Mocking Tauri global
-global.__TAURI__ = {
-  core: {
-    invoke: async () => Promise.resolve(),
+Object.assign(globalThis, {
+  __TAURI__: {
+    core: {
+      invoke: async (): Promise<void> => Promise.resolve(),
+    },
+    event: {
+      listen: (): Promise<() => void> => Promise.resolve(noopCleanup),
+      emit: (): Promise<void> => Promise.resolve(),
+    },
   },
-  event: {
-    listen: () => Promise.resolve(() => {}),
-    emit: () => Promise.resolve(),
-  },
-};
+});
 
 // Mock Tauri internals for v2 API
-// @ts-expect-error - Mocking Tauri internals
-global.__TAURI_INTERNALS__ = {
-  invoke: async () => Promise.resolve(),
-  convertFileSrc: (filePath: string) => filePath,
-};
+Object.assign(globalThis, {
+  __TAURI_INTERNALS__: {
+    invoke: async (): Promise<void> => Promise.resolve(),
+    convertFileSrc: (filePath: string): string => filePath,
+  },
+});
 
 // Mock window.matchMedia for responsive tests
 Object.defineProperty(window, "matchMedia", {
   writable: true,
-  value: (query: string) => ({
+  value: (query: string): MediaQueryList => ({
     matches: false,
     media: query,
     onchange: null,
-    addListener: () => {}, // deprecated
-    removeListener: () => {}, // deprecated
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    dispatchEvent: () => true,
+    addListener: doNothing,
+    removeListener: doNothing,
+    addEventListener: doNothing,
+    removeEventListener: doNothing,
+    dispatchEvent: (): boolean => true,
   }),
 });

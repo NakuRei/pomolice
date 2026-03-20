@@ -7,11 +7,11 @@ import { useTimerStore } from "../../store/timerStore";
  * - Current session count
  * - Current cycle number
  */
-export function BreakStats() {
+export function BreakStats(): React.ReactElement {
   const { completedPomodoros, currentCycle } = useTimerStore();
 
   return (
-    <div className="text-center space-y-3">
+    <div className="space-y-3 text-center">
       <div className="text-lg text-text-muted">
         <span className="font-semibold">今日のポモドーロ:</span>{" "}
         <span className="text-text">{completedPomodoros}</span>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useErrorStore } from "../../store/errorStore";
+import { useErrorStore, type AppError } from "../../store/errorStore";
 import { Button } from "./Button";
 import { LoadingSpinnerIcon, WarningTriangleIcon } from "../icons";
 import { StatusNotice } from "./StatusNotice";
@@ -16,15 +16,17 @@ import { StatusNotice } from "./StatusNotice";
  * The retry is triggered by calling the retryFn stored in the error entry,
  * which was set by useTimerSync to restart the setup() flow from the beginning.
  */
-export function ConnectionBanner() {
-  const error = useErrorStore((s) => s.errors["connection"]);
+export function ConnectionBanner(): React.ReactElement | null {
+  const error = useErrorStore(
+    (state): AppError | undefined => state.errors.connection,
+  );
   const [isRetrying, setIsRetrying] = useState(false);
 
-  if (!error) {
+  if (error === undefined) {
     return null;
   }
 
-  const handleRetry = async () => {
+  const handleRetry = async (): Promise<void> => {
     if (!error.retryFn || isRetrying) {
       return;
     }
@@ -50,7 +52,9 @@ export function ConnectionBanner() {
           <Button
             appearance="secondary"
             size="sm"
-            onClick={handleRetry}
+            onClick={() => {
+              void handleRetry();
+            }}
             disabled={isRetrying}
             className="shrink-0 border-danger-800 bg-danger-950/40 text-danger-100 hover:border-danger-700 hover:bg-danger-950/60 focus-visible:outline-danger-500 disabled:border-disabled-border disabled:bg-disabled-bg disabled:text-disabled-text"
             testId="connection-banner-retry"

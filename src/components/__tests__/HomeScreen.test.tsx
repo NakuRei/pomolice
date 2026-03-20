@@ -3,14 +3,22 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HomeScreen, type HomeScreenProps } from "../Home";
 import { useSettingsStore } from "../../store/settingsStore";
-import { SessionType, TimerStatus, useTimerStore } from "../../store/timerStore";
+import {
+  SessionType,
+  TimerStatus,
+  useTimerStore,
+} from "../../store/timerStore";
 
 vi.mock("../shared/ConnectionBanner", () => ({
-  ConnectionBanner: () => <div data-testid="connection-banner-double" />,
+  ConnectionBanner: (): React.ReactElement => (
+    <div data-testid="connection-banner-double" />
+  ),
 }));
 
 vi.mock("../shared/InfoMessageBanner", () => ({
-  InfoMessageBanner: () => <div data-testid="info-message-banner-double" />,
+  InfoMessageBanner: (): React.ReactElement => (
+    <div data-testid="info-message-banner-double" />
+  ),
 }));
 
 function createProps(
@@ -62,11 +70,7 @@ describe("HomeScreen", () => {
     const user = userEvent.setup();
     const onOpenSettingsTopScreen = vi.fn();
 
-    render(
-      <HomeScreen
-        {...createProps({ onOpenSettingsTopScreen })}
-      />,
-    );
+    render(<HomeScreen {...createProps({ onOpenSettingsTopScreen })} />);
 
     await user.click(screen.getByTestId("settings-button"));
 
@@ -77,11 +81,7 @@ describe("HomeScreen", () => {
     const user = userEvent.setup();
     const onToggleNotificationSoundMuted = vi.fn();
 
-    render(
-      <HomeScreen
-        {...createProps({ onToggleNotificationSoundMuted })}
-      />,
-    );
+    render(<HomeScreen {...createProps({ onToggleNotificationSoundMuted })} />);
 
     await user.click(screen.getByTestId("notification-mute-button"));
 
@@ -99,7 +99,9 @@ describe("HomeScreen", () => {
     );
 
     const badgeContainer = screen.getByTestId("header-status-badges");
-    const badges = badgeContainer.querySelectorAll('[data-testid^="header-badge-"]');
+    const badges = badgeContainer.querySelectorAll(
+      '[data-testid^="header-badge-"]',
+    );
     const badgeIds = Array.from(badges).map((badgeElement) =>
       badgeElement.getAttribute("data-testid"),
     );
@@ -154,6 +156,8 @@ describe("HomeScreen", () => {
     render(<HomeScreen {...createProps()} />);
 
     expect(screen.getByTestId("connection-banner-double")).toBeInTheDocument();
-    expect(screen.getByTestId("info-message-banner-double")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("info-message-banner-double"),
+    ).toBeInTheDocument();
   });
 });

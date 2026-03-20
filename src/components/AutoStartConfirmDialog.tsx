@@ -7,7 +7,7 @@ import { DialogOverlay } from "./shared/DialogOverlay";
 import { DialogPanel } from "./shared/DialogPanel";
 import { InlineError } from "./shared/InlineError";
 
-export function AutoStartConfirmDialog() {
+export function AutoStartConfirmDialog(): React.ReactElement | null {
   const shouldPromptStartOnBoot = useTimerStore(
     (state) => state.shouldPromptStartOnBoot,
   );
@@ -20,11 +20,6 @@ export function AutoStartConfirmDialog() {
   const startButtonRef = useRef<HTMLButtonElement>(null);
 
   const isVisible = shouldPromptStartOnBoot && activeWindowSummary !== null;
-
-  const resolvePrompt = (startNow: boolean) => {
-    resolveBootAutoStartPrompt(startNow).catch(() => undefined);
-  };
-
   useEffect(() => {
     if (!isVisible) {
       return;
@@ -37,21 +32,21 @@ export function AutoStartConfirmDialog() {
       return;
     }
 
-    const onKeyDown = (event: KeyboardEvent) => {
+    const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") {
         return;
       }
       event.preventDefault();
-      resolvePrompt(false);
+      void resolveBootAutoStartPrompt(false).catch(() => undefined);
     };
 
     window.addEventListener("keydown", onKeyDown);
-    return () => {
+    return (): void => {
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [isVisible, resolveBootAutoStartPrompt]);
 
-  if (!isVisible || activeWindowSummary === null) {
+  if (!isVisible) {
     return null;
   }
 
@@ -85,7 +80,7 @@ export function AutoStartConfirmDialog() {
           <InlineError
             errorId="resolve_boot_auto_start_prompt"
             onRetry={() => {
-              resolvePrompt(true);
+              void resolveBootAutoStartPrompt(true).catch(() => undefined);
             }}
           />
         </div>
@@ -95,7 +90,7 @@ export function AutoStartConfirmDialog() {
             appearance="primary"
             size="md"
             onClick={() => {
-              resolvePrompt(true);
+              void resolveBootAutoStartPrompt(true).catch(() => undefined);
             }}
             className="flex-1"
             testId="auto-start-confirm-start"
@@ -106,7 +101,7 @@ export function AutoStartConfirmDialog() {
             appearance="secondary"
             size="md"
             onClick={() => {
-              resolvePrompt(false);
+              void resolveBootAutoStartPrompt(false).catch(() => undefined);
             }}
             className="flex-1"
             testId="auto-start-confirm-later"

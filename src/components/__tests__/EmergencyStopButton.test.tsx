@@ -3,7 +3,11 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { EmergencyStopButton } from "../EmergencyStop/EmergencyStopButton";
 import { useErrorStore } from "../../store/errorStore";
-import { useTimerStore, TimerStatus, SessionType } from "../../store/timerStore";
+import {
+  useTimerStore,
+  TimerStatus,
+  SessionType,
+} from "../../store/timerStore";
 
 // Mock Tauri invoke
 vi.mock("@tauri-apps/api/core", () => ({
@@ -92,7 +96,10 @@ describe("EmergencyStopButton", () => {
       const dialog = screen.getByRole("dialog");
 
       expect(dialog).toHaveAttribute("aria-modal", "true");
-      expect(dialog).toHaveAttribute("aria-labelledby", "emergency-stop-dialog-title");
+      expect(dialog).toHaveAttribute(
+        "aria-labelledby",
+        "emergency-stop-dialog-title",
+      );
     });
 
     it("should show warning message", async () => {
@@ -103,7 +110,7 @@ describe("EmergencyStopButton", () => {
       await user.click(screen.getByTestId("emergency-stop-button"));
 
       expect(
-        screen.getByText(/現在のポモドーロセッションは記録されません/)
+        screen.getByText(/現在のポモドーロセッションは記録されません/u),
       ).toBeInTheDocument();
     });
 
@@ -132,7 +139,7 @@ describe("EmergencyStopButton", () => {
 
       await waitFor(() => {
         expect(
-          screen.queryByTestId("emergency-stop-dialog")
+          screen.queryByTestId("emergency-stop-dialog"),
         ).not.toBeInTheDocument();
       });
     });
@@ -160,7 +167,7 @@ describe("EmergencyStopButton", () => {
 
       await waitFor(() => {
         expect(
-          screen.queryByTestId("emergency-stop-dialog")
+          screen.queryByTestId("emergency-stop-dialog"),
         ).not.toBeInTheDocument();
       });
       expect(invoke).not.toHaveBeenCalled();
@@ -187,7 +194,7 @@ describe("EmergencyStopButton", () => {
 
       await waitFor(() => {
         expect(
-          screen.queryByTestId("emergency-stop-dialog")
+          screen.queryByTestId("emergency-stop-dialog"),
         ).not.toBeInTheDocument();
       });
     });
@@ -206,9 +213,9 @@ describe("EmergencyStopButton", () => {
       await waitFor(() => {
         expect(screen.getByTestId("emergency-stop-dialog")).toBeInTheDocument();
       });
-      expect(screen.getByTestId("inline-error-emergency_stop")).toHaveTextContent(
-        "緊急停止に失敗しました。もう一度試してください"
-      );
+      expect(
+        screen.getByTestId("inline-error-emergency_stop"),
+      ).toHaveTextContent("緊急停止に失敗しました。もう一度試してください");
     });
   });
 

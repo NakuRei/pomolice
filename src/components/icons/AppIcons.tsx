@@ -20,7 +20,7 @@ const DEFAULT_ICON_STROKE_WIDTH = 1.5;
  */
 type AppIconProps = Omit<SVGProps<SVGSVGElement>, "children">;
 
-export function VolumeMutedIcon(props: AppIconProps) {
+export function VolumeMutedIcon(props: AppIconProps): React.ReactElement {
   return (
     <VolumeX
       strokeWidth={DEFAULT_ICON_STROKE_WIDTH}
@@ -30,7 +30,7 @@ export function VolumeMutedIcon(props: AppIconProps) {
   );
 }
 
-export function BackArrowIcon(props: AppIconProps) {
+export function BackArrowIcon(props: AppIconProps): React.ReactElement {
   return (
     <ArrowLeft
       strokeWidth={DEFAULT_ICON_STROKE_WIDTH}
@@ -40,7 +40,7 @@ export function BackArrowIcon(props: AppIconProps) {
   );
 }
 
-export function VolumeOnIcon(props: AppIconProps) {
+export function VolumeOnIcon(props: AppIconProps): React.ReactElement {
   return (
     <Volume2
       strokeWidth={DEFAULT_ICON_STROKE_WIDTH}
@@ -50,7 +50,7 @@ export function VolumeOnIcon(props: AppIconProps) {
   );
 }
 
-export function SettingsGearIcon(props: AppIconProps) {
+export function SettingsGearIcon(props: AppIconProps): React.ReactElement {
   return (
     <Settings
       strokeWidth={DEFAULT_ICON_STROKE_WIDTH}
@@ -60,7 +60,7 @@ export function SettingsGearIcon(props: AppIconProps) {
   );
 }
 
-export function WarningTriangleIcon(props: AppIconProps) {
+export function WarningTriangleIcon(props: AppIconProps): React.ReactElement {
   return (
     <TriangleAlert
       strokeWidth={DEFAULT_ICON_STROKE_WIDTH}
@@ -70,7 +70,7 @@ export function WarningTriangleIcon(props: AppIconProps) {
   );
 }
 
-export function LoadingSpinnerIcon(props: AppIconProps) {
+export function LoadingSpinnerIcon(props: AppIconProps): React.ReactElement {
   return (
     <LoaderCircle
       strokeWidth={DEFAULT_ICON_STROKE_WIDTH}

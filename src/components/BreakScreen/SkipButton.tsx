@@ -14,19 +14,11 @@ interface SkipButtonProps {
   onClick: () => void;
 }
 
-export function SkipButton({ onClick }: SkipButtonProps) {
+export function SkipButton({ onClick }: SkipButtonProps): React.ReactElement {
   return (
     <button
       onClick={onClick}
-      className="
-        px-3 py-1.5
-        text-xs
-        bg-surface-raised hover:bg-surface-hover
-        text-text-muted hover:text-text
-        rounded
-        transition-colors
-        opacity-60 hover:opacity-100
-      "
+      className="rounded bg-surface-raised px-3 py-1.5 text-xs text-text-muted opacity-60 transition-colors hover:bg-surface-hover hover:text-text hover:opacity-100"
       aria-label="休憩をスキップ"
     >
       スキップ

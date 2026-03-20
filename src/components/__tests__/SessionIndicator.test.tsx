@@ -30,7 +30,7 @@ describe("SessionIndicator", () => {
       useTimerStore.setState({ currentCycle: 1 });
       render(<SessionIndicator />);
       expect(screen.getByTestId("session-indicator")).toHaveTextContent(
-        "ポモドーロ 1/4"
+        "ポモドーロ 1/4",
       );
     });
 
@@ -38,7 +38,7 @@ describe("SessionIndicator", () => {
       useTimerStore.setState({ currentCycle: 2 });
       render(<SessionIndicator />);
       expect(screen.getByTestId("session-indicator")).toHaveTextContent(
-        "ポモドーロ 2/4"
+        "ポモドーロ 2/4",
       );
     });
 
@@ -46,7 +46,7 @@ describe("SessionIndicator", () => {
       useTimerStore.setState({ currentCycle: 4 });
       render(<SessionIndicator />);
       expect(screen.getByTestId("session-indicator")).toHaveTextContent(
-        "ポモドーロ 4/4"
+        "ポモドーロ 4/4",
       );
     });
 
@@ -54,7 +54,7 @@ describe("SessionIndicator", () => {
       useTimerStore.setState({ currentCycle: 1 });
       const { rerender } = render(<SessionIndicator />);
       expect(screen.getByTestId("session-indicator")).toHaveTextContent(
-        "ポモドーロ 1/4"
+        "ポモドーロ 1/4",
       );
 
       // Update cycle
@@ -63,7 +63,7 @@ describe("SessionIndicator", () => {
       });
       rerender(<SessionIndicator />);
       expect(screen.getByTestId("session-indicator")).toHaveTextContent(
-        "ポモドーロ 3/4"
+        "ポモドーロ 3/4",
       );
     });
   });
@@ -74,7 +74,7 @@ describe("SessionIndicator", () => {
       useSettingsStore.getState().setLongBreakInterval(6);
       render(<SessionIndicator />);
       expect(screen.getByTestId("session-indicator")).toHaveTextContent(
-        "ポモドーロ 2/6"
+        "ポモドーロ 2/6",
       );
     });
 
@@ -82,7 +82,7 @@ describe("SessionIndicator", () => {
       useTimerStore.setState({ currentCycle: 1 });
       const { rerender } = render(<SessionIndicator />);
       expect(screen.getByTestId("session-indicator")).toHaveTextContent(
-        "ポモドーロ 1/4"
+        "ポモドーロ 1/4",
       );
 
       // Change interval setting
@@ -91,7 +91,7 @@ describe("SessionIndicator", () => {
       });
       rerender(<SessionIndicator />);
       expect(screen.getByTestId("session-indicator")).toHaveTextContent(
-        "ポモドーロ 1/3"
+        "ポモドーロ 1/3",
       );
     });
   });
@@ -111,7 +111,7 @@ describe("SessionIndicator", () => {
       useSettingsStore.getState().setLongBreakInterval(10);
       render(<SessionIndicator />);
       expect(screen.getByTestId("session-indicator")).toHaveTextContent(
-        "ポモドーロ 10/10"
+        "ポモドーロ 10/10",
       );
     });
   });

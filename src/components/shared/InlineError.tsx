@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useErrorStore } from "../../store/errorStore";
+import { useErrorStore, type AppError } from "../../store/errorStore";
 import { WarningTriangleIcon } from "../icons";
 import { StatusNotice } from "./StatusNotice";
 
@@ -14,7 +14,7 @@ interface InlineErrorProps {
    * If omitted, the retryFn stored in the error entry is used.
    * If neither is available, no retry button is shown.
    */
-  onRetry?: () => void;
+  onRetry?: () => void | Promise<void>;
 }
 
 /**
@@ -30,14 +30,19 @@ interface InlineErrorProps {
  * <InlineError errorId="emergency_stop" onRetry={handleRetry} />
  * ```
  */
-export function InlineError({ errorId, onRetry }: InlineErrorProps) {
-  const error = useErrorStore((s) => s.errors[errorId]);
+export function InlineError({
+  errorId,
+  onRetry,
+}: InlineErrorProps): React.ReactElement | null {
+  const error = useErrorStore(
+    (state): AppError | undefined => state.errors[errorId],
+  );
   const clearError = useErrorStore((s) => s.clearError);
   const incrementRetryCount = useErrorStore((s) => s.incrementRetryCount);
 
   // Auto-clear recoverable errors after a timeout
   useEffect(() => {
-    if (!error || error.severity !== "recoverable") {
+    if (error?.severity !== "recoverable") {
       return;
     }
 
@@ -45,24 +50,25 @@ export function InlineError({ errorId, onRetry }: InlineErrorProps) {
       clearError(errorId);
     }, RECOVERABLE_AUTO_CLEAR_MS);
 
-    return () => clearTimeout(timer);
+    return (): void => {
+      clearTimeout(timer);
+    };
   }, [error, errorId, clearError]);
 
-  if (!error) {
+  if (error === undefined) {
     return null;
   }
 
-  const handleRetry = async () => {
+  const handleRetry = (): void => {
     incrementRetryCount(errorId);
-    const retryAction =
-      onRetry ?? (error.retryFn ? () => error.retryFn!() : null);
-    if (retryAction) {
-      retryAction();
+    const retryAction = onRetry ?? error.retryFn;
+    if (retryAction !== null) {
+      void retryAction();
     }
   };
 
   const showRetryButton =
-    error.canRetry && (onRetry != null || error.retryFn != null);
+    error.canRetry && (onRetry !== undefined || error.retryFn !== null);
 
   return (
     <StatusNotice
@@ -75,8 +81,10 @@ export function InlineError({ errorId, onRetry }: InlineErrorProps) {
       actions={
         showRetryButton ? (
           <button
-            onClick={handleRetry}
-            className="shrink-0 font-medium underline hover:no-underline focus:outline-none focus:ring-2 focus:ring-danger-500 focus:ring-offset-1"
+            onClick={() => {
+              handleRetry();
+            }}
+            className="shrink-0 font-medium underline hover:no-underline focus:ring-2 focus:ring-danger-500 focus:ring-offset-1 focus:outline-none"
             data-testid={`inline-error-retry-${errorId}`}
           >
             再試行

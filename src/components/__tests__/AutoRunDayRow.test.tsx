@@ -21,17 +21,21 @@ describe("AutoRunDayRow", () => {
       />,
     );
 
-    expect(screen.getByTestId("settings-auto-run-day-row-mon")).toBeInTheDocument();
-    expect(screen.getByTestId("settings-auto-run-day-enabled-mon")).toHaveAccessibleName(
-      "月曜日の自動実行を有効にする",
-    );
-    expect(screen.getByTestId("settings-auto-run-day-start-mon")).toHaveAccessibleName(
-      "月曜日の開始時刻",
-    );
-    expect(screen.getByTestId("settings-auto-run-day-end-mon")).toHaveAccessibleName(
-      "月曜日の終了時刻",
-    );
-    expect(screen.getByTestId("settings-auto-run-day-overnight-mon")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("settings-auto-run-day-row-mon"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("settings-auto-run-day-enabled-mon"),
+    ).toHaveAccessibleName("月曜日の自動実行を有効にする");
+    expect(
+      screen.getByTestId("settings-auto-run-day-start-mon"),
+    ).toHaveAccessibleName("月曜日の開始時刻");
+    expect(
+      screen.getByTestId("settings-auto-run-day-end-mon"),
+    ).toHaveAccessibleName("月曜日の終了時刻");
+    expect(
+      screen.getByTestId("settings-auto-run-day-overnight-mon"),
+    ).toBeInTheDocument();
   });
 
   it("disables row controls according to feature and weekday state", () => {
@@ -50,8 +54,12 @@ describe("AutoRunDayRow", () => {
       />,
     );
 
-    expect(screen.getByTestId("settings-auto-run-day-enabled-mon")).toBeDisabled();
-    expect(screen.getByTestId("settings-auto-run-day-start-mon")).toBeDisabled();
+    expect(
+      screen.getByTestId("settings-auto-run-day-enabled-mon"),
+    ).toBeDisabled();
+    expect(
+      screen.getByTestId("settings-auto-run-day-start-mon"),
+    ).toBeDisabled();
     expect(screen.getByTestId("settings-auto-run-day-end-mon")).toBeDisabled();
 
     rerender(
@@ -69,8 +77,12 @@ describe("AutoRunDayRow", () => {
       />,
     );
 
-    expect(screen.getByTestId("settings-auto-run-day-enabled-mon")).toBeEnabled();
-    expect(screen.getByTestId("settings-auto-run-day-start-mon")).toBeDisabled();
+    expect(
+      screen.getByTestId("settings-auto-run-day-enabled-mon"),
+    ).toBeEnabled();
+    expect(
+      screen.getByTestId("settings-auto-run-day-start-mon"),
+    ).toBeDisabled();
     expect(screen.getByTestId("settings-auto-run-day-end-mon")).toBeDisabled();
   });
 
@@ -131,10 +143,12 @@ describe("AutoRunDayRow", () => {
       />,
     );
 
-    expect(screen.getByTestId("settings-auto-run-day-overnight-mon")).toHaveClass(
-      "text-primary-500",
-    );
-    expect(screen.queryByTestId("settings-auto-run-day-error-mon")).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId("settings-auto-run-day-overnight-mon"),
+    ).toHaveClass("text-primary-500");
+    expect(
+      screen.queryByTestId("settings-auto-run-day-error-mon"),
+    ).not.toBeInTheDocument();
 
     rerender(
       <AutoRunDayRow
@@ -152,12 +166,12 @@ describe("AutoRunDayRow", () => {
       />,
     );
 
-    expect(screen.getByTestId("settings-auto-run-day-overnight-mon")).toHaveClass(
-      "text-transparent",
-    );
-    expect(screen.getByTestId("settings-auto-run-day-error-mon")).toHaveTextContent(
-      "Start time for mon must use HH:MM (24-hour).",
-    );
+    expect(
+      screen.getByTestId("settings-auto-run-day-overnight-mon"),
+    ).toHaveClass("text-transparent");
+    expect(
+      screen.getByTestId("settings-auto-run-day-error-mon"),
+    ).toHaveTextContent("Start time for mon must use HH:MM (24-hour).");
 
     rerender(
       <AutoRunDayRow
@@ -174,6 +188,8 @@ describe("AutoRunDayRow", () => {
       />,
     );
 
-    expect(screen.queryByTestId("settings-auto-run-day-error-mon")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("settings-auto-run-day-error-mon"),
+    ).not.toBeInTheDocument();
   });
 });

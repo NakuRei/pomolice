@@ -23,7 +23,7 @@ export function DialogOverlay({
   children,
   className = "",
   testId,
-}: DialogOverlayProps) {
+}: DialogOverlayProps): React.ReactElement {
   const overlayClassName = [DIALOG_OVERLAY_BASE_CLASS_NAME, className]
     .filter(Boolean)
     .join(" ");

@@ -51,7 +51,9 @@ describe("settingsStore", () => {
 
     it("should require manual continue after break by default", () => {
       const state = useSettingsStore.getState();
-      expect(state.post_break_transition_policy).toBe("require_manual_continue");
+      expect(state.post_break_transition_policy).toBe(
+        "require_manual_continue",
+      );
     });
 
     it("should default all weekday auto-run slots to disabled", () => {
@@ -80,7 +82,7 @@ describe("settingsStore", () => {
         const { setWorkDuration } = useSettingsStore.getState();
         setWorkDuration(0);
         expect(useSettingsStore.getState().workDuration).toBe(
-          VALIDATION_RULES.workDuration.min
+          VALIDATION_RULES.workDuration.min,
         );
       });
 
@@ -88,7 +90,7 @@ describe("settingsStore", () => {
         const { setWorkDuration } = useSettingsStore.getState();
         setWorkDuration(150);
         expect(useSettingsStore.getState().workDuration).toBe(
-          VALIDATION_RULES.workDuration.max
+          VALIDATION_RULES.workDuration.max,
         );
       });
 
@@ -96,7 +98,7 @@ describe("settingsStore", () => {
         const { setWorkDuration } = useSettingsStore.getState();
         setWorkDuration(-10);
         expect(useSettingsStore.getState().workDuration).toBe(
-          VALIDATION_RULES.workDuration.min
+          VALIDATION_RULES.workDuration.min,
         );
       });
 
@@ -118,7 +120,7 @@ describe("settingsStore", () => {
         const { setShortBreakDuration } = useSettingsStore.getState();
         setShortBreakDuration(0);
         expect(useSettingsStore.getState().shortBreakDuration).toBe(
-          VALIDATION_RULES.shortBreakDuration.min
+          VALIDATION_RULES.shortBreakDuration.min,
         );
       });
 
@@ -126,7 +128,7 @@ describe("settingsStore", () => {
         const { setShortBreakDuration } = useSettingsStore.getState();
         setShortBreakDuration(100);
         expect(useSettingsStore.getState().shortBreakDuration).toBe(
-          VALIDATION_RULES.shortBreakDuration.max
+          VALIDATION_RULES.shortBreakDuration.max,
         );
       });
     });
@@ -142,7 +144,7 @@ describe("settingsStore", () => {
         const { setLongBreakDuration } = useSettingsStore.getState();
         setLongBreakDuration(0); // Below minimum
         expect(useSettingsStore.getState().longBreakDuration).toBe(
-          VALIDATION_RULES.longBreakDuration.min
+          VALIDATION_RULES.longBreakDuration.min,
         );
       });
 
@@ -150,7 +152,7 @@ describe("settingsStore", () => {
         const { setLongBreakDuration } = useSettingsStore.getState();
         setLongBreakDuration(100);
         expect(useSettingsStore.getState().longBreakDuration).toBe(
-          VALIDATION_RULES.longBreakDuration.max
+          VALIDATION_RULES.longBreakDuration.max,
         );
       });
     });
@@ -166,7 +168,7 @@ describe("settingsStore", () => {
         const { setLongBreakInterval } = useSettingsStore.getState();
         setLongBreakInterval(1);
         expect(useSettingsStore.getState().longBreakInterval).toBe(
-          VALIDATION_RULES.longBreakInterval.min
+          VALIDATION_RULES.longBreakInterval.min,
         );
       });
 
@@ -174,31 +176,36 @@ describe("settingsStore", () => {
         const { setLongBreakInterval } = useSettingsStore.getState();
         setLongBreakInterval(15);
         expect(useSettingsStore.getState().longBreakInterval).toBe(
-          VALIDATION_RULES.longBreakInterval.max
+          VALIDATION_RULES.longBreakInterval.max,
         );
       });
     });
 
     describe("setNotificationSoundVolumePercent()", () => {
       it("should update notification sound volume within valid range", () => {
-        const { setNotificationSoundVolumePercent } = useSettingsStore.getState();
+        const { setNotificationSoundVolumePercent } =
+          useSettingsStore.getState();
         setNotificationSoundVolumePercent(30);
-        expect(useSettingsStore.getState().notificationSoundVolumePercent).toBe(30);
+        expect(useSettingsStore.getState().notificationSoundVolumePercent).toBe(
+          30,
+        );
       });
 
       it("should clamp notification sound volume to minimum (0)", () => {
-        const { setNotificationSoundVolumePercent } = useSettingsStore.getState();
+        const { setNotificationSoundVolumePercent } =
+          useSettingsStore.getState();
         setNotificationSoundVolumePercent(-10);
         expect(useSettingsStore.getState().notificationSoundVolumePercent).toBe(
-          VALIDATION_RULES.notificationSoundVolumePercent.min
+          VALIDATION_RULES.notificationSoundVolumePercent.min,
         );
       });
 
       it("should clamp notification sound volume to maximum (100)", () => {
-        const { setNotificationSoundVolumePercent } = useSettingsStore.getState();
+        const { setNotificationSoundVolumePercent } =
+          useSettingsStore.getState();
         setNotificationSoundVolumePercent(120);
         expect(useSettingsStore.getState().notificationSoundVolumePercent).toBe(
-          VALIDATION_RULES.notificationSoundVolumePercent.max
+          VALIDATION_RULES.notificationSoundVolumePercent.max,
         );
       });
     });
@@ -238,7 +245,7 @@ describe("settingsStore", () => {
         const { setPostBreakTransitionPolicy } = useSettingsStore.getState();
         setPostBreakTransitionPolicy("start_next_work_automatically");
         expect(useSettingsStore.getState().post_break_transition_policy).toBe(
-          "start_next_work_automatically"
+          "start_next_work_automatically",
         );
       });
     });
@@ -247,7 +254,9 @@ describe("settingsStore", () => {
       it("should toggle one weekday slot", () => {
         const { setDayAutoRunEnabled } = useSettingsStore.getState();
         setDayAutoRunEnabled("mon", true);
-        expect(useSettingsStore.getState().weeklyAutoRunConfig.mon.enabled).toBe(true);
+        expect(
+          useSettingsStore.getState().weeklyAutoRunConfig.mon.enabled,
+        ).toBe(true);
       });
     });
 
@@ -263,11 +272,13 @@ describe("settingsStore", () => {
       });
 
       it("should write start-time format error when start time is invalid", () => {
-        const { setDayAutoRunEnabled, setDayStartTime } = useSettingsStore.getState();
+        const { setDayAutoRunEnabled, setDayStartTime } =
+          useSettingsStore.getState();
         setDayAutoRunEnabled("mon", true);
         setDayStartTime("mon", "9:00");
 
-        const error = useSettingsStore.getState().dayScheduleValidationErrors.mon;
+        const error =
+          useSettingsStore.getState().dayScheduleValidationErrors.mon;
         expect(error).toEqual({
           code: "start_time_format_invalid",
           weekday: "mon",
@@ -277,11 +288,13 @@ describe("settingsStore", () => {
       });
 
       it("should write end-time format error when end time is invalid", () => {
-        const { setDayAutoRunEnabled, setDayEndTime } = useSettingsStore.getState();
+        const { setDayAutoRunEnabled, setDayEndTime } =
+          useSettingsStore.getState();
         setDayAutoRunEnabled("mon", true);
         setDayEndTime("mon", "24:00");
 
-        const error = useSettingsStore.getState().dayScheduleValidationErrors.mon;
+        const error =
+          useSettingsStore.getState().dayScheduleValidationErrors.mon;
         expect(error).toEqual({
           code: "end_time_format_invalid",
           weekday: "mon",
@@ -297,7 +310,8 @@ describe("settingsStore", () => {
         setDayStartTime("mon", "12:00");
         setDayEndTime("mon", "12:00");
 
-        const error = useSettingsStore.getState().dayScheduleValidationErrors.mon;
+        const error =
+          useSettingsStore.getState().dayScheduleValidationErrors.mon;
         expect(error).toEqual({
           code: "start_time_equals_end_time",
           weekday: "mon",
@@ -314,7 +328,9 @@ describe("settingsStore", () => {
         setDayStartTime("mon", "22:00");
         setDayEndTime("mon", "02:00");
 
-        expect(useSettingsStore.getState().dayScheduleValidationErrors.mon).toBeUndefined();
+        expect(
+          useSettingsStore.getState().dayScheduleValidationErrors.mon,
+        ).toBeUndefined();
       });
 
       it("should clear day error when weekday slot becomes disabled", () => {
@@ -323,10 +339,14 @@ describe("settingsStore", () => {
         setDayAutoRunEnabled("fri", true);
         setDayStartTime("fri", "12:00");
         setDayEndTime("fri", "12:00");
-        expect(useSettingsStore.getState().dayScheduleValidationErrors.fri).toBeDefined();
+        expect(
+          useSettingsStore.getState().dayScheduleValidationErrors.fri,
+        ).toBeDefined();
 
         setDayAutoRunEnabled("fri", false);
-        expect(useSettingsStore.getState().dayScheduleValidationErrors.fri).toBeUndefined();
+        expect(
+          useSettingsStore.getState().dayScheduleValidationErrors.fri,
+        ).toBeUndefined();
       });
     });
 
@@ -343,7 +363,9 @@ describe("settingsStore", () => {
         setDayStartTime("tue", "01:00");
         setDayEndTime("tue", "05:00");
 
-        expect(useSettingsStore.getState().weeklyScheduleValidationErrors).toEqual([
+        expect(
+          useSettingsStore.getState().weeklyScheduleValidationErrors,
+        ).toEqual([
           {
             code: "overlapping_windows_between_days",
             primaryWeekday: "mon",
@@ -367,7 +389,9 @@ describe("settingsStore", () => {
         setDayStartTime("tue", "03:00");
         setDayEndTime("tue", "05:00");
 
-        expect(useSettingsStore.getState().weeklyScheduleValidationErrors).toEqual([]);
+        expect(
+          useSettingsStore.getState().weeklyScheduleValidationErrors,
+        ).toEqual([]);
       });
 
       it("should detect overlap when sunday overnight range reaches monday", () => {
@@ -382,7 +406,9 @@ describe("settingsStore", () => {
         setDayStartTime("mon", "01:00");
         setDayEndTime("mon", "03:00");
 
-        expect(useSettingsStore.getState().weeklyScheduleValidationErrors).toEqual([
+        expect(
+          useSettingsStore.getState().weeklyScheduleValidationErrors,
+        ).toEqual([
           {
             code: "overlapping_windows_between_days",
             primaryWeekday: "mon",
@@ -408,30 +434,34 @@ describe("settingsStore", () => {
         const state = useSettingsStore.getState();
         expect(state.workDuration).toBe(DEFAULT_SETTINGS.workDuration);
         expect(state.shortBreakDuration).toBe(
-          DEFAULT_SETTINGS.shortBreakDuration
+          DEFAULT_SETTINGS.shortBreakDuration,
         );
-        expect(state.longBreakDuration).toBe(DEFAULT_SETTINGS.longBreakDuration);
-        expect(state.longBreakInterval).toBe(DEFAULT_SETTINGS.longBreakInterval);
+        expect(state.longBreakDuration).toBe(
+          DEFAULT_SETTINGS.longBreakDuration,
+        );
+        expect(state.longBreakInterval).toBe(
+          DEFAULT_SETTINGS.longBreakInterval,
+        );
         expect(state.notificationSoundVolumePercent).toBe(
-          DEFAULT_SETTINGS.notificationSoundVolumePercent
+          DEFAULT_SETTINGS.notificationSoundVolumePercent,
         );
         expect(state.notificationSoundMuted).toBe(
-          DEFAULT_SETTINGS.notificationSoundMuted
+          DEFAULT_SETTINGS.notificationSoundMuted,
         );
         expect(state.autoRunFeatureEnabled).toBe(
-          DEFAULT_SETTINGS.autoRunFeatureEnabled
+          DEFAULT_SETTINGS.autoRunFeatureEnabled,
         );
         expect(state.post_break_transition_policy).toBe(
-          DEFAULT_SETTINGS.post_break_transition_policy
+          DEFAULT_SETTINGS.post_break_transition_policy,
         );
         expect(state.weeklyAutoRunConfig).toEqual(
-          DEFAULT_SETTINGS.weeklyAutoRunConfig
+          DEFAULT_SETTINGS.weeklyAutoRunConfig,
         );
         expect(state.dayScheduleValidationErrors).toEqual(
-          DEFAULT_SETTINGS.dayScheduleValidationErrors
+          DEFAULT_SETTINGS.dayScheduleValidationErrors,
         );
         expect(state.weeklyScheduleValidationErrors).toEqual(
-          DEFAULT_SETTINGS.weeklyScheduleValidationErrors
+          DEFAULT_SETTINGS.weeklyScheduleValidationErrors,
         );
       });
     });
@@ -467,10 +497,19 @@ describe("settingsStore", () => {
     it("should export VALIDATION_RULES", () => {
       // Phase 3: Temporarily using 0.01 min for testing (will be restored to 1/5 before production)
       expect(VALIDATION_RULES.workDuration).toEqual({ min: 0.01, max: 120 });
-      expect(VALIDATION_RULES.shortBreakDuration).toEqual({ min: 0.01, max: 60 });
-      expect(VALIDATION_RULES.longBreakDuration).toEqual({ min: 0.01, max: 60 });
+      expect(VALIDATION_RULES.shortBreakDuration).toEqual({
+        min: 0.01,
+        max: 60,
+      });
+      expect(VALIDATION_RULES.longBreakDuration).toEqual({
+        min: 0.01,
+        max: 60,
+      });
       expect(VALIDATION_RULES.longBreakInterval).toEqual({ min: 2, max: 10 });
-      expect(VALIDATION_RULES.notificationSoundVolumePercent).toEqual({ min: 0, max: 100 });
+      expect(VALIDATION_RULES.notificationSoundVolumePercent).toEqual({
+        min: 0,
+        max: 100,
+      });
     });
   });
 

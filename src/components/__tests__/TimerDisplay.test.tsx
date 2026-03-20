@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { TimerDisplay } from "../Timer/TimerDisplay";
-import { useTimerStore, TimerStatus, SessionType } from "../../store/timerStore";
+import {
+  useTimerStore,
+  TimerStatus,
+  SessionType,
+} from "../../store/timerStore";
 
 describe("TimerDisplay", () => {
   beforeEach(() => {

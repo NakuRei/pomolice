@@ -17,12 +17,14 @@ interface FinalWarningProps {
 export default function FinalWarning({
   onConfirm,
   onCancel,
-}: FinalWarningProps) {
+}: FinalWarningProps): React.ReactElement {
   return (
     <div className="space-y-8">
       {/* Final warning header */}
       <div className="text-center">
-        <h2 className="mb-2 text-3xl font-bold text-danger-400">Final Warning</h2>
+        <h2 className="mb-2 text-3xl font-bold text-danger-400">
+          Final Warning
+        </h2>
         <p className="text-lg text-text-muted">
           You are about to skip this break.
         </p>
@@ -69,13 +71,13 @@ export default function FinalWarning({
       <div className="flex justify-center space-x-4">
         <button
           onClick={onCancel}
-          className="flex-1 rounded-lg bg-success-700 px-8 py-4 text-lg font-bold text-on-success transition-colors hover:bg-success-800 focus:outline-none focus:ring-4 focus:ring-success-600 focus:ring-offset-2 focus:ring-offset-surface"
+          className="flex-1 rounded-lg bg-success-700 px-8 py-4 text-lg font-bold text-on-success transition-colors hover:bg-success-800 focus:ring-4 focus:ring-success-600 focus:ring-offset-2 focus:ring-offset-surface focus:outline-none"
         >
           No, Take the Break
         </button>
         <button
           onClick={onConfirm}
-          className="flex-1 rounded-lg border-2 border-danger-500 bg-danger-950/50 px-8 py-4 text-lg font-bold text-danger-300 transition-colors hover:bg-danger-950/70 focus:outline-none focus:ring-4 focus:ring-danger-500 focus:ring-offset-2 focus:ring-offset-surface"
+          className="flex-1 rounded-lg border-2 border-danger-500 bg-danger-950/50 px-8 py-4 text-lg font-bold text-danger-300 transition-colors hover:bg-danger-950/70 focus:ring-4 focus:ring-danger-500 focus:ring-offset-2 focus:ring-offset-surface focus:outline-none"
         >
           Yes, Skip Anyway
         </button>

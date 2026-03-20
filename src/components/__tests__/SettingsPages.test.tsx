@@ -17,7 +17,9 @@ import { SettingsNotificationPage } from "../Settings/SettingsNotificationPage";
 import { playNotificationSoundPreview } from "../../services/notifications";
 
 vi.mock("../../services/notifications", () => ({
-  playNotificationSoundPreview: vi.fn(async () => ({ status: "played" })),
+  playNotificationSoundPreview: vi.fn(() =>
+    Promise.resolve({ status: "played" }),
+  ),
 }));
 
 describe("Settings Pages", () => {
@@ -196,9 +198,7 @@ describe("Settings Pages", () => {
 
     render(<SettingsTimerPage openSettingsTopScreen={openSettingsTopScreen} />);
 
-    const workInput = screen.getByTestId(
-      "settings-work-duration-input",
-    ) as HTMLInputElement;
+    const workInput = screen.getByTestId("settings-work-duration-input");
     await user.clear(workInput);
     await user.type(workInput, "32");
     await user.click(screen.getByTestId("settings-save"));
@@ -220,15 +220,31 @@ describe("Settings Pages", () => {
 
     render(<SettingsTimerPage openSettingsTopScreen={openSettingsTopScreen} />);
 
-    const workInput = screen.getByTestId(
-      "settings-work-duration-input",
-    ) as HTMLInputElement;
+    const workInput = screen.getByTestId("settings-work-duration-input");
     await user.clear(workInput);
     await user.type(workInput, "44");
     await user.click(screen.getByTestId("settings-cancel"));
 
     expect(useSettingsStore.getState().workDuration).toBe(25);
     expect(openSettingsTopScreen).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks timer save when long break interval draft is not an integer", async () => {
+    const user = userEvent.setup();
+    const openSettingsTopScreen = vi.fn();
+
+    render(<SettingsTimerPage openSettingsTopScreen={openSettingsTopScreen} />);
+
+    const intervalInput = screen.getByTestId("settings-interval-input");
+    await user.clear(intervalInput);
+    await user.type(intervalInput, "2.5");
+
+    expect(screen.getByTestId("settings-save")).toBeDisabled();
+
+    await user.click(screen.getByTestId("settings-save"));
+
+    expect(useSettingsStore.getState().longBreakInterval).toBe(4);
+    expect(openSettingsTopScreen).not.toHaveBeenCalled();
   });
 
   it("disables timer duration inputs and keeps existing warning when timer is running", () => {
@@ -395,7 +411,7 @@ describe("Settings Pages", () => {
 
     const volumeSlider = screen.getByTestId(
       "settings-notification-sound-volume",
-    ) as HTMLInputElement;
+    );
     fireEvent.change(volumeSlider, { target: { value: "35" } });
     await user.click(screen.getByTestId("settings-save"));
 
@@ -422,7 +438,7 @@ describe("Settings Pages", () => {
     await user.click(screen.getByTestId("settings-notification-mute-button"));
     const volumeSlider = screen.getByTestId(
       "settings-notification-sound-volume",
-    ) as HTMLInputElement;
+    );
     await user.click(screen.getByTestId("settings-notification-mute-button"));
     fireEvent.change(volumeSlider, { target: { value: "80" } });
     await user.click(screen.getByTestId("settings-cancel"));
@@ -474,7 +490,7 @@ describe("Settings Pages", () => {
 
     const previewTypeSelect = screen.getByTestId(
       "settings-notification-sound-preview-type",
-    ) as HTMLSelectElement;
+    );
     expect(previewTypeSelect).toHaveValue("work");
     expect(
       screen.getByTestId("settings-notification-sound-preview-status"),
@@ -525,9 +541,7 @@ describe("Settings Pages", () => {
     const timerPageRenderResult = render(
       <SettingsTimerPage openSettingsTopScreen={() => undefined} />,
     );
-    const workInput = screen.getByTestId(
-      "settings-work-duration-input",
-    ) as HTMLInputElement;
+    const workInput = screen.getByTestId("settings-work-duration-input");
     await user.clear(workInput);
     await user.type(workInput, "40");
     await user.click(screen.getByTestId("settings-cancel"));
@@ -538,7 +552,7 @@ describe("Settings Pages", () => {
     );
     const volumeSlider = screen.getByTestId(
       "settings-notification-sound-volume",
-    ) as HTMLInputElement;
+    );
     fireEvent.change(volumeSlider, { target: { value: "30" } });
     await user.click(screen.getByTestId("settings-save"));
 

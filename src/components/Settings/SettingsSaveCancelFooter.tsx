@@ -34,7 +34,7 @@ export function SettingsSaveCancelFooter({
   saveButtonTestId = "settings-save",
   cancelButtonLabel = "キャンセル",
   saveButtonLabel = "保存",
-}: SettingsSaveCancelFooterProps) {
+}: SettingsSaveCancelFooterProps): React.ReactElement {
   const combinedFooterClassName =
     footerClassName === "" ? "flex gap-3" : `flex gap-3 ${footerClassName}`;
 

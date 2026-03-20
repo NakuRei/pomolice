@@ -48,7 +48,10 @@ export function getRandomLongPhrase(): LongTypingPhrase {
  */
 export function getConfirmationMessage(step: number): ConfirmationMessage {
   // Steps 1-4 correspond to confirmation messages at indices 0-3
-  const index = Math.max(0, Math.min(step - 1, CONFIRMATION_MESSAGES.length - 1));
+  const index = Math.max(
+    0,
+    Math.min(step - 1, CONFIRMATION_MESSAGES.length - 1),
+  );
   return CONFIRMATION_MESSAGES[index];
 }
 
@@ -74,7 +77,7 @@ export function validateTypedPhrase(input: string, target: string): boolean {
  */
 export function getCharacterValidation(
   input: string,
-  target: string
+  target: string,
 ): (boolean | null)[] {
   return Array.from(target).map((char, index) => {
     if (index >= input.length) {

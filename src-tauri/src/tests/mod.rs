@@ -23,7 +23,7 @@ mod basic_tests {
     #[test]
     fn test_string_operations() {
         let app_name = "Pomolice";
-        assert!(app_name.len() > 0);
+        assert!(!app_name.is_empty());
         assert_eq!(app_name, "Pomolice");
     }
 }

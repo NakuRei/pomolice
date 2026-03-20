@@ -19,7 +19,7 @@ const isFiniteNumberValue = (value: number | null): value is number =>
 
 export function SettingsNotificationPage({
   openSettingsTopScreen,
-}: SettingsNotificationPageProps) {
+}: SettingsNotificationPageProps): React.ReactElement {
   const headingReference = useFocusHeadingOnMount();
 
   const notificationSoundMutedFromStore = useSettingsStore(
@@ -50,11 +50,8 @@ export function SettingsNotificationPage({
     notificationSoundVolumePercentDraft <=
       VALIDATION_RULES.notificationSoundVolumePercent.max;
 
-  const saveNotificationSettingsPage = () => {
+  const saveNotificationSettingsPage = (): void => {
     if (!notificationSoundVolumeDraftIsValid) {
-      return;
-    }
-    if (notificationSoundVolumePercentDraft === null) {
       return;
     }
 
@@ -65,11 +62,11 @@ export function SettingsNotificationPage({
     openSettingsTopScreen();
   };
 
-  const cancelNotificationSettingsPage = () => {
+  const cancelNotificationSettingsPage = (): void => {
     openSettingsTopScreen();
   };
 
-  const toggleNotificationMuteDraft = () => {
+  const toggleNotificationMuteDraft = (): void => {
     setNotificationSoundMutedDraft((previousMutedState) => {
       if (!previousMutedState) {
         setNotificationSoundPreviewStatusText(
@@ -80,7 +77,7 @@ export function SettingsNotificationPage({
     });
   };
 
-  const runNotificationSoundPreview = async () => {
+  const runNotificationSoundPreview = async (): Promise<void> => {
     if (notificationSoundMutedDraft) {
       setNotificationSoundPreviewStatusText(
         "通知音がミュート中のため再生しませんでした。",
@@ -159,11 +156,11 @@ export function SettingsNotificationPage({
               max={VALIDATION_RULES.notificationSoundVolumePercent.max}
               step={1}
               value={notificationSoundVolumePercentDraft ?? 0}
-              onChange={(event) =>
+              onChange={(event) => {
                 setNotificationSoundVolumePercentDraft(
                   Number(event.target.value),
-                )
-              }
+                );
+              }}
               className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-surface-raised accent-primary-700"
               data-testid="settings-notification-sound-volume"
               aria-label="通知音量"
@@ -183,11 +180,11 @@ export function SettingsNotificationPage({
             <select
               id="settings-notification-sound-preview-type"
               value={notificationSoundPreviewType}
-              onChange={(event) =>
+              onChange={(event) => {
                 setNotificationSoundPreviewType(
                   event.target.value as NotificationSoundType,
-                )
-              }
+                );
+              }}
               className="rounded-md border border-border bg-surface-raised px-2 py-1 text-sm text-on-surface"
               data-testid="settings-notification-sound-preview-type"
               aria-label="テストする通知音の種類"
@@ -199,7 +196,9 @@ export function SettingsNotificationPage({
             <Button
               appearance="primary"
               size="sm"
-              onClick={runNotificationSoundPreview}
+              onClick={() => {
+                void runNotificationSoundPreview();
+              }}
               disabled={notificationSoundMutedDraft}
               testId="settings-notification-sound-preview-button"
               aria-label="通知音をテスト再生する"

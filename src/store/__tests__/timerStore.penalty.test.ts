@@ -231,5 +231,3 @@ describe("Timer Store - Penalty System", () => {
     });
   });
 });
-
-

@@ -42,13 +42,14 @@ function randomInt(min: number, max: number): number {
  * @returns MathProblem object with question and answer
  */
 export function generateEasyProblem(): MathProblem {
-  const operation = Math.random() < 0.5 ? MathOperation.ADD : MathOperation.SUBTRACT;
+  const operation =
+    Math.random() < 0.5 ? MathOperation.ADD : MathOperation.SUBTRACT;
 
   if (operation === MathOperation.ADD) {
     const a = randomInt(10, 99);
     const b = randomInt(10, 99);
     return {
-      question: `${a} + ${b} = ?`,
+      question: `${String(a)} + ${String(b)} = ?`,
       answer: a + b,
     };
   } else {
@@ -56,7 +57,7 @@ export function generateEasyProblem(): MathProblem {
     const a = randomInt(20, 99);
     const b = randomInt(10, Math.min(50, a - 1)); // b must be less than a
     return {
-      question: `${a} - ${b} = ?`,
+      question: `${String(a)} - ${String(b)} = ?`,
       answer: a - b,
     };
   }
@@ -70,13 +71,14 @@ export function generateEasyProblem(): MathProblem {
  * @returns MathProblem object with question and answer
  */
 export function generateHardProblem(): MathProblem {
-  const operation = Math.random() < 0.5 ? MathOperation.MULTIPLY : MathOperation.SUBTRACT;
+  const operation =
+    Math.random() < 0.5 ? MathOperation.MULTIPLY : MathOperation.SUBTRACT;
 
   if (operation === MathOperation.MULTIPLY) {
     const a = randomInt(2, 12);
     const b = randomInt(2, 12);
     return {
-      question: `${a} × ${b} = ?`,
+      question: `${String(a)} × ${String(b)} = ?`,
       answer: a * b,
     };
   } else {
@@ -84,7 +86,7 @@ export function generateHardProblem(): MathProblem {
     const a = randomInt(100, 200);
     const b = randomInt(20, 80);
     return {
-      question: `${a} - ${b} = ?`,
+      question: `${String(a)} - ${String(b)} = ?`,
       answer: a - b,
     };
   }
@@ -96,8 +98,12 @@ export function generateHardProblem(): MathProblem {
  * @param correctAnswer - Correct answer
  * @returns True if correct, false otherwise
  */
-export function validateAnswer(userAnswer: string | number, correctAnswer: number): boolean {
-  const parsed = typeof userAnswer === "string" ? parseInt(userAnswer, 10) : userAnswer;
+export function validateAnswer(
+  userAnswer: string | number,
+  correctAnswer: number,
+): boolean {
+  const parsed =
+    typeof userAnswer === "string" ? parseInt(userAnswer, 10) : userAnswer;
 
   // Check if valid number
   if (isNaN(parsed)) {

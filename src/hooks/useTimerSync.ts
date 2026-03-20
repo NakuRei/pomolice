@@ -5,13 +5,13 @@
  */
 
 import { useEffect } from "react";
-import { listen, UnlistenFn } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import {
+  type TimerTickPayload,
+  type SessionCompletedPayload,
+  type FullStatePayload,
   useTimerStore,
-  TimerTickPayload,
-  SessionCompletedPayload,
-  FullStatePayload,
 } from "../store/timerStore";
 import {
   notifyWorkComplete,
@@ -28,7 +28,7 @@ const MAX_CONNECTION_RETRIES = 3;
  * Follows exponential backoff: attempt 0 → 1s, attempt 1 → 2s, attempt 2 → 4s.
  */
 function retryDelayMs(attempt: number): number {
-  return 1000 * Math.pow(2, attempt);
+  return 1000 * 2 ** attempt;
 }
 
 /**
@@ -39,20 +39,22 @@ function retryDelayMs(attempt: number): number {
  * exponential backoff. After exhausting retries, reports a "connection" error
  * to the error store so the UI can surface a ConnectionBanner.
  */
-export function useTimerSync() {
+export function useTimerSync(): void {
   const handleTimerTick = useTimerStore((s) => s.handleTimerTick);
   const handleSessionCompleted = useTimerStore((s) => s.handleSessionCompleted);
   const handleFullState = useTimerStore((s) => s.handleFullState);
   const setConnected = useTimerStore((s) => s.setConnected);
   const syncSettings = useTimerStore((s) => s.syncSettings);
-  const showAutoRunStopPendingInfo = useTimerStore((s) => s.showAutoRunStopPendingInfo);
+  const showAutoRunStopPendingInfo = useTimerStore(
+    (s) => s.showAutoRunStopPendingInfo,
+  );
   const showAutoRunStoppedInfo = useTimerStore((s) => s.showAutoRunStoppedInfo);
 
   useEffect(() => {
     const listeners: UnlistenFn[] = [];
     let mounted = true;
 
-    const setup = async (retryAttempt: number = 0) => {
+    const setup = async (retryAttempt = 0): Promise<void> => {
       try {
         // Listen for timer tick events
         const unlistenTick = await listen<TimerTickPayload>(
@@ -61,7 +63,7 @@ export function useTimerSync() {
             if (mounted) {
               handleTimerTick(event.payload);
             }
-          }
+          },
         );
         listeners.push(unlistenTick);
 
@@ -75,22 +77,25 @@ export function useTimerSync() {
               // Notification routing is decided only by transition_reason.
               const { transition_reason, next_session_type } = event.payload;
               if (transition_reason === "work_to_break") {
-                notifyWorkComplete(next_session_type);
+                void notifyWorkComplete(next_session_type);
               } else if (transition_reason === "break_waiting_decision") {
-                notifyBreakComplete();
+                void notifyBreakComplete();
               } else if (transition_reason === "break_auto_started") {
-                notifyBreakAutoStarted();
+                void notifyBreakAutoStarted();
               }
             }
-          }
+          },
         );
         listeners.push(unlistenSessionCompleted);
 
-        const unlistenAutoRunStopPending = await listen("auto_run_stop_pending", () => {
-          if (mounted) {
-            showAutoRunStopPendingInfo();
-          }
-        });
+        const unlistenAutoRunStopPending = await listen(
+          "auto_run_stop_pending",
+          () => {
+            if (mounted) {
+              showAutoRunStopPendingInfo();
+            }
+          },
+        );
         listeners.push(unlistenAutoRunStopPending);
 
         const unlistenAutoRunStopped = await listen("auto_run_stopped", () => {
@@ -127,6 +132,7 @@ export function useTimerSync() {
           useErrorStore.getState().clearError("connection");
         }
       } catch (error) {
+        // eslint-disable-next-line no-console -- Connection setup failures need a visible retry trace during development and troubleshooting.
         console.error("Failed to setup timer sync:", error);
 
         if (!mounted) {
@@ -138,7 +144,7 @@ export function useTimerSync() {
           const delay = retryDelayMs(retryAttempt);
           setTimeout(() => {
             if (mounted) {
-              setup(retryAttempt + 1);
+              void setup(retryAttempt + 1);
             }
           }, delay);
         } else {
@@ -161,11 +167,13 @@ export function useTimerSync() {
       }
     };
 
-    setup();
+    void setup();
 
-    return () => {
+    return (): void => {
       mounted = false;
-      listeners.forEach((unlisten) => unlisten());
+      listeners.forEach((unlisten) => {
+        unlisten();
+      });
     };
   }, [
     handleTimerTick,

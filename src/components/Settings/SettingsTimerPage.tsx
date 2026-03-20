@@ -13,9 +13,95 @@ interface SettingsTimerPageProps {
 const isFiniteNumberValue = (value: number | null): value is number =>
   typeof value === "number" && Number.isFinite(value);
 
+const isNumberWithinRange = (
+  value: number | null,
+  min: number,
+  max: number,
+): value is number =>
+  isFiniteNumberValue(value) && value >= min && value <= max;
+
+const isWholeNumberWithinRange = (
+  value: number | null,
+  min: number,
+  max: number,
+): value is number =>
+  isNumberWithinRange(value, min, max) && Number.isInteger(value);
+
+interface TimerSettingDraftValues {
+  workDuration: number | null;
+  shortBreakDuration: number | null;
+  longBreakDuration: number | null;
+  longBreakInterval: number | null;
+}
+
+interface ValidTimerSettingValues {
+  workDuration: number;
+  shortBreakDuration: number;
+  longBreakDuration: number;
+  longBreakInterval: number;
+}
+
+function getValidTimerSettingValues(
+  draftValues: TimerSettingDraftValues,
+): ValidTimerSettingValues | null {
+  const {
+    workDuration,
+    shortBreakDuration,
+    longBreakDuration,
+    longBreakInterval,
+  } = draftValues;
+
+  if (
+    !isNumberWithinRange(
+      workDuration,
+      VALIDATION_RULES.workDuration.min,
+      VALIDATION_RULES.workDuration.max,
+    )
+  ) {
+    return null;
+  }
+
+  if (
+    !isNumberWithinRange(
+      shortBreakDuration,
+      VALIDATION_RULES.shortBreakDuration.min,
+      VALIDATION_RULES.shortBreakDuration.max,
+    )
+  ) {
+    return null;
+  }
+
+  if (
+    !isNumberWithinRange(
+      longBreakDuration,
+      VALIDATION_RULES.longBreakDuration.min,
+      VALIDATION_RULES.longBreakDuration.max,
+    )
+  ) {
+    return null;
+  }
+
+  if (
+    !isWholeNumberWithinRange(
+      longBreakInterval,
+      VALIDATION_RULES.longBreakInterval.min,
+      VALIDATION_RULES.longBreakInterval.max,
+    )
+  ) {
+    return null;
+  }
+
+  return {
+    workDuration,
+    shortBreakDuration,
+    longBreakDuration,
+    longBreakInterval,
+  };
+}
+
 export function SettingsTimerPage({
   openSettingsTopScreen,
-}: SettingsTimerPageProps) {
+}: SettingsTimerPageProps): React.ReactElement {
   const headingReference = useFocusHeadingOnMount();
 
   const workDurationFromStore = useSettingsStore((state) => state.workDuration);
@@ -44,51 +130,27 @@ export function SettingsTimerPage({
     number | null
   >(longBreakIntervalFromStore);
 
-  const isWorkDurationValid =
-    isFiniteNumberValue(workDurationDraft) &&
-    workDurationDraft >= VALIDATION_RULES.workDuration.min &&
-    workDurationDraft <= VALIDATION_RULES.workDuration.max;
-  const isShortBreakDurationValid =
-    isFiniteNumberValue(shortBreakDurationDraft) &&
-    shortBreakDurationDraft >= VALIDATION_RULES.shortBreakDuration.min &&
-    shortBreakDurationDraft <= VALIDATION_RULES.shortBreakDuration.max;
-  const isLongBreakDurationValid =
-    isFiniteNumberValue(longBreakDurationDraft) &&
-    longBreakDurationDraft >= VALIDATION_RULES.longBreakDuration.min &&
-    longBreakDurationDraft <= VALIDATION_RULES.longBreakDuration.max;
-  const isLongBreakIntervalValid =
-    isFiniteNumberValue(longBreakIntervalDraft) &&
-    longBreakIntervalDraft >= VALIDATION_RULES.longBreakInterval.min &&
-    longBreakIntervalDraft <= VALIDATION_RULES.longBreakInterval.max;
-
-  const timerDurationDraftValuesAreValid =
-    isWorkDurationValid &&
-    isShortBreakDurationValid &&
-    isLongBreakDurationValid &&
-    isLongBreakIntervalValid &&
-    workDurationDraft !== null &&
-    shortBreakDurationDraft !== null &&
-    longBreakDurationDraft !== null &&
-    longBreakIntervalDraft !== null;
+  const validTimerSettingValues = getValidTimerSettingValues({
+    workDuration: workDurationDraft,
+    shortBreakDuration: shortBreakDurationDraft,
+    longBreakDuration: longBreakDurationDraft,
+    longBreakInterval: longBreakIntervalDraft,
+  });
+  const timerDurationDraftValuesAreValid = validTimerSettingValues !== null;
 
   const isTimerIdle = timerStatus === TimerStatus.IDLE;
 
-  const saveTimerSettingsPage = () => {
-    if (!timerDurationDraftValuesAreValid) {
+  const saveTimerSettingsPage = (): void => {
+    if (validTimerSettingValues === null) {
       return;
     }
 
-    updateSettings({
-      workDuration: workDurationDraft,
-      shortBreakDuration: shortBreakDurationDraft,
-      longBreakDuration: longBreakDurationDraft,
-      longBreakInterval: longBreakIntervalDraft,
-    });
+    updateSettings(validTimerSettingValues);
 
     openSettingsTopScreen();
   };
 
-  const cancelTimerSettingsPage = () => {
+  const cancelTimerSettingsPage = (): void => {
     openSettingsTopScreen();
   };
 
@@ -144,6 +206,7 @@ export function SettingsTimerPage({
           min={VALIDATION_RULES.longBreakInterval.min}
           max={VALIDATION_RULES.longBreakInterval.max}
           unit="回"
+          allowDecimal={false}
           testId="settings-interval"
           disabled={!isTimerIdle}
         />

@@ -12,7 +12,7 @@ import { useSettingsStore } from "./store/settingsStore";
 import { SessionType, TimerStatus, useTimerStore } from "./store/timerStore";
 
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: vi.fn().mockResolvedValue(() => {}),
+  listen: vi.fn().mockResolvedValue(vi.fn()),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -44,7 +44,9 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
 }));
 
 vi.mock("./services/notifications", () => ({
-  playNotificationSoundPreview: vi.fn(async () => ({ status: "played" })),
+  playNotificationSoundPreview: vi.fn(() =>
+    Promise.resolve({ status: "played" }),
+  ),
 }));
 
 describe("App", () => {
@@ -162,7 +164,7 @@ describe("App", () => {
 
     const workDurationInput = screen.getByTestId(
       "settings-work-duration-input",
-    ) as HTMLInputElement;
+    );
     await user.clear(workDurationInput);
     await user.type(workDurationInput, "31");
     await user.click(screen.getByTestId("settings-save"));
@@ -193,7 +195,9 @@ describe("App", () => {
     await user.click(screen.getByTestId("settings-cancel"));
 
     expect(screen.getByTestId("settings-top-page")).toBeInTheDocument();
-    expect(screen.queryByTestId("settings-auto-run-page")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("settings-auto-run-page"),
+    ).not.toBeInTheDocument();
   });
 
   it("returns to settings top when the auto-run header back button is clicked", async () => {

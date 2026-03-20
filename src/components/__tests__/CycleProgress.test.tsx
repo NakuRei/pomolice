@@ -57,7 +57,7 @@ describe("CycleProgress", () => {
 
       expect(screen.getByTestId("cycle-progress")).toHaveAttribute(
         "aria-label",
-        "長い休憩まで 1 / 4 サイクル完了"
+        "長い休憩まで 1 / 4 サイクル完了",
       );
 
       act(() => {
@@ -67,7 +67,7 @@ describe("CycleProgress", () => {
 
       expect(screen.getByTestId("cycle-progress")).toHaveAttribute(
         "aria-label",
-        "長い休憩まで 2 / 4 サイクル完了"
+        "長い休憩まで 2 / 4 サイクル完了",
       );
     });
 
@@ -104,7 +104,7 @@ describe("CycleProgress", () => {
       const container = screen.getByTestId("cycle-progress");
       expect(container).toHaveAttribute(
         "aria-label",
-        "長い休憩まで 2 / 4 サイクル完了"
+        "長い休憩まで 2 / 4 サイクル完了",
       );
     });
 
@@ -114,19 +114,19 @@ describe("CycleProgress", () => {
 
       expect(screen.getByTestId("cycle-dot-1")).toHaveAttribute(
         "aria-label",
-        "サイクル 1 完了"
+        "サイクル 1 完了",
       );
       expect(screen.getByTestId("cycle-dot-2")).toHaveAttribute(
         "aria-label",
-        "サイクル 2 完了"
+        "サイクル 2 完了",
       );
       expect(screen.getByTestId("cycle-dot-3")).toHaveAttribute(
         "aria-label",
-        "サイクル 3"
+        "サイクル 3",
       );
       expect(screen.getByTestId("cycle-dot-4")).toHaveAttribute(
         "aria-label",
-        "サイクル 4"
+        "サイクル 4",
       );
     });
   });
@@ -149,7 +149,9 @@ describe("CycleProgress", () => {
 
       // Should have 10 dots
       for (let i = 1; i <= 10; i++) {
-        expect(screen.getByTestId(`cycle-dot-${i}`)).toBeInTheDocument();
+        expect(
+          screen.getByTestId(`cycle-dot-${i.toString()}`),
+        ).toBeInTheDocument();
       }
     });
   });

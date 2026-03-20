@@ -11,13 +11,19 @@ interface ProgressIndicatorProps {
   totalSteps: number;
 }
 
+function getStepDotClassName(isCompleted: boolean, isCurrent: boolean): string {
+  if (isCompleted) return "bg-primary-600";
+  if (isCurrent) return "scale-125 bg-primary-500";
+  return "bg-border-strong";
+}
+
 /**
  * Progress indicator showing current step in skip flow
  */
 export default function ProgressIndicator({
   currentStep,
   totalSteps,
-}: ProgressIndicatorProps) {
+}: ProgressIndicatorProps): React.ReactElement {
   // Calculate progress percentage
   const progressPercentage = (currentStep / totalSteps) * 100;
 
@@ -36,11 +42,11 @@ export default function ProgressIndicator({
           aria-valuenow={currentStep}
           aria-valuemin={1}
           aria-valuemax={totalSteps}
-          aria-label={`Progress: ${Math.round(progressPercentage)}%`}
+          aria-label={`Progress: ${String(Math.round(progressPercentage))}%`}
         >
           <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
             <rect
-              width={`${progressPercentage}%`}
+              width={`${String(progressPercentage)}%`}
               height="100%"
               fill="currentColor"
             />
@@ -58,14 +64,8 @@ export default function ProgressIndicator({
           return (
             <div
               key={stepNumber}
-              className={`h-2 w-2 rounded-full transition-all duration-200 ${
-                isCompleted
-                  ? "bg-primary-600"
-                  : isCurrent
-                    ? "scale-125 bg-primary-500"
-                    : "bg-border-strong"
-              }`}
-              aria-label={`Step ${stepNumber}`}
+              className={`h-2 w-2 rounded-full transition-all duration-200 ${getStepDotClassName(isCompleted, isCurrent)}`}
+              aria-label={`Step ${String(stepNumber)}`}
             />
           );
         })}

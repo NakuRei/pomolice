@@ -1,4 +1,4 @@
-import { ErrorSeverity } from "../store/errorStore";
+import type { ErrorSeverity } from "../store/errorStore";
 
 /**
  * The result of classifying a raw Rust backend error string.
@@ -36,6 +36,94 @@ export type CommandContext =
   | "get_full_state"
   | "resolve_boot_auto_start_prompt";
 
+const EXACT_MATCH_CLASSIFICATIONS: Readonly<
+  Partial<Record<string, BackendErrorClassification>>
+> = {
+  "Timer already running": {
+    userMessage: "すでに実行中です",
+    isTransient: false,
+    severity: "recoverable",
+  },
+  "Timer not running": {
+    userMessage: "タイマーが停止しています",
+    isTransient: false,
+    severity: "recoverable",
+  },
+};
+
+interface BackendErrorPrefixRule {
+  prefix: string;
+  classify: (context: CommandContext) => BackendErrorClassification;
+}
+
+const PREFIX_MATCH_CLASSIFICATIONS: readonly BackendErrorPrefixRule[] = [
+  {
+    prefix: "Invalid state transition:",
+    classify: () => ({
+      userMessage: "現在の状態では実行できません",
+      isTransient: false,
+      severity: "recoverable",
+    }),
+  },
+  {
+    prefix: "Rate limited:",
+    classify: () => ({
+      userMessage: "少々お待ちください",
+      isTransient: true,
+      severity: "recoverable",
+    }),
+  },
+  {
+    prefix: "Failed to lock state:",
+    classify: (context) => ({
+      userMessage:
+        context === "emergency_stop"
+          ? "緊急停止に失敗しました。もう一度試してください"
+          : "内部エラーが発生しました。もう一度試してください",
+      isTransient: true,
+      severity: context === "emergency_stop" ? "critical" : "recoverable",
+    }),
+  },
+  {
+    prefix: "Window control error:",
+    classify: () => ({
+      userMessage: "ウィンドウ操作に失敗しました",
+      isTransient: false,
+      severity: "recoverable",
+    }),
+  },
+  {
+    prefix: "Persistence error:",
+    classify: () => ({
+      userMessage: "データの保存に失敗しました",
+      isTransient: false,
+      severity: "recoverable",
+    }),
+  },
+  {
+    prefix: "Input monitoring error:",
+    classify: () => ({
+      userMessage: "入力モニタリングに失敗しました",
+      isTransient: false,
+      severity: "recoverable",
+    }),
+  },
+  {
+    prefix: "Unauthorized window:",
+    classify: () => ({
+      userMessage: "権限エラーが発生しました",
+      isTransient: false,
+      severity: "recoverable",
+    }),
+  },
+];
+
+const DEFAULT_BACKEND_ERROR_CLASSIFICATION: BackendErrorClassification = {
+  userMessage: "予期しないエラーが発生しました",
+  isTransient: false,
+  severity: "recoverable",
+};
+
 /**
  * Parse the error string serialized by PomoliceError::serialize() in the Rust backend
  * and map it to a user-visible classification.
@@ -54,97 +142,19 @@ export type CommandContext =
  */
 export function classifyBackendError(
   errorString: string,
-  context: CommandContext
+  context: CommandContext,
 ): BackendErrorClassification {
-  // "Timer already running" — state mismatch, will not resolve on its own
-  if (errorString === "Timer already running") {
-    return {
-      userMessage: "すでに実行中です",
-      isTransient: false,
-      severity: "recoverable",
-    };
+  const exactMatchClassification = EXACT_MATCH_CLASSIFICATIONS[errorString];
+  if (exactMatchClassification) {
+    return exactMatchClassification;
   }
 
-  // "Timer not running" — state mismatch, will not resolve on its own
-  if (errorString === "Timer not running") {
-    return {
-      userMessage: "タイマーが停止しています",
-      isTransient: false,
-      severity: "recoverable",
-    };
+  const prefixMatchRule = PREFIX_MATCH_CLASSIFICATIONS.find(({ prefix }) =>
+    errorString.startsWith(prefix),
+  );
+  if (prefixMatchRule) {
+    return prefixMatchRule.classify(context);
   }
 
-  // "Invalid state transition: cannot {action} from {state}"
-  if (errorString.startsWith("Invalid state transition:")) {
-    return {
-      userMessage: "現在の状態では実行できません",
-      isTransient: false,
-      severity: "recoverable",
-    };
-  }
-
-  // "Rate limited: please wait {N}ms" — transient, will resolve after the wait
-  if (errorString.startsWith("Rate limited:")) {
-    return {
-      userMessage: "少々お待ちください",
-      isTransient: true,
-      severity: "recoverable",
-    };
-  }
-
-  // "Failed to lock state: {detail}" — lock contention; may resolve on retry
-  // Emergency stop failing due to a lock error is critical because the user is stuck
-  if (errorString.startsWith("Failed to lock state:")) {
-    return {
-      userMessage:
-        context === "emergency_stop"
-          ? "緊急停止に失敗しました。もう一度試してください"
-          : "内部エラーが発生しました。もう一度試してください",
-      isTransient: true,
-      severity: context === "emergency_stop" ? "critical" : "recoverable",
-    };
-  }
-
-  // "Window control error: {detail}" — window API failure, typically not transient
-  if (errorString.startsWith("Window control error:")) {
-    return {
-      userMessage: "ウィンドウ操作に失敗しました",
-      isTransient: false,
-      severity: "recoverable",
-    };
-  }
-
-  // "Persistence error: {detail}" — file I/O or storage failure
-  if (errorString.startsWith("Persistence error:")) {
-    return {
-      userMessage: "データの保存に失敗しました",
-      isTransient: false,
-      severity: "recoverable",
-    };
-  }
-
-  // "Input monitoring error: {detail}" — background listener failure
-  if (errorString.startsWith("Input monitoring error:")) {
-    return {
-      userMessage: "入力モニタリングに失敗しました",
-      isTransient: false,
-      severity: "recoverable",
-    };
-  }
-
-  // "Unauthorized window: {detail}" — programming error, not transient
-  if (errorString.startsWith("Unauthorized window:")) {
-    return {
-      userMessage: "権限エラーが発生しました",
-      isTransient: false,
-      severity: "recoverable",
-    };
-  }
-
-  // Unknown error — treat as non-transient, recoverable by default
-  return {
-    userMessage: "予期しないエラーが発生しました",
-    isTransient: false,
-    severity: "recoverable",
-  };
+  return DEFAULT_BACKEND_ERROR_CLASSIFICATION;
 }

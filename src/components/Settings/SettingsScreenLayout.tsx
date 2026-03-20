@@ -10,7 +10,7 @@ interface SettingsScreenLayoutProps {
 export function SettingsScreenLayout({
   children,
   mainTestId,
-}: SettingsScreenLayoutProps) {
+}: SettingsScreenLayoutProps): React.ReactElement {
   return (
     <div className="flex min-h-screen flex-col space-y-6 bg-background p-8 text-on-background">
       <ConnectionBanner />

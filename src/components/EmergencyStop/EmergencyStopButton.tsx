@@ -15,7 +15,7 @@ import { InlineError } from "../shared/InlineError";
  * - Current session is invalidated (not recorded in statistics)
  * - No penalty applied (emergency situations are respected)
  */
-export function EmergencyStopButton() {
+export function EmergencyStopButton(): React.ReactElement | null {
   const status = useTimerStore((state) => state.status);
   const emergencyStop = useTimerStore((state) => state.emergencyStop);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
@@ -23,18 +23,20 @@ export function EmergencyStopButton() {
 
   const isWorking = status === TimerStatus.WORKING;
 
-  const handleEmergencyStopClick = () => {
+  const handleEmergencyStopClick = (): void => {
     setShowConfirmDialog(true);
   };
 
-  const handleConfirm = () => {
+  const handleConfirm = (): void => {
     // Keep the dialog open on failure so the user can see the error and retry
     emergencyStop()
-      .then(() => setShowConfirmDialog(false))
+      .then(() => {
+        setShowConfirmDialog(false);
+      })
       .catch(() => undefined);
   };
 
-  const handleCancel = () => {
+  const handleCancel = (): void => {
     setShowConfirmDialog(false);
   };
 
@@ -51,7 +53,7 @@ export function EmergencyStopButton() {
       return;
     }
 
-    const onKeyDown = (event: KeyboardEvent) => {
+    const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") {
         return;
       }
@@ -62,7 +64,7 @@ export function EmergencyStopButton() {
 
     window.addEventListener("keydown", onKeyDown);
 
-    return () => {
+    return (): void => {
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [isWorking, showConfirmDialog]);
@@ -76,7 +78,7 @@ export function EmergencyStopButton() {
     <>
       <button
         onClick={handleEmergencyStopClick}
-        className="text-xs text-text-muted transition-colors underline hover:text-danger-400"
+        className="text-xs text-text-muted underline transition-colors hover:text-danger-400"
         data-testid="emergency-stop-button"
         aria-label="緊急停止"
       >

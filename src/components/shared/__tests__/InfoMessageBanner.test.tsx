@@ -1,7 +1,11 @@
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InfoMessageBanner } from "../InfoMessageBanner";
-import { SessionType, TimerStatus, useTimerStore } from "../../../store/timerStore";
+import {
+  SessionType,
+  TimerStatus,
+  useTimerStore,
+} from "../../../store/timerStore";
 
 describe("InfoMessageBanner", () => {
   beforeEach(() => {
@@ -46,7 +50,9 @@ describe("InfoMessageBanner", () => {
 
     expect(notice).toBe(screen.getByTestId("info-message-banner"));
     expect(notice).toHaveAttribute("aria-live", "polite");
-    expect(screen.getByText("現在セッション終了後に停止予定")).toBeInTheDocument();
+    expect(
+      screen.getByText("現在セッション終了後に停止予定"),
+    ).toBeInTheDocument();
   });
 
   it("clears the message after ttl", () => {

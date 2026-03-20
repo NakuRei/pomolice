@@ -70,11 +70,7 @@ describe("StatusNotice", () => {
 
   it("merges caller wrapper className without losing base tone classes", () => {
     render(
-      <StatusNotice
-        tone="success"
-        className="mb-4"
-        testId="status-notice"
-      >
+      <StatusNotice tone="success" className="mb-4" testId="status-notice">
         同期が完了しました。
       </StatusNotice>,
     );

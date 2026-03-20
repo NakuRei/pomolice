@@ -2,6 +2,10 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { DurationInput } from "../Settings/DurationInput";
 
+function getDurationInputByTestId(testId: string): HTMLInputElement {
+  return screen.getByTestId(testId);
+}
+
 describe("DurationInput", () => {
   const defaultProps = {
     label: "作業時間",
@@ -20,7 +24,7 @@ describe("DurationInput", () => {
 
     it("should render with current value", () => {
       render(<DurationInput {...defaultProps} />);
-      const input = screen.getByTestId("work-duration-input");
+      const input = getDurationInputByTestId("work-duration-input");
       expect(input).toHaveValue(25);
     });
 
@@ -45,7 +49,7 @@ describe("DurationInput", () => {
       const onChange = vi.fn();
       render(<DurationInput {...defaultProps} onChange={onChange} />);
 
-      const input = screen.getByTestId("work-duration-input") as HTMLInputElement;
+      const input = getDurationInputByTestId("work-duration-input");
 
       // Simulate user changing the value
       fireEvent.change(input, { target: { value: "30" } });
@@ -57,7 +61,7 @@ describe("DurationInput", () => {
       const onChange = vi.fn();
       render(<DurationInput {...defaultProps} onChange={onChange} />);
 
-      const input = screen.getByTestId("work-duration-input") as HTMLInputElement;
+      const input = getDurationInputByTestId("work-duration-input");
 
       // Simulate user changing the value
       fireEvent.change(input, { target: { value: "100" } });
@@ -65,11 +69,22 @@ describe("DurationInput", () => {
       expect(onChange).toHaveBeenCalledWith(100);
     });
 
+    it("should accept decimal values by default", () => {
+      const onChange = vi.fn();
+      render(<DurationInput {...defaultProps} onChange={onChange} />);
+
+      const input = getDurationInputByTestId("work-duration-input");
+
+      fireEvent.change(input, { target: { value: "25.5" } });
+
+      expect(onChange).toHaveBeenCalledWith(25.5);
+    });
+
     it("should emit null with non-numeric input", () => {
       const onChange = vi.fn();
       render(<DurationInput {...defaultProps} onChange={onChange} />);
 
-      const input = screen.getByTestId("work-duration-input") as HTMLInputElement;
+      const input = getDurationInputByTestId("work-duration-input");
 
       // Simulate user entering non-numeric value
       fireEvent.change(input, { target: { value: "abc" } });
@@ -81,7 +96,7 @@ describe("DurationInput", () => {
       const onChange = vi.fn();
       render(<DurationInput {...defaultProps} onChange={onChange} />);
 
-      const input = screen.getByTestId("work-duration-input") as HTMLInputElement;
+      const input = getDurationInputByTestId("work-duration-input");
 
       fireEvent.change(input, { target: { value: "Infinity" } });
 
@@ -92,7 +107,7 @@ describe("DurationInput", () => {
       const onChange = vi.fn();
       render(<DurationInput {...defaultProps} onChange={onChange} />);
 
-      const input = screen.getByTestId("work-duration-input") as HTMLInputElement;
+      const input = getDurationInputByTestId("work-duration-input");
 
       fireEvent.change(input, { target: { value: "1e309" } });
 
@@ -103,7 +118,7 @@ describe("DurationInput", () => {
       const onChange = vi.fn();
       render(<DurationInput {...defaultProps} onChange={onChange} />);
 
-      const input = screen.getByTestId("work-duration-input") as HTMLInputElement;
+      const input = getDurationInputByTestId("work-duration-input");
 
       fireEvent.change(input, { target: { value: "" } });
 
@@ -115,25 +130,48 @@ describe("DurationInput", () => {
       const onChange = vi.fn();
       render(<DurationInput {...defaultProps} onChange={onChange} max={60} />);
 
-      const input = screen.getByTestId("work-duration-input") as HTMLInputElement;
+      const input = getDurationInputByTestId("work-duration-input");
 
       fireEvent.change(input, { target: { value: "999" } });
 
       expect(onChange).toHaveBeenCalledWith(null);
       expect(input.value).toBe("999");
     });
+
+    it("should reject decimal values when configured for whole numbers only", () => {
+      const onChange = vi.fn();
+      render(
+        <DurationInput
+          {...defaultProps}
+          onChange={onChange}
+          allowDecimal={false}
+          testId="interval"
+        />,
+      );
+
+      const input = getDurationInputByTestId("interval-input");
+
+      fireEvent.change(input, { target: { value: "2.5" } });
+
+      expect(onChange).toHaveBeenCalledWith(null);
+      expect(input.value).toBe("2.5");
+    });
   });
 
   describe("Validation", () => {
     it("should show valid state when value is within range", () => {
       render(<DurationInput {...defaultProps} value={50} />);
-      expect(screen.queryByTestId("work-duration-error")).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("work-duration-error"),
+      ).not.toBeInTheDocument();
     });
 
     it("should show error when value is below minimum", () => {
       render(<DurationInput {...defaultProps} value={0} />);
       expect(screen.getByTestId("work-duration-error")).toBeInTheDocument();
-      expect(screen.getByText("1〜120分の範囲で入力してください")).toBeInTheDocument();
+      expect(
+        screen.getByText("1〜120分の範囲で入力してください"),
+      ).toBeInTheDocument();
     });
 
     it("should show error when value is above maximum", () => {
@@ -143,39 +181,61 @@ describe("DurationInput", () => {
 
     it("should validate at minimum boundary", () => {
       render(<DurationInput {...defaultProps} value={1} />);
-      expect(screen.queryByTestId("work-duration-error")).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("work-duration-error"),
+      ).not.toBeInTheDocument();
     });
 
     it("should validate at maximum boundary", () => {
       render(<DurationInput {...defaultProps} value={120} />);
-      expect(screen.queryByTestId("work-duration-error")).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("work-duration-error"),
+      ).not.toBeInTheDocument();
     });
   });
 
   describe("Input Attributes", () => {
     it("should have correct type attribute", () => {
       render(<DurationInput {...defaultProps} />);
-      const input = screen.getByTestId("work-duration-input");
+      const input = getDurationInputByTestId("work-duration-input");
       expect(input).toHaveAttribute("type", "number");
     });
 
     it("should have min attribute", () => {
       render(<DurationInput {...defaultProps} />);
-      const input = screen.getByTestId("work-duration-input");
+      const input = getDurationInputByTestId("work-duration-input");
       expect(input).toHaveAttribute("min", "1");
     });
 
     it("should have max attribute", () => {
       render(<DurationInput {...defaultProps} />);
-      const input = screen.getByTestId("work-duration-input");
+      const input = getDurationInputByTestId("work-duration-input");
       expect(input).toHaveAttribute("max", "120");
+    });
+
+    it("should default to a decimal step size", () => {
+      render(<DurationInput {...defaultProps} />);
+      const input = getDurationInputByTestId("work-duration-input");
+      expect(input).toHaveAttribute("step", "0.01");
+    });
+
+    it("should use an integer step size when decimals are disabled", () => {
+      render(
+        <DurationInput
+          {...defaultProps}
+          allowDecimal={false}
+          testId="interval"
+        />,
+      );
+      const input = getDurationInputByTestId("interval-input");
+      expect(input).toHaveAttribute("step", "1");
     });
   });
 
   describe("Edge Cases", () => {
     it("should handle zero value", () => {
       render(<DurationInput {...defaultProps} value={0} min={0} max={120} />);
-      const input = screen.getByTestId("work-duration-input");
+      const input = getDurationInputByTestId("work-duration-input");
       expect(input).toHaveValue(0);
     });
 
@@ -199,7 +259,7 @@ describe("DurationInput", () => {
           min={2}
           max={10}
           testId="interval"
-        />
+        />,
       );
       expect(screen.getByText("範囲: 2〜10分")).toBeInTheDocument();
     });
@@ -212,10 +272,12 @@ describe("DurationInput", () => {
           min={5}
           max={60}
           testId="break"
-        />
+        />,
       );
       expect(screen.getByTestId("break-error")).toBeInTheDocument();
-      expect(screen.getByText("5〜60分の範囲で入力してください")).toBeInTheDocument();
+      expect(
+        screen.getByText("5〜60分の範囲で入力してください"),
+      ).toBeInTheDocument();
     });
   });
 });

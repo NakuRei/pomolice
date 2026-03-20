@@ -10,7 +10,7 @@
  * - Typo detection with instant restart
  */
 
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSkipFlowStore } from "../../../store/skipFlowStore";
 import {
   getRandomShortPhrase,
@@ -34,48 +34,53 @@ export default function TypingChallenge({
   difficulty,
   onComplete,
   onCancel,
-}: TypingChallengeProps) {
-  const { retryStep } = useSkipFlowStore();
-  const [targetPhrase, setTargetPhrase] = useState("");
+}: TypingChallengeProps): React.ReactElement {
+  const retryStep = useSkipFlowStore((state) => state.retryStep);
   const [userInput, setUserInput] = useState("");
   const [hasTypo, setHasTypo] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const resetTimeoutRef = useRef<number | null>(null);
+  const targetPhrase = useMemo(
+    () =>
+      difficulty === "short" ? getRandomShortPhrase() : getRandomLongPhrase(),
+    [difficulty],
+  );
 
-  // Generate target phrase on mount
   useEffect(() => {
-    const phrase =
-      difficulty === "short" ? getRandomShortPhrase() : getRandomLongPhrase();
-    setTargetPhrase(phrase);
-    // Focus input on mount
     inputRef.current?.focus();
-  }, [difficulty]);
+  }, [targetPhrase]);
 
-  // Validate input in real-time
   useEffect(() => {
-    if (userInput.length === 0) {
-      if (hasTypo) {
-        setHasTypo(false);
+    return (): void => {
+      if (resetTimeoutRef.current !== null) {
+        clearTimeout(resetTimeoutRef.current);
       }
-      return;
-    }
+    };
+  }, []);
 
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
     if (hasTypo) {
       return;
     }
 
-    // Check if current input matches target so far
-    const validation = getCharacterValidation(userInput, targetPhrase);
+    const nextValue = e.target.value;
+    setUserInput(nextValue);
+
+    if (nextValue.length === 0) {
+      return;
+    }
+
+    const validation = getCharacterValidation(nextValue, targetPhrase);
     const hasError = validation.some((result) => result === false);
 
     if (hasError) {
       setHasTypo(true);
-      // Increment retry count
       retryStep();
-      // Reset after showing error briefly
+
       if (resetTimeoutRef.current !== null) {
         clearTimeout(resetTimeoutRef.current);
       }
+
       resetTimeoutRef.current = window.setTimeout(() => {
         setUserInput("");
         setHasTypo(false);
@@ -85,30 +90,16 @@ export default function TypingChallenge({
       return;
     }
 
-    // Check if complete
-    if (validateTypedPhrase(userInput, targetPhrase)) {
+    if (validateTypedPhrase(nextValue, targetPhrase)) {
       onComplete();
     }
-  }, [userInput, targetPhrase, hasTypo, onComplete, retryStep]);
-
-  useEffect(() => {
-    return () => {
-      if (resetTimeoutRef.current !== null) {
-        clearTimeout(resetTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (hasTypo) return; // Prevent input during error display
-    setUserInput(e.target.value);
   };
 
-  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>): void => {
     e.preventDefault();
   };
 
-  const handleDrop = (e: React.DragEvent<HTMLInputElement>) => {
+  const handleDrop = (e: React.DragEvent<HTMLInputElement>): void => {
     e.preventDefault();
   };
 
@@ -177,7 +168,7 @@ export default function TypingChallenge({
           autoCorrect="off"
           autoCapitalize="off"
           spellCheck="false"
-          className={`w-full rounded-lg border-2 bg-background px-4 py-3 font-mono text-lg text-on-background placeholder:text-text-muted focus:outline-none focus:ring-2 ${
+          className={`w-full rounded-lg border-2 bg-background px-4 py-3 font-mono text-lg text-on-background placeholder:text-text-muted focus:ring-2 focus:outline-none ${
             hasTypo
               ? "border-danger-500 focus:ring-danger-500"
               : "border-border focus:ring-primary-600"

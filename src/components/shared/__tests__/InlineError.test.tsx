@@ -16,7 +16,9 @@ describe("InlineError", () => {
   it("renders nothing when the error does not exist", () => {
     render(<InlineError errorId="start_work" />);
 
-    expect(screen.queryByTestId("inline-error-start_work")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("inline-error-start_work"),
+    ).not.toBeInTheDocument();
   });
 
   it("renders alert notice with the current error message", () => {
@@ -40,7 +42,7 @@ describe("InlineError", () => {
 
   it("renders retry action when retry is available", async () => {
     const user = userEvent.setup();
-    const retryFn = vi.fn(async () => undefined);
+    const retryFn = vi.fn(() => Promise.resolve());
 
     useErrorStore.getState().reportError({
       id: "start_work",
@@ -61,7 +63,7 @@ describe("InlineError", () => {
     await user.click(retryButton);
 
     expect(retryFn).toHaveBeenCalledTimes(1);
-    expect(useErrorStore.getState().errors.start_work?.retryCount).toBe(1);
+    expect(useErrorStore.getState().errors.start_work.retryCount).toBe(1);
   });
 
   it("auto-clears recoverable errors after timeout", () => {
@@ -85,7 +87,9 @@ describe("InlineError", () => {
       vi.advanceTimersByTime(5000);
     });
 
-    expect(screen.queryByTestId("inline-error-start_work")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("inline-error-start_work"),
+    ).not.toBeInTheDocument();
     expect(useErrorStore.getState().errors.start_work).toBeUndefined();
   });
 });

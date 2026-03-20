@@ -20,14 +20,15 @@ const ESCAPE_BACK_TARGET_BY_SCREEN: Partial<Record<AppScreen, AppScreen>> = {
   settingsNotification: "settingsTop",
 };
 
-function App() {
+function App(): React.ReactElement {
   // Initialize timer sync with backend (single source of truth)
   useTimerSync();
 
   const [currentScreen, setCurrentScreen] = useState<AppScreen>("home");
-
   // Get fullscreen break state from store (updated by backend events)
   const isFullscreenBreak = useTimerStore((state) => state.isFullscreenBreak);
+  const [previousFullscreenBreakState, setPreviousFullscreenBreakState] =
+    useState(isFullscreenBreak);
   const notificationSoundMuted = useSettingsStore(
     (state) => state.notificationSoundMuted,
   );
@@ -45,29 +46,16 @@ function App() {
   const requiresManualContinue =
     postBreakTransitionPolicy === "require_manual_continue";
 
-  const moveToSettingsTopScreen = () => {
-    setCurrentScreen("settingsTop");
-  };
-  const moveToSettingsTimerScreen = () => {
-    setCurrentScreen("settingsTimer");
-  };
-  const moveToSettingsAutoRunScreen = () => {
-    setCurrentScreen("settingsAutoRun");
-  };
-  const moveToSettingsNotificationScreen = () => {
-    setCurrentScreen("settingsNotification");
-  };
-  const moveToHomeScreen = () => {
-    setCurrentScreen("home");
+  const moveToScreen = (nextScreen: AppScreen): void => {
+    setCurrentScreen(nextScreen);
   };
 
-  useEffect(() => {
-    if (!isFullscreenBreak) {
-      return;
+  if (isFullscreenBreak !== previousFullscreenBreakState) {
+    setPreviousFullscreenBreakState(isFullscreenBreak);
+    if (isFullscreenBreak && currentScreen !== "home") {
+      setCurrentScreen("home");
     }
-
-    setCurrentScreen("home");
-  }, [isFullscreenBreak]);
+  }
 
   useEffect(() => {
     const escapeBackTarget = ESCAPE_BACK_TARGET_BY_SCREEN[currentScreen];
@@ -75,7 +63,7 @@ function App() {
       return;
     }
 
-    const moveBackOnEscapeKey = (keyboardEvent: KeyboardEvent) => {
+    const moveBackOnEscapeKey = (keyboardEvent: KeyboardEvent): void => {
       if (keyboardEvent.key !== "Escape") {
         return;
       }
@@ -85,11 +73,8 @@ function App() {
     };
 
     window.addEventListener("keydown", moveBackOnEscapeKey);
-    return () => {
-      window.removeEventListener(
-        "keydown",
-        moveBackOnEscapeKey,
-      );
+    return (): void => {
+      window.removeEventListener("keydown", moveBackOnEscapeKey);
     };
   }, [currentScreen]);
 
@@ -102,10 +87,18 @@ function App() {
     return (
       <SettingsScreenLayout mainTestId="settings-top-main">
         <SettingsTopPage
-          openHomeScreen={moveToHomeScreen}
-          openTimerSettings={moveToSettingsTimerScreen}
-          openAutoRunSettings={moveToSettingsAutoRunScreen}
-          openNotificationSettings={moveToSettingsNotificationScreen}
+          openHomeScreen={() => {
+            moveToScreen("home");
+          }}
+          openTimerSettings={() => {
+            moveToScreen("settingsTimer");
+          }}
+          openAutoRunSettings={() => {
+            moveToScreen("settingsAutoRun");
+          }}
+          openNotificationSettings={() => {
+            moveToScreen("settingsNotification");
+          }}
         />
       </SettingsScreenLayout>
     );
@@ -114,7 +107,11 @@ function App() {
   if (currentScreen === "settingsTimer") {
     return (
       <SettingsScreenLayout mainTestId="settings-timer-main">
-        <SettingsTimerPage openSettingsTopScreen={moveToSettingsTopScreen} />
+        <SettingsTimerPage
+          openSettingsTopScreen={() => {
+            moveToScreen("settingsTop");
+          }}
+        />
       </SettingsScreenLayout>
     );
   }
@@ -122,7 +119,11 @@ function App() {
   if (currentScreen === "settingsAutoRun") {
     return (
       <SettingsScreenLayout mainTestId="settings-auto-run-main">
-        <SettingsAutoRunPage openSettingsTopScreen={moveToSettingsTopScreen} />
+        <SettingsAutoRunPage
+          openSettingsTopScreen={() => {
+            moveToScreen("settingsTop");
+          }}
+        />
       </SettingsScreenLayout>
     );
   }
@@ -131,7 +132,9 @@ function App() {
     return (
       <SettingsScreenLayout mainTestId="settings-notification-main">
         <SettingsNotificationPage
-          openSettingsTopScreen={moveToSettingsTopScreen}
+          openSettingsTopScreen={() => {
+            moveToScreen("settingsTop");
+          }}
         />
       </SettingsScreenLayout>
     );
@@ -144,7 +147,9 @@ function App() {
       isAutoContinueEnabled={isAutoContinueEnabled}
       requiresManualContinue={requiresManualContinue}
       onToggleNotificationSoundMuted={toggleNotificationSoundMuted}
-      onOpenSettingsTopScreen={moveToSettingsTopScreen}
+      onOpenSettingsTopScreen={() => {
+        moveToScreen("settingsTop");
+      }}
     />
   );
 }

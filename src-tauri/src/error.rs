@@ -89,9 +89,11 @@ mod tests {
 
     #[test]
     fn test_result_type_ok() {
-        let result: Result<i32> = Ok(42);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 42);
+        let result = Ok::<i32, PomoliceError>(42);
+        match result {
+            Ok(value) => assert_eq!(value, 42),
+            Err(error) => panic!("expected Ok(42), got error: {error}"),
+        }
     }
 
     #[test]

@@ -15,7 +15,7 @@ import { StatusNotice } from "../shared/StatusNotice";
  * - "続ける" button: Starts next work session
  * - "終了" button: Returns to idle state
  */
-export function ContinueDialog() {
+export function ContinueDialog(): React.ReactElement | null {
   const requiresManualContinueDecision = useTimerStore(
     (state) => state.requiresManualContinueDecision,
   );
@@ -25,12 +25,12 @@ export function ContinueDialog() {
   );
   const continueButtonReference = useRef<HTMLButtonElement>(null);
 
-  const handleContinue = () => {
+  const handleContinue = (): void => {
     // Errors are reported to errorStore by timerStore — InlineError handles display
     resolvePostBreakDecision("continue").catch(() => undefined);
   };
 
-  const handleEnd = () => {
+  const handleEnd = (): void => {
     // Errors are reported to errorStore by timerStore — InlineError handles display
     resolvePostBreakDecision("stop_cycle").catch(() => undefined);
   };
@@ -48,18 +48,18 @@ export function ContinueDialog() {
       return;
     }
 
-    const onKeyDown = (event: KeyboardEvent) => {
+    const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") {
         return;
       }
 
       event.preventDefault();
-      handleEnd();
+      void resolvePostBreakDecision("stop_cycle").catch(() => undefined);
     };
 
     window.addEventListener("keydown", onKeyDown);
 
-    return () => {
+    return (): void => {
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [requiresManualContinueDecision, resolvePostBreakDecision]);

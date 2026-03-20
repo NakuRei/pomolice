@@ -26,80 +26,80 @@ describe("LongPressButton", () => {
   describe("Rendering", () => {
     it("should render with title and instructions", () => {
       render(
-        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />
+        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />,
       );
 
       expect(screen.getByText("Long Press Challenge")).toBeInTheDocument();
       expect(
-        screen.getByText(/Press and hold the button below/i)
+        screen.getByText(/Press and hold the button below/iu),
       ).toBeInTheDocument();
     });
 
     it("should render press and hold button", () => {
       render(
-        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />
+        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />,
       );
 
       expect(
-        screen.getByRole("button", { name: /Press and Hold/i })
+        screen.getByRole("button", { name: /Press and Hold/iu }),
       ).toBeInTheDocument();
     });
 
     it("should render cancel button", () => {
       render(
-        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />
+        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />,
       );
 
       expect(
-        screen.getByRole("button", { name: /Cancel and Take Break/i })
+        screen.getByRole("button", { name: /Cancel and Take Break/iu }),
       ).toBeInTheDocument();
     });
 
     it("should display progress percentage", () => {
       render(
-        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />
+        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />,
       );
 
-      expect(screen.getByText(/Progress: 0%/)).toBeInTheDocument();
+      expect(screen.getByText(/Progress: 0%/u)).toBeInTheDocument();
     });
   });
 
   describe("Long press functionality", () => {
     it("should start progress on mouse down", () => {
       render(
-        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />
+        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />,
       );
 
-      const button = screen.getByRole("button", { name: /Press and Hold/i });
+      const button = screen.getByRole("button", { name: /Press and Hold/iu });
 
       act(() => {
         fireEvent.mouseDown(button);
       });
 
-      expect(screen.getByText(/Keep holding.../i)).toBeInTheDocument();
+      expect(screen.getByText(/Keep holding.../iu)).toBeInTheDocument();
     });
 
     it("should show countdown when pressing", () => {
       render(
-        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />
+        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />,
       );
 
-      const button = screen.getByRole("button", { name: /Press and Hold/i });
+      const button = screen.getByRole("button", { name: /Press and Hold/iu });
 
       act(() => {
         fireEvent.mouseDown(button);
       });
 
       // Initially should show 15 seconds
-      expect(screen.getByText(/15s/)).toBeInTheDocument();
+      expect(screen.getByText(/15s/u)).toBeInTheDocument();
     });
 
     it("should reset progress on mouse up before completion", () => {
       render(
-        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />
+        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />,
       );
 
-      const button = screen.getByRole("button", { name: /Press and Hold/i });
+      const button = screen.getByRole("button", { name: /Press and Hold/iu });
 
       // Start pressing
       act(() => {
@@ -117,15 +117,15 @@ describe("LongPressButton", () => {
       });
 
       // Should show release warning
-      expect(screen.getByText(/You released too early/i)).toBeInTheDocument();
+      expect(screen.getByText(/You released too early/iu)).toBeInTheDocument();
     });
 
     it("should call onComplete after 15 seconds of holding", () => {
       render(
-        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />
+        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />,
       );
 
-      const button = screen.getByRole("button", { name: /Press and Hold/i });
+      const button = screen.getByRole("button", { name: /Press and Hold/iu });
 
       // Start pressing
       act(() => {
@@ -143,15 +143,15 @@ describe("LongPressButton", () => {
 
     it("should update progress during hold", () => {
       render(
-        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />
+        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />,
       );
 
-      const button = screen.getByRole("button", { name: /Press and Hold/i });
+      const button = screen.getByRole("button", { name: /Press and Hold/iu });
 
       act(() => {
         fireEvent.mouseDown(button);
         // Check initial progress (0%)
-        expect(screen.getByText(/Progress:/)).toBeInTheDocument();
+        expect(screen.getByText(/Progress:/u)).toBeInTheDocument();
       });
 
       // Advance by 7.5 seconds (50%)
@@ -160,16 +160,16 @@ describe("LongPressButton", () => {
       });
 
       // Progress should have increased
-      const progressText = screen.getByText(/Progress:/);
+      const progressText = screen.getByText(/Progress:/u);
       expect(progressText).toBeInTheDocument();
     });
 
     it("should reset on mouse leave", () => {
       render(
-        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />
+        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />,
       );
 
-      const button = screen.getByRole("button", { name: /Press and Hold/i });
+      const button = screen.getByRole("button", { name: /Press and Hold/iu });
 
       // Start pressing
       act(() => {
@@ -187,31 +187,31 @@ describe("LongPressButton", () => {
       });
 
       // Should show release warning
-      expect(screen.getByText(/You released too early/i)).toBeInTheDocument();
+      expect(screen.getByText(/You released too early/iu)).toBeInTheDocument();
     });
   });
 
   describe("Touch support", () => {
     it("should support touch start", () => {
       render(
-        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />
+        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />,
       );
 
-      const button = screen.getByRole("button", { name: /Press and Hold/i });
+      const button = screen.getByRole("button", { name: /Press and Hold/iu });
 
       act(() => {
         fireEvent.touchStart(button);
       });
 
-      expect(screen.getByText(/Keep holding.../i)).toBeInTheDocument();
+      expect(screen.getByText(/Keep holding.../iu)).toBeInTheDocument();
     });
 
     it("should support touch end", () => {
       render(
-        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />
+        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />,
       );
 
-      const button = screen.getByRole("button", { name: /Press and Hold/i });
+      const button = screen.getByRole("button", { name: /Press and Hold/iu });
 
       act(() => {
         fireEvent.touchStart(button);
@@ -225,18 +225,18 @@ describe("LongPressButton", () => {
         fireEvent.touchEnd(button);
       });
 
-      expect(screen.getByText(/You released too early/i)).toBeInTheDocument();
+      expect(screen.getByText(/You released too early/iu)).toBeInTheDocument();
     });
   });
 
   describe("Cancel functionality", () => {
     it("should call onCancel when cancel button is clicked", () => {
       render(
-        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />
+        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />,
       );
 
       const cancelButton = screen.getByRole("button", {
-        name: /Cancel and Take Break/i,
+        name: /Cancel and Take Break/iu,
       });
 
       fireEvent.click(cancelButton);
@@ -248,10 +248,10 @@ describe("LongPressButton", () => {
   describe("Visual feedback", () => {
     it("should show progress bar", () => {
       render(
-        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />
+        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />,
       );
 
-      const button = screen.getByRole("button", { name: /Press and Hold/i });
+      const button = screen.getByRole("button", { name: /Press and Hold/iu });
 
       act(() => {
         fireEvent.mouseDown(button);
@@ -271,10 +271,10 @@ describe("LongPressButton", () => {
 
     it("should clear release warning after timeout", () => {
       render(
-        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />
+        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />,
       );
 
-      const button = screen.getByRole("button", { name: /Press and Hold/i });
+      const button = screen.getByRole("button", { name: /Press and Hold/iu });
 
       // Press and release early
       act(() => {
@@ -290,7 +290,7 @@ describe("LongPressButton", () => {
       });
 
       // Warning should appear
-      expect(screen.getByText(/You released too early/i)).toBeInTheDocument();
+      expect(screen.getByText(/You released too early/iu)).toBeInTheDocument();
 
       // Advance by 2+ seconds to clear warning
       act(() => {
@@ -305,14 +305,18 @@ describe("LongPressButton", () => {
   describe("Hints and instructions", () => {
     it("should display helpful hints", () => {
       render(
-        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />
+        <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />,
       );
 
       expect(
-        screen.getByText(/Keep your finger or mouse button pressed continuously/i)
+        screen.getByText(
+          /Keep your finger or mouse button pressed continuously/iu,
+        ),
       ).toBeInTheDocument();
       expect(
-        screen.getByText(/Releasing before 15 seconds will restart the timer/i)
+        screen.getByText(
+          /Releasing before 15 seconds will restart the timer/iu,
+        ),
       ).toBeInTheDocument();
     });
   });

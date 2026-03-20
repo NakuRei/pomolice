@@ -122,8 +122,10 @@ describe("FullscreenBreak", () => {
       fireEvent.click(skipButton);
 
       // Phase 5: Shows 10-step skip flow instead of simple dialog
-      expect(screen.getByText(/Step/i)).toBeInTheDocument();
-      expect(screen.getByText(/Are you sure you want to skip/i)).toBeInTheDocument();
+      expect(screen.getByText(/Step/iu)).toBeInTheDocument();
+      expect(
+        screen.getByText(/Are you sure you want to skip/iu),
+      ).toBeInTheDocument();
     });
   });
 
@@ -136,16 +138,18 @@ describe("FullscreenBreak", () => {
 
     // Phase 5: Skip flow modal with 10 steps
     it("should show skip flow progress indicator", () => {
-      expect(screen.getByText(/Step/i)).toBeInTheDocument();
-      expect(screen.getByText(/of 10/i)).toBeInTheDocument();
+      expect(screen.getByText(/Step/iu)).toBeInTheDocument();
+      expect(screen.getByText(/of 10/iu)).toBeInTheDocument();
     });
 
     it("should show first confirmation step", () => {
-      expect(screen.getByText(/Are you sure you want to skip/i)).toBeInTheDocument();
+      expect(
+        screen.getByText(/Are you sure you want to skip/iu),
+      ).toBeInTheDocument();
     });
 
     it("should have take break button", () => {
-      expect(screen.getByText(/No, Take Break/i)).toBeInTheDocument();
+      expect(screen.getByText(/No, Take Break/iu)).toBeInTheDocument();
     });
   });
 

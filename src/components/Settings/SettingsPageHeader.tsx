@@ -20,7 +20,9 @@ export function SettingsPageHeader({
   backButtonTestId,
   onBackButtonClick,
   description,
-}: SettingsPageHeaderProps) {
+}: SettingsPageHeaderProps): React.ReactElement {
+  const hasDescription = description !== undefined && description !== "";
+
   return (
     <header className="mb-6 space-y-2">
       <div className="flex items-center gap-3">
@@ -42,7 +44,7 @@ export function SettingsPageHeader({
           {title}
         </h1>
       </div>
-      {description ? (
+      {hasDescription ? (
         <p className="max-w-xl text-sm leading-6 text-text-muted">
           {description}
         </p>

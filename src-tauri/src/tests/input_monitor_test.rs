@@ -17,6 +17,5 @@ mod input_monitor_tests {
     #[test]
     fn test_input_monitor_module_exists() {
         // This test verifies the module compiles
-        assert!(true);
     }
 }

@@ -27,44 +27,29 @@ const UPDATE_INTERVAL = 50; // Update progress every 50ms
 export default function LongPressButton({
   onComplete,
   onCancel,
-}: LongPressButtonProps) {
+}: LongPressButtonProps): React.ReactElement {
   const [isPressing, setIsPressing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [hasReleased, setHasReleased] = useState(false);
-  const startTimeRef = useRef<number>(0);
+  const elapsedMsRef = useRef(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const releaseResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   // Cleanup on unmount
   useEffect(() => {
-    return () => {
+    return (): void => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
+      }
+      if (releaseResetTimeoutRef.current) {
+        clearTimeout(releaseResetTimeoutRef.current);
       }
     };
   }, []);
 
-  const startPress = () => {
-    setIsPressing(true);
-    setHasReleased(false);
-    startTimeRef.current = Date.now();
-
-    // Update progress continuously
-    intervalRef.current = setInterval(() => {
-      const elapsed = Date.now() - startTimeRef.current;
-      const currentProgress = Math.min(
-        (elapsed / REQUIRED_DURATION) * 100,
-        100,
-      );
-      setProgress(currentProgress);
-
-      // Check if completed
-      if (elapsed >= REQUIRED_DURATION) {
-        endPress(true);
-      }
-    }, UPDATE_INTERVAL);
-  };
-
-  const endPress = (completed: boolean = false) => {
+  const endPress = (completed = false): void => {
     setIsPressing(false);
 
     if (intervalRef.current) {
@@ -82,23 +67,46 @@ export default function LongPressButton({
       setHasReleased(true);
 
       // Clear "released" message after 2 seconds
-      setTimeout(() => {
+      releaseResetTimeoutRef.current = setTimeout(() => {
         setHasReleased(false);
+        releaseResetTimeoutRef.current = null;
       }, 2000);
     }
   };
 
-  const handleMouseDown = () => {
+  const startPress = (): void => {
+    setIsPressing(true);
+    setHasReleased(false);
+    elapsedMsRef.current = 0;
+
+    // Update progress continuously
+    intervalRef.current = setInterval(() => {
+      elapsedMsRef.current += UPDATE_INTERVAL;
+      const elapsed = elapsedMsRef.current;
+      const currentProgress = Math.min(
+        (elapsed / REQUIRED_DURATION) * 100,
+        100,
+      );
+      setProgress(currentProgress);
+
+      // Check if completed
+      if (elapsed >= REQUIRED_DURATION) {
+        endPress(true);
+      }
+    }, UPDATE_INTERVAL);
+  };
+
+  const handleMouseDown = (): void => {
     startPress();
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = (): void => {
     if (progress < 100) {
       endPress(false);
     }
   };
 
-  const handleMouseLeave = () => {
+  const handleMouseLeave = (): void => {
     if (isPressing) {
       endPress(false);
     }
@@ -146,7 +154,7 @@ export default function LongPressButton({
           onMouseLeave={handleMouseLeave}
           onTouchStart={handleMouseDown}
           onTouchEnd={handleMouseUp}
-          className={`relative h-32 w-full overflow-hidden rounded-lg font-bold shadow-lg transition-all focus:outline-none focus:ring-4 focus:ring-offset-2 focus:ring-offset-surface ${
+          className={`relative h-32 w-full overflow-hidden rounded-lg font-bold shadow-lg transition-all focus:ring-4 focus:ring-offset-2 focus:ring-offset-surface focus:outline-none ${
             isPressing
               ? "bg-primary-700 text-on-primary focus:ring-primary-600"
               : "bg-surface-raised text-on-surface hover:bg-surface-hover focus:ring-primary-600"
@@ -159,7 +167,7 @@ export default function LongPressButton({
               preserveAspectRatio="none"
             >
               <rect
-                width={`${progress}%`}
+                width={`${String(progress)}%`}
                 height="100%"
                 fill="currentColor"
                 className="transition-all"

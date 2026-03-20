@@ -20,19 +20,21 @@ const audioInstances: MockAudio[] = [];
 let queuedPlayError: Error | null = null;
 
 class MockAudio {
-  src: string;
-  volume = 1;
-  currentTime = 0;
-  pause = vi.fn();
-  play = vi.fn(async () => {
+  public src: string;
+  public volume = 1;
+  public currentTime = 0;
+  public pause = vi.fn();
+  public play = vi.fn(() => {
     if (queuedPlayError) {
       const error = queuedPlayError;
       queuedPlayError = null;
-      throw error;
+      return Promise.reject(error);
     }
+
+    return Promise.resolve();
   });
 
-  constructor(src: string) {
+  public constructor(src: string) {
     this.src = src;
     audioInstances.push(this);
   }
@@ -84,25 +86,25 @@ describe("playNotificationSoundPreview()", () => {
   it.each([1, 10, 50, 60])(
     "should play preview sound with the shared nonlinear gain curve at %s percent",
     async (volumePercent) => {
-    vi.mocked(resolveResource).mockResolvedValueOnce("C:\\sounds\\work.wav");
+      vi.mocked(resolveResource).mockResolvedValueOnce("C:\\sounds\\work.wav");
 
-    const {
-      convertNotificationVolumePercentToGain,
-      playNotificationSoundPreview,
-    } = await import("../notifications");
-    const result = await playNotificationSoundPreview({
-      soundType: "work",
-      volumePercent,
-      muted: false,
-    });
+      const {
+        convertNotificationVolumePercentToGain,
+        playNotificationSoundPreview,
+      } = await import("../notifications");
+      const result = await playNotificationSoundPreview({
+        soundType: "work",
+        volumePercent,
+        muted: false,
+      });
 
-    expect(result).toEqual({ status: "played" });
-    expect(audioInstances).toHaveLength(1);
-    expect(audioInstances[0].volume).toBeCloseTo(
-      convertNotificationVolumePercentToGain(volumePercent),
-      10
-    );
-    }
+      expect(result).toEqual({ status: "played" });
+      expect(audioInstances).toHaveLength(1);
+      expect(audioInstances[0].volume).toBeCloseTo(
+        convertNotificationVolumePercentToGain(volumePercent),
+        10,
+      );
+    },
   );
 
   it("should skip playback when preview is muted", async () => {

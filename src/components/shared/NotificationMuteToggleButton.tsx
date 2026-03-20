@@ -15,7 +15,7 @@ export function NotificationMuteToggleButton({
   testId,
   iconClassName = "h-5 w-5",
   className = "",
-}: NotificationMuteToggleButtonProps) {
+}: NotificationMuteToggleButtonProps): React.ReactElement {
   const buttonTitle = muted ? "通知音ミュート中" : "通知音オン";
 
   return (

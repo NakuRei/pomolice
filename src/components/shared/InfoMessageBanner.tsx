@@ -6,7 +6,7 @@ import { StatusNotice } from "./StatusNotice";
  * Displays short-lived informational messages from timerStore.
  * This is intentionally separate from errorStore-based banners.
  */
-export function InfoMessageBanner() {
+export function InfoMessageBanner(): React.ReactElement | null {
   const infoMessage = useTimerStore((state) => state.infoMessage);
   const clearInfoMessage = useTimerStore((state) => state.clearInfoMessage);
 
@@ -19,7 +19,7 @@ export function InfoMessageBanner() {
       clearInfoMessage(infoMessage.id);
     }, infoMessage.ttlMs);
 
-    return () => {
+    return (): void => {
       window.clearTimeout(timeoutId);
     };
   }, [clearInfoMessage, infoMessage]);

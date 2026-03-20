@@ -15,12 +15,9 @@ import { NotificationMuteToggleButton } from "../shared/NotificationMuteToggleBu
 const HEADER_STATUS_BADGE_BASE_CLASS_NAME =
   "inline-flex items-center rounded-full border px-2 py-1 text-xs font-semibold";
 const HEADER_STATUS_BADGE_CLASS_NAME_BY_VARIANT = {
-  success:
-    `${HEADER_STATUS_BADGE_BASE_CLASS_NAME} border-success-800 bg-success-950/40 text-success-200`,
-  primary:
-    `${HEADER_STATUS_BADGE_BASE_CLASS_NAME} border-primary-800 bg-primary-950/40 text-primary-200`,
-  warning:
-    `${HEADER_STATUS_BADGE_BASE_CLASS_NAME} border-warning-800 bg-warning-950/40 text-warning-200`,
+  success: `${HEADER_STATUS_BADGE_BASE_CLASS_NAME} border-success-800 bg-success-950/40 text-success-200`,
+  primary: `${HEADER_STATUS_BADGE_BASE_CLASS_NAME} border-primary-800 bg-primary-950/40 text-primary-200`,
+  warning: `${HEADER_STATUS_BADGE_BASE_CLASS_NAME} border-warning-800 bg-warning-950/40 text-warning-200`,
 } as const;
 
 /**
@@ -54,13 +51,13 @@ export function HomeScreen({
   requiresManualContinue,
   onToggleNotificationSoundMuted,
   onOpenSettingsTopScreen,
-}: HomeScreenProps) {
+}: HomeScreenProps): React.ReactElement {
   return (
     <div className="flex min-h-screen flex-col space-y-8 bg-background p-8 text-on-background">
       <ConnectionBanner />
       <InfoMessageBanner />
 
-      <div className="flex justify-between items-center">
+      <div className="flex items-center justify-between">
         <div className="flex flex-col gap-2">
           <h1 className="text-3xl font-bold text-text">Pomolice</h1>
           <div
@@ -106,7 +103,7 @@ export function HomeScreen({
             label="設定を開く"
             testId="settings-button"
           >
-            <SettingsGearIcon className="w-6 h-6" />
+            <SettingsGearIcon className="h-6 w-6" />
           </IconButton>
         </div>
       </div>
@@ -116,7 +113,7 @@ export function HomeScreen({
         <CycleProgress />
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center">
+      <div className="flex flex-1 flex-col items-center justify-center">
         <TimerDisplay />
       </div>
 

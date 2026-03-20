@@ -6,7 +6,11 @@ import { ToggleIconButton } from "../ToggleIconButton";
 describe("ToggleIconButton", () => {
   it("renders a stable accessible name and exposes pressed state", () => {
     render(
-      <ToggleIconButton label="通知音" pressed={false} onPressedChange={() => undefined}>
+      <ToggleIconButton
+        label="通知音"
+        pressed={false}
+        onPressedChange={() => undefined}
+      >
         <span data-testid="toggle-icon-off">off</span>
       </ToggleIconButton>,
     );

@@ -9,7 +9,7 @@ describe("MotivationalMessage", () => {
       render(<MotivationalMessage />);
 
       // Should render some text (any message from the array)
-      const messageElement = screen.getByText(/./);
+      const messageElement = screen.getByText(/./u);
       expect(messageElement).toBeInTheDocument();
     });
   });
@@ -18,7 +18,7 @@ describe("MotivationalMessage", () => {
     it("should call getRandomMessage on mount", () => {
       const getRandomMessageSpy = vi.spyOn(
         motivationalMessagesModule,
-        "getRandomMessage"
+        "getRandomMessage",
       );
 
       render(<MotivationalMessage />);
@@ -29,7 +29,7 @@ describe("MotivationalMessage", () => {
     it("should display the message returned by getRandomMessage", () => {
       const testMessage = "テストメッセージ 🎯";
       vi.spyOn(motivationalMessagesModule, "getRandomMessage").mockReturnValue(
-        testMessage
+        testMessage,
       );
 
       render(<MotivationalMessage />);
@@ -38,16 +38,13 @@ describe("MotivationalMessage", () => {
     });
 
     it("should display different messages on different renders", () => {
-      const messages = [
-        "メッセージ1",
-        "メッセージ2",
-        "メッセージ3",
-      ];
+      const messages = ["メッセージ1", "メッセージ2", "メッセージ3"];
 
       let callCount = 0;
-      vi.spyOn(motivationalMessagesModule, "getRandomMessage").mockImplementation(
-        () => messages[callCount++ % messages.length]
-      );
+      vi.spyOn(
+        motivationalMessagesModule,
+        "getRandomMessage",
+      ).mockImplementation(() => messages[callCount++ % messages.length]);
 
       const { unmount } = render(<MotivationalMessage />);
       expect(screen.getByText("メッセージ1")).toBeInTheDocument();
@@ -61,7 +58,9 @@ describe("MotivationalMessage", () => {
 
   describe("Integration", () => {
     it("should handle empty message gracefully", () => {
-      vi.spyOn(motivationalMessagesModule, "getRandomMessage").mockReturnValue("");
+      vi.spyOn(motivationalMessagesModule, "getRandomMessage").mockReturnValue(
+        "",
+      );
 
       render(<MotivationalMessage />);
 
@@ -73,7 +72,7 @@ describe("MotivationalMessage", () => {
     it("should handle long messages", () => {
       const longMessage = "これは非常に長いメッセージです。".repeat(10);
       vi.spyOn(motivationalMessagesModule, "getRandomMessage").mockReturnValue(
-        longMessage
+        longMessage,
       );
 
       render(<MotivationalMessage />);

@@ -34,7 +34,7 @@ function cloneWeeklyAutoRunConfigForDraft(
 
 export function SettingsAutoRunPage({
   openSettingsTopScreen,
-}: SettingsAutoRunPageProps) {
+}: SettingsAutoRunPageProps): React.ReactElement {
   const headingReference = useFocusHeadingOnMount();
 
   const autoRunFeatureEnabledFromStore = useSettingsStore(
@@ -69,7 +69,7 @@ export function SettingsAutoRunPage({
     updateDraftSchedule: (
       draftWeeklyAutoRunConfig: WeeklyAutoRunConfig,
     ) => void,
-  ) => {
+  ): void => {
     setWeeklyAutoRunConfigDraft((previousDraft) => {
       const nextDraft = cloneWeeklyAutoRunConfigForDraft(previousDraft);
       updateDraftSchedule(nextDraft);
@@ -90,7 +90,7 @@ export function SettingsAutoRunPage({
     Object.keys(dayScheduleValidationErrors).length > 0 ||
     weeklyScheduleValidationErrors.length > 0;
 
-  const saveAutoRunSettingsPage = () => {
+  const saveAutoRunSettingsPage = (): void => {
     const validationResultBeforeSave = validateWeeklyAutoRunConfig(
       weeklyAutoRunConfigDraft,
     );
@@ -115,7 +115,7 @@ export function SettingsAutoRunPage({
     openSettingsTopScreen();
   };
 
-  const cancelAutoRunSettingsPage = () => {
+  const cancelAutoRunSettingsPage = (): void => {
     openSettingsTopScreen();
   };
 
@@ -148,9 +148,9 @@ export function SettingsAutoRunPage({
             <input
               type="checkbox"
               checked={autoRunFeatureEnabledDraft}
-              onChange={(event) =>
-                setAutoRunFeatureEnabledDraft(event.target.checked)
-              }
+              onChange={(event) => {
+                setAutoRunFeatureEnabledDraft(event.target.checked);
+              }}
               data-testid="settings-auto-run-feature-toggle"
               aria-label="曜日別自動実行の全体切り替え"
             />
@@ -190,21 +190,21 @@ export function SettingsAutoRunPage({
                 autoRunFeatureEnabled={autoRunFeatureEnabledDraft}
                 daySlot={daySlot}
                 dayValidationError={dayValidationError}
-                onEnabledChange={(enabled) =>
+                onEnabledChange={(enabled) => {
                   updateWeeklyAutoRunDraft((draftWeeklyAutoRunConfig) => {
                     draftWeeklyAutoRunConfig[weekday].enabled = enabled;
-                  })
-                }
-                onStartTimeChange={(timeText) =>
+                  });
+                }}
+                onStartTimeChange={(timeText) => {
                   updateWeeklyAutoRunDraft((draftWeeklyAutoRunConfig) => {
                     draftWeeklyAutoRunConfig[weekday].startTime = timeText;
-                  })
-                }
-                onEndTimeChange={(timeText) =>
+                  });
+                }}
+                onEndTimeChange={(timeText) => {
                   updateWeeklyAutoRunDraft((draftWeeklyAutoRunConfig) => {
                     draftWeeklyAutoRunConfig[weekday].endTime = timeText;
-                  })
-                }
+                  });
+                }}
               />
             );
           })}

@@ -1,8 +1,18 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, act, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  act,
+  fireEvent,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ContinueDialog } from "../ContinueDialog/ContinueDialog";
-import { useTimerStore, TimerStatus, SessionType } from "../../store/timerStore";
+import {
+  useTimerStore,
+  TimerStatus,
+  SessionType,
+} from "../../store/timerStore";
 
 // Mock Tauri invoke
 vi.mock("@tauri-apps/api/core", () => ({
@@ -46,7 +56,10 @@ describe("ContinueDialog", () => {
       const dialog = screen.getByRole("dialog");
 
       expect(dialog).toHaveAttribute("aria-modal", "true");
-      expect(dialog).toHaveAttribute("aria-labelledby", "continue-dialog-title");
+      expect(dialog).toHaveAttribute(
+        "aria-labelledby",
+        "continue-dialog-title",
+      );
     });
   });
 
@@ -65,32 +78,38 @@ describe("ContinueDialog", () => {
 
     it("should display completion confirmation", () => {
       render(<ContinueDialog />);
-      expect(screen.getByText("お疲れ様でした。休憩が完了しました。")).toBeInTheDocument();
+      expect(
+        screen.getByText("お疲れ様でした。休憩が完了しました。"),
+      ).toBeInTheDocument();
     });
 
     it("should display completed pomodoros count", () => {
       render(<ContinueDialog />);
-      expect(screen.getByText(/完了したポモドーロ:/)).toBeInTheDocument();
+      expect(screen.getByText(/完了したポモドーロ:/u)).toBeInTheDocument();
       expect(screen.getByText("3")).toBeInTheDocument();
     });
 
     it("should display continue question", () => {
       render(<ContinueDialog />);
-      expect(screen.getByText("次のポモドーロを続けますか？")).toBeInTheDocument();
+      expect(
+        screen.getByText("次のポモドーロを続けますか？"),
+      ).toBeInTheDocument();
     });
 
     it("should display manual decision pending explanation", () => {
       render(<ContinueDialog />);
       expect(
-        screen.getByTestId("continue-dialog-manual-decision-message")
+        screen.getByTestId("continue-dialog-manual-decision-message"),
       ).toHaveTextContent(
-        "現在、手動判断待ちです。続けるか終了を選んでください。"
+        "現在、手動判断待ちです。続けるか終了を選んでください。",
       );
     });
 
     it("should have continue and end buttons", () => {
       render(<ContinueDialog />);
-      expect(screen.getByTestId("continue-dialog-continue")).toBeInTheDocument();
+      expect(
+        screen.getByTestId("continue-dialog-continue"),
+      ).toBeInTheDocument();
       expect(screen.getByTestId("continue-dialog-end")).toBeInTheDocument();
     });
   });

@@ -113,7 +113,7 @@ impl Default for DayAutoRunSlot {
 ///     end_time: "18:00".to_string(),
 /// };
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
 #[allow(dead_code)]
 pub struct WeeklyAutoRunConfig {
@@ -126,39 +126,20 @@ pub struct WeeklyAutoRunConfig {
     pub sun: DayAutoRunSlot,
 }
 
-impl Default for WeeklyAutoRunConfig {
-    fn default() -> Self {
-        Self {
-            mon: DayAutoRunSlot::default(),
-            tue: DayAutoRunSlot::default(),
-            wed: DayAutoRunSlot::default(),
-            thu: DayAutoRunSlot::default(),
-            fri: DayAutoRunSlot::default(),
-            sat: DayAutoRunSlot::default(),
-            sun: DayAutoRunSlot::default(),
-        }
-    }
-}
-
 /// Source that started the current work timer.
 ///
 /// Usage example:
 /// ```rust,ignore
 /// let source = TimerStartSource::ManualInsideWindow;
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 #[allow(dead_code)]
 pub enum TimerStartSource {
+    #[default]
     ManualOutsideWindow,
     ManualInsideWindow,
     ScheduledAutoStart,
-}
-
-impl Default for TimerStartSource {
-    fn default() -> Self {
-        Self::ManualOutsideWindow
-    }
 }
 
 /// Current state for session-boundary scheduled stop execution.
@@ -167,18 +148,13 @@ impl Default for TimerStartSource {
 /// ```rust,ignore
 /// let stop_state = ScheduledStopState::Pending;
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 #[allow(dead_code)]
 pub enum ScheduledStopState {
+    #[default]
     None,
     Pending,
-}
-
-impl Default for ScheduledStopState {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 /// Policy for deciding what happens when a break session finishes.
@@ -187,18 +163,13 @@ impl Default for ScheduledStopState {
 /// ```rust,ignore
 /// let policy = PostBreakTransitionPolicy::RequireManualContinue;
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 #[allow(dead_code)]
 pub enum PostBreakTransitionPolicy {
+    #[default]
     RequireManualContinue,
     StartNextWorkAutomatically,
-}
-
-impl Default for PostBreakTransitionPolicy {
-    fn default() -> Self {
-        Self::RequireManualContinue
-    }
 }
 
 /// Action selected while a post-break manual decision is pending.
@@ -333,20 +304,15 @@ impl BoundaryOccurrenceId {
 /// ```rust,ignore
 /// let runtime_state = BootPromptRuntimeState::AwaitingDecision;
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 #[allow(dead_code)]
 pub enum BootPromptRuntimeState {
     AwaitingDecision,
     ResolvedStart,
     ResolvedLater,
+    #[default]
     NotApplicable,
-}
-
-impl Default for BootPromptRuntimeState {
-    fn default() -> Self {
-        Self::NotApplicable
-    }
 }
 
 /// Payload sent to frontend on each timer tick

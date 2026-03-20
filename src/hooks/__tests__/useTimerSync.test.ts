@@ -5,9 +5,13 @@
  * These tests verify that the hook correctly sets up event listeners.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
-import { useTimerStore, TimerStatus, SessionType } from "../../store/timerStore";
+import {
+  useTimerStore,
+  TimerStatus,
+  SessionType,
+} from "../../store/timerStore";
 import {
   notifyWorkComplete,
   notifyBreakAutoStarted,
@@ -15,15 +19,30 @@ import {
 } from "../../services/notifications";
 
 // Mock Tauri APIs
-const mockListen = vi.fn();
-const mockInvoke = vi.fn();
+type TimerEventHandler = (event: { payload: unknown }) => void;
+type ListenerRegistration = (
+  event: string,
+  handler: TimerEventHandler | (() => void),
+) => Promise<() => void>;
+type InvokeCommand = (
+  command: string,
+  args?: Record<string, unknown>,
+) => Promise<unknown>;
+
+const mockListen = vi.fn<ListenerRegistration>();
+const mockInvoke = vi.fn<InvokeCommand>();
+const noopUnlisten = (): void => undefined;
 
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: (...args: unknown[]) => mockListen(...args),
+  listen: (
+    event: string,
+    handler: TimerEventHandler | (() => void),
+  ): Promise<() => void> => mockListen(event, handler),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: (...args: unknown[]) => mockInvoke(...args),
+  invoke: (command: string, args?: Record<string, unknown>): Promise<unknown> =>
+    mockInvoke(command, args),
 }));
 
 vi.mock("@tauri-apps/plugin-notification", () => ({
@@ -40,6 +59,66 @@ vi.mock("../../services/notifications", () => ({
 
 // Import after mocking
 import { useTimerSync } from "../useTimerSync";
+
+function expectRecord(
+  value: unknown,
+  description: string,
+): asserts value is Record<string, unknown> {
+  expect(value).not.toBeNull();
+  expect(typeof value).toBe("object");
+  if (value === null || typeof value !== "object") {
+    throw new Error(`Expected ${description} to be an object`);
+  }
+}
+
+function getInvokePayload(commandName: string): Record<string, unknown> {
+  const invokeCall = mockInvoke.mock.calls.find(
+    ([invokedCommand]) => invokedCommand === commandName,
+  );
+  expect(invokeCall).toBeDefined();
+  if (!invokeCall) {
+    throw new Error(`Expected invoke command "${commandName}"`);
+  }
+
+  const payload = invokeCall[1];
+  expectRecord(payload, `${commandName} payload`);
+  return payload;
+}
+
+function getRequiredTimerEventHandler(
+  handler: TimerEventHandler | undefined,
+  description: string,
+): TimerEventHandler {
+  if (!handler) {
+    throw new Error(`Expected ${description} to be defined`);
+  }
+
+  return handler;
+}
+
+function getRequiredVoidListener(
+  listener: (() => void) | undefined,
+  description: string,
+): () => void {
+  if (!listener) {
+    throw new Error(`Expected ${description} to be defined`);
+  }
+
+  return listener;
+}
+
+function expectVoidListener(
+  handler: TimerEventHandler | (() => void),
+  eventName: string,
+): () => void {
+  if (handler.length !== 0) {
+    throw new Error(
+      `Expected "${eventName}" to register a no-argument listener`,
+    );
+  }
+
+  return handler as () => void;
+}
 
 describe("useTimerSync", () => {
   beforeEach(() => {
@@ -63,7 +142,7 @@ describe("useTimerSync", () => {
     });
 
     // Default mock implementations
-    mockListen.mockResolvedValue(() => {});
+    mockListen.mockResolvedValue(noopUnlisten);
     mockInvoke.mockResolvedValue({
       status: "idle",
       remaining_seconds: 1500,
@@ -86,7 +165,9 @@ describe("useTimerSync", () => {
   });
 
   it("should set up event listeners on mount", async () => {
-    renderHook(() => useTimerSync());
+    renderHook(() => {
+      useTimerSync();
+    });
 
     await waitFor(() => {
       expect(mockListen).toHaveBeenCalled();
@@ -101,15 +182,22 @@ describe("useTimerSync", () => {
   });
 
   it("should call get_full_state on mount", async () => {
-    renderHook(() => useTimerSync());
+    renderHook(() => {
+      useTimerSync();
+    });
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("get_full_state");
+      expect(mockInvoke.mock.calls).toContainEqual([
+        "get_full_state",
+        undefined,
+      ]);
     });
   });
 
   it("should set isConnected to true after getting full state", async () => {
-    renderHook(() => useTimerSync());
+    renderHook(() => {
+      useTimerSync();
+    });
 
     await waitFor(() => {
       expect(useTimerStore.getState().isConnected).toBe(true);
@@ -117,23 +205,32 @@ describe("useTimerSync", () => {
   });
 
   it("should handle timer_tick events", async () => {
-    let tickHandler: ((event: { payload: unknown }) => void) | undefined;
+    let tickHandler: ((event: { payload: unknown }) => void) | undefined =
+      undefined;
 
-    mockListen.mockImplementation((event: string, handler: (event: { payload: unknown }) => void) => {
-      if (event === "timer_tick") {
-        tickHandler = handler;
-      }
-      return Promise.resolve(() => {});
+    mockListen.mockImplementation(
+      (event: string, handler: (event: { payload: unknown }) => void) => {
+        if (event === "timer_tick") {
+          tickHandler = handler;
+        }
+        return Promise.resolve(noopUnlisten);
+      },
+    );
+
+    renderHook(() => {
+      useTimerSync();
     });
-
-    renderHook(() => useTimerSync());
 
     await waitFor(() => {
       expect(tickHandler).toBeDefined();
     });
 
     // Simulate timer tick from backend
-    tickHandler!({
+    const definedTickHandler = getRequiredTimerEventHandler(
+      tickHandler,
+      "timer_tick handler",
+    );
+    definedTickHandler({
       payload: {
         status: "working",
         remaining_seconds: 1499,
@@ -150,23 +247,32 @@ describe("useTimerSync", () => {
   });
 
   it("should handle session_completed events", async () => {
-    let sessionHandler: ((event: { payload: unknown }) => void) | undefined;
+    let sessionHandler: ((event: { payload: unknown }) => void) | undefined =
+      undefined;
 
-    mockListen.mockImplementation((event: string, handler: (event: { payload: unknown }) => void) => {
-      if (event === "session_completed") {
-        sessionHandler = handler;
-      }
-      return Promise.resolve(() => {});
+    mockListen.mockImplementation(
+      (event: string, handler: (event: { payload: unknown }) => void) => {
+        if (event === "session_completed") {
+          sessionHandler = handler;
+        }
+        return Promise.resolve(noopUnlisten);
+      },
+    );
+
+    renderHook(() => {
+      useTimerSync();
     });
-
-    renderHook(() => useTimerSync());
 
     await waitFor(() => {
       expect(sessionHandler).toBeDefined();
     });
 
     // Simulate session completed from backend
-    sessionHandler!({
+    const definedSessionHandler = getRequiredTimerEventHandler(
+      sessionHandler,
+      "session_completed handler",
+    );
+    definedSessionHandler({
       payload: {
         transition_reason: "break_waiting_decision",
         completed_session_type: "short_break",
@@ -181,22 +287,31 @@ describe("useTimerSync", () => {
   });
 
   it("should call notifyWorkComplete with next_session_type", async () => {
-    let sessionHandler: ((event: { payload: unknown }) => void) | undefined;
+    let sessionHandler: ((event: { payload: unknown }) => void) | undefined =
+      undefined;
 
-    mockListen.mockImplementation((event: string, handler: (event: { payload: unknown }) => void) => {
-      if (event === "session_completed") {
-        sessionHandler = handler;
-      }
-      return Promise.resolve(() => {});
+    mockListen.mockImplementation(
+      (event: string, handler: (event: { payload: unknown }) => void) => {
+        if (event === "session_completed") {
+          sessionHandler = handler;
+        }
+        return Promise.resolve(noopUnlisten);
+      },
+    );
+
+    renderHook(() => {
+      useTimerSync();
     });
-
-    renderHook(() => useTimerSync());
 
     await waitFor(() => {
       expect(sessionHandler).toBeDefined();
     });
 
-    sessionHandler!({
+    const definedSessionHandler = getRequiredTimerEventHandler(
+      sessionHandler,
+      "session_completed handler",
+    );
+    definedSessionHandler({
       payload: {
         transition_reason: "work_to_break",
         completed_session_type: "work",
@@ -214,22 +329,31 @@ describe("useTimerSync", () => {
   });
 
   it("should call notifyBreakComplete when transition_reason is break_waiting_decision", async () => {
-    let sessionHandler: ((event: { payload: unknown }) => void) | undefined;
+    let sessionHandler: ((event: { payload: unknown }) => void) | undefined =
+      undefined;
 
-    mockListen.mockImplementation((event: string, handler: (event: { payload: unknown }) => void) => {
-      if (event === "session_completed") {
-        sessionHandler = handler;
-      }
-      return Promise.resolve(() => {});
+    mockListen.mockImplementation(
+      (event: string, handler: (event: { payload: unknown }) => void) => {
+        if (event === "session_completed") {
+          sessionHandler = handler;
+        }
+        return Promise.resolve(noopUnlisten);
+      },
+    );
+
+    renderHook(() => {
+      useTimerSync();
     });
-
-    renderHook(() => useTimerSync());
 
     await waitFor(() => {
       expect(sessionHandler).toBeDefined();
     });
 
-    sessionHandler!({
+    const definedSessionHandler = getRequiredTimerEventHandler(
+      sessionHandler,
+      "session_completed handler",
+    );
+    definedSessionHandler({
       payload: {
         transition_reason: "break_waiting_decision",
         completed_session_type: "long_break",
@@ -246,22 +370,31 @@ describe("useTimerSync", () => {
   });
 
   it("should call notifyBreakAutoStarted when transition_reason is break_auto_started", async () => {
-    let sessionHandler: ((event: { payload: unknown }) => void) | undefined;
+    let sessionHandler: ((event: { payload: unknown }) => void) | undefined =
+      undefined;
 
-    mockListen.mockImplementation((event: string, handler: (event: { payload: unknown }) => void) => {
-      if (event === "session_completed") {
-        sessionHandler = handler;
-      }
-      return Promise.resolve(() => {});
+    mockListen.mockImplementation(
+      (event: string, handler: (event: { payload: unknown }) => void) => {
+        if (event === "session_completed") {
+          sessionHandler = handler;
+        }
+        return Promise.resolve(noopUnlisten);
+      },
+    );
+
+    renderHook(() => {
+      useTimerSync();
     });
-
-    renderHook(() => useTimerSync());
 
     await waitFor(() => {
       expect(sessionHandler).toBeDefined();
     });
 
-    sessionHandler!({
+    const definedSessionHandler = getRequiredTimerEventHandler(
+      sessionHandler,
+      "session_completed handler",
+    );
+    definedSessionHandler({
       payload: {
         transition_reason: "break_auto_started",
         completed_session_type: "short_break",
@@ -278,22 +411,31 @@ describe("useTimerSync", () => {
   });
 
   it("should not call work-resume notifications for scheduled_stop_executed", async () => {
-    let sessionHandler: ((event: { payload: unknown }) => void) | undefined;
+    let sessionHandler: ((event: { payload: unknown }) => void) | undefined =
+      undefined;
 
-    mockListen.mockImplementation((event: string, handler: (event: { payload: unknown }) => void) => {
-      if (event === "session_completed") {
-        sessionHandler = handler;
-      }
-      return Promise.resolve(() => {});
+    mockListen.mockImplementation(
+      (event: string, handler: (event: { payload: unknown }) => void) => {
+        if (event === "session_completed") {
+          sessionHandler = handler;
+        }
+        return Promise.resolve(noopUnlisten);
+      },
+    );
+
+    renderHook(() => {
+      useTimerSync();
     });
-
-    renderHook(() => useTimerSync());
 
     await waitFor(() => {
       expect(sessionHandler).toBeDefined();
     });
 
-    sessionHandler!({
+    const definedSessionHandler = getRequiredTimerEventHandler(
+      sessionHandler,
+      "session_completed handler",
+    );
+    definedSessionHandler({
       payload: {
         transition_reason: "scheduled_stop_executed",
         completed_session_type: "short_break",
@@ -313,7 +455,9 @@ describe("useTimerSync", () => {
     const unsubscribe = vi.fn();
     mockListen.mockResolvedValue(unsubscribe);
 
-    const { unmount } = renderHook(() => useTimerSync());
+    const { unmount } = renderHook(() => {
+      useTimerSync();
+    });
 
     await waitFor(() => {
       expect(mockListen).toHaveBeenCalled();
@@ -326,70 +470,99 @@ describe("useTimerSync", () => {
   });
 
   it("should show stop-pending info on auto_run_stop_pending events", async () => {
-    let stopPendingListener: (() => void) | undefined;
+    let stopPendingListener: (() => void) | undefined = undefined;
 
-    mockListen.mockImplementation((event: string, listener: () => void) => {
-      if (event === "auto_run_stop_pending") {
-        stopPendingListener = listener;
-      }
-      return Promise.resolve(() => {});
+    mockListen.mockImplementation(
+      (event: string, handler: TimerEventHandler | (() => void)) => {
+        if (event === "auto_run_stop_pending") {
+          stopPendingListener = expectVoidListener(
+            handler,
+            "auto_run_stop_pending",
+          );
+        }
+        return Promise.resolve(noopUnlisten);
+      },
+    );
+
+    renderHook(() => {
+      useTimerSync();
     });
-
-    renderHook(() => useTimerSync());
 
     await waitFor(() => {
       expect(stopPendingListener).toBeDefined();
     });
 
-    stopPendingListener!();
+    const definedStopPendingListener = getRequiredVoidListener(
+      stopPendingListener,
+      "auto_run_stop_pending listener",
+    );
+    definedStopPendingListener();
 
-    expect(useTimerStore.getState().infoMessage?.id).toBe("auto_run_stop_pending");
+    expect(useTimerStore.getState().infoMessage?.id).toBe(
+      "auto_run_stop_pending",
+    );
   });
 
   it("should show stopped info on auto_run_stopped events", async () => {
-    let stoppedListener: (() => void) | undefined;
+    let stoppedListener: (() => void) | undefined = undefined;
 
-    mockListen.mockImplementation((event: string, listener: () => void) => {
-      if (event === "auto_run_stopped") {
-        stoppedListener = listener;
-      }
-      return Promise.resolve(() => {});
+    mockListen.mockImplementation(
+      (event: string, handler: TimerEventHandler | (() => void)) => {
+        if (event === "auto_run_stopped") {
+          stoppedListener = expectVoidListener(handler, "auto_run_stopped");
+        }
+        return Promise.resolve(noopUnlisten);
+      },
+    );
+
+    renderHook(() => {
+      useTimerSync();
     });
-
-    renderHook(() => useTimerSync());
 
     await waitFor(() => {
       expect(stoppedListener).toBeDefined();
     });
 
-    stoppedListener!();
+    const definedStoppedListener = getRequiredVoidListener(
+      stoppedListener,
+      "auto_run_stopped listener",
+    );
+    definedStoppedListener();
 
     expect(useTimerStore.getState().infoMessage?.id).toBe("auto_run_stopped");
   });
 
   it("should sync settings to backend on mount", async () => {
-    renderHook(() => useTimerSync());
+    renderHook(() => {
+      useTimerSync();
+    });
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith(
+      const durationSettingsPayload = getInvokePayload(
         "sync_timer_duration_settings",
-        expect.objectContaining({
-          workDurationSecs: expect.any(Number),
-          shortBreakDurationSecs: expect.any(Number),
-          longBreakDurationSecs: expect.any(Number),
-          longBreakInterval: expect.any(Number),
-        })
       );
+      expect(typeof durationSettingsPayload.workDurationSecs).toBe("number");
+      expect(typeof durationSettingsPayload.shortBreakDurationSecs).toBe(
+        "number",
+      );
+      expect(typeof durationSettingsPayload.longBreakDurationSecs).toBe(
+        "number",
+      );
+      expect(typeof durationSettingsPayload.longBreakInterval).toBe("number");
 
-      expect(mockInvoke).toHaveBeenCalledWith(
+      const automationPoliciesPayload = getInvokePayload(
         "sync_automation_policies",
-        expect.objectContaining({
-          postBreakTransitionPolicy: "require_manual_continue",
-          autoRunFeatureEnabled: expect.any(Boolean),
-          weeklyAutoRunConfig: expect.any(Object),
-        })
+      );
+      expect(automationPoliciesPayload.postBreakTransitionPolicy).toBe(
+        "require_manual_continue",
+      );
+      expect(typeof automationPoliciesPayload.autoRunFeatureEnabled).toBe(
+        "boolean",
+      );
+      expectRecord(
+        automationPoliciesPayload.weeklyAutoRunConfig,
+        "weeklyAutoRunConfig",
       );
     });
   });
 });
-

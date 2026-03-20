@@ -705,11 +705,13 @@ mod tests {
 
     #[test]
     fn test_timer_state_to_tick_payload() {
-        let mut state = TimerState::default();
-        state.status = TimerStatus::Working;
-        state.remaining_seconds = 1500;
-        state.session_type = SessionType::Work;
-        state.current_cycle = 2;
+        let state = TimerState {
+            status: TimerStatus::Working,
+            remaining_seconds: 1500,
+            session_type: SessionType::Work,
+            current_cycle: 2,
+            ..TimerState::default()
+        };
 
         let payload = state.to_tick_payload();
         assert_eq!(payload.status, TimerStatus::Working);
@@ -720,13 +722,15 @@ mod tests {
 
     #[test]
     fn test_timer_state_to_full_payload() {
-        let mut state = TimerState::default();
-        state.status = TimerStatus::OnBreak;
-        state.remaining_seconds = 300;
-        state.session_type = SessionType::ShortBreak;
-        state.current_cycle = 1;
-        state.completed_pomodoros = 1;
-        state.post_break_decision_pending = false;
+        let state = TimerState {
+            status: TimerStatus::OnBreak,
+            remaining_seconds: 300,
+            session_type: SessionType::ShortBreak,
+            current_cycle: 1,
+            completed_pomodoros: 1,
+            post_break_decision_pending: false,
+            ..TimerState::default()
+        };
 
         let payload = state.to_full_payload();
         assert_eq!(payload.status, TimerStatus::OnBreak);
@@ -1425,9 +1429,11 @@ mod tests {
 
     #[test]
     fn test_initialize_from_persisted_state_returns_payload_when_running() {
-        let mut state = TimerState::default();
-        state.status = TimerStatus::Working;
-        state.remaining_seconds = 900;
+        let state = TimerState {
+            status: TimerStatus::Working,
+            remaining_seconds: 900,
+            ..TimerState::default()
+        };
 
         let mut mgr = TimerStateManager::new(Some(state));
         let result = mgr.initialize_from_persisted_state().unwrap();

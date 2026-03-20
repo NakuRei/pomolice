@@ -15,6 +15,13 @@ import MathChallenge from "./steps/MathChallenge";
 import LongPressButton from "./steps/LongPressButton";
 import FinalWarning from "./steps/FinalWarning";
 
+const CONFIRMATION_STEPS = new Set<number>([
+  SKIP_FLOW_STEPS.CONFIRMATION_1,
+  SKIP_FLOW_STEPS.CONFIRMATION_2,
+  SKIP_FLOW_STEPS.CONFIRMATION_3,
+  SKIP_FLOW_STEPS.CONFIRMATION_4,
+]);
+
 interface SkipFlowModalProps {
   onComplete: () => void;
   onCancel: () => void;
@@ -27,9 +34,17 @@ interface SkipFlowModalProps {
  * Note: Input penalties are now handled entirely by the backend.
  * The backend monitors global input and applies penalties directly.
  */
-export default function SkipFlowModal({ onComplete, onCancel }: SkipFlowModalProps) {
-  const { currentStep, nextStep, cancelSkipFlow, completeSkipFlow, updateTimeSpent } =
-    useSkipFlowStore();
+export default function SkipFlowModal({
+  onComplete,
+  onCancel,
+}: SkipFlowModalProps): React.ReactElement {
+  const {
+    currentStep,
+    nextStep,
+    cancelSkipFlow,
+    completeSkipFlow,
+    updateTimeSpent,
+  } = useSkipFlowStore();
 
   // Update time spent every second
   useEffect(() => {
@@ -37,38 +52,38 @@ export default function SkipFlowModal({ onComplete, onCancel }: SkipFlowModalPro
       updateTimeSpent();
     }, 1000);
 
-    return () => clearInterval(interval);
+    return (): void => {
+      clearInterval(interval);
+    };
   }, [updateTimeSpent]);
 
-  const handleNext = () => {
+  const handleNext = (): void => {
     nextStep();
   };
 
-  const handleCancel = () => {
+  const handleCancel = (): void => {
     cancelSkipFlow();
     onCancel();
   };
 
-  const handleComplete = () => {
+  const handleComplete = (): void => {
     completeSkipFlow();
     onComplete();
   };
 
   // Render appropriate step component
-  const renderStep = () => {
-    switch (currentStep) {
-      case SKIP_FLOW_STEPS.CONFIRMATION_1:
-      case SKIP_FLOW_STEPS.CONFIRMATION_2:
-      case SKIP_FLOW_STEPS.CONFIRMATION_3:
-      case SKIP_FLOW_STEPS.CONFIRMATION_4:
-        return (
-          <ConfirmationStep
-            step={currentStep}
-            onConfirm={handleNext}
-            onCancel={handleCancel}
-          />
-        );
+  const renderStep = (): React.ReactElement | null => {
+    if (CONFIRMATION_STEPS.has(currentStep)) {
+      return (
+        <ConfirmationStep
+          step={currentStep}
+          onConfirm={handleNext}
+          onCancel={handleCancel}
+        />
+      );
+    }
 
+    switch (currentStep) {
       case SKIP_FLOW_STEPS.TYPING_CHALLENGE_1:
         return (
           <TypingChallenge

@@ -10,7 +10,7 @@
  * - Retry counting
  */
 
-import { useState, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSkipFlowStore } from "../../../store/skipFlowStore";
 import {
   generateEasyProblem,
@@ -34,32 +34,31 @@ export default function MathChallenge({
   difficulty,
   onComplete,
   onCancel,
-}: MathChallengeProps) {
-  const { retryStep } = useSkipFlowStore();
-  const [problem, setProblem] = useState<MathProblem | null>(null);
+}: MathChallengeProps): React.ReactElement {
+  const retryStep = useSkipFlowStore((state) => state.retryStep);
+  const [problem, setProblem] = useState<MathProblem>(() =>
+    difficulty === "easy" ? generateEasyProblem() : generateHardProblem(),
+  );
   const [userAnswer, setUserAnswer] = useState("");
   const [showError, setShowError] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Generate initial problem
-  useEffect(() => {
-    generateNewProblem();
-    // Focus input on mount
-    inputRef.current?.focus();
-  }, [difficulty]);
-
-  const generateNewProblem = () => {
+  const generateNewProblem = useCallback(() => {
     const newProblem =
       difficulty === "easy" ? generateEasyProblem() : generateHardProblem();
     setProblem(newProblem);
     setUserAnswer("");
     setShowError(false);
-  };
+  }, [difficulty]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const handleSubmit = (e: React.SyntheticEvent<HTMLFormElement>): void => {
     e.preventDefault();
 
-    if (!problem || userAnswer.trim() === "") {
+    if (userAnswer.trim() === "") {
       return;
     }
 
@@ -81,17 +80,13 @@ export default function MathChallenge({
     }
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
     // Only allow numbers and negative sign
     const value = e.target.value;
-    if (value === "" || value === "-" || /^-?\d+$/.test(value)) {
+    if (value === "" || value === "-" || /^-?\d+$/u.test(value)) {
       setUserAnswer(value);
     }
   };
-
-  if (!problem) {
-    return <div>Loading...</div>;
-  }
 
   return (
     <SkipFlowStepFrame
@@ -139,7 +134,7 @@ export default function MathChallenge({
               disabled={showError}
               placeholder="Your answer"
               autoComplete="off"
-              className={`w-32 rounded-lg border-2 bg-background px-4 py-3 text-center font-mono text-2xl text-on-background placeholder:text-text-muted focus:outline-none focus:ring-2 ${
+              className={`w-32 rounded-lg border-2 bg-background px-4 py-3 text-center font-mono text-2xl text-on-background placeholder:text-text-muted focus:ring-2 focus:outline-none ${
                 showError
                   ? "border-danger-500 focus:ring-danger-500"
                   : "border-border focus:ring-primary-600"
@@ -148,7 +143,7 @@ export default function MathChallenge({
             <button
               type="submit"
               disabled={showError || userAnswer.trim() === ""}
-              className="rounded-lg bg-primary-700 px-6 py-3 font-semibold text-on-primary transition-colors hover:bg-primary-800 focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2 focus:ring-offset-surface disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-primary-700 px-6 py-3 font-semibold text-on-primary transition-colors hover:bg-primary-800 focus:ring-2 focus:ring-primary-600 focus:ring-offset-2 focus:ring-offset-surface focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
             >
               Submit
             </button>

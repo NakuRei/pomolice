@@ -30,6 +30,10 @@ export const SKIP_FLOW_STEPS = {
 
 export const TOTAL_STEPS = 10;
 
+function createStepsCompletedState(): boolean[] {
+  return Array.from({ length: TOTAL_STEPS }, () => false);
+}
+
 /**
  * Skip flow state interface
  */
@@ -90,7 +94,7 @@ type SkipFlowStore = SkipFlowState & SkipFlowActions;
 const initialState: SkipFlowState = {
   isActive: false,
   currentStep: 1,
-  stepsCompleted: Array(TOTAL_STEPS).fill(false),
+  stepsCompleted: createStepsCompletedState(),
   stepRetries: {},
   totalTimeSpent: 0,
   startedAt: null,
@@ -99,7 +103,7 @@ const initialState: SkipFlowState = {
 /**
  * Helper to conditionally apply devtools middleware only in development
  */
-const noopDevtools = (<T,>(config: T): T => config) as typeof devtools;
+const noopDevtools = (<T>(config: T): T => config) as typeof devtools;
 const conditionalDevtools = import.meta.env.DEV ? devtools : noopDevtools;
 
 /**
@@ -112,17 +116,18 @@ export const useSkipFlowStore = create<SkipFlowStore>()(
     immer((set, get) => ({
       ...initialState,
 
-      startSkipFlow: () =>
+      startSkipFlow: (): void => {
         set((state) => {
           state.isActive = true;
           state.currentStep = 1;
-          state.stepsCompleted = Array(TOTAL_STEPS).fill(false);
+          state.stepsCompleted = createStepsCompletedState();
           state.stepRetries = {};
           state.totalTimeSpent = 0;
           state.startedAt = Date.now();
-        }),
+        });
+      },
 
-      nextStep: () => {
+      nextStep: (): void => {
         set((draft) => {
           // Mark current step as completed
           draft.stepsCompleted[draft.currentStep - 1] = true;
@@ -139,7 +144,7 @@ export const useSkipFlowStore = create<SkipFlowStore>()(
         }
       },
 
-      retryStep: () => {
+      retryStep: (): void => {
         set((draft) => {
           // Increment retry count for current step
           const currentRetries = draft.stepRetries[draft.currentStep] || 0;
@@ -147,25 +152,28 @@ export const useSkipFlowStore = create<SkipFlowStore>()(
         });
       },
 
-      cancelSkipFlow: () =>
+      cancelSkipFlow: (): void => {
         set((state) => {
           // Reset to initial state
           state.isActive = false;
           state.currentStep = 1;
-          state.stepsCompleted = Array(TOTAL_STEPS).fill(false);
+          state.stepsCompleted = createStepsCompletedState();
           state.stepRetries = {};
           state.totalTimeSpent = 0;
           state.startedAt = null;
-        }),
+        });
+      },
 
-      completeSkipFlow: () => {
+      completeSkipFlow: (): void => {
         set((draft) => {
           // Mark final step as completed
           draft.stepsCompleted[TOTAL_STEPS - 1] = true;
 
           // Calculate final time spent
           if (draft.startedAt !== null) {
-            draft.totalTimeSpent = Math.floor((Date.now() - draft.startedAt) / 1000);
+            draft.totalTimeSpent = Math.floor(
+              (Date.now() - draft.startedAt) / 1000,
+            );
           }
 
           // Mark as inactive (will be reset externally)
@@ -176,7 +184,7 @@ export const useSkipFlowStore = create<SkipFlowStore>()(
         // will be handled by the component that calls this action
       },
 
-      updateTimeSpent: () => {
+      updateTimeSpent: (): void => {
         const state = get();
 
         if (!state.isActive || state.startedAt === null) {
@@ -184,12 +192,17 @@ export const useSkipFlowStore = create<SkipFlowStore>()(
         }
 
         set((draft) => {
-          draft.totalTimeSpent = Math.floor((Date.now() - draft.startedAt!) / 1000);
+          if (draft.startedAt === null) return;
+          draft.totalTimeSpent = Math.floor(
+            (Date.now() - draft.startedAt) / 1000,
+          );
         });
       },
 
-      resetSkipFlow: () => set(initialState),
+      resetSkipFlow: (): void => {
+        set(initialState);
+      },
     })),
-    { name: "SkipFlowStore" }
-  )
+    { name: "SkipFlowStore" },
+  ),
 );

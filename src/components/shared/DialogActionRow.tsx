@@ -23,7 +23,7 @@ export function DialogActionRow({
   children,
   className = "",
   testId,
-}: DialogActionRowProps) {
+}: DialogActionRowProps): React.ReactElement {
   const actionRowClassName = [DIALOG_ACTION_ROW_BASE_CLASS_NAME, className]
     .filter(Boolean)
     .join(" ");

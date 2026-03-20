@@ -170,7 +170,7 @@ fn render_icon_rgba(
     match glyph_mode {
         TrayGlyphMode::IdleSymbol => tray_icon_renderer::render_idle_icon(),
         TrayGlyphMode::RemainingMinutes => {
-            let remaining_minutes = (remaining_seconds + 59) / 60; // Round up
+            let remaining_minutes = remaining_seconds.div_ceil(60); // Round up
             tray_icon_renderer::render_tray_icon(remaining_minutes as u32, status)
         }
     }

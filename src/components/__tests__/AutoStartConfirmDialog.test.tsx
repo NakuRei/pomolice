@@ -1,15 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { AutoStartConfirmDialog } from "../AutoStartConfirmDialog";
-import { SessionType, TimerStatus, useTimerStore } from "../../store/timerStore";
+import {
+  SessionType,
+  TimerStatus,
+  useTimerStore,
+} from "../../store/timerStore";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockResolvedValue("resolved_later"),
 }));
 
-function setDialogVisible() {
+function setDialogVisible(): void {
   useTimerStore.setState({
     shouldPromptStartOnBoot: true,
     activeWindowSummary: {
@@ -41,7 +51,9 @@ describe("AutoStartConfirmDialog", () => {
 
   it("does not render when startup prompt is not required", () => {
     render(<AutoStartConfirmDialog />);
-    expect(screen.queryByTestId("auto-start-confirm-dialog")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("auto-start-confirm-dialog"),
+    ).not.toBeInTheDocument();
   });
 
   it("does not render when prompt flag is true but active window summary is missing", () => {
@@ -51,7 +63,9 @@ describe("AutoStartConfirmDialog", () => {
     });
 
     render(<AutoStartConfirmDialog />);
-    expect(screen.queryByTestId("auto-start-confirm-dialog")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("auto-start-confirm-dialog"),
+    ).not.toBeInTheDocument();
   });
 
   it("does not render when active window summary exists but prompt flag is false", () => {
@@ -66,7 +80,9 @@ describe("AutoStartConfirmDialog", () => {
     });
 
     render(<AutoStartConfirmDialog />);
-    expect(screen.queryByTestId("auto-start-confirm-dialog")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("auto-start-confirm-dialog"),
+    ).not.toBeInTheDocument();
   });
 
   it("renders current window summary when startup prompt is required", () => {
@@ -77,10 +93,17 @@ describe("AutoStartConfirmDialog", () => {
 
     expect(screen.getByTestId("auto-start-confirm-dialog")).toBeInTheDocument();
     expect(dialog).toHaveAttribute("aria-modal", "true");
-    expect(dialog).toHaveAttribute("aria-labelledby", "auto-start-confirm-dialog-title");
-    expect(screen.getByText(/現在は 月曜日 09:00 - 18:00/)).toBeInTheDocument();
+    expect(dialog).toHaveAttribute(
+      "aria-labelledby",
+      "auto-start-confirm-dialog-title",
+    );
     expect(
-      screen.getByText("開始すると終了時刻連動でセッション区切り停止されます。")
+      screen.getByText(/現在は 月曜日 09:00 - 18:00/u),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "開始すると終了時刻連動でセッション区切り停止されます。",
+      ),
     ).toBeInTheDocument();
   });
 
@@ -128,7 +151,9 @@ describe("AutoStartConfirmDialog", () => {
     await user.click(screen.getByTestId("auto-start-confirm-later"));
 
     await waitFor(() => {
-      expect(screen.queryByTestId("auto-start-confirm-dialog")).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("auto-start-confirm-dialog"),
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -139,10 +164,12 @@ describe("AutoStartConfirmDialog", () => {
 
     await user.click(screen.getByTestId("auto-start-confirm-later"));
     await waitFor(() => {
-      expect(screen.queryByTestId("auto-start-confirm-dialog")).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("auto-start-confirm-dialog"),
+      ).not.toBeInTheDocument();
     });
 
-    await act(async () => {
+    act(() => {
       useTimerStore.setState({
         shouldPromptStartOnBoot: false,
         activeWindowSummary: null,
@@ -151,7 +178,9 @@ describe("AutoStartConfirmDialog", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId("auto-start-confirm-dialog")).toBeInTheDocument();
+      expect(
+        screen.getByTestId("auto-start-confirm-dialog"),
+      ).toBeInTheDocument();
     });
   });
 
@@ -163,9 +192,12 @@ describe("AutoStartConfirmDialog", () => {
     fireEvent.keyDown(window, { key: "Escape" });
 
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("resolve_boot_auto_start_prompt", {
-        startNow: false,
-      });
+      expect(invokeMock).toHaveBeenCalledWith(
+        "resolve_boot_auto_start_prompt",
+        {
+          startNow: false,
+        },
+      );
     });
   });
 

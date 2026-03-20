@@ -37,7 +37,7 @@ describe("ConnectionBanner", () => {
   });
 
   it("shows retry button only when canRetry is true", () => {
-    const retryFn = vi.fn(async () => undefined);
+    const retryFn = vi.fn(() => Promise.resolve());
 
     useErrorStore.getState().reportError({
       id: "connection",
@@ -51,7 +51,9 @@ describe("ConnectionBanner", () => {
 
     const { rerender } = render(<ConnectionBanner />);
 
-    expect(screen.queryByTestId("connection-banner-retry")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("connection-banner-retry"),
+    ).not.toBeInTheDocument();
 
     useErrorStore.getState().reportError({
       id: "connection",
@@ -70,7 +72,9 @@ describe("ConnectionBanner", () => {
 
   it("shows retrying state while retryFn is pending", async () => {
     const user = userEvent.setup();
-    let resolveRetry!: () => void;
+    let resolveRetry: () => void = () => {
+      throw new Error("Retry promise resolver was not initialized");
+    };
     const retryPromise = new Promise<void>((resolve) => {
       resolveRetry = resolve;
     });

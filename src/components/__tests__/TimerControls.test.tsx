@@ -2,12 +2,35 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TimerControls } from "../Timer/TimerControls";
-import { useTimerStore, TimerStatus, SessionType } from "../../store/timerStore";
+import {
+  useTimerStore,
+  TimerStatus,
+  SessionType,
+} from "../../store/timerStore";
+
+type InvokeCommand = (
+  command: string,
+  args?: Record<string, unknown>,
+) => Promise<unknown>;
+
+const mockInvoke = vi.fn<InvokeCommand>();
 
 // Mock Tauri invoke
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn().mockResolvedValue(undefined),
+  invoke: (command: string, args?: Record<string, unknown>): Promise<unknown> =>
+    mockInvoke(command, args),
 }));
+
+function getInvokeCall(callIndex: number): {
+  command: string;
+  payload: Record<string, unknown> | undefined;
+} {
+  const invokeCall = mockInvoke.mock.calls[callIndex];
+  expect(invokeCall).toBeDefined();
+
+  const [command, payload] = invokeCall;
+  return { command, payload };
+}
 
 describe("TimerControls", () => {
   beforeEach(() => {
@@ -40,23 +63,24 @@ describe("TimerControls", () => {
     });
 
     it("should call startWork when start button is clicked", async () => {
-      const { invoke } = await import("@tauri-apps/api/core");
       const user = userEvent.setup();
       render(<TimerControls />);
 
       const startButton = screen.getByTestId("start-button");
       await user.click(startButton);
 
-      expect(invoke).toHaveBeenCalledWith(
-        "start_work",
-        expect.objectContaining({
-          workDurationSecs: expect.any(Number),
-          shortBreakDurationSecs: expect.any(Number),
-          longBreakDurationSecs: expect.any(Number),
-          longBreakInterval: expect.any(Number),
-          postBreakTransitionPolicy: "require_manual_continue",
-        })
-      );
+      const { command, payload } = getInvokeCall(0);
+      expect(command).toBe("start_work");
+      expect(payload).toBeDefined();
+      if (!payload) {
+        throw new Error("Expected start_work payload");
+      }
+
+      expect(typeof payload.workDurationSecs).toBe("number");
+      expect(typeof payload.shortBreakDurationSecs).toBe("number");
+      expect(typeof payload.longBreakDurationSecs).toBe("number");
+      expect(typeof payload.longBreakInterval).toBe("number");
+      expect(payload.postBreakTransitionPolicy).toBe("require_manual_continue");
     });
   });
 
@@ -98,7 +122,7 @@ describe("TimerControls", () => {
   });
 
   describe("State Transitions", () => {
-    it("should hide start button after starting (backend updates state)", async () => {
+    it("should hide start button after starting (backend updates state)", () => {
       const { rerender } = render(<TimerControls />);
 
       // Initially shows start button
@@ -116,7 +140,7 @@ describe("TimerControls", () => {
       expect(screen.queryByTestId("start-button")).not.toBeInTheDocument();
     });
 
-    it("should show start button again after emergency stop (backend updates state)", async () => {
+    it("should show start button again after emergency stop (backend updates state)", () => {
       const { rerender } = render(<TimerControls />);
 
       // Simulate working state from backend

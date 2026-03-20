@@ -8,11 +8,16 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import MathChallenge from "../steps/MathChallenge";
 
+const mockRetryStep = vi.fn();
+
 // Mock the store
 vi.mock("../../../store/skipFlowStore", () => ({
-  useSkipFlowStore: vi.fn(() => ({
-    retryStep: vi.fn(),
-  })),
+  useSkipFlowStore: vi.fn(
+    (selector: (state: { retryStep: typeof mockRetryStep }) => unknown) =>
+      selector({
+        retryStep: mockRetryStep,
+      }),
+  ),
 }));
 
 // Mock math generator
@@ -37,6 +42,7 @@ describe("MathChallenge", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRetryStep.mockReset();
   });
 
   describe("Rendering", () => {
@@ -46,13 +52,11 @@ describe("MathChallenge", () => {
           difficulty="easy"
           onComplete={mockOnComplete}
           onCancel={mockOnCancel}
-        />
+        />,
       );
 
       expect(screen.getByText("Math Challenge")).toBeInTheDocument();
-      expect(
-        screen.getByText(/Solve the following/i)
-      ).toBeInTheDocument();
+      expect(screen.getByText(/Solve the following/iu)).toBeInTheDocument();
     });
 
     it("should display math problem", () => {
@@ -61,11 +65,11 @@ describe("MathChallenge", () => {
           difficulty="easy"
           onComplete={mockOnComplete}
           onCancel={mockOnCancel}
-        />
+        />,
       );
 
       // Should display a question mark
-      expect(screen.getByText(/= \?/)).toBeInTheDocument();
+      expect(screen.getByText(/[=] \?/u)).toBeInTheDocument();
     });
 
     it("should render input and submit button", () => {
@@ -74,11 +78,13 @@ describe("MathChallenge", () => {
           difficulty="easy"
           onComplete={mockOnComplete}
           onCancel={mockOnCancel}
-        />
+        />,
       );
 
       expect(screen.getByPlaceholderText("Your answer")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /Submit/i })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /Submit/iu }),
+      ).toBeInTheDocument();
     });
 
     it("should render cancel button", () => {
@@ -87,11 +93,11 @@ describe("MathChallenge", () => {
           difficulty="easy"
           onComplete={mockOnComplete}
           onCancel={mockOnCancel}
-        />
+        />,
       );
 
       expect(
-        screen.getByRole("button", { name: /Cancel and Take Break/i })
+        screen.getByRole("button", { name: /Cancel and Take Break/iu }),
       ).toBeInTheDocument();
     });
   });
@@ -105,7 +111,7 @@ describe("MathChallenge", () => {
           difficulty="easy"
           onComplete={mockOnComplete}
           onCancel={mockOnCancel}
-        />
+        />,
       );
 
       const input = screen.getByPlaceholderText("Your answer");
@@ -122,7 +128,7 @@ describe("MathChallenge", () => {
           difficulty="easy"
           onComplete={mockOnComplete}
           onCancel={mockOnCancel}
-        />
+        />,
       );
 
       const input = screen.getByPlaceholderText("Your answer");
@@ -139,7 +145,7 @@ describe("MathChallenge", () => {
           difficulty="easy"
           onComplete={mockOnComplete}
           onCancel={mockOnCancel}
-        />
+        />,
       );
 
       const input = screen.getByPlaceholderText("Your answer");
@@ -155,9 +161,8 @@ describe("MathChallenge", () => {
       const user = userEvent.setup();
 
       // Mock to generate predictable problem
-      const { generateEasyProblem } = await import(
-        "../../../utils/mathGenerator"
-      );
+      const { generateEasyProblem } =
+        await import("../../../utils/mathGenerator");
       vi.mocked(generateEasyProblem).mockReturnValue({
         question: "10 + 5 = ?",
         answer: 15,
@@ -168,11 +173,11 @@ describe("MathChallenge", () => {
           difficulty="easy"
           onComplete={mockOnComplete}
           onCancel={mockOnCancel}
-        />
+        />,
       );
 
       const input = screen.getByPlaceholderText("Your answer");
-      const submitButton = screen.getByRole("button", { name: /Submit/i });
+      const submitButton = screen.getByRole("button", { name: /Submit/iu });
 
       await user.type(input, "15");
       await user.click(submitButton);
@@ -192,11 +197,11 @@ describe("MathChallenge", () => {
           difficulty="easy"
           onComplete={mockOnComplete}
           onCancel={mockOnCancel}
-        />
+        />,
       );
 
       const cancelButton = screen.getByRole("button", {
-        name: /Cancel and Take Break/i,
+        name: /Cancel and Take Break/iu,
       });
       await user.click(cancelButton);
 
@@ -211,7 +216,7 @@ describe("MathChallenge", () => {
           difficulty="easy"
           onComplete={mockOnComplete}
           onCancel={mockOnCancel}
-        />
+        />,
       );
 
       const input = screen.getByPlaceholderText("Your answer");
@@ -224,12 +229,12 @@ describe("MathChallenge", () => {
           difficulty="easy"
           onComplete={mockOnComplete}
           onCancel={mockOnCancel}
-        />
+        />,
       );
 
       const input = screen.getByPlaceholderText("Your answer");
       const cancelButton = screen.getByRole("button", {
-        name: /Cancel and Take Break/i,
+        name: /Cancel and Take Break/iu,
       });
 
       // All elements should be focusable

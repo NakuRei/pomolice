@@ -9,14 +9,12 @@ import {
   convertWeekdayKeyToChronoWeekdayToken,
   convertWeekdayKeyToDateDayIndex,
   createWeeklyAutoRunConfigAllDaysDisabled,
-} from "../types/weeklyAutoRun";
-import type {
-  DayAutoRunSlot,
-  DayScheduleValidationError,
-  TimerStartSource,
-  WeeklyAutoRunConfig,
-  WeeklyScheduleValidationError,
-  WeekdayKey,
+  type DayAutoRunSlot,
+  type DayScheduleValidationError,
+  type TimerStartSource,
+  type WeeklyAutoRunConfig,
+  type WeeklyScheduleValidationError,
+  type WeekdayKey,
 } from "../types/weeklyAutoRun";
 
 export type {
@@ -60,7 +58,9 @@ interface SettingsState {
   /** Weekly auto-run schedule keyed by weekday. */
   weeklyAutoRunConfig: WeeklyAutoRunConfig;
   /** Validation errors scoped to each weekday row. */
-  dayScheduleValidationErrors: Partial<Record<WeekdayKey, DayScheduleValidationError>>;
+  dayScheduleValidationErrors: Partial<
+    Record<WeekdayKey, DayScheduleValidationError>
+  >;
   /** Validation errors that compare multiple weekdays. */
   weeklyScheduleValidationErrors: WeeklyScheduleValidationError[];
 }
@@ -151,14 +151,14 @@ export const DEFAULT_SETTINGS: SettingsState = createDefaultSettingsState();
  * - longBreakDuration: { min: 5 }
  */
 export const VALIDATION_RULES = {
-  workDuration: { min: 0.01, max: 120 },        // TEMP: 0.01 min (0.6 sec) for testing
-  shortBreakDuration: { min: 0.01, max: 60 },   // TEMP: 0.01 min (0.6 sec) for testing
-  longBreakDuration: { min: 0.01, max: 60 },    // TEMP: 0.01 min (0.6 sec) for testing
+  workDuration: { min: 0.01, max: 120 }, // TEMP: 0.01 min (0.6 sec) for testing
+  shortBreakDuration: { min: 0.01, max: 60 }, // TEMP: 0.01 min (0.6 sec) for testing
+  longBreakDuration: { min: 0.01, max: 60 }, // TEMP: 0.01 min (0.6 sec) for testing
   longBreakInterval: { min: 2, max: 10 },
   notificationSoundVolumePercent: { min: 0, max: 100 },
 } as const;
 
-const HH_MM_TIME_TEXT_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+const HH_MM_TIME_TEXT_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 const MINUTES_PER_DAY = 24 * 60;
 const WEEKDAY_INDEX_BY_KEY: Record<WeekdayKey, number> = {
   mon: 0,
@@ -181,6 +181,11 @@ interface WeekMinuteRange {
   endMinuteOfWeek: number;
 }
 
+interface ComparableWeekdaySchedule {
+  weekday: WeekdayKey;
+  ranges: WeekMinuteRange[];
+}
+
 /**
  * Result of validating a weekly schedule before save.
  *
@@ -193,7 +198,9 @@ interface WeekMinuteRange {
  * ```
  */
 export interface WeeklyAutoRunValidationResult {
-  dayScheduleValidationErrors: Partial<Record<WeekdayKey, DayScheduleValidationError>>;
+  dayScheduleValidationErrors: Partial<
+    Record<WeekdayKey, DayScheduleValidationError>
+  >;
   weeklyScheduleValidationErrors: WeeklyScheduleValidationError[];
 }
 
@@ -213,7 +220,9 @@ export function parseHhMm(timeText: string): ParsedHhMm | null {
   };
 }
 
-function cloneWeeklyAutoRunConfig(config: WeeklyAutoRunConfig): WeeklyAutoRunConfig {
+function cloneWeeklyAutoRunConfig(
+  config: WeeklyAutoRunConfig,
+): WeeklyAutoRunConfig {
   return {
     mon: { ...config.mon },
     tue: { ...config.tue },
@@ -227,7 +236,7 @@ function cloneWeeklyAutoRunConfig(config: WeeklyAutoRunConfig): WeeklyAutoRunCon
 
 function createDayScheduleValidationError(
   weekday: WeekdayKey,
-  daySlot: DayAutoRunSlot
+  daySlot: DayAutoRunSlot,
 ): DayScheduleValidationError | undefined {
   if (!daySlot.enabled) {
     return undefined;
@@ -268,7 +277,7 @@ function createDayScheduleValidationError(
 
 function createWeekMinuteRanges(
   weekday: WeekdayKey,
-  daySlot: DayAutoRunSlot
+  daySlot: DayAutoRunSlot,
 ): WeekMinuteRange[] {
   const parsedStart = parseHhMm(daySlot.startTime);
   const parsedEnd = parseHhMm(daySlot.endTime);
@@ -283,8 +292,10 @@ function createWeekMinuteRanges(
 
   const weekdayIndex = WEEKDAY_INDEX_BY_KEY[weekday];
   const dayStartMinuteOfWeek = weekdayIndex * MINUTES_PER_DAY;
-  const startMinuteOfWeek = dayStartMinuteOfWeek + parsedStart.minutesSinceStartOfDay;
-  const endMinuteOfWeek = dayStartMinuteOfWeek + parsedEnd.minutesSinceStartOfDay;
+  const startMinuteOfWeek =
+    dayStartMinuteOfWeek + parsedStart.minutesSinceStartOfDay;
+  const endMinuteOfWeek =
+    dayStartMinuteOfWeek + parsedEnd.minutesSinceStartOfDay;
 
   if (startMinuteOfWeek < endMinuteOfWeek) {
     return [{ startMinuteOfWeek, endMinuteOfWeek }];
@@ -306,7 +317,7 @@ function createWeekMinuteRanges(
 
 function weekMinuteRangesOverlap(
   firstRange: WeekMinuteRange,
-  secondRange: WeekMinuteRange
+  secondRange: WeekMinuteRange,
 ): boolean {
   return (
     firstRange.startMinuteOfWeek < secondRange.endMinuteOfWeek &&
@@ -314,71 +325,87 @@ function weekMinuteRangesOverlap(
   );
 }
 
+function collectComparableWeekdaySchedules(
+  weeklyAutoRunConfig: WeeklyAutoRunConfig,
+  dayScheduleValidationErrors: Partial<
+    Record<WeekdayKey, DayScheduleValidationError>
+  >,
+): ComparableWeekdaySchedule[] {
+  const comparableSchedules: ComparableWeekdaySchedule[] = [];
+
+  for (const weekday of WEEKDAY_KEYS) {
+    if (!weeklyAutoRunConfig[weekday].enabled) {
+      continue;
+    }
+    if (dayScheduleValidationErrors[weekday] !== undefined) {
+      continue;
+    }
+
+    const ranges = createWeekMinuteRanges(
+      weekday,
+      weeklyAutoRunConfig[weekday],
+    );
+    if (ranges.length === 0) {
+      continue;
+    }
+
+    comparableSchedules.push({ weekday, ranges });
+  }
+
+  return comparableSchedules;
+}
+
+function hasOverlappingWeekMinuteRanges(
+  firstRanges: WeekMinuteRange[],
+  secondRanges: WeekMinuteRange[],
+): boolean {
+  return firstRanges.some((firstRange) =>
+    secondRanges.some((secondRange) =>
+      weekMinuteRangesOverlap(firstRange, secondRange),
+    ),
+  );
+}
+
 function createWeeklyScheduleValidationErrors(
   weeklyAutoRunConfig: WeeklyAutoRunConfig,
-  dayScheduleValidationErrors: Partial<Record<WeekdayKey, DayScheduleValidationError>>
+  dayScheduleValidationErrors: Partial<
+    Record<WeekdayKey, DayScheduleValidationError>
+  >,
 ): WeeklyScheduleValidationError[] {
+  const comparableSchedules = collectComparableWeekdaySchedules(
+    weeklyAutoRunConfig,
+    dayScheduleValidationErrors,
+  );
   const weeklyValidationErrors: WeeklyScheduleValidationError[] = [];
 
-  for (let primaryIndex = 0; primaryIndex < WEEKDAY_KEYS.length; primaryIndex += 1) {
-    const primaryWeekday = WEEKDAY_KEYS[primaryIndex];
-    if (!weeklyAutoRunConfig[primaryWeekday].enabled) {
-      continue;
-    }
-    if (dayScheduleValidationErrors[primaryWeekday]) {
-      continue;
-    }
-
-    const primaryRanges = createWeekMinuteRanges(
-      primaryWeekday,
-      weeklyAutoRunConfig[primaryWeekday]
-    );
-    if (primaryRanges.length === 0) {
-      continue;
-    }
+  for (
+    let primaryIndex = 0;
+    primaryIndex < comparableSchedules.length;
+    primaryIndex += 1
+  ) {
+    const primarySchedule = comparableSchedules[primaryIndex];
 
     for (
       let secondaryIndex = primaryIndex + 1;
-      secondaryIndex < WEEKDAY_KEYS.length;
+      secondaryIndex < comparableSchedules.length;
       secondaryIndex += 1
     ) {
-      const secondaryWeekday = WEEKDAY_KEYS[secondaryIndex];
-      if (!weeklyAutoRunConfig[secondaryWeekday].enabled) {
-        continue;
-      }
-      if (dayScheduleValidationErrors[secondaryWeekday]) {
-        continue;
-      }
-
-      const secondaryRanges = createWeekMinuteRanges(
-        secondaryWeekday,
-        weeklyAutoRunConfig[secondaryWeekday]
-      );
-      if (secondaryRanges.length === 0) {
+      const secondarySchedule = comparableSchedules[secondaryIndex];
+      if (
+        !hasOverlappingWeekMinuteRanges(
+          primarySchedule.ranges,
+          secondarySchedule.ranges,
+        )
+      ) {
         continue;
       }
 
-      let foundOverlap = false;
-      for (const primaryRange of primaryRanges) {
-        for (const secondaryRange of secondaryRanges) {
-          if (weekMinuteRangesOverlap(primaryRange, secondaryRange)) {
-            foundOverlap = true;
-            break;
-          }
-        }
-        if (foundOverlap) {
-          break;
-        }
-      }
-
-      if (foundOverlap) {
-        weeklyValidationErrors.push({
-          code: "overlapping_windows_between_days",
-          primaryWeekday,
-          secondaryWeekday,
-          message: `Schedule windows overlap between ${primaryWeekday} and ${secondaryWeekday}.`,
-        });
-      }
+      weeklyValidationErrors.push({
+        code: "overlapping_windows_between_days",
+        primaryWeekday: primarySchedule.weekday,
+        secondaryWeekday: secondarySchedule.weekday,
+        message: `Schedule windows overlap between ${primarySchedule.weekday} and ${secondarySchedule.weekday}.`,
+      });
     }
   }
 
@@ -389,7 +416,7 @@ function createWeeklyScheduleValidationErrors(
  * Validate all weekday slots and return both per-day and cross-weekday errors.
  */
 export function validateWeeklyAutoRunConfig(
-  weeklyAutoRunConfig: WeeklyAutoRunConfig
+  weeklyAutoRunConfig: WeeklyAutoRunConfig,
 ): WeeklyAutoRunValidationResult {
   const dayScheduleValidationErrors: Partial<
     Record<WeekdayKey, DayScheduleValidationError>
@@ -398,7 +425,7 @@ export function validateWeeklyAutoRunConfig(
   for (const weekday of WEEKDAY_KEYS) {
     const dayError = createDayScheduleValidationError(
       weekday,
-      weeklyAutoRunConfig[weekday]
+      weeklyAutoRunConfig[weekday],
     );
     if (dayError) {
       dayScheduleValidationErrors[weekday] = dayError;
@@ -409,14 +436,14 @@ export function validateWeeklyAutoRunConfig(
     dayScheduleValidationErrors,
     weeklyScheduleValidationErrors: createWeeklyScheduleValidationErrors(
       weeklyAutoRunConfig,
-      dayScheduleValidationErrors
+      dayScheduleValidationErrors,
     ),
   };
 }
 
 function writeScheduleValidationResults(settingsState: SettingsState): void {
   const validationResult = validateWeeklyAutoRunConfig(
-    settingsState.weeklyAutoRunConfig
+    settingsState.weeklyAutoRunConfig,
   );
   settingsState.dayScheduleValidationErrors =
     validationResult.dayScheduleValidationErrors;
@@ -441,7 +468,7 @@ function validateRange(value: number, min: number, max: number): number {
 /**
  * Helper to conditionally apply devtools middleware only in development
  */
-const noopDevtools = (<T,>(config: T): T => config) as typeof devtools;
+const noopDevtools = (<T>(config: T): T => config) as typeof devtools;
 const conditionalDevtools = import.meta.env.DEV ? devtools : noopDevtools;
 
 /**
@@ -456,119 +483,132 @@ export const useSettingsStore = create<SettingsStore>()(
       immer((set) => ({
         ...createDefaultSettingsState(),
 
-        setWorkDuration: (minutes: number) =>
+        setWorkDuration: (minutes: number): void => {
           set((state) => {
             state.workDuration = validateRange(
               minutes,
               VALIDATION_RULES.workDuration.min,
-              VALIDATION_RULES.workDuration.max
+              VALIDATION_RULES.workDuration.max,
             );
-          }),
+          });
+        },
 
-        setShortBreakDuration: (minutes: number) =>
+        setShortBreakDuration: (minutes: number): void => {
           set((state) => {
             state.shortBreakDuration = validateRange(
               minutes,
               VALIDATION_RULES.shortBreakDuration.min,
-              VALIDATION_RULES.shortBreakDuration.max
+              VALIDATION_RULES.shortBreakDuration.max,
             );
-          }),
+          });
+        },
 
-        setLongBreakDuration: (minutes: number) =>
+        setLongBreakDuration: (minutes: number): void => {
           set((state) => {
             state.longBreakDuration = validateRange(
               minutes,
               VALIDATION_RULES.longBreakDuration.min,
-              VALIDATION_RULES.longBreakDuration.max
+              VALIDATION_RULES.longBreakDuration.max,
             );
-          }),
+          });
+        },
 
-        setLongBreakInterval: (count: number) =>
+        setLongBreakInterval: (count: number): void => {
           set((state) => {
             state.longBreakInterval = validateRange(
               count,
               VALIDATION_RULES.longBreakInterval.min,
-              VALIDATION_RULES.longBreakInterval.max
+              VALIDATION_RULES.longBreakInterval.max,
             );
-          }),
+          });
+        },
 
-        setNotificationSoundVolumePercent: (percent: number) =>
+        setNotificationSoundVolumePercent: (percent: number): void => {
           set((state) => {
             state.notificationSoundVolumePercent = validateRange(
               percent,
               VALIDATION_RULES.notificationSoundVolumePercent.min,
-              VALIDATION_RULES.notificationSoundVolumePercent.max
+              VALIDATION_RULES.notificationSoundVolumePercent.max,
             );
-          }),
+          });
+        },
 
-        toggleNotificationSoundMuted: () =>
+        toggleNotificationSoundMuted: (): void => {
           set((state) => {
             state.notificationSoundMuted = !state.notificationSoundMuted;
-          }),
+          });
+        },
 
-        setAutoRunFeatureEnabled: (enabled: boolean) =>
+        setAutoRunFeatureEnabled: (enabled: boolean): void => {
           set((state) => {
             state.autoRunFeatureEnabled = enabled;
-          }),
+          });
+        },
 
-        setPostBreakTransitionPolicy: (policy: PostBreakTransitionPolicy) =>
+        setPostBreakTransitionPolicy: (
+          policy: PostBreakTransitionPolicy,
+        ): void => {
           set((state) => {
             state.post_break_transition_policy = policy;
-          }),
+          });
+        },
 
-        setDayAutoRunEnabled: (weekday: WeekdayKey, enabled: boolean) =>
+        setDayAutoRunEnabled: (weekday: WeekdayKey, enabled: boolean): void => {
           set((state) => {
             state.weeklyAutoRunConfig[weekday].enabled = enabled;
             writeScheduleValidationResults(state);
-          }),
+          });
+        },
 
-        setDayStartTime: (weekday: WeekdayKey, time: string) =>
+        setDayStartTime: (weekday: WeekdayKey, time: string): void => {
           set((state) => {
             state.weeklyAutoRunConfig[weekday].startTime = time;
             writeScheduleValidationResults(state);
-          }),
+          });
+        },
 
-        setDayEndTime: (weekday: WeekdayKey, time: string) =>
+        setDayEndTime: (weekday: WeekdayKey, time: string): void => {
           set((state) => {
             state.weeklyAutoRunConfig[weekday].endTime = time;
             writeScheduleValidationResults(state);
-          }),
+          });
+        },
 
-        updateSettings: (settings: Partial<SettingsEditableValues>) =>
+        updateSettings: (settings: Partial<SettingsEditableValues>): void => {
           set((state) => {
             if (settings.workDuration !== undefined) {
               state.workDuration = validateRange(
                 settings.workDuration,
                 VALIDATION_RULES.workDuration.min,
-                VALIDATION_RULES.workDuration.max
+                VALIDATION_RULES.workDuration.max,
               );
             }
             if (settings.shortBreakDuration !== undefined) {
               state.shortBreakDuration = validateRange(
                 settings.shortBreakDuration,
                 VALIDATION_RULES.shortBreakDuration.min,
-                VALIDATION_RULES.shortBreakDuration.max
+                VALIDATION_RULES.shortBreakDuration.max,
               );
             }
             if (settings.longBreakDuration !== undefined) {
               state.longBreakDuration = validateRange(
                 settings.longBreakDuration,
                 VALIDATION_RULES.longBreakDuration.min,
-                VALIDATION_RULES.longBreakDuration.max
+                VALIDATION_RULES.longBreakDuration.max,
               );
             }
             if (settings.longBreakInterval !== undefined) {
               state.longBreakInterval = validateRange(
                 settings.longBreakInterval,
                 VALIDATION_RULES.longBreakInterval.min,
-                VALIDATION_RULES.longBreakInterval.max
+                VALIDATION_RULES.longBreakInterval.max,
               );
             }
             if (settings.notificationSoundVolumePercent !== undefined) {
               state.notificationSoundVolumePercent = validateRange(
                 settings.notificationSoundVolumePercent,
                 VALIDATION_RULES.notificationSoundVolumePercent.min,
-                VALIDATION_RULES.notificationSoundVolumePercent.max
+                VALIDATION_RULES.notificationSoundVolumePercent.max,
               );
             }
             if (settings.notificationSoundMuted !== undefined) {
@@ -585,20 +625,25 @@ export const useSettingsStore = create<SettingsStore>()(
 
             if (settings.weeklyAutoRunConfig !== undefined) {
               state.weeklyAutoRunConfig = cloneWeeklyAutoRunConfig(
-                settings.weeklyAutoRunConfig
+                settings.weeklyAutoRunConfig,
               );
               writeScheduleValidationResults(state);
             }
-          }),
+          });
+        },
 
-        resetToDefaults: () => set(createDefaultSettingsState()),
+        resetToDefaults: (): void => {
+          set(createDefaultSettingsState());
+        },
 
-        reset: () => set(createDefaultSettingsState()),
+        reset: (): void => {
+          set(createDefaultSettingsState());
+        },
       })),
       {
         name: "pomolice-settings", // localStorage key
-      }
+      },
     ),
-    { name: "SettingsStore" }
-  )
+    { name: "SettingsStore" },
+  ),
 );

@@ -27,7 +27,7 @@ export function DialogPanel({
   describedBy,
   className = "",
   testId,
-}: DialogPanelProps) {
+}: DialogPanelProps): React.ReactElement {
   const panelClassName = [DIALOG_PANEL_BASE_CLASS_NAME, className]
     .filter(Boolean)
     .join(" ");

@@ -6,7 +6,7 @@
  * import { TimerDisplay, TimerControls, SessionIndicator, CycleProgress } from '@/components/Timer';
  */
 
-export { TimerDisplay } from './TimerDisplay';
-export { TimerControls } from './TimerControls';
-export { SessionIndicator } from './SessionIndicator';
-export { CycleProgress } from './CycleProgress';
+export { TimerDisplay } from "./TimerDisplay";
+export { TimerControls } from "./TimerControls";
+export { SessionIndicator } from "./SessionIndicator";
+export { CycleProgress } from "./CycleProgress";

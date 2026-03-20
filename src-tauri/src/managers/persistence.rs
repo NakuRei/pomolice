@@ -423,11 +423,13 @@ mod tests {
         let fixed_clock =
             create_fixed_clock_for_utc_datetime(create_utc_datetime(2025, 2, 1, 9, 0, 0));
 
-        let mut state = TimerState::default();
-        state.status = TimerStatus::Working;
-        state.auto_run_feature_enabled = true;
-        state.timer_start_source = Some(TimerStartSource::ManualInsideWindow);
-        state.scheduled_stop_state = ScheduledStopState::Pending;
+        let state = TimerState {
+            status: TimerStatus::Working,
+            auto_run_feature_enabled: true,
+            timer_start_source: Some(TimerStartSource::ManualInsideWindow),
+            scheduled_stop_state: ScheduledStopState::Pending,
+            ..TimerState::default()
+        };
 
         let persisted_state = PersistedState::from_timer_state(&state, fixed_clock.as_ref());
         PersistenceManager::save_persisted_state_to_path(&persisted_state, &path)

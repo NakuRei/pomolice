@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { devtools } from "zustand/middleware";
 import { immer } from "zustand/middleware/immer";
 import { invoke } from "@tauri-apps/api/core";
-import { useSettingsStore } from "./settingsStore";
+import { useSettingsStore, VALIDATION_RULES } from "./settingsStore";
 import { useErrorStore } from "./errorStore";
 import { classifyBackendError } from "../errors/classifyBackendError";
 import type { WeekdayKey } from "../types/weeklyAutoRun";
@@ -144,7 +144,7 @@ interface TimerActions {
 
 type TimerStore = TimerState & TimerActions;
 
-type SyncTimerDurationSettingsCommandPayload = Record<string, unknown> & {
+type TimerDurationSettingsCommandPayload = Record<string, unknown> & {
   workDurationSecs: number;
   shortBreakDurationSecs: number;
   longBreakDurationSecs: number;
@@ -154,22 +154,63 @@ type SyncTimerDurationSettingsCommandPayload = Record<string, unknown> & {
 type SyncAutomationPoliciesCommandPayload = Record<string, unknown> & {
   postBreakTransitionPolicy: PostBreakTransitionPolicy;
   autoRunFeatureEnabled: boolean;
-  weeklyAutoRunConfig: ReturnType<typeof useSettingsStore.getState>["weeklyAutoRunConfig"];
+  weeklyAutoRunConfig: ReturnType<
+    typeof useSettingsStore.getState
+  >["weeklyAutoRunConfig"];
 };
 
-function createSyncTimerDurationSettingsCommandPayload(
-  settings: ReturnType<typeof useSettingsStore.getState>
-): SyncTimerDurationSettingsCommandPayload {
+function clampWithinRange(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function normalizeDurationMinutesToWholeSeconds(
+  durationMinutes: number,
+  minMinutes: number,
+  maxMinutes: number,
+): number {
+  const clampedMinutes = clampWithinRange(
+    durationMinutes,
+    minMinutes,
+    maxMinutes,
+  );
+  return Math.max(1, Math.round(clampedMinutes * 60));
+}
+
+function normalizeLongBreakInterval(intervalCount: number): number {
+  const clampedInterval = clampWithinRange(
+    intervalCount,
+    VALIDATION_RULES.longBreakInterval.min,
+    VALIDATION_RULES.longBreakInterval.max,
+  );
+
+  return Math.round(clampedInterval);
+}
+
+function createTimerDurationSettingsCommandPayload(
+  settings: ReturnType<typeof useSettingsStore.getState>,
+): TimerDurationSettingsCommandPayload {
   return {
-    workDurationSecs: settings.workDuration * 60,
-    shortBreakDurationSecs: settings.shortBreakDuration * 60,
-    longBreakDurationSecs: settings.longBreakDuration * 60,
-    longBreakInterval: settings.longBreakInterval,
+    workDurationSecs: normalizeDurationMinutesToWholeSeconds(
+      settings.workDuration,
+      VALIDATION_RULES.workDuration.min,
+      VALIDATION_RULES.workDuration.max,
+    ),
+    shortBreakDurationSecs: normalizeDurationMinutesToWholeSeconds(
+      settings.shortBreakDuration,
+      VALIDATION_RULES.shortBreakDuration.min,
+      VALIDATION_RULES.shortBreakDuration.max,
+    ),
+    longBreakDurationSecs: normalizeDurationMinutesToWholeSeconds(
+      settings.longBreakDuration,
+      VALIDATION_RULES.longBreakDuration.min,
+      VALIDATION_RULES.longBreakDuration.max,
+    ),
+    longBreakInterval: normalizeLongBreakInterval(settings.longBreakInterval),
   };
 }
 
 function createSyncAutomationPoliciesCommandPayload(
-  settings: ReturnType<typeof useSettingsStore.getState>
+  settings: ReturnType<typeof useSettingsStore.getState>,
 ): SyncAutomationPoliciesCommandPayload {
   return {
     postBreakTransitionPolicy: settings.post_break_transition_policy,
@@ -193,13 +234,17 @@ const AUTO_RUN_STOPPED_INFO_MESSAGE: InfoMessage = {
 function shouldSuppressInfoMessageByTtl(
   nowEpochMs: number,
   infoMessage: InfoMessage,
-  infoMessageShownAtById: Partial<Record<InfoMessageId, number>>
+  infoMessageShownAtById: Partial<Record<InfoMessageId, number>>,
 ): boolean {
   const lastShownAtEpochMs = infoMessageShownAtById[infoMessage.id];
   return (
     lastShownAtEpochMs !== undefined &&
     nowEpochMs - lastShownAtEpochMs < infoMessage.ttlMs
   );
+}
+
+function keepLegacyTimerActionAsNoop(): void {
+  return undefined;
 }
 
 /**
@@ -224,7 +269,7 @@ const initialState: TimerState = {
 /**
  * Helper to conditionally apply devtools middleware only in development
  */
-const noopDevtools = (<T,>(config: T): T => config) as typeof devtools;
+const noopDevtools = (<T>(config: T): T => config) as typeof devtools;
 const conditionalDevtools = import.meta.env.DEV ? devtools : noopDevtools;
 
 /**
@@ -238,20 +283,20 @@ export const useTimerStore = create<TimerStore>()(
 
       // Start work session.
       // Backend decides manual_inside_window/manual_outside_window from server-side clock and schedule.
-      start: async () => {
+      start: async (): Promise<void> => {
         const settings = useSettingsStore.getState();
         try {
           await invoke("start_work", {
-            workDurationSecs: settings.workDuration * 60,
-            shortBreakDurationSecs: settings.shortBreakDuration * 60,
-            longBreakDurationSecs: settings.longBreakDuration * 60,
-            longBreakInterval: settings.longBreakInterval,
+            ...createTimerDurationSettingsCommandPayload(settings),
             postBreakTransitionPolicy: settings.post_break_transition_policy,
           });
           useErrorStore.getState().clearError("start_work");
         } catch (error) {
           const detail = String(error);
-          const { userMessage, severity } = classifyBackendError(detail, "start_work");
+          const { userMessage, severity } = classifyBackendError(
+            detail,
+            "start_work",
+          );
           useErrorStore.getState().reportError({
             id: "start_work",
             message: userMessage,
@@ -261,13 +306,14 @@ export const useTimerStore = create<TimerStore>()(
             canRetry: false,
             retryFn: null,
           });
-          console.error("Failed to start work:", error);
           throw error;
         }
       },
 
       // Resolve manual decision after break (continue or stop cycle).
-      resolvePostBreakDecision: async (action: PostBreakDecisionAction) => {
+      resolvePostBreakDecision: async (
+        action: PostBreakDecisionAction,
+      ): Promise<void> => {
         try {
           await invoke("resolve_post_break_decision", { action });
           set((state) => {
@@ -278,7 +324,7 @@ export const useTimerStore = create<TimerStore>()(
           const detail = String(error);
           const { userMessage, severity } = classifyBackendError(
             detail,
-            "resolve_post_break_decision"
+            "resolve_post_break_decision",
           );
           useErrorStore.getState().reportError({
             id: "resolve_post_break_decision",
@@ -291,19 +337,21 @@ export const useTimerStore = create<TimerStore>()(
               await get().resolvePostBreakDecision(action);
             },
           });
-          console.error(`Failed to resolve post-break decision (${action}):`, error);
           throw error;
         }
       },
 
       // Emergency stop
-      emergencyStop: async () => {
+      emergencyStop: async (): Promise<void> => {
         try {
           await invoke("emergency_stop");
           useErrorStore.getState().clearError("emergency_stop");
         } catch (error) {
           const detail = String(error);
-          const { userMessage } = classifyBackendError(detail, "emergency_stop");
+          const { userMessage } = classifyBackendError(
+            detail,
+            "emergency_stop",
+          );
           useErrorStore.getState().reportError({
             id: "emergency_stop",
             message: userMessage,
@@ -313,13 +361,12 @@ export const useTimerStore = create<TimerStore>()(
             canRetry: true,
             retryFn: null,
           });
-          console.error("Failed to emergency stop:", error);
           throw error;
         }
       },
 
       // Sync settings to backend
-      syncSettings: async () => {
+      syncSettings: async (): Promise<void> => {
         const settings = useSettingsStore.getState();
         const timerStatus = get().status;
         try {
@@ -328,21 +375,20 @@ export const useTimerStore = create<TimerStore>()(
           if (timerStatus === TimerStatus.IDLE) {
             await invoke(
               "sync_timer_duration_settings",
-              createSyncTimerDurationSettingsCommandPayload(settings)
+              createTimerDurationSettingsCommandPayload(settings),
             );
           }
           await invoke("sync_automation_policies", automationPoliciesPayload);
-        } catch (error) {
+        } catch {
           // Silently fail - settings sync is not critical
-          console.debug("Settings sync failed (timer may be running):", error);
         }
       },
 
-      resolveBootAutoStartPrompt: async (startNow: boolean) => {
+      resolveBootAutoStartPrompt: async (startNow: boolean): Promise<void> => {
         try {
           await invoke<BootPromptRuntimeStateValue>(
             "resolve_boot_auto_start_prompt",
-            { startNow }
+            { startNow },
           );
           set((state) => {
             state.shouldPromptStartOnBoot = false;
@@ -351,7 +397,7 @@ export const useTimerStore = create<TimerStore>()(
           const detail = String(error);
           const { userMessage, severity } = classifyBackendError(
             detail,
-            "resolve_boot_auto_start_prompt"
+            "resolve_boot_auto_start_prompt",
           );
           useErrorStore.getState().reportError({
             id: "resolve_boot_auto_start_prompt",
@@ -366,39 +412,41 @@ export const useTimerStore = create<TimerStore>()(
         }
       },
 
-      showAutoRunStopPendingInfo: () =>
+      showAutoRunStopPendingInfo: (): void => {
         set((state) => {
           const nowEpochMs = Date.now();
           if (
             shouldSuppressInfoMessageByTtl(
               nowEpochMs,
               AUTO_RUN_STOP_PENDING_INFO_MESSAGE,
-              state.infoMessageShownAtById
+              state.infoMessageShownAtById,
             )
           ) {
             return;
           }
           state.infoMessage = AUTO_RUN_STOP_PENDING_INFO_MESSAGE;
           state.infoMessageShownAtById.auto_run_stop_pending = nowEpochMs;
-        }),
+        });
+      },
 
-      showAutoRunStoppedInfo: () =>
+      showAutoRunStoppedInfo: (): void => {
         set((state) => {
           const nowEpochMs = Date.now();
           if (
             shouldSuppressInfoMessageByTtl(
               nowEpochMs,
               AUTO_RUN_STOPPED_INFO_MESSAGE,
-              state.infoMessageShownAtById
+              state.infoMessageShownAtById,
             )
           ) {
             return;
           }
           state.infoMessage = AUTO_RUN_STOPPED_INFO_MESSAGE;
           state.infoMessageShownAtById.auto_run_stopped = nowEpochMs;
-        }),
+        });
+      },
 
-      clearInfoMessage: (expectedInfoMessageId?: InfoMessageId) =>
+      clearInfoMessage: (expectedInfoMessageId?: InfoMessageId): void => {
         set((state) => {
           if (!state.infoMessage) {
             return;
@@ -410,10 +458,11 @@ export const useTimerStore = create<TimerStore>()(
             return;
           }
           state.infoMessage = null;
-        }),
+        });
+      },
 
       // Handle timer tick event from backend
-      handleTimerTick: (payload: TimerTickPayload) =>
+      handleTimerTick: (payload: TimerTickPayload): void => {
         set((state) => {
           state.status = payload.status;
           state.remainingSeconds = payload.remaining_seconds;
@@ -422,17 +471,20 @@ export const useTimerStore = create<TimerStore>()(
           state.completedPomodoros = payload.completed_pomodoros;
           state.breakInteractionCount = payload.break_interaction_count;
           state.isFullscreenBreak = payload.is_fullscreen_break;
-        }),
+        });
+      },
 
       // Handle session completed event from backend
-      handleSessionCompleted: (payload: SessionCompletedPayload) =>
+      handleSessionCompleted: (payload: SessionCompletedPayload): void => {
         set((state) => {
-          state.requiresManualContinueDecision = payload.requires_manual_continue_decision;
+          state.requiresManualContinueDecision =
+            payload.requires_manual_continue_decision;
           // Session type will be updated via timer_tick event
-        }),
+        });
+      },
 
       // Handle full state from backend (initial sync)
-      handleFullState: (payload: FullStatePayload) =>
+      handleFullState: (payload: FullStatePayload): void => {
         set((state) => {
           state.status = payload.status;
           state.remainingSeconds = payload.remaining_seconds;
@@ -441,31 +493,34 @@ export const useTimerStore = create<TimerStore>()(
           state.completedPomodoros = payload.completed_pomodoros;
           state.breakInteractionCount = payload.break_interaction_count;
           state.isFullscreenBreak = payload.is_fullscreen_break;
-          state.requiresManualContinueDecision = payload.post_break_decision_pending;
+          state.requiresManualContinueDecision =
+            payload.post_break_decision_pending;
           state.shouldPromptStartOnBoot = payload.should_prompt_start_on_boot;
           state.activeWindowSummary = payload.active_window_summary;
           state.isConnected = true;
-        }),
+        });
+      },
 
       // Set connection status
-      setConnected: (connected: boolean) =>
+      setConnected: (connected: boolean): void => {
         set((state) => {
           state.isConnected = connected;
-        }),
+        });
+      },
 
       // Legacy compatibility - these do nothing now
-      stop: () => {},
-      reset: () => {},
-      tick: () => {},
+      stop: keepLegacyTimerActionAsNoop,
+      reset: keepLegacyTimerActionAsNoop,
+      tick: keepLegacyTimerActionAsNoop,
     })),
-    { name: "TimerStore" }
-  )
+    { name: "TimerStore" },
+  ),
 );
 
 // Sync settings to backend when they change (while idle)
 useSettingsStore.subscribe(() => {
   const timerState = useTimerStore.getState();
   if (timerState.isConnected) {
-    timerState.syncSettings();
+    void timerState.syncSettings();
   }
 });
