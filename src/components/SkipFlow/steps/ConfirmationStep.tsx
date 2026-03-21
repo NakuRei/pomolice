@@ -6,7 +6,7 @@
  * Each with progressively stronger warning messages
  */
 
-import { getConfirmationMessage } from "../../../utils/phraseGenerator";
+import { getConfirmationMessage } from "@/utils/phraseGenerator";
 
 interface ConfirmationStepProps {
   step: number; // 1-4

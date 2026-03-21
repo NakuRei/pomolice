@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { getRandomMessage } from "../../data/motivationalMessages";
+import { getRandomMessage } from "@/data/motivationalMessages";
 
 /**
  * MotivationalMessage Component

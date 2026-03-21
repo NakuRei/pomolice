@@ -1,9 +1,9 @@
-import { WEEKDAY_LABELS_BY_KEY } from "../../constants/weekdayLabels";
+import { WEEKDAY_LABELS_BY_KEY } from "@/constants/weekdayLabels";
 import {
   type DayAutoRunSlot,
   type DayScheduleValidationError,
   type WeekdayKey,
-} from "../../types/weeklyAutoRun";
+} from "@/types/weeklyAutoRun";
 
 interface AutoRunDayRowProps {
   weekday: WeekdayKey;

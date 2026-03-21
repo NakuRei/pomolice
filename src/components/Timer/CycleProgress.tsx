@@ -1,5 +1,5 @@
-import { useTimerStore } from "../../store/timerStore";
-import { useSettingsStore } from "../../store/settingsStore";
+import { useTimerStore } from "@/store/timerStore";
+import { useSettingsStore } from "@/store/settingsStore";
 
 /**
  * CycleProgress Component

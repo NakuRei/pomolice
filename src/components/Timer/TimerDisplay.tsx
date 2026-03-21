@@ -1,5 +1,5 @@
-import { useTimerStore, SessionType } from "../../store/timerStore";
-import { formatTime } from "../../formatters/timeFormatter";
+import { useTimerStore, SessionType } from "@/store/timerStore";
+import { formatTime } from "@/formatters/timeFormatter";
 
 /**
  * TimerDisplay Component

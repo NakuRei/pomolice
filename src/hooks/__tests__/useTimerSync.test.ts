@@ -7,16 +7,12 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
-import {
-  useTimerStore,
-  TimerStatus,
-  SessionType,
-} from "../../store/timerStore";
+import { useTimerStore, TimerStatus, SessionType } from "@/store/timerStore";
 import {
   notifyWorkComplete,
   notifyBreakAutoStarted,
   notifyBreakComplete,
-} from "../../services/notifications";
+} from "@/services/notifications";
 
 // Mock Tauri APIs
 type TimerEventHandler = (event: { payload: unknown }) => void;
@@ -51,7 +47,7 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
   sendNotification: vi.fn(),
 }));
 
-vi.mock("../../services/notifications", () => ({
+vi.mock("@/services/notifications", () => ({
   notifyWorkComplete: vi.fn(),
   notifyBreakAutoStarted: vi.fn(),
   notifyBreakComplete: vi.fn(),

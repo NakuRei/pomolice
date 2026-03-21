@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { FullscreenBreak } from "../BreakScreen/FullscreenBreak";
-import { useTimerStore, SessionType } from "../../store/timerStore";
-import * as motivationalMessagesModule from "../../data/motivationalMessages";
+import { useTimerStore, SessionType } from "@/store/timerStore";
+import * as motivationalMessagesModule from "@/data/motivationalMessages";
 
 describe("FullscreenBreak", () => {
   beforeEach(() => {

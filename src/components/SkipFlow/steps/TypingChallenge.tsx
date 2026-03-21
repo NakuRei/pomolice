@@ -11,13 +11,13 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSkipFlowStore } from "../../../store/skipFlowStore";
+import { useSkipFlowStore } from "@/store/skipFlowStore";
 import {
   getRandomShortPhrase,
   getRandomLongPhrase,
   validateTypedPhrase,
   getCharacterValidation,
-} from "../../../utils/phraseGenerator";
+} from "@/utils/phraseGenerator";
 import SkipFlowCancelButton from "../SkipFlowCancelButton";
 import SkipFlowStepFrame from "../SkipFlowStepFrame";
 

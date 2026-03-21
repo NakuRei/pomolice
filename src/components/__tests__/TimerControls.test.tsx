@@ -2,11 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TimerControls } from "../Timer/TimerControls";
-import {
-  useTimerStore,
-  TimerStatus,
-  SessionType,
-} from "../../store/timerStore";
+import { useTimerStore, TimerStatus, SessionType } from "@/store/timerStore";
 
 type InvokeCommand = (
   command: string,

@@ -11,7 +11,7 @@ import MathChallenge from "../steps/MathChallenge";
 const mockRetryStep = vi.fn();
 
 // Mock the store
-vi.mock("../../../store/skipFlowStore", () => ({
+vi.mock("@/store/skipFlowStore", () => ({
   useSkipFlowStore: vi.fn(
     (selector: (state: { retryStep: typeof mockRetryStep }) => unknown) =>
       selector({
@@ -21,7 +21,7 @@ vi.mock("../../../store/skipFlowStore", () => ({
 }));
 
 // Mock math generator
-vi.mock("../../../utils/mathGenerator", () => ({
+vi.mock("@/utils/mathGenerator", () => ({
   generateEasyProblem: vi.fn(() => ({
     question: "10 + 20 = ?",
     answer: 30,
@@ -161,8 +161,7 @@ describe("MathChallenge", () => {
       const user = userEvent.setup();
 
       // Mock to generate predictable problem
-      const { generateEasyProblem } =
-        await import("../../../utils/mathGenerator");
+      const { generateEasyProblem } = await import("@/utils/mathGenerator");
       vi.mocked(generateEasyProblem).mockReturnValue({
         question: "10 + 5 = ?",
         answer: 15,

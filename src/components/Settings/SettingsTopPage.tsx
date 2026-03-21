@@ -1,11 +1,11 @@
-import { WEEKDAY_LABELS_BY_KEY } from "../../constants/weekdayLabels";
-import { useFocusHeadingOnMount } from "../../hooks/useFocusHeadingOnMount";
+import { WEEKDAY_LABELS_BY_KEY } from "@/constants/weekdayLabels";
+import { useFocusHeadingOnMount } from "@/hooks/useFocusHeadingOnMount";
 import {
   useSettingsStore,
   WEEKDAY_KEYS,
   type WeeklyAutoRunConfig,
-} from "../../store/settingsStore";
-import type { PostBreakTransitionPolicy } from "../../types/sessionTransitionPolicy";
+} from "@/store/settingsStore";
+import type { PostBreakTransitionPolicy } from "@/types/sessionTransitionPolicy";
 import { Button } from "../shared/Button";
 import { SettingsPageHeader } from "./SettingsPageHeader";
 

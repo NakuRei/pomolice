@@ -1,4 +1,4 @@
-import { useTimerStore, TimerStatus } from "../../store/timerStore";
+import { useTimerStore, TimerStatus } from "@/store/timerStore";
 import { EmergencyStopButton } from "../EmergencyStop/EmergencyStopButton";
 import { Button } from "../shared/Button";
 import { InlineError } from "../shared/InlineError";

@@ -1,6 +1,6 @@
-import { useTimerStore, SessionType } from "../../store/timerStore";
-import { useSkipFlowStore } from "../../store/skipFlowStore";
-import { formatTime } from "../../formatters/timeFormatter";
+import { useTimerStore, SessionType } from "@/store/timerStore";
+import { useSkipFlowStore } from "@/store/skipFlowStore";
+import { formatTime } from "@/formatters/timeFormatter";
 import { MotivationalMessage } from "./MotivationalMessage";
 import { BreakStats } from "./BreakStats";
 import { SkipButton } from "./SkipButton";

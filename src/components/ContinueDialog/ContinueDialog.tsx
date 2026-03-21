@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useTimerStore } from "../../store/timerStore";
+import { useTimerStore } from "@/store/timerStore";
 import { DialogActionRow } from "../shared/DialogActionRow";
 import { Button } from "../shared/Button";
 import { DialogOverlay } from "../shared/DialogOverlay";

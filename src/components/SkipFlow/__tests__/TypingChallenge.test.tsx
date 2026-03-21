@@ -22,7 +22,7 @@ function createCharacterValidationResult(
 }
 
 // Mock the store
-vi.mock("../../../store/skipFlowStore", () => ({
+vi.mock("@/store/skipFlowStore", () => ({
   useSkipFlowStore: vi.fn(
     (selector: (state: { retryStep: typeof mockRetryStep }) => unknown) =>
       selector({
@@ -32,7 +32,7 @@ vi.mock("../../../store/skipFlowStore", () => ({
 }));
 
 // Mock phrase generator to return predictable values
-vi.mock("../../../utils/phraseGenerator", () => ({
+vi.mock("@/utils/phraseGenerator", () => ({
   getRandomShortPhrase: vi.fn(() => "TEST PHRASE"),
   getRandomLongPhrase: vi.fn(() => "THIS IS A LONGER TEST PHRASE"),
   validateTypedPhrase: vi.fn(
@@ -180,7 +180,7 @@ describe("TypingChallenge", () => {
 
       // Mock validation to simulate typo
       const { getCharacterValidation } =
-        await import("../../../utils/phraseGenerator");
+        await import("@/utils/phraseGenerator");
       vi.mocked(getCharacterValidation).mockReturnValue([
         true,
         true,
@@ -209,7 +209,7 @@ describe("TypingChallenge", () => {
 
       // Mock validation to simulate typo
       const { getCharacterValidation } =
-        await import("../../../utils/phraseGenerator");
+        await import("@/utils/phraseGenerator");
       vi.mocked(getCharacterValidation).mockReturnValue([
         true,
         true,
@@ -240,7 +240,7 @@ describe("TypingChallenge", () => {
 
       // Mock validation to return correct validation
       const { validateTypedPhrase, getCharacterValidation } =
-        await import("../../../utils/phraseGenerator");
+        await import("@/utils/phraseGenerator");
       vi.mocked(getCharacterValidation).mockImplementation(
         createCharacterValidationResult,
       );

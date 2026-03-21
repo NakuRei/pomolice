@@ -1,4 +1,4 @@
-import { VolumeMutedIcon, VolumeOnIcon } from "../icons";
+import { VolumeMutedIcon, VolumeOnIcon } from "@/components/icons/AppIcons";
 import { ToggleIconButton } from "./ToggleIconButton";
 
 interface NotificationMuteToggleButtonProps {

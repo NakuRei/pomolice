@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { useFocusHeadingOnMount } from "../../hooks/useFocusHeadingOnMount";
-import { useSettingsStore, VALIDATION_RULES } from "../../store/settingsStore";
-import { TimerStatus, useTimerStore } from "../../store/timerStore";
+import { useFocusHeadingOnMount } from "@/hooks/useFocusHeadingOnMount";
+import { useSettingsStore, VALIDATION_RULES } from "@/store/settingsStore";
+import { TimerStatus, useTimerStore } from "@/store/timerStore";
 import { DurationInput } from "./DurationInput";
 import { SettingsPageHeader } from "./SettingsPageHeader";
 import { SettingsSaveCancelFooter } from "./SettingsSaveCancelFooter";

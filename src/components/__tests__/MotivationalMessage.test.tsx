@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MotivationalMessage } from "../BreakScreen/MotivationalMessage";
-import * as motivationalMessagesModule from "../../data/motivationalMessages";
+import * as motivationalMessagesModule from "@/data/motivationalMessages";
 
 describe("MotivationalMessage", () => {
   describe("Rendering", () => {

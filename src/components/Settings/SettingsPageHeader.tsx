@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import { BackArrowIcon } from "../icons";
+import { BackArrowIcon } from "@/components/icons/AppIcons";
 import { IconButton } from "../shared/IconButton";
 
 interface SettingsPageHeaderProps {

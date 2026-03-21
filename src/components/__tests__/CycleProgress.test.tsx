@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { CycleProgress } from "../Timer/CycleProgress";
-import { useTimerStore } from "../../store/timerStore";
-import { useSettingsStore } from "../../store/settingsStore";
+import { useTimerStore } from "@/store/timerStore";
+import { useSettingsStore } from "@/store/settingsStore";
 
 describe("CycleProgress", () => {
   beforeEach(() => {

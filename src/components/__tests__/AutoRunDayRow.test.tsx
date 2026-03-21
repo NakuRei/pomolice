@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AutoRunDayRow } from "../Settings/AutoRunDayRow";
-import type { DayScheduleValidationError } from "../../types/weeklyAutoRun";
+import type { DayScheduleValidationError } from "@/types/weeklyAutoRun";
 
 describe("AutoRunDayRow", () => {
   it("renders existing weekday row entry points with stable test ids", () => {

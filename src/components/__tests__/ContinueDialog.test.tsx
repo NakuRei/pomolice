@@ -8,11 +8,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ContinueDialog } from "../ContinueDialog/ContinueDialog";
-import {
-  useTimerStore,
-  TimerStatus,
-  SessionType,
-} from "../../store/timerStore";
+import { useTimerStore, TimerStatus, SessionType } from "@/store/timerStore";
 
 // Mock Tauri invoke
 vi.mock("@tauri-apps/api/core", () => ({

@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useErrorStore } from "../../../store/errorStore";
+import { useErrorStore } from "@/store/errorStore";
 import { ConnectionBanner } from "../ConnectionBanner";
 
 describe("ConnectionBanner", () => {

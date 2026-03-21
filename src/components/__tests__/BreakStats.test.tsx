@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { BreakStats } from "../BreakScreen/BreakStats";
-import { useTimerStore } from "../../store/timerStore";
+import { useTimerStore } from "@/store/timerStore";
 
 describe("BreakStats", () => {
   beforeEach(() => {

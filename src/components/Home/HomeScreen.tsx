@@ -1,12 +1,10 @@
 import { AutoStartConfirmDialog } from "../AutoStartConfirmDialog";
-import { ContinueDialog } from "../ContinueDialog";
-import { SettingsGearIcon } from "../icons";
-import {
-  CycleProgress,
-  SessionIndicator,
-  TimerControls,
-  TimerDisplay,
-} from "../Timer";
+import { ContinueDialog } from "@/components/ContinueDialog/ContinueDialog";
+import { SettingsGearIcon } from "@/components/icons/AppIcons";
+import { CycleProgress } from "@/components/Timer/CycleProgress";
+import { SessionIndicator } from "@/components/Timer/SessionIndicator";
+import { TimerControls } from "@/components/Timer/TimerControls";
+import { TimerDisplay } from "@/components/Timer/TimerDisplay";
 import { ConnectionBanner } from "../shared/ConnectionBanner";
 import { IconButton } from "../shared/IconButton";
 import { InfoMessageBanner } from "../shared/InfoMessageBanner";

@@ -1,13 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { HomeScreen, type HomeScreenProps } from "../Home";
-import { useSettingsStore } from "../../store/settingsStore";
-import {
-  SessionType,
-  TimerStatus,
-  useTimerStore,
-} from "../../store/timerStore";
+import { HomeScreen, type HomeScreenProps } from "@/components/Home/HomeScreen";
+import { useSettingsStore } from "@/store/settingsStore";
+import { SessionType, TimerStatus, useTimerStore } from "@/store/timerStore";
 
 vi.mock("../shared/ConnectionBanner", () => ({
   ConnectionBanner: (): React.ReactElement => (

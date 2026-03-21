@@ -1,7 +1,10 @@
 import { useState } from "react";
-import { useErrorStore, type AppError } from "../../store/errorStore";
+import { useErrorStore, type AppError } from "@/store/errorStore";
 import { Button } from "./Button";
-import { LoadingSpinnerIcon, WarningTriangleIcon } from "../icons";
+import {
+  LoadingSpinnerIcon,
+  WarningTriangleIcon,
+} from "@/components/icons/AppIcons";
 import { StatusNotice } from "./StatusNotice";
 
 /**

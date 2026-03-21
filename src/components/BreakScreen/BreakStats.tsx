@@ -1,4 +1,4 @@
-import { useTimerStore } from "../../store/timerStore";
+import { useTimerStore } from "@/store/timerStore";
 
 /**
  * BreakStats Component

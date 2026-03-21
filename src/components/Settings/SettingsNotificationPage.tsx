@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { useFocusHeadingOnMount } from "../../hooks/useFocusHeadingOnMount";
+import { useFocusHeadingOnMount } from "@/hooks/useFocusHeadingOnMount";
 import {
   playNotificationSoundPreview,
   type NotificationSoundType,
-} from "../../services/notifications";
-import { useSettingsStore, VALIDATION_RULES } from "../../store/settingsStore";
+} from "@/services/notifications";
+import { useSettingsStore, VALIDATION_RULES } from "@/store/settingsStore";
 import { Button } from "../shared/Button";
 import { NotificationMuteToggleButton } from "../shared/NotificationMuteToggleButton";
 import { SettingsPageHeader } from "./SettingsPageHeader";

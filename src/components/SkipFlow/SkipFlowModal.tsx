@@ -7,7 +7,7 @@
  */
 
 import { useEffect } from "react";
-import { useSkipFlowStore, SKIP_FLOW_STEPS } from "../../store/skipFlowStore";
+import { useSkipFlowStore, SKIP_FLOW_STEPS } from "@/store/skipFlowStore";
 import ProgressIndicator from "./ProgressIndicator";
 import ConfirmationStep from "./steps/ConfirmationStep";
 import TypingChallenge from "./steps/TypingChallenge";

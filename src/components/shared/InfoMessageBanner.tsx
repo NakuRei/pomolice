@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useTimerStore } from "../../store/timerStore";
+import { useTimerStore } from "@/store/timerStore";
 import { StatusNotice } from "./StatusNotice";
 
 /**

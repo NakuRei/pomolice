@@ -11,13 +11,13 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSkipFlowStore } from "../../../store/skipFlowStore";
+import { useSkipFlowStore } from "@/store/skipFlowStore";
 import {
   generateEasyProblem,
   generateHardProblem,
   validateAnswer,
   type MathProblem,
-} from "../../../utils/mathGenerator";
+} from "@/utils/mathGenerator";
 import SkipFlowCancelButton from "../SkipFlowCancelButton";
 import SkipFlowStepFrame from "../SkipFlowStepFrame";
 

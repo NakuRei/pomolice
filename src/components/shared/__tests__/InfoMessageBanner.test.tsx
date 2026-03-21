@@ -1,11 +1,7 @@
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InfoMessageBanner } from "../InfoMessageBanner";
-import {
-  SessionType,
-  TimerStatus,
-  useTimerStore,
-} from "../../../store/timerStore";
+import { SessionType, TimerStatus, useTimerStore } from "@/store/timerStore";
 
 describe("InfoMessageBanner", () => {
   beforeEach(() => {

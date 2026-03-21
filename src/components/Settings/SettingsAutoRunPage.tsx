@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useFocusHeadingOnMount } from "../../hooks/useFocusHeadingOnMount";
+import { useFocusHeadingOnMount } from "@/hooks/useFocusHeadingOnMount";
 import {
   useSettingsStore,
   WEEKDAY_KEYS,
@@ -8,7 +8,7 @@ import {
   type WeeklyAutoRunConfig,
   type WeeklyScheduleValidationError,
   type WeekdayKey,
-} from "../../store/settingsStore";
+} from "@/store/settingsStore";
 import { StatusNotice } from "../shared/StatusNotice";
 import { AutoRunDayRow } from "./AutoRunDayRow";
 import { SettingsPageHeader } from "./SettingsPageHeader";

@@ -4,19 +4,15 @@ import userEvent from "@testing-library/user-event";
 import {
   createWeeklyAutoRunConfigAllDaysDisabled,
   useSettingsStore,
-} from "../../store/settingsStore";
-import {
-  SessionType,
-  TimerStatus,
-  useTimerStore,
-} from "../../store/timerStore";
+} from "@/store/settingsStore";
+import { SessionType, TimerStatus, useTimerStore } from "@/store/timerStore";
 import { SettingsTopPage } from "../Settings/SettingsTopPage";
 import { SettingsTimerPage } from "../Settings/SettingsTimerPage";
 import { SettingsAutoRunPage } from "../Settings/SettingsAutoRunPage";
 import { SettingsNotificationPage } from "../Settings/SettingsNotificationPage";
-import { playNotificationSoundPreview } from "../../services/notifications";
+import { playNotificationSoundPreview } from "@/services/notifications";
 
-vi.mock("../../services/notifications", () => ({
+vi.mock("@/services/notifications", () => ({
   playNotificationSoundPreview: vi.fn(() =>
     Promise.resolve({ status: "played" }),
   ),

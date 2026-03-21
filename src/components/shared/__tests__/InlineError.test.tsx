@@ -1,7 +1,7 @@
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useErrorStore } from "../../../store/errorStore";
+import { useErrorStore } from "@/store/errorStore";
 import { InlineError } from "../InlineError";
 
 describe("InlineError", () => {

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import { useErrorStore, type AppError } from "../../store/errorStore";
-import { WarningTriangleIcon } from "../icons";
+import { useErrorStore, type AppError } from "@/store/errorStore";
+import { WarningTriangleIcon } from "@/components/icons/AppIcons";
 import { StatusNotice } from "./StatusNotice";
 
 /** How long a "recoverable" error stays visible before being auto-cleared. */

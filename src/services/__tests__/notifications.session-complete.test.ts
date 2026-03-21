@@ -56,7 +56,7 @@ describe("session complete notifications", () => {
     vi.mocked(isPermissionGranted).mockResolvedValue(true);
     vi.mocked(resolveResource).mockResolvedValueOnce("C:\\sounds\\work.wav");
 
-    const { useSettingsStore } = await import("../../store/settingsStore");
+    const { useSettingsStore } = await import("@/store/settingsStore");
     useSettingsStore.getState().reset();
     useSettingsStore.setState({
       notificationSoundMuted: false,
@@ -96,7 +96,7 @@ describe("session complete notifications", () => {
     vi.mocked(isPermissionGranted).mockResolvedValue(true);
     vi.mocked(resolveResource).mockResolvedValueOnce("C:\\sounds\\work.wav");
 
-    const { useSettingsStore } = await import("../../store/settingsStore");
+    const { useSettingsStore } = await import("@/store/settingsStore");
     useSettingsStore.getState().reset();
     useSettingsStore.setState({
       notificationSoundMuted: false,
@@ -119,7 +119,7 @@ describe("session complete notifications", () => {
     vi.mocked(isPermissionGranted).mockResolvedValue(false);
     vi.mocked(requestPermission).mockResolvedValue("denied");
 
-    const { useSettingsStore } = await import("../../store/settingsStore");
+    const { useSettingsStore } = await import("@/store/settingsStore");
     useSettingsStore.getState().reset();
 
     const { notifyBreakComplete } = await import("../notifications");
@@ -134,7 +134,7 @@ describe("session complete notifications", () => {
   it("keeps the Windows banner but suppresses all notification sound when muted", async () => {
     vi.mocked(isPermissionGranted).mockResolvedValue(true);
 
-    const { useSettingsStore } = await import("../../store/settingsStore");
+    const { useSettingsStore } = await import("@/store/settingsStore");
     useSettingsStore.getState().reset();
     useSettingsStore.setState({
       notificationSoundMuted: true,

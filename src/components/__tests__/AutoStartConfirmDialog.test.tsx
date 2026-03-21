@@ -9,11 +9,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { AutoStartConfirmDialog } from "../AutoStartConfirmDialog";
-import {
-  SessionType,
-  TimerStatus,
-  useTimerStore,
-} from "../../store/timerStore";
+import { SessionType, TimerStatus, useTimerStore } from "@/store/timerStore";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockResolvedValue("resolved_later"),

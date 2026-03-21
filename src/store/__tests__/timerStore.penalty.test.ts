@@ -13,7 +13,7 @@ import { useTimerStore, SessionType, TimerStatus } from "../timerStore";
 import { useSettingsStore } from "../settingsStore";
 
 // Mock the services
-vi.mock("../../services/notifications", () => ({
+vi.mock("@/services/notifications", () => ({
   notifyWorkComplete: vi.fn(),
   notifyBreakComplete: vi.fn(),
   notifyLongBreakComplete: vi.fn(),

@@ -2,12 +2,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { EmergencyStopButton } from "../EmergencyStop/EmergencyStopButton";
-import { useErrorStore } from "../../store/errorStore";
-import {
-  useTimerStore,
-  TimerStatus,
-  SessionType,
-} from "../../store/timerStore";
+import { useErrorStore } from "@/store/errorStore";
+import { useTimerStore, TimerStatus, SessionType } from "@/store/timerStore";
 
 // Mock Tauri invoke
 vi.mock("@tauri-apps/api/core", () => ({

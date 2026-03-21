@@ -1,13 +1,11 @@
 import { useEffect, useState } from "react";
-import {
-  SettingsAutoRunPage,
-  SettingsNotificationPage,
-  SettingsScreenLayout,
-  SettingsTopPage,
-  SettingsTimerPage,
-} from "./components/Settings";
+import { SettingsAutoRunPage } from "./components/Settings/SettingsAutoRunPage";
+import { SettingsNotificationPage } from "./components/Settings/SettingsNotificationPage";
+import { SettingsScreenLayout } from "./components/Settings/SettingsScreenLayout";
+import { SettingsTopPage } from "./components/Settings/SettingsTopPage";
+import { SettingsTimerPage } from "./components/Settings/SettingsTimerPage";
 import { FullscreenBreak } from "./components/BreakScreen/FullscreenBreak";
-import { HomeScreen } from "./components/Home";
+import { HomeScreen } from "./components/Home/HomeScreen";
 import { useTimerSync } from "./hooks/useTimerSync";
 import { useSettingsStore } from "./store/settingsStore";
 import { useTimerStore } from "./store/timerStore";
