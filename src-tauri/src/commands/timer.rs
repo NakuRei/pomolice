@@ -174,11 +174,11 @@ pub async fn emergency_stop(window: WebviewWindow, state: State<'_, AppState>) -
     // Exit fullscreen if needed
     if was_fullscreen_break {
         let app_handle = window.app_handle().clone();
-        let window_manager = state.window_manager.clone();
 
         tauri::async_runtime::spawn(async move {
-            let mut mgr = window_manager.lock().await;
-            let _ = mgr.exit_fullscreen_all_monitors(app_handle).await;
+            let state_handle = app_handle.state::<AppState>();
+            let mut mgr = state_handle.window_manager.lock().await;
+            let _ = mgr.exit_fullscreen_all_monitors(app_handle.clone()).await;
         });
     }
 

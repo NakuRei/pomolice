@@ -44,10 +44,10 @@ pub struct SchedulerTaskState {
 ///
 /// `scheduler_task_state` must not be acquired together with other locks.
 pub struct AppState {
-    pub timer_manager: Arc<Mutex<TimerStateManager>>,
-    pub input_monitor: Arc<Mutex<InputMonitorManager>>,
-    pub window_manager: Arc<Mutex<WindowStateManager>>,
-    pub persistence: Arc<PersistenceManager>,
+    pub timer_manager: Mutex<TimerStateManager>,
+    pub input_monitor: Mutex<InputMonitorManager>,
+    pub window_manager: Mutex<WindowStateManager>,
+    pub persistence: PersistenceManager,
     pub clock: Arc<dyn Clock + Send + Sync>,
     pub scheduler_task_state: StdMutex<SchedulerTaskState>,
     pub boot_prompt_runtime_state: StdMutex<BootPromptRuntimeState>,
@@ -66,7 +66,7 @@ impl AppState {
     /// Create a new AppState instance with an injected clock implementation.
     pub fn new_with_clock(app_handle: AppHandle, clock: Arc<dyn Clock + Send + Sync>) -> Self {
         info!("Creating new AppState");
-        let persistence = Arc::new(PersistenceManager::new(clock.clone()));
+        let persistence = PersistenceManager::new(clock.clone());
 
         // Load persisted state if available
         let (initial_timer_state, restored_saved_at_utc) =
@@ -101,8 +101,8 @@ impl AppState {
         let app_for_input = app_handle.clone();
 
         Self {
-            timer_manager: Arc::new(Mutex::new(TimerStateManager::new(initial_timer_state))),
-            input_monitor: Arc::new(Mutex::new(InputMonitorManager::new(
+            timer_manager: Mutex::new(TimerStateManager::new(initial_timer_state)),
+            input_monitor: Mutex::new(InputMonitorManager::new(
                 move || {
                     let app = app_for_escape.clone();
                     tauri::async_runtime::spawn(async move {
@@ -115,8 +115,8 @@ impl AppState {
                         crate::lib_handle_input_detected(app).await;
                     });
                 },
-            ))),
-            window_manager: Arc::new(Mutex::new(WindowStateManager::new())),
+            )),
+            window_manager: Mutex::new(WindowStateManager::new()),
             persistence,
             clock,
             scheduler_task_state: StdMutex::new(SchedulerTaskState::default()),

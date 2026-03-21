@@ -19,7 +19,7 @@ mod lock_ordering_tests {
     struct FakeWindowManager;
     struct FakeTimerManager;
 
-    /// Shared lock set that mirrors the structure of AppState.
+    /// Shared lock set that mirrors AppState lock relationships.
     struct FakeLocks {
         input_monitor: Arc<Mutex<FakeInputMonitor>>,
         window_manager: Arc<Mutex<FakeWindowManager>>,
