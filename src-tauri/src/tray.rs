@@ -1,7 +1,11 @@
 // System tray icon setup, event handling, and dynamic updates.
 // The tray icon is output-only and does not participate in lock ordering.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::io::Cursor;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    LazyLock,
+};
 
 use tauri::image::Image;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
@@ -27,12 +31,23 @@ struct TrayStatusPresentation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TrayVisualSpec {
     icon_rgba: Vec<u8>,
+    width: u32,
+    height: u32,
     tooltip: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DecodedPngImage {
+    rgba: Vec<u8>,
+    width: u32,
+    height: u32,
 }
 
 /// Tracks whether the "minimized to tray" notification has been shown.
 /// Once shown, it is never shown again for the lifetime of the process.
 static TRAY_NOTIFICATION_SHOWN: AtomicBool = AtomicBool::new(false);
+
+static IDLE_APP_ICON: LazyLock<DecodedPngImage> = LazyLock::new(decode_idle_app_icon);
 
 /// Guards against phantom menu events on Windows.
 ///
@@ -52,8 +67,11 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let menu = MenuBuilder::new(app).item(&exit_item).build()?;
 
     let initial_spec = compose_tray_visual_spec(TimerStatus::Idle, 0);
-    let size = tray_icon_renderer::icon_size();
-    let icon = Image::new_owned(initial_spec.icon_rgba, size, size);
+    let icon = Image::new_owned(
+        initial_spec.icon_rgba,
+        initial_spec.width,
+        initial_spec.height,
+    );
 
     TrayIconBuilder::with_id("pomolice-tray")
         .icon(icon)
@@ -102,8 +120,7 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
 /// Update the tray icon image and tooltip based on the current timer tick.
 pub fn update_tray_icon(app: &AppHandle, payload: &TimerTickPayload) {
     let visual_spec = compose_tray_visual_spec(payload.status, payload.remaining_seconds);
-    let size = tray_icon_renderer::icon_size();
-    let icon = Image::new_owned(visual_spec.icon_rgba, size, size);
+    let icon = Image::new_owned(visual_spec.icon_rgba, visual_spec.width, visual_spec.height);
 
     if let Some(tray) = app.tray_by_id("pomolice-tray") {
         if let Err(e) = tray.set_icon(Some(icon)) {
@@ -157,22 +174,62 @@ fn status_presentation(status: TimerStatus) -> TrayStatusPresentation {
 /// Convert timer status and time data to icon pixels and tooltip text.
 fn compose_tray_visual_spec(status: TimerStatus, remaining_seconds: u64) -> TrayVisualSpec {
     let presentation = status_presentation(status);
-    let icon_rgba = render_icon_rgba(presentation.glyph_mode, status, remaining_seconds);
+    let (icon_rgba, width, height) =
+        render_icon_rgba(presentation.glyph_mode, status, remaining_seconds);
     let tooltip = compose_tooltip_text(presentation, remaining_seconds);
-    TrayVisualSpec { icon_rgba, tooltip }
+    TrayVisualSpec {
+        icon_rgba,
+        width,
+        height,
+        tooltip,
+    }
 }
 
 fn render_icon_rgba(
     glyph_mode: TrayGlyphMode,
     status: TimerStatus,
     remaining_seconds: u64,
-) -> Vec<u8> {
+) -> (Vec<u8>, u32, u32) {
     match glyph_mode {
-        TrayGlyphMode::IdleSymbol => tray_icon_renderer::render_idle_icon(),
+        TrayGlyphMode::IdleSymbol => {
+            let icon = idle_app_icon();
+            (icon.rgba.clone(), icon.width, icon.height)
+        }
         TrayGlyphMode::RemainingMinutes => {
             let remaining_minutes = remaining_seconds.div_ceil(60); // Round up
-            tray_icon_renderer::render_tray_icon(remaining_minutes as u32, status)
+            let size = tray_icon_renderer::icon_size();
+            (
+                tray_icon_renderer::render_tray_icon(remaining_minutes as u32, status),
+                size,
+                size,
+            )
         }
+    }
+}
+
+fn idle_app_icon() -> &'static DecodedPngImage {
+    &IDLE_APP_ICON
+}
+
+fn decode_idle_app_icon() -> DecodedPngImage {
+    let decoder = png::Decoder::new(Cursor::new(&include_bytes!("../icons/32x32.png")[..]));
+    let mut reader = decoder
+        .read_info()
+        .expect("embedded idle app icon PNG must be readable");
+
+    if reader.output_color_type().0 != png::ColorType::Rgba {
+        panic!("embedded idle app icon PNG must decode to RGBA");
+    }
+
+    let mut rgba = Vec::with_capacity(reader.output_buffer_size());
+    while let Ok(Some(row)) = reader.next_row() {
+        rgba.extend(row.data());
+    }
+
+    DecodedPngImage {
+        rgba,
+        width: reader.info().width,
+        height: reader.info().height,
     }
 }
 
@@ -249,10 +306,16 @@ mod tests {
     }
 
     #[test]
-    fn test_compose_tray_visual_spec_idle_uses_idle_icon() {
+    fn test_compose_tray_visual_spec_idle_uses_app_icon() {
         let spec = compose_tray_visual_spec(TimerStatus::Idle, 10);
-        let expected = tray_icon_renderer::render_idle_icon();
-        assert_eq!(spec.icon_rgba, expected);
+        let expected = idle_app_icon();
+        let legacy_idle = tray_icon_renderer::render_idle_icon();
+        assert_eq!(spec.icon_rgba.as_slice(), expected.rgba.as_slice());
+        assert_ne!(spec.icon_rgba.as_slice(), legacy_idle.as_slice());
+        assert_eq!(spec.width, 32);
+        assert_eq!(spec.height, 32);
+        assert_eq!(spec.width, expected.width);
+        assert_eq!(spec.height, expected.height);
         assert_eq!(spec.tooltip, "Pomolice - Idle");
     }
 
@@ -261,6 +324,8 @@ mod tests {
         let spec = compose_tray_visual_spec(TimerStatus::Working, 65);
         let expected = tray_icon_renderer::render_tray_icon(2, TimerStatus::Working);
         assert_eq!(spec.icon_rgba, expected);
+        assert_eq!(spec.width, 16);
+        assert_eq!(spec.height, 16);
         assert_eq!(spec.tooltip, "Pomolice - Working - 1:05 remaining");
     }
 
