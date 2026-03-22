@@ -68,7 +68,7 @@ describe("HomeScreen", () => {
 
     render(<HomeScreen {...createProps({ onOpenSettingsTopScreen })} />);
 
-    await user.click(screen.getByTestId("settings-button"));
+    await user.click(screen.getByRole("button", { name: "設定を開く" }));
 
     expect(onOpenSettingsTopScreen).toHaveBeenCalledTimes(1);
   });
@@ -79,7 +79,7 @@ describe("HomeScreen", () => {
 
     render(<HomeScreen {...createProps({ onToggleNotificationSoundMuted })} />);
 
-    await user.click(screen.getByTestId("notification-mute-button"));
+    await user.click(screen.getByRole("button", { name: "通知音" }));
 
     expect(onToggleNotificationSoundMuted).toHaveBeenCalledTimes(1);
   });
@@ -117,15 +117,9 @@ describe("HomeScreen", () => {
       />,
     );
 
-    expect(
-      screen.getByTestId("header-badge-require-manual-continue"),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByTestId("header-badge-auto-run"),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByTestId("header-badge-auto-continue"),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText("毎回確認")).toBeInTheDocument();
+    expect(screen.queryByText("自動実行ON")).not.toBeInTheDocument();
+    expect(screen.queryByText("自動継続ON")).not.toBeInTheDocument();
   });
 
   it("renders only auto-continue badge when auto-continue is enabled", () => {
@@ -137,15 +131,9 @@ describe("HomeScreen", () => {
       />,
     );
 
-    expect(
-      screen.getByTestId("header-badge-auto-continue"),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByTestId("header-badge-auto-run"),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByTestId("header-badge-require-manual-continue"),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText("自動継続ON")).toBeInTheDocument();
+    expect(screen.queryByText("自動実行ON")).not.toBeInTheDocument();
+    expect(screen.queryByText("毎回確認")).not.toBeInTheDocument();
   });
 
   it("keeps ConnectionBanner and InfoMessageBanner composed inside HomeScreen via lightweight test doubles", () => {

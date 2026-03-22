@@ -75,7 +75,7 @@ describe("App", () => {
 
     render(<App />);
 
-    const muteButton = screen.getByTestId("notification-mute-button");
+    const muteButton = screen.getByRole("button", { name: "通知音" });
     await user.click(muteButton);
 
     expect(useSettingsStore.getState().notificationSoundMuted).toBe(true);
@@ -85,7 +85,7 @@ describe("App", () => {
     const user = userEvent.setup();
 
     render(<App />);
-    await user.click(screen.getByTestId("settings-button"));
+    await user.click(screen.getByRole("button", { name: "設定を開く" }));
 
     expect(screen.getByTestId("settings-top-page")).toBeInTheDocument();
     expect(screen.queryByTestId("timer-display")).not.toBeInTheDocument();
@@ -95,8 +95,8 @@ describe("App", () => {
     const user = userEvent.setup();
 
     render(<App />);
-    await user.click(screen.getByTestId("settings-button"));
-    await user.click(screen.getByTestId("settings-top-back-home"));
+    await user.click(screen.getByRole("button", { name: "設定を開く" }));
+    await user.click(screen.getByRole("button", { name: "ホームへ戻る" }));
 
     expect(screen.getByTestId("timer-display")).toBeInTheDocument();
     expect(screen.queryByTestId("settings-top-page")).not.toBeInTheDocument();
@@ -131,12 +131,12 @@ describe("App", () => {
     const user = userEvent.setup();
 
     render(<App />);
-    await user.click(screen.getByTestId("settings-button"));
+    await user.click(screen.getByRole("button", { name: "設定を開く" }));
     await user.click(screen.getByTestId("settings-top-row-auto-run"));
 
     expect(screen.getByTestId("settings-auto-run-page")).toBeInTheDocument();
     expect(
-      screen.getByTestId("settings-auto-run-feature-toggle"),
+      screen.getByRole("checkbox", { name: "曜日別自動実行の全体切り替え" }),
     ).toBeInTheDocument();
   });
 
@@ -144,14 +144,14 @@ describe("App", () => {
     const user = userEvent.setup();
 
     render(<App />);
-    await user.click(screen.getByTestId("settings-button"));
+    await user.click(screen.getByRole("button", { name: "設定を開く" }));
     await user.click(screen.getByTestId("settings-top-row-notification"));
 
     expect(
       screen.getByTestId("settings-notification-page"),
     ).toBeInTheDocument();
     expect(
-      screen.getByTestId("settings-notification-sound-volume"),
+      screen.getByRole("slider", { name: "通知音量" }),
     ).toBeInTheDocument();
   });
 
@@ -218,13 +218,13 @@ describe("App", () => {
     const user = userEvent.setup();
 
     render(<App />);
-    await user.click(screen.getByTestId("settings-button"));
+    await user.click(screen.getByRole("button", { name: "設定を開く" }));
     await user.click(screen.getByTestId("settings-top-row-notification"));
 
-    fireEvent.change(screen.getByTestId("settings-notification-sound-volume"), {
+    fireEvent.change(screen.getByRole("slider", { name: "通知音量" }), {
       target: { value: "40" },
     });
-    await user.click(screen.getByTestId("settings-save"));
+    await user.click(screen.getByRole("button", { name: "保存" }));
 
     expect(screen.getByTestId("settings-top-page")).toBeInTheDocument();
     expect(
@@ -236,9 +236,9 @@ describe("App", () => {
     const user = userEvent.setup();
 
     render(<App />);
-    await user.click(screen.getByTestId("settings-button"));
+    await user.click(screen.getByRole("button", { name: "設定を開く" }));
     await user.click(screen.getByTestId("settings-top-row-notification"));
-    await user.click(screen.getByTestId("settings-notification-back"));
+    await user.click(screen.getByRole("button", { name: "設定一覧へ戻る" }));
 
     expect(screen.getByTestId("settings-top-page")).toBeInTheDocument();
     expect(

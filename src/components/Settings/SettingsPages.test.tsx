@@ -96,7 +96,7 @@ describe("Settings Pages", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId("settings-top-heading")).toHaveFocus();
+      expect(screen.getByRole("heading", { name: "設定" })).toHaveFocus();
     });
   });
 
@@ -113,8 +113,7 @@ describe("Settings Pages", () => {
       />,
     );
 
-    const backButton = screen.getByTestId("settings-top-back-home");
-    expect(backButton).toHaveAccessibleName("ホームへ戻る");
+    const backButton = screen.getByRole("button", { name: "ホームへ戻る" });
 
     await user.click(backButton);
 
@@ -170,12 +169,15 @@ describe("Settings Pages", () => {
     ).toHaveTextContent("毎回確認する");
 
     await user.click(
-      screen.getByTestId("settings-top-post-break-policy-toggle"),
+      screen.getByRole("button", { name: "自動継続をONにする" }),
     );
 
     expect(useSettingsStore.getState().postBreakTransitionPolicy).toBe(
       "start_next_work_automatically",
     );
+    expect(
+      screen.getByRole("button", { name: "毎回確認に戻す" }),
+    ).toHaveAttribute("aria-pressed", "true");
     expect(
       screen.getByTestId("settings-top-row-post-break-policy"),
     ).toHaveTextContent("休憩後に自動で次の作業を開始する");
@@ -262,7 +264,9 @@ describe("Settings Pages", () => {
     render(<SettingsTimerPage openSettingsTopScreen={() => undefined} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("settings-timer-heading")).toHaveFocus();
+      expect(
+        screen.getByRole("heading", { name: "タイマー設定" }),
+      ).toHaveFocus();
     });
   });
 
@@ -280,15 +284,19 @@ describe("Settings Pages", () => {
       <SettingsAutoRunPage openSettingsTopScreen={openSettingsTopScreen} />,
     );
 
-    await user.click(screen.getByTestId("settings-auto-run-feature-toggle"));
-    await user.click(screen.getByTestId("settings-auto-run-day-enabled-mon"));
-    fireEvent.change(screen.getByTestId("settings-auto-run-day-start-mon"), {
+    await user.click(
+      screen.getByRole("checkbox", { name: "曜日別自動実行の全体切り替え" }),
+    );
+    await user.click(
+      screen.getByRole("checkbox", { name: "月曜日の自動実行を有効にする" }),
+    );
+    fireEvent.change(screen.getByLabelText("月曜日の開始時刻"), {
       target: { value: "09:00" },
     });
-    fireEvent.change(screen.getByTestId("settings-auto-run-day-end-mon"), {
+    fireEvent.change(screen.getByLabelText("月曜日の終了時刻"), {
       target: { value: "18:00" },
     });
-    await user.click(screen.getByTestId("settings-save"));
+    await user.click(screen.getByRole("button", { name: "保存" }));
 
     expect(useSettingsStore.getState().autoRunFeatureEnabled).toBe(true);
     expect(useSettingsStore.getState().weeklyAutoRunConfig.mon.enabled).toBe(
@@ -312,15 +320,19 @@ describe("Settings Pages", () => {
       <SettingsAutoRunPage openSettingsTopScreen={openSettingsTopScreen} />,
     );
 
-    await user.click(screen.getByTestId("settings-auto-run-feature-toggle"));
-    await user.click(screen.getByTestId("settings-auto-run-day-enabled-mon"));
-    fireEvent.change(screen.getByTestId("settings-auto-run-day-start-mon"), {
+    await user.click(
+      screen.getByRole("checkbox", { name: "曜日別自動実行の全体切り替え" }),
+    );
+    await user.click(
+      screen.getByRole("checkbox", { name: "月曜日の自動実行を有効にする" }),
+    );
+    fireEvent.change(screen.getByLabelText("月曜日の開始時刻"), {
       target: { value: "10:00" },
     });
-    fireEvent.change(screen.getByTestId("settings-auto-run-day-end-mon"), {
+    fireEvent.change(screen.getByLabelText("月曜日の終了時刻"), {
       target: { value: "19:00" },
     });
-    await user.click(screen.getByTestId("settings-cancel"));
+    await user.click(screen.getByRole("button", { name: "キャンセル" }));
 
     expect(useSettingsStore.getState().autoRunFeatureEnabled).toBe(false);
     expect(useSettingsStore.getState().weeklyAutoRunConfig.mon.enabled).toBe(
@@ -337,9 +349,13 @@ describe("Settings Pages", () => {
       <SettingsAutoRunPage openSettingsTopScreen={openSettingsTopScreen} />,
     );
 
-    await user.click(screen.getByTestId("settings-auto-run-feature-toggle"));
-    await user.click(screen.getByTestId("settings-auto-run-day-enabled-mon"));
-    fireEvent.change(screen.getByTestId("settings-auto-run-day-start-mon"), {
+    await user.click(
+      screen.getByRole("checkbox", { name: "曜日別自動実行の全体切り替え" }),
+    );
+    await user.click(
+      screen.getByRole("checkbox", { name: "月曜日の自動実行を有効にする" }),
+    );
+    fireEvent.change(screen.getByLabelText("月曜日の開始時刻"), {
       target: { value: "invalid-time" },
     });
 
@@ -347,7 +363,7 @@ describe("Settings Pages", () => {
       screen.getByTestId("settings-auto-run-day-error-mon"),
     ).toBeInTheDocument();
     expect(screen.getByTestId("settings-auto-run-footer")).toBeInTheDocument();
-    expect(screen.getByTestId("settings-save")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
     expect(openSettingsTopScreen).not.toHaveBeenCalled();
   });
 
@@ -385,7 +401,9 @@ describe("Settings Pages", () => {
     render(<SettingsAutoRunPage openSettingsTopScreen={() => undefined} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("settings-auto-run-heading")).toHaveFocus();
+      expect(
+        screen.getByRole("heading", { name: "曜日別自動実行設定" }),
+      ).toHaveFocus();
     });
   });
 
@@ -405,11 +423,9 @@ describe("Settings Pages", () => {
       />,
     );
 
-    const volumeSlider = screen.getByTestId(
-      "settings-notification-sound-volume",
-    );
+    const volumeSlider = screen.getByRole("slider", { name: "通知音量" });
     fireEvent.change(volumeSlider, { target: { value: "35" } });
-    await user.click(screen.getByTestId("settings-save"));
+    await user.click(screen.getByRole("button", { name: "保存" }));
 
     expect(useSettingsStore.getState().notificationSoundVolumePercent).toBe(35);
     expect(useSettingsStore.getState().workDuration).toBe(27);
@@ -431,13 +447,11 @@ describe("Settings Pages", () => {
       />,
     );
 
-    await user.click(screen.getByTestId("settings-notification-mute-button"));
-    const volumeSlider = screen.getByTestId(
-      "settings-notification-sound-volume",
-    );
-    await user.click(screen.getByTestId("settings-notification-mute-button"));
+    await user.click(screen.getByRole("button", { name: "通知音" }));
+    const volumeSlider = screen.getByRole("slider", { name: "通知音量" });
+    await user.click(screen.getByRole("button", { name: "通知音" }));
     fireEvent.change(volumeSlider, { target: { value: "80" } });
-    await user.click(screen.getByTestId("settings-cancel"));
+    await user.click(screen.getByRole("button", { name: "キャンセル" }));
 
     expect(useSettingsStore.getState().notificationSoundMuted).toBe(false);
     expect(useSettingsStore.getState().notificationSoundVolumePercent).toBe(50);
@@ -451,20 +465,15 @@ describe("Settings Pages", () => {
       <SettingsNotificationPage openSettingsTopScreen={() => undefined} />,
     );
 
-    await user.click(screen.getByTestId("settings-notification-mute-button"));
+    await user.click(screen.getByRole("button", { name: "通知音" }));
 
+    expect(screen.getByRole("slider", { name: "通知音量" })).toBeDisabled();
     expect(
-      screen.getByTestId("settings-notification-footer"),
+      screen.getByRole("button", { name: "通知音をテスト再生する" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByText("通知音がミュート中のため再生しませんでした。"),
     ).toBeInTheDocument();
-    expect(
-      screen.getByTestId("settings-notification-sound-volume"),
-    ).toBeDisabled();
-    expect(
-      screen.getByTestId("settings-notification-sound-preview-button"),
-    ).toBeDisabled();
-    expect(
-      screen.getByTestId("settings-notification-sound-preview-status"),
-    ).toHaveTextContent("通知音がミュート中のため再生しませんでした。");
   });
 
   it("initializes notification preview ui state on each mount", async () => {
@@ -474,19 +483,19 @@ describe("Settings Pages", () => {
       <SettingsNotificationPage openSettingsTopScreen={() => undefined} />,
     );
     await user.selectOptions(
-      screen.getByTestId("settings-notification-sound-preview-type"),
+      screen.getByRole("combobox", { name: "テストする通知音の種類" }),
       "long_break",
     );
-    await user.click(screen.getByTestId("settings-notification-mute-button"));
+    await user.click(screen.getByRole("button", { name: "通知音" }));
     firstRender.unmount();
 
     render(
       <SettingsNotificationPage openSettingsTopScreen={() => undefined} />,
     );
 
-    const previewTypeSelect = screen.getByTestId(
-      "settings-notification-sound-preview-type",
-    );
+    const previewTypeSelect = screen.getByRole("combobox", {
+      name: "テストする通知音の種類",
+    });
     expect(previewTypeSelect).toHaveValue("work");
     expect(
       screen.getByTestId("settings-notification-sound-preview-status"),
@@ -504,15 +513,15 @@ describe("Settings Pages", () => {
     );
 
     await user.click(
-      screen.getByTestId("settings-notification-sound-preview-button"),
+      screen.getByRole("button", { name: "通知音をテスト再生する" }),
     );
 
     expect(playNotificationSoundPreview).toHaveBeenCalledTimes(1);
     expect(
-      screen.getByTestId("settings-notification-sound-preview-status"),
-    ).toHaveTextContent(
-      "通知音ファイルを読み込めなかったため再生できませんでした。",
-    );
+      screen.getByText(
+        "通知音ファイルを読み込めなかったため再生できませんでした。",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("focuses the notification heading on mount", async () => {
@@ -521,7 +530,7 @@ describe("Settings Pages", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId("settings-notification-heading")).toHaveFocus();
+      expect(screen.getByRole("heading", { name: "通知設定" })).toHaveFocus();
     });
   });
 

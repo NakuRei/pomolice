@@ -26,9 +26,7 @@ describe("InlineError", () => {
   it("renders nothing when the error does not exist", () => {
     render(<InlineError errorId="start_work" />);
 
-    expect(
-      screen.queryByTestId("inline-error-start_work"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("renders alert notice with the current error message", () => {
@@ -45,8 +43,6 @@ describe("InlineError", () => {
     render(<InlineError errorId="start_work" />);
 
     const notice = screen.getByRole("alert");
-
-    expect(notice).toBe(screen.getByTestId("inline-error-start_work"));
     expect(notice).toHaveTextContent("開始に失敗しました。");
   });
 
@@ -66,7 +62,7 @@ describe("InlineError", () => {
 
     render(<InlineError errorId="start_work" />);
 
-    const retryButton = screen.getByTestId("inline-error-retry-start_work");
+    const retryButton = screen.getByRole("button", { name: "再試行" });
 
     expect(retryButton).toHaveTextContent("再試行");
 
@@ -91,15 +87,13 @@ describe("InlineError", () => {
 
     render(<InlineError errorId="start_work" />);
 
-    expect(screen.getByTestId("inline-error-start_work")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toBeInTheDocument();
 
     act(() => {
       vi.advanceTimersByTime(5000);
     });
 
-    expect(
-      screen.queryByTestId("inline-error-start_work"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(useErrorStore.getState().errors.start_work).toBeUndefined();
   });
 });

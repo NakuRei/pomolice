@@ -17,7 +17,7 @@ describe("NotificationMuteToggleButton", () => {
       />,
     );
 
-    const button = screen.getByTestId("notification-mute-toggle-button");
+    const button = screen.getByRole("button", { name: "通知音" });
 
     expect(button).toHaveAccessibleName("通知音");
     expect(button).toHaveAttribute("aria-pressed", "false");
@@ -37,7 +37,7 @@ describe("NotificationMuteToggleButton", () => {
       />,
     );
 
-    const button = screen.getByTestId("notification-mute-toggle-button");
+    const button = screen.getByRole("button", { name: "通知音" });
 
     expect(button).toHaveAccessibleName("通知音");
     expect(button).toHaveAttribute("aria-pressed", "true");
