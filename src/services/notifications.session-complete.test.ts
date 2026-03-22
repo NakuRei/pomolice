@@ -36,6 +36,28 @@ class MockAudio {
   }
 }
 
+function getAudioInstance(index: number): MockAudio {
+  const audioInstance = audioInstances[index];
+  expect(audioInstance).toBeDefined();
+  if (audioInstance === undefined) {
+    throw new Error(`Expected audio instance at index ${String(index)}`);
+  }
+
+  return audioInstance;
+}
+
+function getSendNotificationPayload(callIndex: number): unknown {
+  const notificationCall = vi.mocked(sendNotification).mock.calls[callIndex];
+  expect(notificationCall).toBeDefined();
+  if (notificationCall === undefined) {
+    throw new Error(
+      `Expected sendNotification call at index ${String(callIndex)}`,
+    );
+  }
+
+  return notificationCall[0];
+}
+
 function setNavigatorUserAgent(userAgent: string): void {
   Object.defineProperty(window.navigator, "userAgent", {
     configurable: true,
@@ -74,7 +96,7 @@ describe("session complete notifications", () => {
       body: "休憩が終わりました。次のポモドーロを始めましょう。",
     });
 
-    const bannerCall = vi.mocked(sendNotification).mock.calls[0][0] as unknown;
+    const bannerCall = getSendNotificationPayload(0);
     expect(typeof bannerCall).toBe("object");
     expect(bannerCall).not.toBeNull();
     expect(Object.prototype.hasOwnProperty.call(bannerCall, "sound")).toBe(
@@ -84,11 +106,11 @@ describe("session complete notifications", () => {
     expect(resolveResource).toHaveBeenCalledWith("resources/sounds/work.wav");
     expect(convertFileSrc).toHaveBeenCalledWith("C:/sounds/work.wav");
     expect(audioInstances).toHaveLength(1);
-    expect(audioInstances[0].volume).toBeCloseTo(
+    expect(getAudioInstance(0).volume).toBeCloseTo(
       convertNotificationVolumePercentToGain(60),
       10,
     );
-    expect(audioInstances[0].play).toHaveBeenCalledTimes(1);
+    expect(getAudioInstance(0).play).toHaveBeenCalledTimes(1);
   });
 
   it("keeps non-Windows notifications on the native notification sound path", async () => {

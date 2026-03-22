@@ -219,7 +219,14 @@ export function convertDateDayIndexToWeekdayKey(dayIndex: number): WeekdayKey {
     );
   }
 
-  return WEEKDAY_CONVERSION_MAPPER.dateDayIndexToWeekdayKey[dayIndex];
+  const weekday = WEEKDAY_CONVERSION_MAPPER.dateDayIndexToWeekdayKey[dayIndex];
+  if (weekday === undefined) {
+    throw new RangeError(
+      `Date.getDay() index must be 0-6, received ${String(dayIndex)}.`,
+    );
+  }
+
+  return weekday;
 }
 
 /**

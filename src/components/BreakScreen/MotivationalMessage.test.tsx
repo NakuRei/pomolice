@@ -44,7 +44,15 @@ describe("MotivationalMessage", () => {
       vi.spyOn(
         motivationalMessagesModule,
         "getRandomMessage",
-      ).mockImplementation(() => messages[callCount++ % messages.length]);
+      ).mockImplementation(() => {
+        const message = messages[callCount % messages.length];
+        callCount += 1;
+        if (message === undefined) {
+          throw new Error("Expected mock message to exist.");
+        }
+
+        return message;
+      });
 
       const { unmount } = render(<MotivationalMessage />);
       expect(screen.getByText("メッセージ1")).toBeInTheDocument();

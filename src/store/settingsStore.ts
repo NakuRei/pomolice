@@ -378,19 +378,10 @@ function createWeeklyScheduleValidationErrors(
   );
   const weeklyValidationErrors: WeeklyScheduleValidationError[] = [];
 
-  for (
-    let primaryIndex = 0;
-    primaryIndex < comparableSchedules.length;
-    primaryIndex += 1
-  ) {
-    const primarySchedule = comparableSchedules[primaryIndex];
-
-    for (
-      let secondaryIndex = primaryIndex + 1;
-      secondaryIndex < comparableSchedules.length;
-      secondaryIndex += 1
-    ) {
-      const secondarySchedule = comparableSchedules[secondaryIndex];
+  for (const [primaryIndex, primarySchedule] of comparableSchedules.entries()) {
+    for (const secondarySchedule of comparableSchedules.slice(
+      primaryIndex + 1,
+    )) {
       if (
         !hasOverlappingWeekMinuteRanges(
           primarySchedule.ranges,

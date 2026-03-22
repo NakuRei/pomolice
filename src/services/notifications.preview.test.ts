@@ -40,6 +40,16 @@ class MockAudio {
   }
 }
 
+function getAudioInstance(index: number): MockAudio {
+  const audioInstance = audioInstances[index];
+  expect(audioInstance).toBeDefined();
+  if (audioInstance === undefined) {
+    throw new Error(`Expected audio instance at index ${String(index)}`);
+  }
+
+  return audioInstance;
+}
+
 describe("playNotificationSoundPreview()", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -63,8 +73,9 @@ describe("playNotificationSoundPreview()", () => {
     expect(resolveResource).toHaveBeenCalledWith("resources/sounds/work.wav");
     expect(convertFileSrc).toHaveBeenCalledWith("C:/sounds/work.wav");
     expect(audioInstances).toHaveLength(1);
-    expect(audioInstances[0].volume).toBe(1);
-    expect(audioInstances[0].play).toHaveBeenCalledTimes(1);
+    const previewAudio = getAudioInstance(0);
+    expect(previewAudio.volume).toBe(1);
+    expect(previewAudio.play).toHaveBeenCalledTimes(1);
   });
 
   it("should play preview sound with clamped min volume", async () => {
@@ -79,8 +90,9 @@ describe("playNotificationSoundPreview()", () => {
 
     expect(result).toEqual({ status: "played" });
     expect(audioInstances).toHaveLength(1);
-    expect(audioInstances[0].volume).toBe(0);
-    expect(audioInstances[0].play).toHaveBeenCalledTimes(1);
+    const previewAudio = getAudioInstance(0);
+    expect(previewAudio.volume).toBe(0);
+    expect(previewAudio.play).toHaveBeenCalledTimes(1);
   });
 
   it.each([1, 10, 50, 60])(
@@ -100,7 +112,7 @@ describe("playNotificationSoundPreview()", () => {
 
       expect(result).toEqual({ status: "played" });
       expect(audioInstances).toHaveLength(1);
-      expect(audioInstances[0].volume).toBeCloseTo(
+      expect(getAudioInstance(0).volume).toBeCloseTo(
         convertNotificationVolumePercentToGain(volumePercent),
         10,
       );
@@ -153,9 +165,11 @@ describe("playNotificationSoundPreview()", () => {
     });
 
     expect(audioInstances).toHaveLength(2);
-    expect(audioInstances[0].pause).toHaveBeenCalledTimes(1);
-    expect(audioInstances[0].currentTime).toBe(0);
-    expect(audioInstances[1].play).toHaveBeenCalledTimes(1);
+    const firstPreviewAudio = getAudioInstance(0);
+    const secondPreviewAudio = getAudioInstance(1);
+    expect(firstPreviewAudio.pause).toHaveBeenCalledTimes(1);
+    expect(firstPreviewAudio.currentTime).toBe(0);
+    expect(secondPreviewAudio.play).toHaveBeenCalledTimes(1);
   });
 
   it("should return error when audio playback fails", async () => {

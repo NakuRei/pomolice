@@ -77,7 +77,7 @@ describe("CycleProgress", () => {
       const { rerender } = render(<CycleProgress />);
 
       // Initially: 4 dots, 2 filled
-      expect(screen.getAllByRole("img")[0].children).toHaveLength(4);
+      expect(screen.getByTestId("cycle-progress").children).toHaveLength(4);
 
       // Change to 6 dots
       act(() => {
@@ -85,7 +85,7 @@ describe("CycleProgress", () => {
       });
       rerender(<CycleProgress />);
 
-      expect(screen.getAllByRole("img")[0].children).toHaveLength(6);
+      expect(screen.getByTestId("cycle-progress").children).toHaveLength(6);
     });
   });
 

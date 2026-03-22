@@ -23,13 +23,30 @@ function randomInt(max: number): number {
   return Math.floor(Math.random() * max);
 }
 
+function getArrayItemOrThrow<T>(
+  values: readonly T[],
+  index: number,
+  errorMessage: string,
+): T {
+  const value = values[index];
+  if (value === undefined) {
+    throw new Error(errorMessage);
+  }
+
+  return value;
+}
+
 /**
  * Get a random short typing phrase for step 5
  * @returns Random short typing phrase
  */
 export function getRandomShortPhrase(): ShortTypingPhrase {
   const index = randomInt(SHORT_TYPING_PHRASES.length);
-  return SHORT_TYPING_PHRASES[index];
+  return getArrayItemOrThrow(
+    SHORT_TYPING_PHRASES,
+    index,
+    "SHORT_TYPING_PHRASES must contain at least one value.",
+  );
 }
 
 /**
@@ -38,7 +55,11 @@ export function getRandomShortPhrase(): ShortTypingPhrase {
  */
 export function getRandomLongPhrase(): LongTypingPhrase {
   const index = randomInt(LONG_TYPING_PHRASES.length);
-  return LONG_TYPING_PHRASES[index];
+  return getArrayItemOrThrow(
+    LONG_TYPING_PHRASES,
+    index,
+    "LONG_TYPING_PHRASES must contain at least one value.",
+  );
 }
 
 /**
@@ -52,7 +73,11 @@ export function getConfirmationMessage(step: number): ConfirmationMessage {
     0,
     Math.min(step - 1, CONFIRMATION_MESSAGES.length - 1),
   );
-  return CONFIRMATION_MESSAGES[index];
+  return getArrayItemOrThrow(
+    CONFIRMATION_MESSAGES,
+    index,
+    "CONFIRMATION_MESSAGES must contain at least one value.",
+  );
 }
 
 /**

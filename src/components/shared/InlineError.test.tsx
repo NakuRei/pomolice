@@ -1,8 +1,18 @@
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useErrorStore } from "@/store/errorStore";
+import { useErrorStore, type AppError } from "@/store/errorStore";
 import { InlineError } from "./InlineError";
+
+function getActiveError(errorId: string): AppError {
+  const activeError = useErrorStore.getState().errors[errorId];
+  expect(activeError).toBeDefined();
+  if (activeError === undefined) {
+    throw new Error(`Expected active error for ${errorId}`);
+  }
+
+  return activeError;
+}
 
 describe("InlineError", () => {
   beforeEach(() => {
@@ -63,7 +73,7 @@ describe("InlineError", () => {
     await user.click(retryButton);
 
     expect(retryFn).toHaveBeenCalledTimes(1);
-    expect(useErrorStore.getState().errors.start_work.retryCount).toBe(1);
+    expect(getActiveError("start_work").retryCount).toBe(1);
   });
 
   it("auto-clears recoverable errors after timeout", () => {

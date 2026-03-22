@@ -41,15 +41,20 @@ function buildAutoRunSummaryText(
     return "ON（有効曜日なし）";
   }
 
-  const baseWeekday = enabledWeekdays[0];
+  const [baseWeekday, ...remainingEnabledWeekdays] = enabledWeekdays;
+  if (baseWeekday === undefined) {
+    return "ON（有効曜日なし）";
+  }
   const baseSlot = weeklyAutoRunConfig[baseWeekday];
-  const allWeekdaysShareOneWindow = enabledWeekdays.every((weekday) => {
-    const daySlot = weeklyAutoRunConfig[weekday];
-    return (
-      daySlot.startTime === baseSlot.startTime &&
-      daySlot.endTime === baseSlot.endTime
-    );
-  });
+  const allWeekdaysShareOneWindow = remainingEnabledWeekdays.every(
+    (weekday) => {
+      const daySlot = weeklyAutoRunConfig[weekday];
+      return (
+        daySlot.startTime === baseSlot.startTime &&
+        daySlot.endTime === baseSlot.endTime
+      );
+    },
+  );
 
   if (allWeekdaysShareOneWindow) {
     const weekdayLabelSummary = enabledWeekdays

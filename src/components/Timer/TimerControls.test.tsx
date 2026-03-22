@@ -21,8 +21,14 @@ function getInvokeCall(callIndex: number): {
   command: string;
   payload: Record<string, unknown> | undefined;
 } {
-  const invokeCall = mockInvoke.mock.calls[callIndex];
+  const invokeCall: (typeof mockInvoke.mock.calls)[number] | undefined =
+    mockInvoke.mock.calls[callIndex] as
+      | (typeof mockInvoke.mock.calls)[number]
+      | undefined;
   expect(invokeCall).toBeDefined();
+  if (invokeCall === undefined) {
+    throw new Error(`Expected invoke call at index ${String(callIndex)}`);
+  }
 
   const [command, payload] = invokeCall;
   return { command, payload };

@@ -119,9 +119,12 @@ export const useErrorStore = create<ErrorStore>()(
 
       incrementRetryCount: (id): void => {
         set((state) => {
-          if (Object.prototype.hasOwnProperty.call(state.errors, id)) {
-            state.errors[id].retryCount += 1;
+          const activeError = state.errors[id];
+          if (activeError === undefined) {
+            return;
           }
+
+          activeError.retryCount += 1;
         });
       },
     })),

@@ -147,7 +147,7 @@ export const useSkipFlowStore = create<SkipFlowStore>()(
       retryStep: (): void => {
         set((draft) => {
           // Increment retry count for current step
-          const currentRetries = draft.stepRetries[draft.currentStep] || 0;
+          const currentRetries = draft.stepRetries[draft.currentStep] ?? 0;
           draft.stepRetries[draft.currentStep] = currentRetries + 1;
         });
       },

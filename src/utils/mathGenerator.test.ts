@@ -10,6 +10,21 @@ import {
   validateAnswer,
 } from "./mathGenerator";
 
+function parseQuestionOperands(question: string): [number, number] | null {
+  const matches = question.match(/\d+/gu);
+  if (matches === null || matches.length < 2) {
+    return null;
+  }
+
+  const [firstOperand, secondOperand] = matches as [
+    string,
+    string,
+    ...string[],
+  ];
+
+  return [Number(firstOperand), Number(secondOperand)];
+}
+
 describe("mathGenerator", () => {
   describe("generateEasyProblem", () => {
     it("should generate a problem with valid structure", () => {
@@ -50,10 +65,10 @@ describe("mathGenerator", () => {
           foundAddition = true;
 
           // Verify addition is correct
-          const numbers = problem.question.match(/\d+/gu)?.map(Number);
-          expect(numbers).toBeDefined();
-          if (numbers === undefined) break;
-          const [a, b] = numbers;
+          const operands = parseQuestionOperands(problem.question);
+          expect(operands).not.toBeNull();
+          if (operands === null) break;
+          const [a, b] = operands;
           expect(problem.answer).toBe(a + b);
           break;
         }
@@ -72,10 +87,10 @@ describe("mathGenerator", () => {
           foundSubtraction = true;
 
           // Verify subtraction is correct
-          const numbers = problem.question.match(/\d+/gu);
-          expect(numbers).toBeDefined();
-          if (numbers === null) break;
-          const [a, b] = numbers.map(Number);
+          const operands = parseQuestionOperands(problem.question);
+          expect(operands).not.toBeNull();
+          if (operands === null) break;
+          const [a, b] = operands;
           expect(problem.answer).toBe(a - b);
 
           // Verify result is positive
@@ -90,15 +105,15 @@ describe("mathGenerator", () => {
     it("should have correct answer for generated problems", () => {
       for (let i = 0; i < 20; i++) {
         const problem = generateEasyProblem();
-        const numbers = problem.question.match(/\d+/gu);
-        expect(numbers).toBeDefined();
-        if (numbers === null) continue;
-        const parsedNumbers = numbers.map(Number);
+        const operands = parseQuestionOperands(problem.question);
+        expect(operands).not.toBeNull();
+        if (operands === null) continue;
+        const [a, b] = operands;
 
         if (problem.question.includes("+")) {
-          expect(problem.answer).toBe(parsedNumbers[0] + parsedNumbers[1]);
+          expect(problem.answer).toBe(a + b);
         } else if (problem.question.includes("-")) {
-          expect(problem.answer).toBe(parsedNumbers[0] - parsedNumbers[1]);
+          expect(problem.answer).toBe(a - b);
         }
       }
     });
@@ -124,10 +139,10 @@ describe("mathGenerator", () => {
           foundMultiplication = true;
 
           // Verify multiplication is correct
-          const numbers = problem.question.match(/\d+/gu);
-          expect(numbers).toBeDefined();
-          if (numbers === null) break;
-          const [a, b] = numbers.map(Number);
+          const operands = parseQuestionOperands(problem.question);
+          expect(operands).not.toBeNull();
+          if (operands === null) break;
+          const [a, b] = operands;
           expect(problem.answer).toBe(a * b);
 
           // Check multiplication range (2-12)
@@ -152,10 +167,10 @@ describe("mathGenerator", () => {
           foundSubtraction = true;
 
           // Verify subtraction is correct
-          const numbers = problem.question.match(/\d+/gu);
-          expect(numbers).toBeDefined();
-          if (numbers === null) break;
-          const [a, b] = numbers.map(Number);
+          const operands = parseQuestionOperands(problem.question);
+          expect(operands).not.toBeNull();
+          if (operands === null) break;
+          const [a, b] = operands;
           expect(problem.answer).toBe(a - b);
 
           // Check subtraction range (100-200 minus 20-80)
@@ -173,15 +188,15 @@ describe("mathGenerator", () => {
     it("should have correct answer for generated problems", () => {
       for (let i = 0; i < 20; i++) {
         const problem = generateHardProblem();
-        const numbers = problem.question.match(/\d+/gu);
-        expect(numbers).toBeDefined();
-        if (numbers === null) continue;
-        const parsedNumbers = numbers.map(Number);
+        const operands = parseQuestionOperands(problem.question);
+        expect(operands).not.toBeNull();
+        if (operands === null) continue;
+        const [a, b] = operands;
 
         if (problem.question.includes("×")) {
-          expect(problem.answer).toBe(parsedNumbers[0] * parsedNumbers[1]);
+          expect(problem.answer).toBe(a * b);
         } else if (problem.question.includes("-")) {
-          expect(problem.answer).toBe(parsedNumbers[0] - parsedNumbers[1]);
+          expect(problem.answer).toBe(a - b);
         }
       }
     });

@@ -24,5 +24,10 @@ export const motivationalMessages = [
  */
 export function getRandomMessage(): string {
   const index = Math.floor(Math.random() * motivationalMessages.length);
-  return motivationalMessages[index];
+  const message = motivationalMessages[index];
+  if (message === undefined) {
+    throw new Error("motivationalMessages must contain at least one message.");
+  }
+
+  return message;
 }
