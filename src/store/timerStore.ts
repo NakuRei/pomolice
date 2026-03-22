@@ -135,11 +135,6 @@ interface TimerActions {
   handleSessionCompleted: (payload: SessionCompletedPayload) => void;
   handleFullState: (payload: FullStatePayload) => void;
   setConnected: (connected: boolean) => void;
-
-  // Legacy compatibility (to be removed)
-  stop: () => void;
-  reset: () => void;
-  tick: () => void;
 }
 
 type TimerStore = TimerState & TimerActions;
@@ -241,10 +236,6 @@ function shouldSuppressInfoMessageByTtl(
     lastShownAtEpochMs !== undefined &&
     nowEpochMs - lastShownAtEpochMs < infoMessage.ttlMs
   );
-}
-
-function keepLegacyTimerActionAsNoop(): void {
-  return undefined;
 }
 
 /**
@@ -507,11 +498,6 @@ export const useTimerStore = create<TimerStore>()(
           state.isConnected = connected;
         });
       },
-
-      // Legacy compatibility - these do nothing now
-      stop: keepLegacyTimerActionAsNoop,
-      reset: keepLegacyTimerActionAsNoop,
-      tick: keepLegacyTimerActionAsNoop,
     })),
     { name: "TimerStore" },
   ),

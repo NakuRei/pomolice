@@ -3,10 +3,11 @@ import { render, screen, act } from "@testing-library/react";
 import { SessionIndicator } from "./SessionIndicator";
 import { useTimerStore } from "@/store/timerStore";
 import { useSettingsStore } from "@/store/settingsStore";
+import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 
 describe("SessionIndicator", () => {
   beforeEach(() => {
-    useTimerStore.getState().reset();
+    resetTimerStoreForTest();
     useSettingsStore.getState().resetToDefaults();
   });
 

@@ -3,10 +3,11 @@ import { render, screen, act } from "@testing-library/react";
 import { CycleProgress } from "./CycleProgress";
 import { useTimerStore } from "@/store/timerStore";
 import { useSettingsStore } from "@/store/settingsStore";
+import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 
 describe("CycleProgress", () => {
   beforeEach(() => {
-    useTimerStore.getState().reset();
+    resetTimerStoreForTest();
     useSettingsStore.getState().resetToDefaults();
   });
 

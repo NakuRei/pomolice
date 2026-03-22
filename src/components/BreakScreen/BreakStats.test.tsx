@@ -2,11 +2,12 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { BreakStats } from "./BreakStats";
 import { useTimerStore } from "@/store/timerStore";
+import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 
 describe("BreakStats", () => {
   beforeEach(() => {
     // Reset store to initial state before each test
-    useTimerStore.getState().reset();
+    resetTimerStoreForTest();
   });
 
   describe("Rendering", () => {

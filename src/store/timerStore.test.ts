@@ -1,25 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useTimerStore, TimerStatus, SessionType } from "./timerStore";
 import { useSettingsStore } from "./settingsStore";
+import { resetTimerStoreForTest } from "../test/resetTimerStore";
 
 describe("timerStore", () => {
   beforeEach(() => {
-    // Reset stores to initial state before each test
-    useTimerStore.setState({
-      status: TimerStatus.IDLE,
-      remainingSeconds: 25 * 60,
-      sessionType: SessionType.WORK,
-      currentCycle: 0,
-      completedPomodoros: 0,
-      breakInteractionCount: 0,
-      isFullscreenBreak: false,
-      requiresManualContinueDecision: false,
-      isConnected: false,
-      shouldPromptStartOnBoot: false,
-      activeWindowSummary: null,
-      infoMessage: null,
-      infoMessageShownAtById: {},
-    });
+    resetTimerStoreForTest();
     useSettingsStore.getState().resetToDefaults();
   });
 
@@ -328,36 +314,6 @@ describe("timerStore", () => {
 
         clearInfoMessage("auto_run_stopped");
         expect(useTimerStore.getState().infoMessage).toBeNull();
-      });
-    });
-  });
-
-  describe("Legacy Actions", () => {
-    // These are no-ops for backward compatibility
-    describe("stop()", () => {
-      it("should be a no-op", () => {
-        const initialState = useTimerStore.getState();
-        useTimerStore.getState().stop();
-        // State should be unchanged
-        expect(useTimerStore.getState().status).toBe(initialState.status);
-      });
-    });
-
-    describe("reset()", () => {
-      it("should be a no-op", () => {
-        const initialState = useTimerStore.getState();
-        useTimerStore.getState().reset();
-        // State should be unchanged
-        expect(useTimerStore.getState().status).toBe(initialState.status);
-      });
-    });
-
-    describe("tick()", () => {
-      it("should be a no-op", () => {
-        const initialSeconds = useTimerStore.getState().remainingSeconds;
-        useTimerStore.getState().tick();
-        // State should be unchanged
-        expect(useTimerStore.getState().remainingSeconds).toBe(initialSeconds);
       });
     });
   });

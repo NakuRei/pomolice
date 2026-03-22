@@ -3,11 +3,12 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import { FullscreenBreak } from "./FullscreenBreak";
 import { useTimerStore, SessionType } from "@/store/timerStore";
 import * as motivationalMessagesModule from "@/data/motivationalMessages";
+import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 
 describe("FullscreenBreak", () => {
   beforeEach(() => {
     // Reset store to initial state before each test
-    useTimerStore.getState().reset();
+    resetTimerStoreForTest();
     useTimerStore.setState({
       sessionType: SessionType.SHORT_BREAK,
       remainingSeconds: 300,
