@@ -213,7 +213,7 @@ function createSyncAutomationPoliciesCommandPayload(
   settings: ReturnType<typeof useSettingsStore.getState>,
 ): SyncAutomationPoliciesCommandPayload {
   return {
-    postBreakTransitionPolicy: settings.post_break_transition_policy,
+    postBreakTransitionPolicy: settings.postBreakTransitionPolicy,
     autoRunFeatureEnabled: settings.autoRunFeatureEnabled,
     weeklyAutoRunConfig: settings.weeklyAutoRunConfig,
   };
@@ -288,7 +288,7 @@ export const useTimerStore = create<TimerStore>()(
         try {
           await invoke("start_work", {
             ...createTimerDurationSettingsCommandPayload(settings),
-            postBreakTransitionPolicy: settings.post_break_transition_policy,
+            postBreakTransitionPolicy: settings.postBreakTransitionPolicy,
           });
           useErrorStore.getState().clearError("start_work");
         } catch (error) {

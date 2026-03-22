@@ -57,7 +57,7 @@ describe("Settings Pages", () => {
       longBreakInterval: 5,
       autoRunFeatureEnabled: true,
       weeklyAutoRunConfig,
-      post_break_transition_policy: "start_next_work_automatically",
+      postBreakTransitionPolicy: "start_next_work_automatically",
       notificationSoundMuted: true,
       notificationSoundVolumePercent: 35,
     });
@@ -153,7 +153,7 @@ describe("Settings Pages", () => {
     const user = userEvent.setup();
 
     useSettingsStore.setState({
-      post_break_transition_policy: "require_manual_continue",
+      postBreakTransitionPolicy: "require_manual_continue",
     });
 
     render(
@@ -173,7 +173,7 @@ describe("Settings Pages", () => {
       screen.getByTestId("settings-top-post-break-policy-toggle"),
     );
 
-    expect(useSettingsStore.getState().post_break_transition_policy).toBe(
+    expect(useSettingsStore.getState().postBreakTransitionPolicy).toBe(
       "start_next_work_automatically",
     );
     expect(
@@ -189,7 +189,7 @@ describe("Settings Pages", () => {
       workDuration: 25,
       autoRunFeatureEnabled: true,
       notificationSoundVolumePercent: 50,
-      post_break_transition_policy: "require_manual_continue",
+      postBreakTransitionPolicy: "require_manual_continue",
     });
 
     render(<SettingsTimerPage openSettingsTopScreen={openSettingsTopScreen} />);
@@ -200,7 +200,7 @@ describe("Settings Pages", () => {
     await user.click(screen.getByTestId("settings-save"));
 
     expect(useSettingsStore.getState().workDuration).toBe(32);
-    expect(useSettingsStore.getState().post_break_transition_policy).toBe(
+    expect(useSettingsStore.getState().postBreakTransitionPolicy).toBe(
       "require_manual_continue",
     );
     expect(useSettingsStore.getState().autoRunFeatureEnabled).toBe(true);

@@ -54,7 +54,7 @@ interface SettingsState {
   /** Global toggle for scheduled auto-run behavior. */
   autoRunFeatureEnabled: boolean;
   /** Policy used when a break session completes. */
-  post_break_transition_policy: PostBreakTransitionPolicy;
+  postBreakTransitionPolicy: PostBreakTransitionPolicy;
   /** Weekly auto-run schedule keyed by weekday. */
   weeklyAutoRunConfig: WeeklyAutoRunConfig;
   /** Validation errors scoped to each weekday row. */
@@ -77,7 +77,7 @@ type SettingsEditableValues = Pick<
   | "notificationSoundVolumePercent"
   | "notificationSoundMuted"
   | "autoRunFeatureEnabled"
-  | "post_break_transition_policy"
+  | "postBreakTransitionPolicy"
   | "weeklyAutoRunConfig"
 >;
 
@@ -132,7 +132,7 @@ function createDefaultSettingsState(): SettingsState {
     notificationSoundVolumePercent: 50,
     notificationSoundMuted: false,
     autoRunFeatureEnabled: false,
-    post_break_transition_policy: "require_manual_continue",
+    postBreakTransitionPolicy: "require_manual_continue",
     weeklyAutoRunConfig: createWeeklyAutoRunConfigAllDaysDisabled(),
     dayScheduleValidationErrors: {},
     weeklyScheduleValidationErrors: [],
@@ -549,7 +549,7 @@ export const useSettingsStore = create<SettingsStore>()(
           policy: PostBreakTransitionPolicy,
         ): void => {
           set((state) => {
-            state.post_break_transition_policy = policy;
+            state.postBreakTransitionPolicy = policy;
           });
         },
 
@@ -618,9 +618,9 @@ export const useSettingsStore = create<SettingsStore>()(
             if (settings.autoRunFeatureEnabled !== undefined) {
               state.autoRunFeatureEnabled = settings.autoRunFeatureEnabled;
             }
-            if (settings.post_break_transition_policy !== undefined) {
-              state.post_break_transition_policy =
-                settings.post_break_transition_policy;
+            if (settings.postBreakTransitionPolicy !== undefined) {
+              state.postBreakTransitionPolicy =
+                settings.postBreakTransitionPolicy;
             }
 
             if (settings.weeklyAutoRunConfig !== undefined) {

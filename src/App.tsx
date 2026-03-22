@@ -34,7 +34,7 @@ function App(): React.ReactElement {
     (state) => state.autoRunFeatureEnabled,
   );
   const postBreakTransitionPolicy = useSettingsStore(
-    (state) => state.post_break_transition_policy,
+    (state) => state.postBreakTransitionPolicy,
   );
   const toggleNotificationSoundMuted = useSettingsStore(
     (state) => state.toggleNotificationSoundMuted,

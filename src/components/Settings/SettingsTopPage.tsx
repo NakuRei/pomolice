@@ -187,7 +187,7 @@ export function SettingsTopPage({
     (state) => state.weeklyAutoRunConfig,
   );
   const postBreakTransitionPolicy = useSettingsStore(
-    (state) => state.post_break_transition_policy,
+    (state) => state.postBreakTransitionPolicy,
   );
   const setPostBreakTransitionPolicy = useSettingsStore(
     (state) => state.setPostBreakTransitionPolicy,
