@@ -18,7 +18,7 @@ use crate::types::{
 ///
 /// This struct holds only pure timer state and task lifecycle handles.
 /// All side effects (event emission to frontend) are the caller's responsibility.
-pub struct TimerStateManager {
+pub(crate) struct TimerStateManager {
     state: TimerState,
     /// Token used to signal the timer task to stop.
     /// Cancelling this token causes the task's `select!` to resolve immediately,
@@ -29,7 +29,7 @@ pub struct TimerStateManager {
 
 impl TimerStateManager {
     /// Create a new timer state manager
-    pub fn new(persisted_state: Option<TimerState>) -> Self {
+    pub(crate) fn new(persisted_state: Option<TimerState>) -> Self {
         let state = persisted_state.unwrap_or_default();
 
         Self {
@@ -43,32 +43,32 @@ impl TimerStateManager {
     ///
     /// Returns the tick payload to emit if the timer was running when the app closed,
     /// or `None` if the timer was idle.
-    pub fn initialize_from_persisted_state(&mut self) -> Result<Option<TimerTickPayload>> {
+    pub(crate) fn initialize_from_persisted_state(&mut self) -> Option<TimerTickPayload> {
         if self.state.status != TimerStatus::Idle {
             // In the future, we can implement elapsed time calculation here
             let payload = self.state.to_tick_payload();
-            return Ok(Some(payload));
+            return Some(payload);
         }
-        Ok(None)
+        None
     }
 
     /// Get current timer status
-    pub fn status(&self) -> TimerStatus {
+    pub(crate) fn status(&self) -> TimerStatus {
         self.state.status
     }
 
     /// Get full state for frontend sync
-    pub fn get_full_state(&self) -> FullStatePayload {
+    pub(crate) fn get_full_state(&self) -> FullStatePayload {
         self.state.to_full_payload()
     }
 
     /// Get mutable reference to internal state (for persistence)
-    pub fn get_state(&self) -> &TimerState {
+    pub(crate) fn get_state(&self) -> &TimerState {
         &self.state
     }
 
     /// Start a work session with an explicit session start source.
-    pub fn start_work_with_source(
+    pub(crate) fn start_work_with_source(
         &mut self,
         settings: TimerSettings,
         timer_start_source: TimerStartSource,
@@ -124,7 +124,7 @@ impl TimerStateManager {
         Ok((payload, work_duration_secs))
     }
 
-    pub fn resolve_post_break_decision(
+    pub(crate) fn resolve_post_break_decision(
         &mut self,
         action: PostBreakDecisionAction,
     ) -> Result<TimerTickPayload> {
@@ -165,7 +165,7 @@ impl TimerStateManager {
     ///
     /// Returns `(was_fullscreen_break, tick_payload)`.
     /// The caller is responsible for emitting `"timer_tick"` and exiting fullscreen if needed.
-    pub fn emergency_stop(&mut self) -> Result<(bool, TimerTickPayload)> {
+    pub(crate) fn emergency_stop(&mut self) -> (bool, TimerTickPayload) {
         let was_fullscreen_break = self.state.is_fullscreen_break;
 
         // Reset state
@@ -183,13 +183,13 @@ impl TimerStateManager {
         // Note: caller must call cancel_and_take_task() inside the lock,
         // then await the handle outside the lock. See commands/timer.rs.
 
-        Ok((was_fullscreen_break, self.state.to_tick_payload()))
+        (was_fullscreen_break, self.state.to_tick_payload())
     }
 
     /// Sync only timer duration settings from frontend.
     ///
     /// This method is restricted to idle state to avoid mid-session duration changes.
-    pub fn sync_timer_duration_settings(
+    pub(crate) fn sync_timer_duration_settings(
         &mut self,
         work_duration_secs: u64,
         short_break_duration_secs: u64,
@@ -216,7 +216,7 @@ impl TimerStateManager {
     /// This method is allowed in every timer state. It intentionally does not
     /// recalculate `timer_start_source` and only clears pending scheduled stop
     /// when the feature is disabled.
-    pub fn sync_automation_policies(
+    pub(crate) fn sync_automation_policies(
         &mut self,
         auto_run_feature_enabled: bool,
         weekly_auto_run_config: WeeklyAutoRunConfig,
@@ -234,16 +234,16 @@ impl TimerStateManager {
     ///
     /// Returns the tick payload for the caller to emit as `"timer_tick"`,
     /// or `None` if the penalty was skipped (not on break, or debounced).
-    pub fn apply_input_penalty(&mut self) -> Result<Option<TimerTickPayload>> {
+    pub(crate) fn apply_input_penalty(&mut self) -> Option<TimerTickPayload> {
         // Only apply penalty if on break
         if self.state.status != TimerStatus::OnBreak {
-            return Ok(None);
+            return None;
         }
 
         // Debounce: 100ms between penalties
         if let Some(last) = self.state.last_penalty_time {
             if last.elapsed() < Duration::from_millis(100) {
-                return Ok(None);
+                return None;
             }
         }
 
@@ -254,17 +254,17 @@ impl TimerStateManager {
         // Reset break timer to full duration
         self.state.remaining_seconds = self.state.get_break_duration();
 
-        Ok(Some(self.state.to_tick_payload()))
+        Some(self.state.to_tick_payload())
     }
 
     /// Set fullscreen break state
-    pub fn set_fullscreen_break(&mut self, is_fullscreen: bool) {
+    pub(crate) fn set_fullscreen_break(&mut self, is_fullscreen: bool) {
         self.state.is_fullscreen_break = is_fullscreen;
     }
 
     /// Handle a timer tick (called every second)
-    /// Returns (should_complete_session, tick_payload)
-    pub fn tick(&mut self) -> (bool, TimerTickPayload) {
+    /// Returns `(should_complete_session, tick_payload)`.
+    pub(crate) fn tick(&mut self) -> (bool, TimerTickPayload) {
         // Decrement timer
         if self.state.remaining_seconds > 0 {
             self.state.remaining_seconds -= 1;
@@ -277,8 +277,8 @@ impl TimerStateManager {
     }
 
     /// Transition from work session to break
-    /// Returns (break_type, session_completed_payload)
-    pub fn transition_to_break(&mut self) -> (SessionType, SessionCompletedPayload) {
+    /// Returns `(break_type, session_completed_payload)`.
+    pub(crate) fn transition_to_break(&mut self) -> (SessionType, SessionCompletedPayload) {
         use crate::types::SessionType;
 
         // Work session completed
@@ -311,7 +311,7 @@ impl TimerStateManager {
         self.state.last_transition = Some(Instant::now());
 
         let payload = SessionCompletedPayload::from_transition_outcome(
-            SessionTransitionOutcome::work_to_break(break_type),
+            &SessionTransitionOutcome::work_to_break(break_type),
         );
         self.log_transition_snapshot("transition_to_break", payload.transition_reason);
 
@@ -321,8 +321,7 @@ impl TimerStateManager {
     /// Complete a work-session boundary transition.
     ///
     /// Scheduled stop has higher priority than normal work->break transition.
-    #[allow(dead_code)]
-    pub fn complete_work_session_transition(&mut self) -> SessionCompletedPayload {
+    pub(crate) fn complete_work_session_transition(&mut self) -> SessionCompletedPayload {
         if self.state.scheduled_stop_state == ScheduledStopState::Pending {
             return self.execute_scheduled_stop_transition(SessionType::Work);
         }
@@ -334,8 +333,7 @@ impl TimerStateManager {
     /// Complete a break-session boundary transition using the latest policy in state.
     ///
     /// Scheduled stop has higher priority than post-break policy.
-    #[allow(dead_code)]
-    pub fn complete_break_session_transition(&mut self) -> SessionCompletedPayload {
+    pub(crate) fn complete_break_session_transition(&mut self) -> SessionCompletedPayload {
         let completed_session_type = self.state.session_type;
 
         if self.state.scheduled_stop_state == ScheduledStopState::Pending {
@@ -353,8 +351,8 @@ impl TimerStateManager {
     }
 
     /// Transition from break session to idle
-    /// Returns session_completed_payload
-    pub fn transition_to_idle_after_break(&mut self) -> SessionCompletedPayload {
+    /// Returns `session_completed_payload`.
+    pub(crate) fn transition_to_idle_after_break(&mut self) -> SessionCompletedPayload {
         let is_long_break = self.state.session_type == SessionType::LongBreak;
         let completed_type = self.state.session_type;
 
@@ -376,13 +374,12 @@ impl TimerStateManager {
         // Note: caller must cancel and await the old task outside the lock.
 
         let payload = SessionCompletedPayload::from_transition_outcome(
-            SessionTransitionOutcome::break_waiting_decision(completed_type),
+            &SessionTransitionOutcome::break_waiting_decision(completed_type),
         );
         self.log_transition_snapshot("transition_to_idle_after_break", payload.transition_reason);
         payload
     }
 
-    #[allow(dead_code)]
     fn transition_break_to_work_automatically(
         &mut self,
         completed_session_type: SessionType,
@@ -404,7 +401,7 @@ impl TimerStateManager {
         self.state.last_transition = Some(Instant::now());
 
         let payload = SessionCompletedPayload::from_transition_outcome(
-            SessionTransitionOutcome::break_auto_started(completed_session_type),
+            &SessionTransitionOutcome::break_auto_started(completed_session_type),
         );
         self.log_transition_snapshot(
             "transition_break_to_work_automatically",
@@ -417,15 +414,15 @@ impl TimerStateManager {
     ///
     /// This path intentionally skips the continue dialog and clears scheduled-stop
     /// metadata so later sessions start cleanly.
-    #[allow(dead_code)]
-    pub fn transition_to_idle_due_to_scheduled_stop(
+    #[cfg(test)]
+    pub(crate) fn transition_to_idle_due_to_scheduled_stop(
         &mut self,
         completed_session_type: SessionType,
     ) -> SessionCompletedPayload {
         self.execute_scheduled_stop_transition(completed_session_type)
     }
 
-    pub fn execute_scheduled_stop_transition(
+    pub(crate) fn execute_scheduled_stop_transition(
         &mut self,
         completed_session_type: SessionType,
     ) -> SessionCompletedPayload {
@@ -447,7 +444,7 @@ impl TimerStateManager {
         self.state.last_transition = Some(Instant::now());
 
         let payload = SessionCompletedPayload::from_transition_outcome(
-            SessionTransitionOutcome::scheduled_stop_executed(completed_session_type),
+            &SessionTransitionOutcome::scheduled_stop_executed(completed_session_type),
         );
         self.log_transition_snapshot(
             "execute_scheduled_stop_transition",
@@ -491,7 +488,8 @@ impl TimerStateManager {
             let elapsed = t.elapsed();
             let limit = Duration::from_millis(300);
             if elapsed < limit {
-                return Some((limit - elapsed).as_millis() as u64);
+                let remaining = limit.checked_sub(elapsed)?;
+                return u64::try_from(remaining.as_millis()).ok();
             }
         }
         None
@@ -531,7 +529,7 @@ impl TimerStateManager {
     /// - `scheduled_auto_start` schedules a stop
     ///
     /// Returns `true` when the state changed from `none` to `pending`.
-    pub fn mark_scheduled_stop_pending_if_session_is_eligible(&mut self) -> bool {
+    pub(crate) fn mark_scheduled_stop_pending_if_session_is_eligible(&mut self) -> bool {
         if !matches!(
             self.state.status,
             TimerStatus::Working | TimerStatus::OnBreak
@@ -556,7 +554,7 @@ impl TimerStateManager {
         }
     }
 
-    /// Cancel the running timer task and extract its JoinHandle.
+    /// Cancel the running timer task and extract its `JoinHandle`.
     ///
     /// This is intentionally split into two steps so the caller can release
     /// the Mutex lock before awaiting the handle, avoiding a deadlock:
@@ -572,7 +570,7 @@ impl TimerStateManager {
     ///
     /// The cancelled token causes the task's `select!` to resolve immediately,
     /// so the await completes quickly without dispatching another tick.
-    pub fn cancel_and_take_task(&mut self) -> Option<tokio::task::JoinHandle<()>> {
+    pub(crate) fn cancel_and_take_task(&mut self) -> Option<tokio::task::JoinHandle<()>> {
         if let Some(token) = self.cancel_token.take() {
             token.cancel();
         }
@@ -580,7 +578,7 @@ impl TimerStateManager {
     }
 
     #[cfg(test)]
-    pub fn set_task_handles_for_test(
+    pub(crate) fn set_task_handles_for_test(
         &mut self,
         cancel_token: CancellationToken,
         timer_task: tokio::task::JoinHandle<()>,
@@ -596,7 +594,7 @@ impl TimerStateManager {
     ///
     /// Must be called **after** the old task has been awaited (outside the lock).
     /// See `cancel_and_take_task` for the required call sequence.
-    pub fn spawn_timer_task(&mut self, app_handle: AppHandle) {
+    pub(crate) fn spawn_timer_task(&mut self, app_handle: AppHandle) {
         let token = CancellationToken::new();
         self.cancel_token = Some(token.clone());
 
@@ -604,9 +602,9 @@ impl TimerStateManager {
             loop {
                 tokio::select! {
                     // Cancel wins immediately with no side-effect
-                    _ = token.cancelled() => break,
+                    () = token.cancelled() => break,
                     // Sleep for one second, then dispatch a tick
-                    _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                    () = tokio::time::sleep(Duration::from_secs(1)) => {
                         // Re-check cancellation after waking so we never dispatch
                         // a tick that races with a newly started session
                         if token.is_cancelled() {
@@ -1152,7 +1150,7 @@ mod tests {
     #[test]
     fn test_apply_input_penalty_skipped_when_not_on_break() {
         let mut mgr = make_manager();
-        let result = mgr.apply_input_penalty().unwrap();
+        let result = mgr.apply_input_penalty();
         assert!(result.is_none());
     }
 
@@ -1173,7 +1171,7 @@ mod tests {
         // Drain some time from the break timer
         mgr.state.remaining_seconds = 100;
 
-        let result = mgr.apply_input_penalty().unwrap();
+        let result = mgr.apply_input_penalty();
         assert!(result.is_some());
         // Timer reset to full short break duration
         assert_eq!(mgr.state.remaining_seconds, 300);
@@ -1193,7 +1191,7 @@ mod tests {
         mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
             .unwrap();
 
-        let (was_fullscreen, payload) = mgr.emergency_stop().unwrap();
+        let (was_fullscreen, payload) = mgr.emergency_stop();
         assert!(!was_fullscreen);
         assert_eq!(mgr.status(), TimerStatus::Idle);
         assert_eq!(payload.status, TimerStatus::Idle);
@@ -1436,7 +1434,7 @@ mod tests {
         };
 
         let mut mgr = TimerStateManager::new(Some(state));
-        let result = mgr.initialize_from_persisted_state().unwrap();
+        let result = mgr.initialize_from_persisted_state();
 
         assert!(result.is_some());
         assert_eq!(result.unwrap().remaining_seconds, 900);
@@ -1445,7 +1443,7 @@ mod tests {
     #[test]
     fn test_initialize_from_persisted_state_returns_none_when_idle() {
         let mut mgr = make_manager();
-        let result = mgr.initialize_from_persisted_state().unwrap();
+        let result = mgr.initialize_from_persisted_state();
         assert!(result.is_none());
     }
 
@@ -1474,7 +1472,19 @@ mod tests {
         assert!(remaining.is_some());
         let ms = remaining.unwrap();
         assert!(ms > 0, "remaining_ms should be > 0");
-        assert!(ms <= 300, "remaining_ms should be <= 300, got {}", ms);
+        assert!(ms <= 300, "remaining_ms should be <= 300, got {ms}");
+    }
+
+    #[test]
+    fn test_rate_limit_remaining_ms_returns_none_after_limit_elapsed() {
+        let mut mgr = make_manager();
+        let Some(expired_transition) = Instant::now().checked_sub(Duration::from_millis(301))
+        else {
+            panic!("expected checked_sub to succeed for short test duration");
+        };
+        mgr.state.last_transition = Some(expired_transition);
+
+        assert!(mgr.rate_limit_remaining_ms().is_none());
     }
 
     #[test]
@@ -1504,11 +1514,10 @@ mod tests {
                 assert!(remaining_ms > 0, "remaining_ms should be > 0");
                 assert!(
                     remaining_ms <= 300,
-                    "remaining_ms should be <= 300, got {}",
-                    remaining_ms
+                    "remaining_ms should be <= 300, got {remaining_ms}"
                 );
             }
-            other => panic!("Expected RateLimited, got {:?}", other),
+            other => panic!("Expected RateLimited, got {other:?}"),
         }
     }
 

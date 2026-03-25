@@ -1,5 +1,6 @@
 use tauri_build::{AppManifest, Attributes};
 
+#[expect(clippy::expect_used, reason = "build script should panic on failure")]
 fn main() {
     tauri_build::try_build(
         Attributes::new().app_manifest(AppManifest::new().commands(&[

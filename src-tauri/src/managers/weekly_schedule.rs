@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 // Weekly schedule boundary evaluation with pure functions.
 
 use chrono::{
@@ -27,7 +25,7 @@ const MINUTES_PER_DAY: u32 = 24 * 60;
 /// };
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ActiveWindow {
+pub(crate) struct ActiveWindow {
     pub slot_key: String,
     pub anchor_local_date: NaiveDate,
     pub start_time: String,
@@ -76,7 +74,7 @@ impl BoundaryType {
 /// - Start boundary is inclusive.
 /// - End boundary is exclusive.
 /// - Overnight slots belong to their start weekday.
-pub fn is_now_inside_schedule_window(
+pub(crate) fn is_now_inside_schedule_window(
     now_local: DateTime<Local>,
     config: &WeeklyAutoRunConfig,
 ) -> Option<ActiveWindow> {
@@ -95,15 +93,21 @@ pub fn is_now_inside_schedule_window(
 
         let anchor_local_date =
             most_recent_weekday_on_or_before(now_local_date, descriptor.weekday);
-        let start_local_naive =
-            create_local_naive_datetime(anchor_local_date, parsed_time_range.start_minutes);
+        let Some(start_local_naive) =
+            create_local_naive_datetime(anchor_local_date, parsed_time_range.start_minutes)
+        else {
+            continue;
+        };
         let end_boundary_date = if parsed_time_range.crosses_midnight {
             anchor_local_date + Duration::days(1)
         } else {
             anchor_local_date
         };
-        let end_local_naive =
-            create_local_naive_datetime(end_boundary_date, parsed_time_range.end_minutes);
+        let Some(end_local_naive) =
+            create_local_naive_datetime(end_boundary_date, parsed_time_range.end_minutes)
+        else {
+            continue;
+        };
 
         if start_local_naive <= now_local_naive && now_local_naive < end_local_naive {
             active_windows.push((
@@ -132,7 +136,7 @@ pub fn is_now_inside_schedule_window(
 /// Collects crossed start boundaries in chronological order.
 ///
 /// The search range is capped to the latest 7 days.
-pub fn collect_crossed_start_boundaries(
+pub(crate) fn collect_crossed_start_boundaries(
     previous_local: DateTime<Local>,
     now_local: DateTime<Local>,
     config: &WeeklyAutoRunConfig,
@@ -143,7 +147,7 @@ pub fn collect_crossed_start_boundaries(
 /// Collects crossed end boundaries in chronological order.
 ///
 /// The search range is capped to the latest 7 days.
-pub fn collect_crossed_end_boundaries(
+pub(crate) fn collect_crossed_end_boundaries(
     previous_local: DateTime<Local>,
     now_local: DateTime<Local>,
     config: &WeeklyAutoRunConfig,
@@ -155,12 +159,12 @@ pub fn collect_crossed_end_boundaries(
 ///
 /// The overlap check uses half-open intervals (`[start, end)`) and supports
 /// overnight slots by splitting them into two ranges on the week timeline.
-pub fn find_first_overlapping_weekday_pair(
+pub(crate) fn find_first_overlapping_weekday_pair(
     config: &WeeklyAutoRunConfig,
 ) -> Option<(&'static str, &'static str)> {
     let mut weekday_ranges: Vec<(&'static str, Vec<WeekMinuteRange>)> = Vec::new();
 
-    for (weekday_index, descriptor) in build_slot_descriptors(config).iter().enumerate() {
+    for descriptor in build_slot_descriptors(config) {
         if !descriptor.slot.enabled {
             continue;
         }
@@ -169,7 +173,8 @@ pub fn find_first_overlapping_weekday_pair(
             continue;
         };
 
-        let ranges = build_week_minute_ranges(weekday_index as u32, parsed_time_range);
+        let ranges =
+            build_week_minute_ranges(descriptor.weekday.num_days_from_monday(), parsed_time_range);
         if ranges.is_empty() {
             continue;
         }
@@ -244,6 +249,11 @@ fn collect_crossed_boundaries(
                     };
                     create_local_naive_datetime(end_boundary_date, parsed_time_range.end_minutes)
                 }
+            };
+
+            let Some(boundary_local_naive) = boundary_local_naive else {
+                anchor_local_date += Duration::days(7);
+                continue;
             };
 
             for boundary_epoch_seconds in collect_boundary_epoch_candidates(boundary_local_naive) {
@@ -358,8 +368,8 @@ fn parse_hh_mm_minutes(value: &str) -> Option<u32> {
         return None;
     }
 
-    let hour = ((hour_tens - b'0') as u32) * 10 + (hour_ones - b'0') as u32;
-    let minute = ((minute_tens - b'0') as u32) * 10 + (minute_ones - b'0') as u32;
+    let hour = u32::from(hour_tens - b'0') * 10 + u32::from(hour_ones - b'0');
+    let minute = u32::from(minute_tens - b'0') * 10 + u32::from(minute_ones - b'0');
 
     if hour >= 24 || minute >= 60 {
         return None;
@@ -408,26 +418,26 @@ fn build_slot_descriptors(config: &WeeklyAutoRunConfig) -> [SlotDescriptor<'_>; 
     ]
 }
 
-fn create_local_naive_datetime(date: NaiveDate, total_minutes: u32) -> NaiveDateTime {
+fn create_local_naive_datetime(date: NaiveDate, total_minutes: u32) -> Option<NaiveDateTime> {
     let hour = total_minutes / 60;
     let minute = total_minutes % 60;
-    let time = NaiveTime::from_hms_opt(hour, minute, 0).expect("validated HH:MM minute range");
-    date.and_time(time)
+    let time = NaiveTime::from_hms_opt(hour, minute, 0)?;
+    Some(date.and_time(time))
 }
 
 fn most_recent_weekday_on_or_before(
     reference_date: NaiveDate,
     target_weekday: Weekday,
 ) -> NaiveDate {
-    let current = reference_date.weekday().num_days_from_monday() as i64;
-    let target = target_weekday.num_days_from_monday() as i64;
+    let current = i64::from(reference_date.weekday().num_days_from_monday());
+    let target = i64::from(target_weekday.num_days_from_monday());
     let offset_days = (current - target + 7) % 7;
     reference_date - Duration::days(offset_days)
 }
 
 fn first_weekday_on_or_after(reference_date: NaiveDate, target_weekday: Weekday) -> NaiveDate {
-    let current = reference_date.weekday().num_days_from_monday() as i64;
-    let target = target_weekday.num_days_from_monday() as i64;
+    let current = i64::from(reference_date.weekday().num_days_from_monday());
+    let target = i64::from(target_weekday.num_days_from_monday());
     let offset_days = (target - current + 7) % 7;
     reference_date + Duration::days(offset_days)
 }

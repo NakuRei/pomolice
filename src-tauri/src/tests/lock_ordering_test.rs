@@ -19,7 +19,7 @@ mod lock_ordering_tests {
     struct FakeWindowManager;
     struct FakeTimerManager;
 
-    /// Shared lock set that mirrors AppState lock relationships.
+    /// Shared lock set that mirrors `AppState` lock relationships.
     struct FakeLocks {
         input_monitor: Arc<Mutex<FakeInputMonitor>>,
         window_manager: Arc<Mutex<FakeWindowManager>>,
@@ -39,8 +39,8 @@ mod lock_ordering_tests {
     }
 
     /// Simulates the lock acquisition pattern of `lib_handle_escape_combo`:
-    ///   1. input_monitor
-    ///   2. window_manager
+    ///   1. `input_monitor`
+    ///   2. `window_manager`
     async fn escape_combo_pattern(locks: &FakeLocks) {
         {
             let _input = locks.input_monitor.lock().await;
@@ -53,9 +53,9 @@ mod lock_ordering_tests {
     }
 
     /// Simulates the lock acquisition pattern of `exit_break_mode`:
-    ///   1. input_monitor
-    ///   2. window_manager
-    ///   3. timer_manager
+    ///   1. `input_monitor`
+    ///   2. `window_manager`
+    ///   3. `timer_manager`
     async fn exit_break_mode_pattern(locks: &FakeLocks) {
         {
             let _input = locks.input_monitor.lock().await;
@@ -72,9 +72,9 @@ mod lock_ordering_tests {
     }
 
     /// Simulates the lock acquisition pattern of `enter_break_mode`:
-    ///   1. input_monitor
-    ///   2. window_manager
-    ///   3. timer_manager
+    ///   1. `input_monitor`
+    ///   2. `window_manager`
+    ///   3. `timer_manager`
     async fn enter_break_mode_pattern(locks: &FakeLocks) {
         {
             let _input = locks.input_monitor.lock().await;
@@ -91,7 +91,7 @@ mod lock_ordering_tests {
     }
 
     /// Simulates the lock acquisition pattern of `lib_handle_input_detected`:
-    ///   1. timer_manager (only)
+    ///   1. `timer_manager` (only)
     async fn input_detected_pattern(locks: &FakeLocks) {
         let _timer = locks.timer_manager.lock().await;
         tokio::time::sleep(Duration::from_millis(1)).await;
@@ -129,7 +129,7 @@ mod lock_ordering_tests {
     // -------------------------------------------------------------------------
 
     /// `lib_handle_escape_combo` and `exit_break_mode` running concurrently
-    /// must not deadlock. Both follow input_monitor → window_manager order.
+    /// must not deadlock. Both follow `input_monitor` → `window_manager` order.
     #[tokio::test]
     async fn test_escape_combo_and_exit_break_mode_do_not_deadlock() {
         let locks = Arc::new(FakeLocks::new());
@@ -191,7 +191,7 @@ mod lock_ordering_tests {
         );
     }
 
-    /// `lib_handle_input_detected` (timer_manager only) and `exit_break_mode`
+    /// `lib_handle_input_detected` (`timer_manager` only) and `exit_break_mode`
     /// running concurrently must not deadlock.
     #[tokio::test]
     async fn test_input_detected_and_exit_break_mode_do_not_deadlock() {

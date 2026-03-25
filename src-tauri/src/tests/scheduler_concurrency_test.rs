@@ -318,8 +318,8 @@ mod scheduler_concurrency_tests {
         let old_task_handle = tokio::spawn(async move {
             loop {
                 tokio::select! {
-                    _ = old_task_cancel_token_for_worker.cancelled() => break,
-                    _ = tokio::time::sleep(Duration::from_millis(2)) => {
+                    () = old_task_cancel_token_for_worker.cancelled() => break,
+                    () = tokio::time::sleep(Duration::from_millis(2)) => {
                         if old_task_cancel_token_for_worker.is_cancelled() {
                             break;
                         }
@@ -389,8 +389,8 @@ mod scheduler_concurrency_tests {
                 active_worker_count.fetch_add(1, Ordering::SeqCst);
                 loop {
                     tokio::select! {
-                        _ = worker_cancel_token.cancelled() => break,
-                        _ = tokio::time::sleep(Duration::from_millis(10)) => {}
+                        () = worker_cancel_token.cancelled() => break,
+                        () = tokio::time::sleep(Duration::from_millis(10)) => {}
                     }
                 }
                 active_worker_count.fetch_sub(1, Ordering::SeqCst);

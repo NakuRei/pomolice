@@ -8,7 +8,7 @@ use std::thread;
 use std::time::Duration;
 use tracing::{error, info};
 
-use crate::error::Result;
+const INPUT_MONITOR_MAX_BACKOFF: Duration = Duration::from_secs(30);
 
 #[derive(Default, Clone)]
 struct ModifierState {
@@ -37,15 +37,15 @@ impl ModifierState {
 /// Callbacks are injected at construction time to decouple this manager
 /// from Tauri's `AppHandle`. The caller (e.g. `AppState::new`) is responsible
 /// for capturing any `AppHandle` clones inside the closures.
-pub struct InputMonitorManager {
-    /// Whether callbacks should fire. Set to true by start(), false by stop().
+pub(crate) struct InputMonitorManager {
+    /// Whether callbacks should fire. Set to true by `start()`, false by `stop()`.
     enabled: Arc<AtomicBool>,
     /// True while the supervisor thread is alive. Cleared by the thread itself on exit.
-    /// Never written by start() or stop() after the initial spawn — only the thread
+    /// Never written by `start()` or `stop()` after the initial spawn — only the thread
     /// clears it, preventing a race between a dying thread and a new spawn.
     listener_alive: Arc<AtomicBool>,
-    /// Set to true by stop() to tell the supervisor loop to exit cleanly instead of
-    /// retrying. Reset to false by start() before each spawn.
+    /// Set to true by `stop()` to tell the supervisor loop to exit cleanly instead of
+    /// retrying. Reset to false by `start()` before each spawn.
     shutdown_requested: Arc<AtomicBool>,
     modifier_state: Arc<parking_lot::Mutex<ModifierState>>,
     /// Called when the escape combo (Ctrl+Alt+Shift+E) is detected.
@@ -59,7 +59,7 @@ impl InputMonitorManager {
     ///
     /// - `on_escape_combo`: invoked when Ctrl+Alt+Shift+E is detected
     /// - `on_input_detected`: invoked on any input event while monitoring is active
-    pub fn new(
+    pub(crate) fn new(
         on_escape_combo: impl Fn() + Send + Sync + 'static,
         on_input_detected: impl Fn() + Send + Sync + 'static,
     ) -> Self {
@@ -78,14 +78,14 @@ impl InputMonitorManager {
     /// If a supervisor thread is already running (`listener_alive` is true), this
     /// call re-enables callbacks without spawning a new thread. Otherwise it resets
     /// the shutdown signal, marks the thread as alive, and spawns a new supervisor.
-    pub fn start(&mut self) -> Result<()> {
+    pub(crate) fn start(&mut self) {
         info!("Starting global input monitoring");
 
         // If the supervisor thread is already running, just re-enable callbacks.
         if self.listener_alive.load(Ordering::SeqCst) {
             self.enabled.store(true, Ordering::SeqCst);
             info!("Input monitoring already running; callbacks re-enabled");
-            return Ok(());
+            return;
         }
 
         // Reset signals before spawning so the supervisor loop starts fresh.
@@ -102,7 +102,6 @@ impl InputMonitorManager {
 
         thread::spawn(move || {
             let mut backoff = Duration::from_secs(1);
-            const MAX_BACKOFF: Duration = Duration::from_secs(30);
 
             loop {
                 let callback = build_event_callback(
@@ -129,7 +128,7 @@ impl InputMonitorManager {
                             e, backoff
                         );
                         thread::sleep(backoff);
-                        backoff = (backoff * 2).min(MAX_BACKOFF);
+                        backoff = (backoff * 2).min(INPUT_MONITOR_MAX_BACKOFF);
                     }
                 }
             }
@@ -137,15 +136,13 @@ impl InputMonitorManager {
             // Always clear the alive flag so start() can spawn a new thread later.
             listener_alive.store(false, Ordering::SeqCst);
         });
-
-        Ok(())
     }
 
     /// Stop global input monitoring
-    pub fn stop(&mut self) -> Result<()> {
+    pub(crate) fn stop(&mut self) {
         if !self.enabled.swap(false, Ordering::SeqCst) {
             info!("Input monitoring already stopped");
-            return Ok(()); // Already stopped, not an error
+            return; // Already stopped, not an error
         }
 
         info!("Stopping global input monitoring");
@@ -156,8 +153,6 @@ impl InputMonitorManager {
         // Reset modifier state so no stale key flags remain for the next session.
         let mut mods = self.modifier_state.lock();
         *mods = ModifierState::default();
-
-        Ok(())
     }
 }
 
@@ -354,30 +349,29 @@ mod tests {
     #[test]
     fn test_stop_is_idempotent() {
         let mut mgr = make_manager();
-        // stop on an already-stopped manager must not error
-        assert!(mgr.stop().is_ok());
-        assert!(mgr.stop().is_ok());
+        mgr.stop();
+        mgr.stop();
     }
 
     #[test]
     fn test_start_is_idempotent() {
         let mut mgr = make_manager();
-        assert!(mgr.start().is_ok());
+        mgr.start();
         // listener_alive is true after the first start (thread was spawned)
         assert!(mgr.listener_alive.load(Ordering::SeqCst));
-        // Second start must not error and must not spawn a second thread
-        assert!(mgr.start().is_ok());
+        // Second start must not spawn a second thread
+        mgr.start();
         // Cleanup
-        let _ = mgr.stop();
+        mgr.stop();
     }
 
     #[test]
     fn test_stop_clears_enabled_flag_and_sets_shutdown_requested() {
         let mut mgr = make_manager();
-        mgr.start().unwrap();
+        mgr.start();
         assert!(mgr.enabled.load(Ordering::SeqCst));
 
-        mgr.stop().unwrap();
+        mgr.stop();
         assert!(!mgr.enabled.load(Ordering::SeqCst));
         // stop() must signal the supervisor loop to exit.
         assert!(mgr.shutdown_requested.load(Ordering::SeqCst));
@@ -388,7 +382,7 @@ mod tests {
         let mut mgr = make_manager();
         // stop() on a never-started manager: enabled was already false, so the
         // early-return guard fires and shutdown_requested must stay false.
-        mgr.stop().unwrap();
+        mgr.stop();
         assert!(!mgr.shutdown_requested.load(Ordering::SeqCst));
     }
 
@@ -396,8 +390,8 @@ mod tests {
     fn test_start_after_stop_resets_shutdown_requested() {
         let mut mgr = make_manager();
         // Simulate a start → stop cycle.
-        mgr.start().unwrap();
-        mgr.stop().unwrap();
+        mgr.start();
+        mgr.stop();
         assert!(mgr.shutdown_requested.load(Ordering::SeqCst));
 
         // Manually clear listener_alive so start() treats the thread as dead
@@ -405,10 +399,10 @@ mod tests {
         // so we simulate thread exit to test the start() reset path).
         mgr.listener_alive.store(false, Ordering::SeqCst);
 
-        mgr.start().unwrap();
+        mgr.start();
         // start() must reset shutdown_requested before spawning.
         assert!(!mgr.shutdown_requested.load(Ordering::SeqCst));
-        let _ = mgr.stop();
+        mgr.stop();
     }
 
     // Note: start() spawns a real OS thread via rdev::listen which blocks until

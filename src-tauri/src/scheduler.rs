@@ -14,6 +14,7 @@ use crate::state;
 use crate::tray;
 use crate::types::{
     BootPromptRuntimeState, BoundaryOccurrenceId, TimerSettings, TimerStartSource, TimerStatus,
+    WeeklyAutoRunConfig,
 };
 
 const SCHEDULER_INTERVAL_SECONDS: u64 = 1;
@@ -24,6 +25,18 @@ struct SchedulerRuntimeState {
     last_checked_local: DateTime<Local>,
     start_boundaries_blocked_until_idle: bool,
     last_seen_config_revision: u64,
+}
+
+struct SchedulerTimerSnapshot {
+    status: TimerStatus,
+    auto_run_feature_enabled: bool,
+    weekly_auto_run_config: WeeklyAutoRunConfig,
+    timer_settings: TimerSettings,
+}
+
+struct SchedulerTickPlan {
+    end_boundary_previous_local: DateTime<Local>,
+    should_evaluate_start_boundaries: bool,
 }
 
 pub async fn lib_start_scheduler_task(app: AppHandle) {
@@ -73,7 +86,7 @@ pub async fn lib_start_scheduler_task(app: AppHandle) {
 
         loop {
             tokio::select! {
-                _ = scheduler_cancellation_token.cancelled() => {
+                () = scheduler_cancellation_token.cancelled() => {
                     info!("Weekly scheduler received cancellation");
                     break;
                 }
@@ -97,24 +110,69 @@ async fn lib_run_scheduler_tick(app: AppHandle, runtime_state: &mut SchedulerRun
     let now_local = state_handle.clock.now_local();
     let previous_local = runtime_state.last_checked_local;
 
-    let timer_snapshot = {
-        let timer_manager = state_handle.timer_manager.lock().await;
-        let timer_state = timer_manager.get_state();
-        (
-            timer_manager.status(),
-            timer_state.auto_run_feature_enabled,
-            timer_state.weekly_auto_run_config.clone(),
-            timer_state.settings.clone(),
-        )
-    };
-    let (timer_status, auto_run_feature_enabled, weekly_auto_run_config, timer_settings) =
-        timer_snapshot;
+    let timer_snapshot = load_scheduler_timer_snapshot(&state_handle).await;
+    resume_start_boundary_evaluation_when_idle(runtime_state, timer_snapshot.status);
 
+    let tick_plan = build_scheduler_tick_plan(
+        &state_handle,
+        runtime_state,
+        now_local,
+        timer_snapshot.auto_run_feature_enabled,
+    );
+
+    process_crossed_end_boundaries(
+        &app,
+        runtime_state,
+        &timer_snapshot.weekly_auto_run_config,
+        timer_snapshot.auto_run_feature_enabled,
+        tick_plan.end_boundary_previous_local,
+        now_local,
+    )
+    .await;
+
+    if tick_plan.should_evaluate_start_boundaries {
+        process_crossed_start_boundaries(
+            &app,
+            runtime_state,
+            &timer_snapshot,
+            previous_local,
+            now_local,
+        )
+        .await;
+    }
+
+    trim_old_processed_boundaries(&mut runtime_state.processed_boundary_occurrences, now_local);
+    runtime_state.last_checked_local = now_local;
+}
+
+async fn load_scheduler_timer_snapshot(state_handle: &state::AppState) -> SchedulerTimerSnapshot {
+    let timer_manager = state_handle.timer_manager.lock().await;
+    let timer_state = timer_manager.get_state();
+
+    SchedulerTimerSnapshot {
+        status: timer_manager.status(),
+        auto_run_feature_enabled: timer_state.auto_run_feature_enabled,
+        weekly_auto_run_config: timer_state.weekly_auto_run_config.clone(),
+        timer_settings: timer_state.settings.clone(),
+    }
+}
+
+fn resume_start_boundary_evaluation_when_idle(
+    runtime_state: &mut SchedulerRuntimeState,
+    timer_status: TimerStatus,
+) {
     if runtime_state.start_boundaries_blocked_until_idle && timer_status == TimerStatus::Idle {
         runtime_state.start_boundaries_blocked_until_idle = false;
         info!("Weekly scheduler resumed start-boundary evaluation after idle transition");
     }
+}
 
+fn build_scheduler_tick_plan(
+    state_handle: &state::AppState,
+    runtime_state: &mut SchedulerRuntimeState,
+    now_local: DateTime<Local>,
+    auto_run_feature_enabled: bool,
+) -> SchedulerTickPlan {
     let config_revision = state_handle.config_revision.load(Ordering::Acquire);
     let config_changed = config_revision != runtime_state.last_seen_config_revision;
     let mut skip_start_boundaries_this_tick = false;
@@ -130,85 +188,112 @@ async fn lib_run_scheduler_tick(app: AppHandle, runtime_state: &mut SchedulerRun
         );
         now_local - ChronoDuration::seconds(1)
     } else {
-        previous_local
+        runtime_state.last_checked_local
     };
 
-    if auto_run_feature_enabled {
-        let crossed_end_boundaries = collect_crossed_end_boundaries(
-            end_boundary_previous_local,
-            now_local,
-            &weekly_auto_run_config,
-        );
-
-        for end_boundary in crossed_end_boundaries {
-            if runtime_state
-                .processed_boundary_occurrences
-                .insert(end_boundary.clone())
-            {
-                info!("Weekly scheduler crossed end boundary: {}", end_boundary.0);
-                let did_mark_stop_pending =
-                    mark_scheduled_stop_pending_for_current_session(app.clone()).await;
-                if did_mark_stop_pending {
-                    info!(
-                        "Weekly scheduler marked scheduled stop as pending at end boundary: {}",
-                        end_boundary.0
-                    );
-                }
-            }
-        }
-    }
-
-    let auto_start_boundary_enabled = state_handle
-        .auto_start_boundary_enabled
-        .load(Ordering::Acquire);
-    let boot_prompt_check_pending = state_handle
-        .boot_prompt_check_pending
-        .load(Ordering::Acquire);
-    let boot_prompt_runtime_state = match state_handle.boot_prompt_runtime_state.lock() {
-        Ok(guard) => *guard,
-        Err(_) => BootPromptRuntimeState::NotApplicable,
-    };
-
-    let can_run_start_boundary_evaluation = auto_run_feature_enabled
-        && auto_start_boundary_enabled
-        && !boot_prompt_check_pending
-        && boot_prompt_runtime_state != BootPromptRuntimeState::AwaitingDecision
+    let should_evaluate_start_boundaries = auto_run_feature_enabled
+        && state_handle
+            .auto_start_boundary_enabled
+            .load(Ordering::Acquire)
+        && !state_handle
+            .boot_prompt_check_pending
+            .load(Ordering::Acquire)
+        && current_boot_prompt_runtime_state(state_handle)
+            != BootPromptRuntimeState::AwaitingDecision
         && !runtime_state.start_boundaries_blocked_until_idle
         && !skip_start_boundaries_this_tick;
 
-    if can_run_start_boundary_evaluation {
-        let crossed_start_boundaries =
-            collect_crossed_start_boundaries(previous_local, now_local, &weekly_auto_run_config);
+    SchedulerTickPlan {
+        end_boundary_previous_local,
+        should_evaluate_start_boundaries,
+    }
+}
 
-        for start_boundary in crossed_start_boundaries {
-            if runtime_state
-                .processed_boundary_occurrences
-                .insert(start_boundary.clone())
-            {
-                info!(
-                    "Weekly scheduler crossed start boundary: {}",
-                    start_boundary.0
-                );
-                let did_start = start_work_from_scheduler_when_idle(
-                    app.clone(),
-                    timer_status,
-                    timer_settings.clone(),
-                    &start_boundary,
-                )
-                .await;
+fn current_boot_prompt_runtime_state(state_handle: &state::AppState) -> BootPromptRuntimeState {
+    match state_handle.boot_prompt_runtime_state.lock() {
+        Ok(guard) => *guard,
+        Err(_) => BootPromptRuntimeState::NotApplicable,
+    }
+}
 
-                if did_start {
-                    info!(
-                        "Weekly scheduler started a work session from start boundary: {}",
-                        start_boundary.0
-                    );
-                }
-            }
-        }
+async fn process_crossed_end_boundaries(
+    app: &AppHandle,
+    runtime_state: &mut SchedulerRuntimeState,
+    weekly_auto_run_config: &WeeklyAutoRunConfig,
+    auto_run_feature_enabled: bool,
+    previous_local: DateTime<Local>,
+    now_local: DateTime<Local>,
+) {
+    if !auto_run_feature_enabled {
+        return;
     }
 
-    trim_old_processed_boundaries(&mut runtime_state.processed_boundary_occurrences, now_local);
-    runtime_state.last_checked_local = now_local;
+    let crossed_end_boundaries =
+        collect_crossed_end_boundaries(previous_local, now_local, weekly_auto_run_config);
+
+    for end_boundary in crossed_end_boundaries {
+        if !record_processed_boundary_occurrence(runtime_state, &end_boundary) {
+            continue;
+        }
+
+        info!("Weekly scheduler crossed end boundary: {}", end_boundary.0);
+        let did_mark_stop_pending =
+            mark_scheduled_stop_pending_for_current_session(app.clone()).await;
+        if did_mark_stop_pending {
+            info!(
+                "Weekly scheduler marked scheduled stop as pending at end boundary: {}",
+                end_boundary.0
+            );
+        }
+    }
+}
+
+async fn process_crossed_start_boundaries(
+    app: &AppHandle,
+    runtime_state: &mut SchedulerRuntimeState,
+    timer_snapshot: &SchedulerTimerSnapshot,
+    previous_local: DateTime<Local>,
+    now_local: DateTime<Local>,
+) {
+    let crossed_start_boundaries = collect_crossed_start_boundaries(
+        previous_local,
+        now_local,
+        &timer_snapshot.weekly_auto_run_config,
+    );
+
+    for start_boundary in crossed_start_boundaries {
+        if !record_processed_boundary_occurrence(runtime_state, &start_boundary) {
+            continue;
+        }
+
+        info!(
+            "Weekly scheduler crossed start boundary: {}",
+            start_boundary.0
+        );
+        let did_start = start_work_from_scheduler_when_idle(
+            app.clone(),
+            timer_snapshot.status,
+            timer_snapshot.timer_settings.clone(),
+            &start_boundary,
+        )
+        .await;
+
+        if did_start {
+            info!(
+                "Weekly scheduler started a work session from start boundary: {}",
+                start_boundary.0
+            );
+        }
+    }
+}
+
+fn record_processed_boundary_occurrence(
+    runtime_state: &mut SchedulerRuntimeState,
+    boundary: &BoundaryOccurrenceId,
+) -> bool {
+    runtime_state
+        .processed_boundary_occurrences
+        .insert(boundary.clone())
 }
 
 pub(crate) fn trim_old_processed_boundaries(
@@ -220,8 +305,7 @@ pub(crate) fn trim_old_processed_boundaries(
 
     processed_boundary_occurrences.retain(|boundary_id| {
         extract_boundary_epoch_seconds(boundary_id)
-            .map(|epoch_seconds| epoch_seconds >= oldest_epoch_to_keep)
-            .unwrap_or(false)
+            .is_some_and(|epoch_seconds| epoch_seconds >= oldest_epoch_to_keep)
     });
 }
 

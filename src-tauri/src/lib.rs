@@ -1,5 +1,8 @@
 use tauri::{Emitter, Manager};
+use tauri_plugin_notification::NotificationExt;
 use tracing::{error, info};
+
+type RunResult = std::result::Result<(), Box<dyn std::error::Error>>;
 
 mod commands;
 mod error;
@@ -20,7 +23,11 @@ pub use session_pipeline::{
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
+/// Start the Tauri application and register all runtime state, handlers, and background tasks.
+///
+/// # Errors
+/// Returns an error if Tauri application setup or runtime startup fails.
+pub fn run() -> RunResult {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -34,22 +41,22 @@ pub fn run() {
 
     info!("Starting Pomolice application");
 
+    #[expect(
+        clippy::exit,
+        reason = "Tauri's generate_context!() codegen calls process::exit() if generated context creation panics"
+    )]
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             info!("Initializing application state");
-            let app_state = state::AppState::new(app.handle().clone());
+            let app_state = state::AppState::new(app.handle());
 
-            tauri::async_runtime::block_on(async {
-                let tick_payload = app_state
-                    .initialize()
-                    .await
-                    .expect("Failed to initialize application state");
+            let tick_payload =
+                tauri::async_runtime::block_on(async { app_state.initialize().await });
 
-                if let Some(payload) = tick_payload {
-                    let _ = app.emit("timer_tick", &payload);
-                }
-            });
+            if let Some(payload) = tick_payload {
+                let _ = app.emit("timer_tick", &payload);
+            }
 
             app.manage(app_state);
 
@@ -72,7 +79,6 @@ pub fn run() {
 
                     if tray::should_show_tray_notification() {
                         info!("Window minimized to tray (first time notification)");
-                        use tauri_plugin_notification::NotificationExt;
                         let _ = window
                             .app_handle()
                             .notification()
@@ -93,8 +99,9 @@ pub fn run() {
             commands::timer::get_full_state,
             commands::timer::resolve_boot_auto_start_prompt,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .run(tauri::generate_context!())?;
+
+    Ok(())
 }
 
 #[cfg(test)]

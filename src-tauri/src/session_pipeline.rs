@@ -171,11 +171,8 @@ async fn enter_break_mode(app: AppHandle) {
 
     {
         let mut input_monitor = state_handle.input_monitor.lock().await;
-        if let Err(e) = input_monitor.start() {
-            error!("Failed to start input monitoring: {:?}", e);
-        } else {
-            info!("Input monitoring started successfully");
-        }
+        input_monitor.start();
+        info!("Input monitoring started successfully");
     }
 
     {
@@ -204,19 +201,13 @@ async fn exit_break_mode(app: AppHandle) {
 
     {
         let mut input_monitor = state_handle.input_monitor.lock().await;
-        if let Err(e) = input_monitor.stop() {
-            error!("Failed to stop input monitoring: {:?}", e);
-        } else {
-            info!("Input monitoring stopped successfully");
-        }
+        input_monitor.stop();
+        info!("Input monitoring stopped successfully");
     }
 
     {
         let mut window_manager = state_handle.window_manager.lock().await;
-        if let Err(e) = window_manager
-            .exit_fullscreen_all_monitors(app.clone())
-            .await
-        {
+        if let Err(e) = window_manager.exit_fullscreen_all_monitors(&app) {
             error!("Failed to exit fullscreen: {:?}", e);
             return;
         }
@@ -236,7 +227,7 @@ pub async fn lib_handle_input_detected(app: AppHandle) {
 
     let tick_payload = {
         let mut timer = state_handle.timer_manager.lock().await;
-        let payload = timer.apply_input_penalty().ok().flatten();
+        let payload = timer.apply_input_penalty();
         state_handle.persistence.save_state(timer.get_state());
         payload
     };
@@ -252,14 +243,12 @@ pub async fn lib_handle_escape_combo(app: AppHandle) {
 
     {
         let mut input_monitor = state_handle.input_monitor.lock().await;
-        let _ = input_monitor.stop();
+        input_monitor.stop();
     }
 
     {
         let mut window_manager = state_handle.window_manager.lock().await;
-        let _ = window_manager
-            .exit_fullscreen_all_monitors(app.clone())
-            .await;
+        let _ = window_manager.exit_fullscreen_all_monitors(&app);
     }
 }
 

@@ -38,7 +38,7 @@ use crate::types::{
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PersistedState {
+pub(crate) struct PersistedState {
     pub schema_version: u32,
     pub status: TimerStatus,
     pub remaining_seconds: u64,
@@ -61,7 +61,7 @@ pub struct PersistedState {
 
 impl PersistedState {
     /// Build persisted schema v3 from current runtime state.
-    pub fn from_timer_state(state: &TimerState, clock: &dyn Clock) -> Self {
+    pub(crate) fn from_timer_state(state: &TimerState, clock: &dyn Clock) -> Self {
         Self {
             schema_version: PERSISTED_STATE_SCHEMA_VERSION_V3,
             status: state.status,
@@ -80,14 +80,14 @@ impl PersistedState {
     }
 
     /// Calculate elapsed seconds since this state was saved.
-    pub fn elapsed_seconds_since_save(&self, clock: &dyn Clock) -> u64 {
+    pub(crate) fn elapsed_seconds_since_save(&self, clock: &dyn Clock) -> u64 {
         let now = clock.now_utc();
         let elapsed = now.signed_duration_since(self.saved_at);
-        elapsed.num_seconds().max(0) as u64
+        u64::try_from(elapsed.num_seconds().max(0)).unwrap_or_default()
     }
 
     /// Convert persisted state into `TimerState` with schema migration.
-    pub fn into_timer_state(self, clock: &dyn Clock) -> TimerState {
+    pub(crate) fn into_timer_state(self, clock: &dyn Clock) -> TimerState {
         let elapsed_seconds = self.elapsed_seconds_since_save(clock);
 
         let PersistedState {
@@ -211,13 +211,13 @@ fn normalize_recovered_session_stop_behavior(
 }
 
 /// Manager for state persistence.
-pub struct PersistenceManager {
+pub(crate) struct PersistenceManager {
     clock: Arc<dyn Clock + Send + Sync>,
 }
 
 impl PersistenceManager {
     /// Create a new persistence manager.
-    pub fn new(clock: Arc<dyn Clock + Send + Sync>) -> Self {
+    pub(crate) fn new(clock: Arc<dyn Clock + Send + Sync>) -> Self {
         Self { clock }
     }
 
@@ -230,7 +230,7 @@ impl PersistenceManager {
     }
 
     /// Save timer state to disk.
-    pub fn save_state(&self, state: &TimerState) {
+    pub(crate) fn save_state(&self, state: &TimerState) {
         info!("Saving timer state to disk");
         let persisted_state = PersistedState::from_timer_state(state, self.clock.as_ref());
 
@@ -245,15 +245,8 @@ impl PersistenceManager {
         }
     }
 
-    /// Load timer state from disk.
-    #[allow(dead_code)]
-    pub fn load_state(&self) -> Option<TimerState> {
-        self.load_state_with_saved_at_utc()
-            .map(|(timer_state, _saved_at_utc)| timer_state)
-    }
-
     /// Load timer state and the persisted save timestamp.
-    pub fn load_state_with_saved_at_utc(&self) -> Option<(TimerState, DateTime<Utc>)> {
+    pub(crate) fn load_state_with_saved_at_utc(&self) -> Option<(TimerState, DateTime<Utc>)> {
         let path = Self::get_state_file_path()?;
         let persisted_state = Self::load_persisted_state_from_path(&path)?;
         let saved_at_utc = persisted_state.saved_at;
@@ -318,18 +311,10 @@ impl PersistenceManager {
         Some(persisted_state)
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     fn load_state_from_path(clock: &dyn Clock, path: &Path) -> Option<TimerState> {
         let persisted_state = Self::load_persisted_state_from_path(path)?;
         Some(persisted_state.into_timer_state(clock))
-    }
-
-    /// Clear persisted state (for testing or reset).
-    #[allow(dead_code)]
-    pub fn clear_state(&self) {
-        if let Some(path) = Self::get_state_file_path() {
-            let _ = fs::remove_file(path);
-        }
     }
 }
 
@@ -342,7 +327,7 @@ impl Default for PersistenceManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::managers::clock::FixedClock;
+    use crate::managers::clock::testing::FixedClock;
     use chrono::{Local, TimeZone};
     use serde_json::json;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -406,6 +391,32 @@ mod tests {
 
         let elapsed = persisted.elapsed_seconds_since_save(fixed_clock.as_ref());
         assert_eq!(elapsed, 30);
+    }
+
+    #[test]
+    fn test_elapsed_seconds_calculation_clamps_negative_values_to_zero() {
+        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
+        let fixed_clock =
+            create_fixed_clock_for_utc_datetime(saved_at_utc - chrono::Duration::seconds(30));
+
+        let persisted = PersistedState {
+            schema_version: PERSISTED_STATE_SCHEMA_VERSION_V3,
+            status: TimerStatus::Working,
+            remaining_seconds: 100,
+            session_type: SessionType::Work,
+            current_cycle: 1,
+            completed_pomodoros: 0,
+            post_break_decision_pending: false,
+            settings: TimerSettings::default(),
+            saved_at: saved_at_utc,
+            auto_run_feature_enabled: false,
+            weekly_auto_run_config: WeeklyAutoRunConfig::default(),
+            timer_start_source: Some(TimerStartSource::ManualOutsideWindow),
+            scheduled_stop_state: ScheduledStopState::None,
+        };
+
+        let elapsed = persisted.elapsed_seconds_since_save(fixed_clock.as_ref());
+        assert_eq!(elapsed, 0);
     }
 
     #[test]

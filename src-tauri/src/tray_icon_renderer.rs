@@ -22,14 +22,14 @@ const MIN_IDLE_CONTRAST_RATIO: f64 = 4.5;
 /// assert_eq!(icon.len(), 16 * 16 * 4);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IdleGlyphVariant {
+pub(crate) enum IdleGlyphVariant {
     HollowCircle,
     PowerStandby,
     PauseBars,
 }
 
 /// All selectable idle glyph variants for preview and fixture generation.
-pub const IDLE_GLYPH_VARIANTS: [IdleGlyphVariant; 3] = [
+pub(crate) const IDLE_GLYPH_VARIANTS: [IdleGlyphVariant; 3] = [
     IdleGlyphVariant::HollowCircle,
     IdleGlyphVariant::PowerStandby,
     IdleGlyphVariant::PauseBars,
@@ -102,7 +102,7 @@ const FONT_COLOR: [u8; 4] = [255, 255, 255, 255]; // White text
 /// let rgba = render_tray_icon(18, TimerStatus::Working);  // Red background, "18"
 /// let rgba = render_tray_icon(5, TimerStatus::OnBreak);   // Green background, "5"
 /// ```
-pub fn render_tray_icon(remaining_minutes: u32, status: TimerStatus) -> Vec<u8> {
+pub(crate) fn render_tray_icon(remaining_minutes: u32, status: TimerStatus) -> Vec<u8> {
     let bg = background_color(status);
     let mut buf = vec![0u8; (ICON_SIZE * ICON_SIZE * 4) as usize];
 
@@ -115,14 +115,14 @@ pub fn render_tray_icon(remaining_minutes: u32, status: TimerStatus) -> Vec<u8> 
 /// Render an idle tray icon (grey background, no number).
 ///
 /// Returns a 16x16 RGBA pixel buffer (1024 bytes).
-pub fn render_idle_icon() -> Vec<u8> {
+pub(crate) fn render_idle_icon() -> Vec<u8> {
     render_idle_icon_for_variant(IDLE_GLYPH_VARIANTS[ACTIVE_IDLE_GLYPH_INDEX])
 }
 
 /// Render an idle icon for a specific glyph variant.
 ///
 /// This is intended for design review and fixture generation workflows.
-pub fn render_idle_icon_for_variant(variant: IdleGlyphVariant) -> Vec<u8> {
+pub(crate) fn render_idle_icon_for_variant(variant: IdleGlyphVariant) -> Vec<u8> {
     let bg = background_color(TimerStatus::Idle);
     let mut buf = vec![0u8; (ICON_SIZE * ICON_SIZE * 4) as usize];
     fill_background(&mut buf, bg);
@@ -132,17 +132,17 @@ pub fn render_idle_icon_for_variant(variant: IdleGlyphVariant) -> Vec<u8> {
 }
 
 /// Icon dimensions (always 16x16).
-pub fn icon_size() -> u32 {
+pub(crate) fn icon_size() -> u32 {
     ICON_SIZE
 }
 
 /// Draw a single digit at the given pixel offset using the 5x7 bitmap font.
 fn draw_digit(buf: &mut [u8], digit: usize, x_offset: u32, y_offset: u32) {
     let bitmap = &DIGIT_BITMAPS[digit];
-    for (row, &bits) in bitmap.iter().enumerate() {
+    for (row, &bits) in (0_u32..).zip(bitmap.iter()) {
         for col in 0..DIGIT_WIDTH {
             if bits & (1 << (DIGIT_WIDTH - 1 - col)) != 0 {
-                set_pixel(buf, x_offset + col, y_offset + row as u32, &FONT_COLOR);
+                set_pixel(buf, x_offset + col, y_offset + row, FONT_COLOR);
             }
         }
     }
@@ -243,25 +243,25 @@ fn draw_idle_pause_bars(buf: &mut [u8]) {
             buf,
             IDLE_GLYPH_ORIGIN_X + 1,
             IDLE_GLYPH_ORIGIN_Y + y,
-            &FONT_COLOR,
+            FONT_COLOR,
         );
         set_pixel(
             buf,
             IDLE_GLYPH_ORIGIN_X + 2,
             IDLE_GLYPH_ORIGIN_Y + y,
-            &FONT_COLOR,
+            FONT_COLOR,
         );
         set_pixel(
             buf,
             IDLE_GLYPH_ORIGIN_X + 5,
             IDLE_GLYPH_ORIGIN_Y + y,
-            &FONT_COLOR,
+            FONT_COLOR,
         );
         set_pixel(
             buf,
             IDLE_GLYPH_ORIGIN_X + 6,
             IDLE_GLYPH_ORIGIN_Y + y,
-            &FONT_COLOR,
+            FONT_COLOR,
         );
     }
 }
@@ -272,16 +272,16 @@ fn draw_offset_points(buf: &mut [u8], points: &[(u32, u32)]) {
             buf,
             IDLE_GLYPH_ORIGIN_X + x,
             IDLE_GLYPH_ORIGIN_Y + y,
-            &FONT_COLOR,
+            FONT_COLOR,
         );
     }
 }
 
 /// Set a pixel in the RGBA buffer at (x, y).
-fn set_pixel(buf: &mut [u8], x: u32, y: u32, color: &[u8; 4]) {
+fn set_pixel(buf: &mut [u8], x: u32, y: u32, color: [u8; 4]) {
     if x < ICON_SIZE && y < ICON_SIZE {
         let idx = ((y * ICON_SIZE + x) * 4) as usize;
-        buf[idx..idx + 4].copy_from_slice(color);
+        buf[idx..idx + 4].copy_from_slice(&color);
     }
 }
 
@@ -340,10 +340,16 @@ mod tests {
                 if dx == 0 && dy == 0 {
                     continue;
                 }
-                let nx = x as i32 + dx;
-                let ny = y as i32 + dy;
-                if nx >= 0 && ny >= 0 && nx < ICON_SIZE as i32 && ny < ICON_SIZE as i32 {
-                    result.push((nx as u32, ny as u32));
+                let nx = i64::from(x) + i64::from(dx);
+                let ny = i64::from(y) + i64::from(dy);
+                if nx >= 0 && ny >= 0 && nx < i64::from(ICON_SIZE) && ny < i64::from(ICON_SIZE) {
+                    let Some(nx) = u32::try_from(nx).ok() else {
+                        continue;
+                    };
+                    let Some(ny) = u32::try_from(ny).ok() else {
+                        continue;
+                    };
+                    result.push((nx, ny));
                 }
             }
         }
@@ -464,7 +470,7 @@ mod tests {
 
     fn relative_luminance(color: [u8; 4]) -> f64 {
         fn channel(value: u8) -> f64 {
-            let normalized = value as f64 / 255.0;
+            let normalized = f64::from(value) / 255.0;
             if normalized <= 0.03928 {
                 normalized / 12.92
             } else {
@@ -508,16 +514,16 @@ mod tests {
     fn test_idle_glyph_bounds_are_center_aligned() {
         let icon = render_idle_icon();
         let bounds = white_pixel_bounds(&icon).expect("Idle icon must include white pixels");
-        let center_x_twice = (bounds.0 + bounds.1) as i32;
-        let center_y_twice = (bounds.2 + bounds.3) as i32;
-        let icon_center_twice = (ICON_SIZE - 1) as i32;
+        let horizontal_center_twice = bounds.0 + bounds.1;
+        let vertical_center_twice = bounds.2 + bounds.3;
+        let icon_center_twice = ICON_SIZE - 1;
 
         assert!(
-            (center_x_twice - icon_center_twice).abs() <= 1,
+            horizontal_center_twice.abs_diff(icon_center_twice) <= 1,
             "Idle glyph horizontal center is misaligned"
         );
         assert!(
-            (center_y_twice - icon_center_twice).abs() <= 1,
+            vertical_center_twice.abs_diff(icon_center_twice) <= 1,
             "Idle glyph vertical center is misaligned"
         );
     }

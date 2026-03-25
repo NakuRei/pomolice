@@ -2,12 +2,14 @@ use std::fs::{self, File};
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 
+use tracing::{info, Level};
+
 #[path = "../tray_icon_renderer.rs"]
 mod tray_icon_renderer;
 
 mod types {
     #[derive(Debug, Clone, Copy, PartialEq)]
-    pub enum TimerStatus {
+    pub(crate) enum TimerStatus {
         Idle,
         Working,
         OnBreak,
@@ -40,7 +42,9 @@ enum IconRenderAction {
 }
 
 fn main() -> Result<(), String> {
-    let output_directory = project_root()
+    initialize_logging();
+
+    let output_directory = project_root()?
         .join("docs")
         .join("tray-icon-visual-review")
         .join("fixtures");
@@ -96,11 +100,19 @@ fn main() -> Result<(), String> {
         let size = tray_icon_renderer::icon_size();
         let output_path = output_directory.join(format!("{}.png", instruction.output_name));
         write_png_rgba(&output_path, size, size, &rgba)?;
-        println!("Exported {}", output_path.display());
+        info!(path = %output_path.display(), "Exported tray icon fixture");
     }
 
-    println!("Export complete: {}", output_directory.display());
+    info!(path = %output_directory.display(), "Tray icon fixture export complete");
     Ok(())
+}
+
+fn initialize_logging() {
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(Level::INFO)
+        .with_target(false)
+        .without_time()
+        .try_init();
 }
 
 fn render_rgba(render_action: IconRenderAction) -> Vec<u8> {
@@ -147,9 +159,9 @@ fn write_png_rgba(output_path: &Path, width: u32, height: u32, rgba: &[u8]) -> R
     Ok(())
 }
 
-fn project_root() -> PathBuf {
+fn project_root() -> Result<PathBuf, String> {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .expect("Expected src-tauri to have a parent directory")
-        .to_path_buf()
+        .map(std::path::Path::to_path_buf)
+        .ok_or_else(|| "Expected src-tauri to have a parent directory".to_string())
 }

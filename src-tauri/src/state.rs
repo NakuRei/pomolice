@@ -10,7 +10,6 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-use crate::error::Result;
 use crate::managers::clock::{Clock, SystemClock};
 use crate::managers::input_monitor::InputMonitorManager;
 use crate::managers::persistence::PersistenceManager;
@@ -20,7 +19,7 @@ use crate::types::{BootPromptRuntimeState, TimerStatus, TimerTickPayload};
 
 /// Lifecycle handles for the weekly scheduler background task.
 #[derive(Default)]
-pub struct SchedulerTaskState {
+pub(crate) struct SchedulerTaskState {
     pub cancellation_token: Option<CancellationToken>,
     pub join_handle: Option<JoinHandle<()>>,
 }
@@ -43,7 +42,7 @@ pub struct SchedulerTaskState {
 /// before acquiring the next one. Never hold two locks simultaneously.
 ///
 /// `scheduler_task_state` must not be acquired together with other locks.
-pub struct AppState {
+pub(crate) struct AppState {
     pub timer_manager: Mutex<TimerStateManager>,
     pub input_monitor: Mutex<InputMonitorManager>,
     pub window_manager: Mutex<WindowStateManager>,
@@ -58,15 +57,18 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Create a new AppState instance
-    pub fn new(app_handle: AppHandle) -> Self {
+    /// Create a new `AppState` instance.
+    pub(crate) fn new(app_handle: &AppHandle) -> Self {
         Self::new_with_clock(app_handle, Arc::new(SystemClock))
     }
 
-    /// Create a new AppState instance with an injected clock implementation.
-    pub fn new_with_clock(app_handle: AppHandle, clock: Arc<dyn Clock + Send + Sync>) -> Self {
+    /// Create a new `AppState` instance with an injected clock implementation.
+    pub(crate) fn new_with_clock(
+        app_handle: &AppHandle,
+        clock: Arc<dyn Clock + Send + Sync>,
+    ) -> Self {
         info!("Creating new AppState");
-        let persistence = PersistenceManager::new(clock.clone());
+        let persistence = PersistenceManager::new(Arc::clone(&clock));
 
         // Load persisted state if available
         let (initial_timer_state, restored_saved_at_utc) =
@@ -129,8 +131,8 @@ impl AppState {
     }
 
     /// Stops the scheduler task by canceling the token and taking ownership
-    /// of the stored JoinHandle.
-    pub fn stop_scheduler_task(&self) {
+    /// of the stored `JoinHandle`.
+    pub(crate) fn stop_scheduler_task(&self) {
         if let Ok(mut scheduler_task_state) = self.scheduler_task_state.lock() {
             if let Some(cancellation_token) = scheduler_task_state.cancellation_token.take() {
                 cancellation_token.cancel();
@@ -145,7 +147,7 @@ impl AppState {
     ///
     /// Returns a tick payload to emit if the timer was running when the app closed,
     /// or `None` if the timer was idle. The caller is responsible for emitting the event.
-    pub async fn initialize(&self) -> Result<Option<TimerTickPayload>> {
+    pub(crate) async fn initialize(&self) -> Option<TimerTickPayload> {
         info!("Initializing application state");
         let mut timer = self.timer_manager.lock().await;
         let result = timer.initialize_from_persisted_state();

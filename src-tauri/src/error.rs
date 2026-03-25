@@ -7,7 +7,7 @@ use crate::types::TimerStatus;
 
 /// Main error type for the Pomolice application
 #[derive(Error, Debug)]
-pub enum PomoliceError {
+pub(crate) enum PomoliceError {
     #[error("Unauthorized window: {0}")]
     Unauthorized(String),
 
@@ -23,16 +23,12 @@ pub enum PomoliceError {
     #[error("Window control error: {0}")]
     WindowControl(String),
 
-    #[error("Input monitoring failed: {0}")]
-    #[allow(dead_code)]
-    InputMonitorFailed(String),
-
     #[error("Invalid auto-run schedule: {reason}")]
     InvalidAutoRunSchedule { reason: String },
 }
 
 /// Result type alias for Pomolice operations
-pub type Result<T> = std::result::Result<T, PomoliceError>;
+pub(crate) type Result<T> = std::result::Result<T, PomoliceError>;
 
 impl serde::Serialize for PomoliceError {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>

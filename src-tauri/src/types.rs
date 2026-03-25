@@ -3,12 +3,12 @@
 use serde::{Deserialize, Serialize};
 
 /// Persisted state schema version currently supported by this binary.
-pub const PERSISTED_STATE_SCHEMA_VERSION_V3: u32 = 3;
+pub(crate) const PERSISTED_STATE_SCHEMA_VERSION_V3: u32 = 3;
 
 /// Timer status representing the current phase
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TimerStatus {
+pub(crate) enum TimerStatus {
     Idle,
     Working,
     OnBreak,
@@ -17,7 +17,7 @@ pub enum TimerStatus {
 /// Session type representing work or break sessions
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SessionType {
+pub(crate) enum SessionType {
     Work,
     ShortBreak,
     LongBreak,
@@ -25,7 +25,7 @@ pub enum SessionType {
 
 /// Timer settings synchronized from frontend
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TimerSettings {
+pub(crate) struct TimerSettings {
     pub work_duration_secs: u64,
     pub short_break_duration_secs: u64,
     pub long_break_duration_secs: u64,
@@ -46,12 +46,10 @@ impl Default for TimerSettings {
     }
 }
 
-#[allow(dead_code)]
 fn default_slot_start_time() -> String {
     "09:00".to_string()
 }
 
-#[allow(dead_code)]
 fn default_slot_end_time() -> String {
     "18:00".to_string()
 }
@@ -68,8 +66,7 @@ fn default_slot_end_time() -> String {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
-#[allow(dead_code)]
-pub struct DayAutoRunSlot {
+pub(crate) struct DayAutoRunSlot {
     pub enabled: bool,
     #[serde(default = "default_slot_start_time", alias = "startTime")]
     pub start_time: String,
@@ -115,8 +112,7 @@ impl Default for DayAutoRunSlot {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
-#[allow(dead_code)]
-pub struct WeeklyAutoRunConfig {
+pub(crate) struct WeeklyAutoRunConfig {
     pub mon: DayAutoRunSlot,
     pub tue: DayAutoRunSlot,
     pub wed: DayAutoRunSlot,
@@ -134,8 +130,7 @@ pub struct WeeklyAutoRunConfig {
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
-#[allow(dead_code)]
-pub enum TimerStartSource {
+pub(crate) enum TimerStartSource {
     #[default]
     ManualOutsideWindow,
     ManualInsideWindow,
@@ -150,8 +145,7 @@ pub enum TimerStartSource {
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
-#[allow(dead_code)]
-pub enum ScheduledStopState {
+pub(crate) enum ScheduledStopState {
     #[default]
     None,
     Pending,
@@ -165,8 +159,7 @@ pub enum ScheduledStopState {
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
-#[allow(dead_code)]
-pub enum PostBreakTransitionPolicy {
+pub(crate) enum PostBreakTransitionPolicy {
     #[default]
     RequireManualContinue,
     StartNextWorkAutomatically,
@@ -180,8 +173,7 @@ pub enum PostBreakTransitionPolicy {
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[allow(dead_code)]
-pub enum PostBreakDecisionAction {
+pub(crate) enum PostBreakDecisionAction {
     Continue,
     StopCycle,
 }
@@ -194,8 +186,7 @@ pub enum PostBreakDecisionAction {
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[allow(dead_code)]
-pub enum SessionTransitionReason {
+pub(crate) enum SessionTransitionReason {
     WorkToBreak,
     BreakWaitingDecision,
     BreakAutoStarted,
@@ -216,8 +207,7 @@ pub enum SessionTransitionReason {
 /// };
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[allow(dead_code)]
-pub struct SessionTransitionOutcome {
+pub(crate) struct SessionTransitionOutcome {
     pub transition_reason: SessionTransitionReason,
     pub completed_session_type: SessionType,
     pub next_status: TimerStatus,
@@ -225,9 +215,8 @@ pub struct SessionTransitionOutcome {
     pub requires_manual_continue_decision: bool,
 }
 
-#[allow(dead_code)]
 impl SessionTransitionOutcome {
-    pub fn work_to_break(next_session_type: SessionType) -> Self {
+    pub(crate) fn work_to_break(next_session_type: SessionType) -> Self {
         debug_assert!(matches!(
             next_session_type,
             SessionType::ShortBreak | SessionType::LongBreak
@@ -241,7 +230,7 @@ impl SessionTransitionOutcome {
         }
     }
 
-    pub fn break_waiting_decision(completed_session_type: SessionType) -> Self {
+    pub(crate) fn break_waiting_decision(completed_session_type: SessionType) -> Self {
         debug_assert!(matches!(
             completed_session_type,
             SessionType::ShortBreak | SessionType::LongBreak
@@ -255,7 +244,7 @@ impl SessionTransitionOutcome {
         }
     }
 
-    pub fn break_auto_started(completed_session_type: SessionType) -> Self {
+    pub(crate) fn break_auto_started(completed_session_type: SessionType) -> Self {
         debug_assert!(matches!(
             completed_session_type,
             SessionType::ShortBreak | SessionType::LongBreak
@@ -269,7 +258,7 @@ impl SessionTransitionOutcome {
         }
     }
 
-    pub fn scheduled_stop_executed(completed_session_type: SessionType) -> Self {
+    pub(crate) fn scheduled_stop_executed(completed_session_type: SessionType) -> Self {
         Self {
             transition_reason: SessionTransitionReason::ScheduledStopExecuted,
             completed_session_type,
@@ -284,19 +273,11 @@ impl SessionTransitionOutcome {
 ///
 /// Usage example:
 /// ```rust,ignore
-/// let id = BoundaryOccurrenceId::new("mon|start|1738707600");
+/// let id = BoundaryOccurrenceId("mon|start|1738707600".to_string());
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(transparent)]
-#[allow(dead_code)]
-pub struct BoundaryOccurrenceId(pub String);
-
-#[allow(dead_code)]
-impl BoundaryOccurrenceId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-}
+pub(crate) struct BoundaryOccurrenceId(pub String);
 
 /// Runtime state for the one-time startup confirmation decision.
 ///
@@ -306,8 +287,7 @@ impl BoundaryOccurrenceId {
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
-#[allow(dead_code)]
-pub enum BootPromptRuntimeState {
+pub(crate) enum BootPromptRuntimeState {
     AwaitingDecision,
     ResolvedStart,
     ResolvedLater,
@@ -317,7 +297,7 @@ pub enum BootPromptRuntimeState {
 
 /// Payload sent to frontend on each timer tick
 #[derive(Debug, Clone, Serialize)]
-pub struct TimerTickPayload {
+pub(crate) struct TimerTickPayload {
     pub status: TimerStatus,
     pub remaining_seconds: u64,
     pub session_type: SessionType,
@@ -329,7 +309,7 @@ pub struct TimerTickPayload {
 
 /// Payload sent to frontend when a session completes
 #[derive(Debug, Clone, Serialize)]
-pub struct SessionCompletedPayload {
+pub(crate) struct SessionCompletedPayload {
     pub transition_reason: SessionTransitionReason,
     pub completed_session_type: SessionType,
     pub next_status: TimerStatus,
@@ -341,7 +321,7 @@ pub struct SessionCompletedPayload {
 }
 
 impl SessionCompletedPayload {
-    pub fn from_transition_outcome(outcome: SessionTransitionOutcome) -> Self {
+    pub(crate) fn from_transition_outcome(outcome: &SessionTransitionOutcome) -> Self {
         Self {
             transition_reason: outcome.transition_reason,
             completed_session_type: outcome.completed_session_type,
@@ -355,7 +335,7 @@ impl SessionCompletedPayload {
 
 /// Full timer state sent on initial sync
 #[derive(Debug, Clone, Serialize)]
-pub struct FullStatePayload {
+pub(crate) struct FullStatePayload {
     pub status: TimerStatus,
     pub remaining_seconds: u64,
     pub session_type: SessionType,
@@ -371,7 +351,7 @@ pub struct FullStatePayload {
 
 /// Summary of the currently active schedule window.
 #[derive(Debug, Clone, Serialize)]
-pub struct ActiveWindowSummaryPayload {
+pub(crate) struct ActiveWindowSummaryPayload {
     pub weekday_key: String,
     pub start_time: String,
     pub end_time: String,
@@ -380,7 +360,7 @@ pub struct ActiveWindowSummaryPayload {
 
 /// Application state for timer management
 #[derive(Debug)]
-pub struct TimerState {
+pub(crate) struct TimerState {
     // Current phase
     pub status: TimerStatus,
 
@@ -435,7 +415,7 @@ impl Default for TimerState {
 }
 
 impl TimerState {
-    pub fn to_tick_payload(&self) -> TimerTickPayload {
+    pub(crate) fn to_tick_payload(&self) -> TimerTickPayload {
         TimerTickPayload {
             status: self.status,
             remaining_seconds: self.remaining_seconds,
@@ -447,7 +427,7 @@ impl TimerState {
         }
     }
 
-    pub fn to_full_payload(&self) -> FullStatePayload {
+    pub(crate) fn to_full_payload(&self) -> FullStatePayload {
         FullStatePayload {
             status: self.status,
             remaining_seconds: self.remaining_seconds,
@@ -464,7 +444,7 @@ impl TimerState {
     }
 
     /// Get break duration based on session type
-    pub fn get_break_duration(&self) -> u64 {
+    pub(crate) fn get_break_duration(&self) -> u64 {
         match self.session_type {
             SessionType::ShortBreak => self.settings.short_break_duration_secs,
             SessionType::LongBreak => self.settings.long_break_duration_secs,
@@ -578,7 +558,7 @@ mod tests {
         let default_id = BoundaryOccurrenceId::default();
         assert_eq!(default_id.0, "");
 
-        let custom_id = BoundaryOccurrenceId::new("mon|start|1738707600");
+        let custom_id = BoundaryOccurrenceId("mon|start|1738707600".to_string());
         assert_eq!(custom_id.0, "mon|start|1738707600");
     }
 
@@ -639,7 +619,7 @@ mod tests {
     #[test]
     fn test_session_completed_payload_from_outcome_maps_manual_decision_flag() {
         let outcome = SessionTransitionOutcome::break_waiting_decision(SessionType::ShortBreak);
-        let payload = SessionCompletedPayload::from_transition_outcome(outcome);
+        let payload = SessionCompletedPayload::from_transition_outcome(&outcome);
 
         assert_eq!(
             payload.transition_reason,

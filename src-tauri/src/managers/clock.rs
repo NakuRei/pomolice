@@ -1,7 +1,6 @@
 // Clock abstractions for deterministic time-dependent behavior.
 
-use chrono::{DateTime, Duration, Local, Utc};
-use std::sync::Mutex;
+use chrono::{DateTime, Local, Utc};
 
 /// Abstract clock used by runtime code and tests.
 ///
@@ -15,7 +14,7 @@ use std::sync::Mutex;
 /// let fixed_clock = FixedClock::new(current_local);
 /// fixed_clock.advance_seconds(60);
 /// ```
-pub trait Clock {
+pub(crate) trait Clock {
     fn now_local(&self) -> DateTime<Local>;
 
     fn now_utc(&self) -> DateTime<Utc> {
@@ -25,7 +24,7 @@ pub trait Clock {
 
 /// Runtime clock implementation backed by the system wall clock.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct SystemClock;
+pub(crate) struct SystemClock;
 
 impl Clock for SystemClock {
     fn now_local(&self) -> DateTime<Local> {
@@ -33,55 +32,61 @@ impl Clock for SystemClock {
     }
 }
 
-/// Test clock implementation that returns a controlled local datetime.
-///
-/// Usage example:
-/// ```rust,ignore
-/// let fixed_clock = FixedClock::new(chrono::Local::now());
-/// fixed_clock.set_now_local(chrono::Local::now());
-/// ```
-#[derive(Debug)]
-#[allow(dead_code)]
-pub struct FixedClock {
-    current_local_datetime: Mutex<DateTime<Local>>,
-}
+#[cfg(test)]
+pub(crate) mod testing {
+    use super::*;
+    use chrono::Duration;
+    use std::sync::Mutex;
 
-#[allow(dead_code)]
-impl FixedClock {
-    pub fn new(now_local: DateTime<Local>) -> Self {
-        Self {
-            current_local_datetime: Mutex::new(now_local),
+    /// Test clock implementation that returns a controlled local datetime.
+    ///
+    /// Usage example:
+    /// ```rust,ignore
+    /// let fixed_clock = FixedClock::new(chrono::Local::now());
+    /// fixed_clock.set_now_local(chrono::Local::now());
+    /// ```
+    #[derive(Debug)]
+    pub(crate) struct FixedClock {
+        current_local_datetime: Mutex<DateTime<Local>>,
+    }
+
+    impl FixedClock {
+        pub(crate) fn new(now_local: DateTime<Local>) -> Self {
+            Self {
+                current_local_datetime: Mutex::new(now_local),
+            }
+        }
+
+        pub(crate) fn set_now_local(&self, now_local: DateTime<Local>) {
+            let mut locked_datetime = self
+                .current_local_datetime
+                .lock()
+                .expect("fixed clock mutex should not be poisoned");
+            *locked_datetime = now_local;
+        }
+
+        pub(crate) fn advance_seconds(&self, seconds: i64) {
+            let mut locked_datetime = self
+                .current_local_datetime
+                .lock()
+                .expect("fixed clock mutex should not be poisoned");
+            *locked_datetime += Duration::seconds(seconds);
         }
     }
 
-    pub fn set_now_local(&self, now_local: DateTime<Local>) {
-        let mut locked_datetime = self
-            .current_local_datetime
-            .lock()
-            .expect("fixed clock mutex should not be poisoned");
-        *locked_datetime = now_local;
-    }
-
-    pub fn advance_seconds(&self, seconds: i64) {
-        let mut locked_datetime = self
-            .current_local_datetime
-            .lock()
-            .expect("fixed clock mutex should not be poisoned");
-        *locked_datetime += Duration::seconds(seconds);
-    }
-}
-
-impl Clock for FixedClock {
-    fn now_local(&self) -> DateTime<Local> {
-        self.current_local_datetime
-            .lock()
-            .expect("fixed clock mutex should not be poisoned")
-            .to_owned()
+    impl Clock for FixedClock {
+        fn now_local(&self) -> DateTime<Local> {
+            self.current_local_datetime
+                .lock()
+                .expect("fixed clock mutex should not be poisoned")
+                .to_owned()
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::testing::FixedClock;
     use super::*;
     use chrono::TimeZone;
 

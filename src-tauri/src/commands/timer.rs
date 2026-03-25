@@ -18,7 +18,7 @@ use crate::types::{
 
 /// Start a work session with settings
 #[tauri::command]
-pub async fn start_work(
+pub(crate) async fn start_work(
     window: WebviewWindow,
     state: State<'_, AppState>,
     work_duration_secs: u64,
@@ -98,7 +98,7 @@ pub async fn start_work(
 ///
 /// This command is valid only while `post_break_decision_pending = true`.
 #[tauri::command]
-pub async fn resolve_post_break_decision(
+pub(crate) async fn resolve_post_break_decision(
     window: WebviewWindow,
     state: State<'_, AppState>,
     action: PostBreakDecisionAction,
@@ -148,7 +148,10 @@ pub async fn resolve_post_break_decision(
 
 /// Emergency stop - reset all state
 #[tauri::command]
-pub async fn emergency_stop(window: WebviewWindow, state: State<'_, AppState>) -> Result<()> {
+pub(crate) async fn emergency_stop(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+) -> Result<()> {
     warn!(
         "Command: emergency_stop called from window '{}'",
         window.label()
@@ -159,7 +162,7 @@ pub async fn emergency_stop(window: WebviewWindow, state: State<'_, AppState>) -
         let mut timer = state.timer_manager.lock().await;
         // Take/cancel under the lock, but never await under the lock.
         let old = timer.cancel_and_take_task();
-        let (was_fullscreen, payload) = timer.emergency_stop()?;
+        let (was_fullscreen, payload) = timer.emergency_stop();
         (was_fullscreen, payload, old)
     };
 
@@ -178,7 +181,7 @@ pub async fn emergency_stop(window: WebviewWindow, state: State<'_, AppState>) -
         tauri::async_runtime::spawn(async move {
             let state_handle = app_handle.state::<AppState>();
             let mut mgr = state_handle.window_manager.lock().await;
-            let _ = mgr.exit_fullscreen_all_monitors(app_handle.clone()).await;
+            let _ = mgr.exit_fullscreen_all_monitors(&app_handle);
         });
     }
 
@@ -193,7 +196,7 @@ pub async fn emergency_stop(window: WebviewWindow, state: State<'_, AppState>) -
 
 /// Sync timer duration settings from frontend (idle only)
 #[tauri::command]
-pub async fn sync_timer_duration_settings(
+pub(crate) async fn sync_timer_duration_settings(
     window: WebviewWindow,
     state: State<'_, AppState>,
     work_duration_secs: u64,
@@ -227,7 +230,7 @@ pub async fn sync_timer_duration_settings(
 
 /// Sync automation policies from frontend
 #[tauri::command]
-pub async fn sync_automation_policies(
+pub(crate) async fn sync_automation_policies(
     window: WebviewWindow,
     state: State<'_, AppState>,
     auto_run_feature_enabled: bool,
@@ -379,7 +382,7 @@ fn evaluate_initial_boot_prompt_decision(
 
 /// Get full timer state for initial sync
 #[tauri::command]
-pub async fn get_full_state(
+pub(crate) async fn get_full_state(
     window: WebviewWindow,
     state: State<'_, AppState>,
 ) -> Result<FullStatePayload> {
@@ -435,7 +438,7 @@ pub async fn get_full_state(
 
 /// Resolve startup auto-start confirmation prompt.
 #[tauri::command]
-pub async fn resolve_boot_auto_start_prompt(
+pub(crate) async fn resolve_boot_auto_start_prompt(
     window: WebviewWindow,
     state: State<'_, AppState>,
     start_now: bool,
