@@ -1,5 +1,5 @@
 use tauri::{AppHandle, Emitter, Manager};
-use tracing::{error, info};
+use tracing::{error, info, instrument};
 
 use crate::state;
 use crate::tray;
@@ -34,6 +34,7 @@ fn session_completion_emit_order(
     }
 }
 
+#[instrument(skip(app))]
 pub async fn lib_handle_timer_tick(app: AppHandle) {
     let state_handle = app.state::<state::AppState>();
 
@@ -57,6 +58,7 @@ pub async fn lib_handle_timer_tick(app: AppHandle) {
     }
 }
 
+#[instrument(skip(app))]
 pub async fn lib_handle_session_complete(app: AppHandle) {
     use types::{SessionTransitionOutcome, SessionTransitionReason, SessionType};
 
@@ -222,6 +224,7 @@ async fn exit_break_mode(app: AppHandle) {
     let _ = app.emit("break_completed", serde_json::json!({}));
 }
 
+#[instrument(skip(app))]
 pub async fn lib_handle_input_detected(app: AppHandle) {
     let state_handle = app.state::<state::AppState>();
 
@@ -238,6 +241,7 @@ pub async fn lib_handle_input_detected(app: AppHandle) {
     }
 }
 
+#[instrument(skip(app))]
 pub async fn lib_handle_escape_combo(app: AppHandle) {
     let state_handle = app.state::<state::AppState>();
 

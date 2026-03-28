@@ -10,6 +10,7 @@ import {
 } from "@tauri-apps/plugin-notification";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { resolveResource } from "@tauri-apps/api/path";
+import { createLogger } from "../logging/logger";
 import { useSettingsStore } from "../store/settingsStore";
 import type { SessionTypeValue } from "../store/timerStore";
 
@@ -66,19 +67,7 @@ interface SessionCompleteNotificationPayload {
   body: string;
   soundType: NotificationSoundType;
 }
-
-function logNotificationWarning(
-  message: string,
-  context: Record<string, unknown>,
-): void {
-  // eslint-disable-next-line no-console -- Notification diagnostics are non-fatal and only needed for troubleshooting.
-  console.warn(message, context);
-}
-
-function logNotificationError(message: string, context: unknown): void {
-  // eslint-disable-next-line no-console -- Notification diagnostics are non-fatal and only needed for troubleshooting.
-  console.error(message, context);
-}
+const logger = createLogger("notifications");
 
 function isWindowsPlatform(): boolean {
   return (
@@ -132,9 +121,9 @@ export async function resolveNotificationSoundResourcePath(
     });
     return resolvedPath;
   } catch (error) {
-    logNotificationWarning("Failed to resolve notification sound path:", {
-      notificationSoundType,
-      error,
+    logger.warn("sound_path_resolution_failed", {
+      notification_sound_type: notificationSoundType,
+      failure_message: String(error),
     });
     return undefined;
   }
@@ -191,9 +180,9 @@ export async function playNotificationSoundPreview(
     currentNotificationPreviewAudio = previewAudio;
     return { status: "played" };
   } catch (error) {
-    logNotificationWarning("Failed to play notification sound preview:", {
-      notificationSoundType: options.soundType,
-      error,
+    logger.warn("sound_preview_playback_failed", {
+      notification_sound_type: options.soundType,
+      failure_message: String(error),
     });
     return { status: "error" };
   }
@@ -246,7 +235,7 @@ async function ensureNotificationPermission(): Promise<boolean> {
 
     return permissionGranted;
   } catch (error) {
-    logNotificationError("Failed to request notification permission:", error);
+    logger.error("permission_request_failed", error);
     return false;
   }
 }
@@ -293,9 +282,9 @@ async function sendSessionCompleteNotification(
     );
     await playNotificationAudioAtGain(resolvedPath, notificationGain);
   } catch (error) {
-    logNotificationError("Failed to show session complete notification:", {
-      payload,
-      error,
+    logger.error("session_complete_notification_failed", error, {
+      notification_sound_type: payload.soundType,
+      notification_title: payload.title,
     });
   }
 }

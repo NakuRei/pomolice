@@ -7,6 +7,14 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 
+const mockNotificationsLogger = {
+  trace: vi.fn(),
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+};
+
 vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: vi.fn((path: string) => `asset://${path}`),
 }));
@@ -19,6 +27,11 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
   isPermissionGranted: vi.fn(),
   requestPermission: vi.fn(),
   sendNotification: vi.fn(),
+}));
+
+vi.mock("@/logging/logger", () => ({
+  createLogger: (): typeof mockNotificationsLogger => mockNotificationsLogger,
+  initializeFrontendLogging: vi.fn(),
 }));
 
 const audioInstances: MockAudio[] = [];
@@ -153,6 +166,21 @@ describe("session complete notifications", () => {
     expect(audioInstances).toHaveLength(0);
   });
 
+  it("logs an error when notification permission lookup fails", async () => {
+    vi.mocked(isPermissionGranted).mockRejectedValueOnce(
+      new Error("permission lookup failed"),
+    );
+
+    const { notifyBreakComplete } = await import("./notifications");
+    await notifyBreakComplete();
+
+    expect(mockNotificationsLogger.error).toHaveBeenCalledWith(
+      "permission_request_failed",
+      expect.any(Error),
+    );
+    expect(sendNotification).not.toHaveBeenCalled();
+  });
+
   it("keeps the Windows banner but suppresses all notification sound when muted", async () => {
     vi.mocked(isPermissionGranted).mockResolvedValue(true);
 
@@ -173,5 +201,24 @@ describe("session complete notifications", () => {
     });
     expect(resolveResource).not.toHaveBeenCalled();
     expect(audioInstances).toHaveLength(0);
+  });
+
+  it("logs an error when notification display fails", async () => {
+    vi.mocked(isPermissionGranted).mockResolvedValue(true);
+    vi.mocked(sendNotification).mockImplementationOnce(() => {
+      throw new Error("display failed");
+    });
+
+    const { notifyBreakComplete } = await import("./notifications");
+    await notifyBreakComplete();
+
+    expect(mockNotificationsLogger.error).toHaveBeenCalledWith(
+      "session_complete_notification_failed",
+      expect.any(Error),
+      expect.objectContaining({
+        notification_sound_type: "work",
+        notification_title: "作業に戻りましょう！",
+      }),
+    );
   });
 });

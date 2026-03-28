@@ -1,5 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const { mockSettingsSyncLogger } = vi.hoisted(() => ({
+  mockSettingsSyncLogger: {
+    trace: vi.fn(),
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
+}));
+
 type InvokeCommand = (
   command: string,
   args?: Record<string, unknown>,
@@ -10,6 +20,11 @@ const mockInvoke = vi.fn<InvokeCommand>();
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: Record<string, unknown>): Promise<unknown> =>
     mockInvoke(command, args),
+}));
+
+vi.mock("@/logging/logger", () => ({
+  createLogger: (): typeof mockSettingsSyncLogger => mockSettingsSyncLogger,
+  initializeFrontendLogging: vi.fn(),
 }));
 
 import { SessionType, TimerStatus, useTimerStore } from "./timerStore";
@@ -215,5 +230,12 @@ describe("timerStore syncSettings command routing", () => {
     await expect(
       useTimerStore.getState().syncSettings(),
     ).resolves.toBeUndefined();
+    expect(mockSettingsSyncLogger.warn).toHaveBeenCalledWith(
+      "sync_failed",
+      expect.objectContaining({
+        failure_message: "Error: sync failed",
+        timer_status: TimerStatus.IDLE,
+      }),
+    );
   });
 });

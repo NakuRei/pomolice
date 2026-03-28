@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useSettingsStore, VALIDATION_RULES } from "./settingsStore";
 import { useErrorStore } from "./errorStore";
 import { classifyBackendError } from "../errors/classifyBackendError";
+import { createLogger } from "../logging/logger";
 import type { WeekdayKey } from "../types/weeklyAutoRun";
 import type {
   PostBreakDecisionAction,
@@ -153,6 +154,8 @@ type SyncAutomationPoliciesCommandPayload = Record<string, unknown> & {
     typeof useSettingsStore.getState
   >["weeklyAutoRunConfig"];
 };
+
+const logger = createLogger("settings_sync");
 
 function clampWithinRange(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -370,8 +373,11 @@ export const useTimerStore = create<TimerStore>()(
             );
           }
           await invoke("sync_automation_policies", automationPoliciesPayload);
-        } catch {
-          // Silently fail - settings sync is not critical
+        } catch (error) {
+          logger.warn("sync_failed", {
+            failure_message: String(error),
+            timer_status: timerStatus,
+          });
         }
       },
 

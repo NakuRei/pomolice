@@ -2,6 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { resolveResource } from "@tauri-apps/api/path";
 
+const mockNotificationsLogger = {
+  trace: vi.fn(),
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+};
+
 vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: vi.fn((path: string) => `asset://${path}`),
 }));
@@ -14,6 +22,11 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
   isPermissionGranted: vi.fn(),
   requestPermission: vi.fn(),
   sendNotification: vi.fn(),
+}));
+
+vi.mock("@/logging/logger", () => ({
+  createLogger: (): typeof mockNotificationsLogger => mockNotificationsLogger,
+  initializeFrontendLogging: vi.fn(),
 }));
 
 const audioInstances: MockAudio[] = [];
@@ -144,6 +157,12 @@ describe("playNotificationSoundPreview()", () => {
 
     expect(result).toEqual({ status: "unavailable" });
     expect(audioInstances).toHaveLength(0);
+    expect(mockNotificationsLogger.warn).toHaveBeenCalledWith(
+      "sound_path_resolution_failed",
+      expect.objectContaining({
+        notification_sound_type: "long_break",
+      }),
+    );
   });
 
   it("should stop the previous preview before playing a new one", async () => {
@@ -184,5 +203,11 @@ describe("playNotificationSoundPreview()", () => {
     });
 
     expect(result).toEqual({ status: "error" });
+    expect(mockNotificationsLogger.warn).toHaveBeenCalledWith(
+      "sound_preview_playback_failed",
+      expect.objectContaining({
+        notification_sound_type: "work",
+      }),
+    );
   });
 });

@@ -6,7 +6,7 @@ import { immer } from "zustand/middleware/immer";
  * How severe an error is, which determines the UI treatment:
  * - "critical"    → blocking inline error with retry (e.g. emergency stop failed)
  * - "recoverable" → non-blocking inline error, auto-clears after timeout
- * - "silent"      → no UI, logged only (e.g. settings sync)
+ * - "silent"      → no UI; callers may still record diagnostics separately
  */
 export type ErrorSeverity = "critical" | "recoverable" | "silent";
 
@@ -46,7 +46,7 @@ export interface AppError {
   id: string;
   /** Japanese user-facing message displayed in the UI. */
   message: string;
-  /** Original error string from Rust backend, used for console logging only. */
+  /** Additional diagnostic detail for troubleshooting. reportError() itself does not log it anywhere. */
   technicalDetail: string;
   severity: ErrorSeverity;
   origin: ErrorOrigin;

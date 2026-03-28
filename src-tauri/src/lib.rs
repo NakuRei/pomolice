@@ -6,6 +6,7 @@ type RunResult = std::result::Result<(), Box<dyn std::error::Error>>;
 
 mod commands;
 mod error;
+mod logging;
 mod managers;
 mod scheduler;
 mod session_pipeline;
@@ -28,26 +29,18 @@ pub use session_pipeline::{
 /// # Errors
 /// Returns an error if Tauri application setup or runtime startup fails.
 pub fn run() -> RunResult {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .with_target(false)
-        .with_thread_ids(false)
-        .with_file(true)
-        .with_line_number(true)
-        .init();
-
-    info!("Starting Pomolice application");
-
     #[expect(
         clippy::exit,
         reason = "Tauri's generate_context!() codegen calls process::exit() if generated context creation panics"
     )]
     tauri::Builder::default()
+        .plugin(logging::build_log_plugin())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
+            let logging_runtime = logging::init_logging(app.handle())?;
+            app.manage(logging_runtime);
+
+            info!("Starting Pomolice application");
             info!("Initializing application state");
             let app_state = state::AppState::new(app.handle());
 

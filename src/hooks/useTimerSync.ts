@@ -7,6 +7,7 @@
 import { useEffect } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import { createLogger } from "../logging/logger";
 import {
   type TimerTickPayload,
   type SessionCompletedPayload,
@@ -22,6 +23,7 @@ import { useErrorStore } from "../store/errorStore";
 
 /** Maximum number of automatic retry attempts before giving up and showing the error banner. */
 const MAX_CONNECTION_RETRIES = 3;
+const logger = createLogger("timer_sync");
 
 /**
  * Delay in ms before each retry attempt.
@@ -132,8 +134,10 @@ export function useTimerSync(): void {
           useErrorStore.getState().clearError("connection");
         }
       } catch (error) {
-        // eslint-disable-next-line no-console -- Connection setup failures need a visible retry trace during development and troubleshooting.
-        console.error("Failed to setup timer sync:", error);
+        logger.error("setup_failed", error, {
+          retry_attempt: retryAttempt,
+          max_connection_retries: MAX_CONNECTION_RETRIES,
+        });
 
         if (!mounted) {
           return;

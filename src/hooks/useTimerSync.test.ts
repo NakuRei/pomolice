@@ -28,6 +28,15 @@ type InvokeCommand = (
 const mockListen = vi.fn<ListenerRegistration>();
 const mockInvoke = vi.fn<InvokeCommand>();
 const noopUnlisten = (): void => undefined;
+const { mockTimerSyncLogger } = vi.hoisted(() => ({
+  mockTimerSyncLogger: {
+    trace: vi.fn(),
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
+}));
 
 vi.mock("@tauri-apps/api/event", () => ({
   listen: (
@@ -51,6 +60,11 @@ vi.mock("@/services/notifications", () => ({
   notifyWorkComplete: vi.fn(),
   notifyBreakAutoStarted: vi.fn(),
   notifyBreakComplete: vi.fn(),
+}));
+
+vi.mock("@/logging/logger", () => ({
+  createLogger: (): typeof mockTimerSyncLogger => mockTimerSyncLogger,
+  initializeFrontendLogging: vi.fn(),
 }));
 
 // Import after mocking
@@ -175,6 +189,25 @@ describe("useTimerSync", () => {
     expect(listenCalls).toContain("session_completed");
     expect(listenCalls).toContain("auto_run_stop_pending");
     expect(listenCalls).toContain("auto_run_stopped");
+  });
+
+  it("should log setup failures through the logger", async () => {
+    mockListen.mockRejectedValueOnce(new Error("listen failed"));
+
+    renderHook(() => {
+      useTimerSync();
+    });
+
+    await waitFor(() => {
+      expect(mockTimerSyncLogger.error).toHaveBeenCalledWith(
+        "setup_failed",
+        expect.any(Error),
+        expect.objectContaining({
+          retry_attempt: 0,
+          max_connection_retries: 3,
+        }),
+      );
+    });
   });
 
   it("should call get_full_state on mount", async () => {

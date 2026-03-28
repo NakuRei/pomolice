@@ -7,6 +7,9 @@
 mod input_monitor_test;
 
 #[cfg(test)]
+mod logging_test;
+
+#[cfg(test)]
 mod lock_ordering_test;
 
 #[cfg(test)]
