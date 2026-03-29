@@ -24,7 +24,6 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 vi.mock("@/logging/logger", () => ({
   createLogger: (): typeof mockSettingsSyncLogger => mockSettingsSyncLogger,
-  initializeFrontendLogging: vi.fn(),
 }));
 
 import { SessionType, TimerStatus, useTimerStore } from "./timerStore";

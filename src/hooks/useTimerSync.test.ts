@@ -64,7 +64,6 @@ vi.mock("@/services/notifications", () => ({
 
 vi.mock("@/logging/logger", () => ({
   createLogger: (): typeof mockTimerSyncLogger => mockTimerSyncLogger,
-  initializeFrontendLogging: vi.fn(),
 }));
 
 // Import after mocking

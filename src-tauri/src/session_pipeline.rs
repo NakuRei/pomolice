@@ -1,5 +1,5 @@
+use log::{error, info};
 use tauri::{AppHandle, Emitter, Manager};
-use tracing::{error, info, instrument};
 
 use crate::state;
 use crate::tray;
@@ -34,7 +34,6 @@ fn session_completion_emit_order(
     }
 }
 
-#[instrument(skip(app))]
 pub async fn lib_handle_timer_tick(app: AppHandle) {
     let state_handle = app.state::<state::AppState>();
 
@@ -58,7 +57,6 @@ pub async fn lib_handle_timer_tick(app: AppHandle) {
     }
 }
 
-#[instrument(skip(app))]
 pub async fn lib_handle_session_complete(app: AppHandle) {
     use types::{SessionTransitionOutcome, SessionTransitionReason, SessionType};
 
@@ -138,12 +136,12 @@ pub async fn lib_handle_session_complete(app: AppHandle) {
     };
 
     info!(
-        transition_reason = ?transition_outcome.transition_reason,
-        post_break_transition_policy = ?final_post_break_transition_policy,
-        post_break_decision_pending = final_post_break_decision_pending,
-        scheduled_stop_state = ?final_scheduled_stop_state,
-        timer_start_source = ?final_timer_start_source,
-        "Session completion pipeline finalized transition state"
+        "Session completion pipeline finalized transition state: reason={:?}, policy={:?}, decision_pending={}, scheduled_stop_state={:?}, timer_start_source={:?}",
+        transition_outcome.transition_reason,
+        final_post_break_transition_policy,
+        final_post_break_decision_pending,
+        final_scheduled_stop_state,
+        final_timer_start_source
     );
 
     for emit_event in session_completion_emit_order(transition_outcome.transition_reason) {
@@ -183,7 +181,7 @@ async fn enter_break_mode(app: AppHandle) {
             .enter_fullscreen_all_monitors(app.clone())
             .await
         {
-            error!("Failed to enter fullscreen: {:?}", e);
+            error!("Failed to enter fullscreen: {e:?}");
             return;
         }
         info!("Entered fullscreen mode on all monitors");
@@ -210,7 +208,7 @@ async fn exit_break_mode(app: AppHandle) {
     {
         let mut window_manager = state_handle.window_manager.lock().await;
         if let Err(e) = window_manager.exit_fullscreen_all_monitors(&app) {
-            error!("Failed to exit fullscreen: {:?}", e);
+            error!("Failed to exit fullscreen: {e:?}");
             return;
         }
         info!("Exited fullscreen mode on all monitors");
@@ -224,7 +222,6 @@ async fn exit_break_mode(app: AppHandle) {
     let _ = app.emit("break_completed", serde_json::json!({}));
 }
 
-#[instrument(skip(app))]
 pub async fn lib_handle_input_detected(app: AppHandle) {
     let state_handle = app.state::<state::AppState>();
 
@@ -241,7 +238,6 @@ pub async fn lib_handle_input_detected(app: AppHandle) {
     }
 }
 
-#[instrument(skip(app))]
 pub async fn lib_handle_escape_combo(app: AppHandle) {
     let state_handle = app.state::<state::AppState>();
 

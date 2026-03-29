@@ -7,11 +7,11 @@ use std::sync::{
     OnceLock,
 };
 
+use log::{info, warn};
 use tauri::image::Image;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
-use tracing::{info, warn};
 
 use crate::tray_icon_renderer;
 use crate::types::{TimerStatus, TimerTickPayload};

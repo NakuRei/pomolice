@@ -1,6 +1,6 @@
+use log::{error, info};
 use tauri::{Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
-use tracing::{error, info};
 
 type RunResult = std::result::Result<(), Box<dyn std::error::Error>>;
 
@@ -37,9 +37,6 @@ pub fn run() -> RunResult {
         .plugin(logging::build_log_plugin())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
-            let logging_runtime = logging::init_logging(app.handle())?;
-            app.manage(logging_runtime);
-
             info!("Starting Pomolice application");
             info!("Initializing application state");
             let app_state = state::AppState::new(app.handle());
@@ -54,7 +51,7 @@ pub fn run() -> RunResult {
             app.manage(app_state);
 
             if let Err(e) = tray::setup_tray(app.handle()) {
-                error!("Failed to setup tray icon: {:?}", e);
+                error!("Failed to setup tray icon: {e:?}");
             }
 
             let scheduler_app_handle = app.handle().clone();

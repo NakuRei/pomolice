@@ -1,11 +1,11 @@
 use chrono::{DateTime, Duration as ChronoDuration, Local};
+use log::info;
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
-use tracing::info;
 
 use crate::managers::weekly_schedule::{
     collect_crossed_end_boundaries, collect_crossed_start_boundaries,
@@ -182,10 +182,7 @@ fn build_scheduler_tick_plan(
         runtime_state.last_checked_local = now_local;
         runtime_state.last_seen_config_revision = config_revision;
         skip_start_boundaries_this_tick = true;
-        info!(
-            "Weekly scheduler detected config revision change: {}",
-            config_revision
-        );
+        info!("Weekly scheduler detected config revision change: {config_revision}");
         now_local - ChronoDuration::seconds(1)
     } else {
         runtime_state.last_checked_local

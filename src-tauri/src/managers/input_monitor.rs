@@ -1,12 +1,12 @@
 // Input Monitor Manager
 // Manages global input monitoring without global statics
 
+use log::{error, info};
 use rdev::{listen, Event, EventType, Key};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use tracing::{error, info};
 
 const INPUT_MONITOR_MAX_BACKOFF: Duration = Duration::from_secs(30);
 
@@ -123,10 +123,7 @@ impl InputMonitorManager {
                             info!("Input monitoring shut down on request after listener error");
                             break;
                         }
-                        error!(
-                            "Input monitoring listener failed: {:?}; retrying in {:?}",
-                            e, backoff
-                        );
+                        error!("Input monitoring listener failed: {e:?}; retrying in {backoff:?}");
                         thread::sleep(backoff);
                         backoff = (backoff * 2).min(INPUT_MONITOR_MAX_BACKOFF);
                     }

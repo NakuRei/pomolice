@@ -4,12 +4,12 @@
 use atomic_write_file::AtomicWriteFile;
 use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
+use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tracing::{error, info, warn};
 
 use crate::managers::clock::{Clock, SystemClock};
 use crate::types::{
@@ -107,10 +107,9 @@ impl PersistedState {
         } = self;
 
         if schema_version != PERSISTED_STATE_SCHEMA_VERSION_V3 {
+            let expected_schema_version = PERSISTED_STATE_SCHEMA_VERSION_V3;
             warn!(
-                schema_version,
-                expected_schema_version = PERSISTED_STATE_SCHEMA_VERSION_V3,
-                "Persisted schema version is unsupported. Resetting timer state to defaults."
+                "Persisted schema version is unsupported. Resetting timer state to defaults: schema_version={schema_version}, expected_schema_version={expected_schema_version}"
             );
             return TimerState::default();
         }
@@ -130,10 +129,7 @@ impl PersistedState {
                 || remaining_seconds != settings.work_duration_secs
             {
                 warn!(
-                    persisted_status = ?status,
-                    persisted_session_type = ?session_type,
-                    persisted_remaining_seconds = remaining_seconds,
-                    "Persisted post-break pending state was inconsistent. Normalizing to idle work preview."
+                    "Persisted post-break pending state was inconsistent. Normalizing to idle work preview: status={status:?}, session_type={session_type:?}, remaining_seconds={remaining_seconds}"
                 );
             }
 
@@ -146,10 +142,7 @@ impl PersistedState {
 
         if normalized_status == TimerStatus::OnBreak {
             warn!(
-                persisted_session_type = ?session_type,
-                persisted_remaining_seconds = remaining_seconds,
-                persisted_completed_pomodoros = completed_pomodoros,
-                "Persisted break session cannot be resumed safely. Resetting to idle work preview."
+                "Persisted break session cannot be resumed safely. Resetting to idle work preview: session_type={session_type:?}, remaining_seconds={remaining_seconds}, completed_pomodoros={completed_pomodoros}"
             );
 
             normalized_status = TimerStatus::Idle;
@@ -236,9 +229,12 @@ impl PersistenceManager {
 
         if let Some(path) = Self::get_state_file_path() {
             if let Err(write_error) = Self::save_persisted_state_to_path(&persisted_state, &path) {
-                error!("Failed to save timer state to {:?}: {}", path, write_error);
+                error!(
+                    "Failed to save timer state to {}: {write_error}",
+                    path.display()
+                );
             } else {
-                info!("Successfully saved state to {:?}", path);
+                info!("Successfully saved state to {}", path.display());
             }
         } else {
             warn!("Could not determine state file path");
@@ -282,16 +278,16 @@ impl PersistenceManager {
 
     fn load_persisted_state_from_path(path: &Path) -> Option<PersistedState> {
         if !path.exists() {
-            info!("No persisted state file found at {:?}", path);
+            info!("No persisted state file found at {}", path.display());
             return None;
         }
 
-        info!("Loading timer state from {:?}", path);
+        info!("Loading timer state from {}", path.display());
 
         let raw_json = match fs::read_to_string(path) {
             Ok(content) => content,
             Err(read_error) => {
-                error!("Failed to read state file {:?}: {}", path, read_error);
+                error!("Failed to read state file {}: {read_error}", path.display());
                 return None;
             }
         };
@@ -300,8 +296,8 @@ impl PersistenceManager {
             Ok(parsed) => parsed,
             Err(deserialize_error) => {
                 warn!(
-                    "Persisted state parse failed. Resetting to default state on startup. path={:?}, error={}",
-                    path, deserialize_error
+                    "Persisted state parse failed. Resetting to default state on startup. path={}, error={deserialize_error}",
+                    path.display()
                 );
                 return None;
             }

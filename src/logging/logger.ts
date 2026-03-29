@@ -1,4 +1,11 @@
-import { writeLog } from "./logTransport";
+import {
+  debug as writeDebugLog,
+  error as writeErrorLog,
+  info as writeInfoLog,
+  trace as writeTraceLog,
+  warn as writeWarnLog,
+  type LogOptions,
+} from "@tauri-apps/plugin-log";
 
 export type LogFieldValue = string | number | boolean | null;
 export type LogFields = Record<string, LogFieldValue>;
@@ -19,10 +26,15 @@ const EXCEPTION_MESSAGE_FIELD = "exception.message";
 const EXCEPTION_STACKTRACE_FIELD = "exception.stacktrace";
 
 type LogLevel = "trace" | "debug" | "info" | "warn" | "error";
+type PluginLogWriter = (message: string, options?: LogOptions) => Promise<void>;
 
-// This init gate is intentionally shared across all logger instances.
-// Tests reset the module to isolate this state.
-let loggingInitialized = false;
+const pluginLogWriterByLogLevel: Record<LogLevel, PluginLogWriter> = {
+  trace: writeTraceLog,
+  debug: writeDebugLog,
+  info: writeInfoLog,
+  warn: writeWarnLog,
+  error: writeErrorLog,
+};
 
 function normalizeIdentifier(value: string, fallback: string): string {
   const trimmedValue = value.trim();
@@ -176,6 +188,14 @@ function sanitizeFields(fields?: LogFields): Record<string, string> {
   );
 }
 
+function isTauriEnvironment(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+function escapeLogText(value: string): string {
+  return value.replace(/\r/gu, "\\r").replace(/\n/gu, "\\n");
+}
+
 function writeRecord(
   level: LogLevel,
   scope: string,
@@ -183,7 +203,7 @@ function writeRecord(
   error?: unknown,
   fields?: LogFields,
 ): void {
-  if (!loggingInitialized) {
+  if (!isTauriEnvironment()) {
     return;
   }
 
@@ -194,11 +214,17 @@ function writeRecord(
   };
 
   try {
-    writeLog(
-      level,
-      `${scope}.${normalizedEvent}`,
-      sanitizeFields(mergedFields),
-    );
+    void pluginLogWriterByLogLevel[level](
+      escapeLogText(`${scope}.${normalizedEvent}`),
+      {
+        keyValues: Object.fromEntries(
+          Object.entries(sanitizeFields(mergedFields)).map(([key, value]) => [
+            key,
+            escapeLogText(value),
+          ]),
+        ),
+      },
+    ).catch(noop);
   } catch {
     noop();
   }
@@ -242,9 +268,4 @@ export function createLogger(scope: string): FrontendLogger {
       logError(normalizedScope, event, error, fields);
     },
   };
-}
-
-export function initializeFrontendLogging(): Promise<void> {
-  loggingInitialized = true;
-  return Promise.resolve();
 }

@@ -26,7 +26,6 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
 
 vi.mock("@/logging/logger", () => ({
   createLogger: (): typeof mockNotificationsLogger => mockNotificationsLogger,
-  initializeFrontendLogging: vi.fn(),
 }));
 
 const audioInstances: MockAudio[] = [];

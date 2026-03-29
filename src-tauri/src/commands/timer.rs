@@ -1,10 +1,10 @@
 // Timer commands using dependency injection
 
+use log::{info, warn};
 use std::sync::atomic::Ordering;
 
 use chrono::{DateTime, Local};
 use tauri::{Emitter, Manager, State, WebviewWindow};
-use tracing::{info, instrument, warn};
 
 use crate::error::{PomoliceError, Result};
 use crate::managers::weekly_schedule::{
@@ -18,7 +18,6 @@ use crate::types::{
 
 /// Start a work session with settings
 #[tauri::command]
-#[instrument(skip(window, state), fields(window_label = %window.label()))]
 pub(crate) async fn start_work(
     window: WebviewWindow,
     state: State<'_, AppState>,
@@ -99,7 +98,6 @@ pub(crate) async fn start_work(
 ///
 /// This command is valid only while `post_break_decision_pending = true`.
 #[tauri::command]
-#[instrument(skip(window, state), fields(window_label = %window.label()))]
 pub(crate) async fn resolve_post_break_decision(
     window: WebviewWindow,
     state: State<'_, AppState>,
@@ -150,7 +148,6 @@ pub(crate) async fn resolve_post_break_decision(
 
 /// Emergency stop - reset all state
 #[tauri::command]
-#[instrument(skip(window, state), fields(window_label = %window.label()))]
 pub(crate) async fn emergency_stop(
     window: WebviewWindow,
     state: State<'_, AppState>,
@@ -199,7 +196,6 @@ pub(crate) async fn emergency_stop(
 
 /// Sync timer duration settings from frontend (idle only)
 #[tauri::command]
-#[instrument(skip(window, state), fields(window_label = %window.label()))]
 pub(crate) async fn sync_timer_duration_settings(
     window: WebviewWindow,
     state: State<'_, AppState>,
@@ -234,7 +230,6 @@ pub(crate) async fn sync_timer_duration_settings(
 
 /// Sync automation policies from frontend
 #[tauri::command]
-#[instrument(skip(window, state), fields(window_label = %window.label()))]
 pub(crate) async fn sync_automation_policies(
     window: WebviewWindow,
     state: State<'_, AppState>,
@@ -302,10 +297,7 @@ fn authorize_main_window_label(window_label: &str) -> Result<()> {
 fn authorize_main_window(window: &WebviewWindow, command_name: &'static str) -> Result<()> {
     let window_label = window.label();
     if let Err(error) = authorize_main_window_label(window_label) {
-        warn!(
-            "Unauthorized {command_name} attempt from window '{}'",
-            window_label
-        );
+        warn!("Unauthorized {command_name} attempt from window '{window_label}'");
         return Err(error);
     }
 
@@ -387,7 +379,6 @@ fn evaluate_initial_boot_prompt_decision(
 
 /// Get full timer state for initial sync
 #[tauri::command]
-#[instrument(skip(window, state), fields(window_label = %window.label()))]
 pub(crate) async fn get_full_state(
     window: WebviewWindow,
     state: State<'_, AppState>,
@@ -444,7 +435,6 @@ pub(crate) async fn get_full_state(
 
 /// Resolve startup auto-start confirmation prompt.
 #[tauri::command]
-#[instrument(skip(window, state), fields(window_label = %window.label()))]
 pub(crate) async fn resolve_boot_auto_start_prompt(
     window: WebviewWindow,
     state: State<'_, AppState>,

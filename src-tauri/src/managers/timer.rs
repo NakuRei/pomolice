@@ -1,10 +1,10 @@
 // Timer State Manager
 // Manages timer state and session lifecycle without global statics
 
+use log::{info, warn};
 use std::time::{Duration, Instant};
 use tauri::AppHandle;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
 
 use crate::error::{PomoliceError, Result};
 use crate::types::{
@@ -88,10 +88,7 @@ impl TimerStateManager {
 
         if timer_start_source != TimerStartSource::ScheduledAutoStart {
             if let Some(remaining_ms) = self.rate_limit_remaining_ms() {
-                warn!(
-                    "Start work action is rate limited ({}ms remaining)",
-                    remaining_ms
-                );
+                warn!("Start work action is rate limited ({remaining_ms}ms remaining)");
                 return Err(PomoliceError::RateLimited { remaining_ms });
             }
         }
@@ -459,26 +456,24 @@ impl TimerStateManager {
         transition_reason: SessionTransitionReason,
     ) {
         info!(
-            transition_stage = transition_stage,
-            transition_reason = ?transition_reason,
-            post_break_transition_policy = ?self.state.settings.post_break_transition_policy,
-            post_break_decision_pending = self.state.post_break_decision_pending,
-            scheduled_stop_state = ?self.state.scheduled_stop_state,
-            timer_start_source = ?self.state.timer_start_source,
-            "Timer transition snapshot"
+            "Timer transition snapshot: stage={}, reason={:?}, policy={:?}, post_break_decision_pending={}, scheduled_stop_state={:?}, timer_start_source={:?}",
+            transition_stage,
+            transition_reason,
+            self.state.settings.post_break_transition_policy,
+            self.state.post_break_decision_pending,
+            self.state.scheduled_stop_state,
+            self.state.timer_start_source
         );
     }
 
     fn log_manual_decision_snapshot(&self, action: PostBreakDecisionAction) {
         info!(
-            transition_stage = "resolve_post_break_decision",
-            transition_reason = "manual_post_break_decision",
-            post_break_decision_action = ?action,
-            post_break_transition_policy = ?self.state.settings.post_break_transition_policy,
-            post_break_decision_pending = self.state.post_break_decision_pending,
-            scheduled_stop_state = ?self.state.scheduled_stop_state,
-            timer_start_source = ?self.state.timer_start_source,
-            "Timer transition snapshot"
+            "Timer transition snapshot: stage=resolve_post_break_decision, reason=manual_post_break_decision, action={:?}, policy={:?}, post_break_decision_pending={}, scheduled_stop_state={:?}, timer_start_source={:?}",
+            action,
+            self.state.settings.post_break_transition_policy,
+            self.state.post_break_decision_pending,
+            self.state.scheduled_stop_state,
+            self.state.timer_start_source
         );
     }
 

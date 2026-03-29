@@ -2,13 +2,13 @@
 // Central hub for all state, managed via Tauri's State mechanism
 
 use chrono::{DateTime, Duration as ChronoDuration, Local};
+use log::info;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex as StdMutex};
 use tauri::async_runtime::JoinHandle;
 use tauri::AppHandle;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
-use tracing::info;
 
 use crate::managers::clock::{Clock, SystemClock};
 use crate::managers::input_monitor::InputMonitorManager;

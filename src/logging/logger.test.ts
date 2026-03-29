@@ -1,5 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const traceLog = vi.fn().mockResolvedValue(undefined);
+const debugLog = vi.fn().mockResolvedValue(undefined);
+const infoLog = vi.fn().mockResolvedValue(undefined);
+const warnLog = vi.fn().mockResolvedValue(undefined);
+const errorLog = vi.fn().mockResolvedValue(undefined);
+
+vi.mock("@tauri-apps/plugin-log", () => ({
+  trace: traceLog,
+  debug: debugLog,
+  info: infoLog,
+  warn: warnLog,
+  error: errorLog,
+}));
+
 function expectRecord(
   value: unknown,
   description: string,
@@ -11,45 +25,61 @@ function expectRecord(
   }
 }
 
-function getFirstWriteLogCall(
-  writeLogMock: ReturnType<typeof vi.fn>,
-): [unknown, unknown, Record<string, unknown>] {
-  const firstCall = writeLogMock.mock.calls[0];
+function getFirstPluginWriteCall(
+  pluginLogMock: ReturnType<typeof vi.fn>,
+): [unknown, Record<string, unknown>] {
+  const firstCall = pluginLogMock.mock.calls[0];
   expect(firstCall).toBeDefined();
   if (firstCall === undefined) {
     throw new Error("Expected the logger to write at least one record");
   }
 
-  const keyValues: unknown = firstCall[2];
-  expectRecord(keyValues, "writeLog keyValues");
-  return [firstCall[0], firstCall[1], keyValues];
+  const options: unknown = firstCall[1];
+  expectRecord(options, "plugin log options");
+  const keyValues: unknown = options.keyValues;
+  expectRecord(keyValues, "plugin log keyValues");
+  return [firstCall[0], keyValues];
+}
+
+function getTauriInternals(): unknown {
+  return Reflect.get(globalThis, "__TAURI_INTERNALS__");
+}
+
+function setTauriInternals(value: unknown): void {
+  Reflect.set(globalThis, "__TAURI_INTERNALS__", value);
 }
 
 describe("createLogger()", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
-    vi.doUnmock("./logTransport");
   });
 
-  it("writes normalized error records through writeLog", async () => {
-    const writeLogMock = vi.fn();
-    vi.doMock("./logTransport", () => ({
-      writeLog: writeLogMock,
-    }));
+  it("writes scoped info records via @tauri-apps/plugin-log without initialization", async () => {
+    const { createLogger } = await import("./logger");
 
-    const { createLogger, initializeFrontendLogging } =
-      await import("./logger");
+    createLogger("timer_sync").info("completed", {
+      retry_attempt: 1,
+    });
 
-    await initializeFrontendLogging();
+    expect(infoLog).toHaveBeenCalledTimes(1);
+    expect(infoLog).toHaveBeenCalledWith("timer_sync.completed", {
+      keyValues: {
+        retry_attempt: "1",
+      },
+    });
+  });
+
+  it("writes error records via @tauri-apps/plugin-log with sanitized keyValues", async () => {
+    const { createLogger } = await import("./logger");
+
     createLogger("timer_sync").error("setup_failed", new Error("boom"), {
       retry_attempt: 1,
     });
 
-    expect(writeLogMock).toHaveBeenCalledTimes(1);
+    expect(errorLog).toHaveBeenCalledTimes(1);
 
-    const [level, message, keyValues] = getFirstWriteLogCall(writeLogMock);
-    expect(level).toBe("error");
+    const [message, keyValues] = getFirstPluginWriteCall(errorLog);
     expect(message).toBe("timer_sync.setup_failed");
     expect(keyValues.retry_attempt).toBe("1");
     expect(keyValues["exception.type"]).toBe("Error");
@@ -57,36 +87,22 @@ describe("createLogger()", () => {
   });
 
   it("keeps caller error detail fields separate from canonical exception fields", async () => {
-    const writeLogMock = vi.fn();
-    vi.doMock("./logTransport", () => ({
-      writeLog: writeLogMock,
-    }));
+    const { createLogger } = await import("./logger");
 
-    const { createLogger, initializeFrontendLogging } =
-      await import("./logger");
-
-    await initializeFrontendLogging();
     createLogger("timer_sync").error("setup_failed", new Error("boom"), {
       error_message: "caller detail",
     });
 
-    expect(writeLogMock).toHaveBeenCalledTimes(1);
+    expect(errorLog).toHaveBeenCalledTimes(1);
 
-    const [, , keyValues] = getFirstWriteLogCall(writeLogMock);
+    const [, keyValues] = getFirstPluginWriteCall(errorLog);
     expect(keyValues.error_message).toBe("caller detail");
     expect(keyValues["exception.message"]).toBe("boom");
   });
 
-  it("redacts sensitive fields before writing them", async () => {
-    const writeLogMock = vi.fn();
-    vi.doMock("./logTransport", () => ({
-      writeLog: writeLogMock,
-    }));
+  it("redacts sensitive field values before calling plugin-log", async () => {
+    const { createLogger } = await import("./logger");
 
-    const { createLogger, initializeFrontendLogging } =
-      await import("./logger");
-
-    await initializeFrontendLogging();
     createLogger("settings_sync").info("config_applied", {
       authorization_header: "Bearer secret",
       cookie_value: "session=abc",
@@ -95,9 +111,9 @@ describe("createLogger()", () => {
       token: "abc",
     });
 
-    expect(writeLogMock).toHaveBeenCalledTimes(1);
+    expect(infoLog).toHaveBeenCalledTimes(1);
 
-    const [, , keyValues] = getFirstWriteLogCall(writeLogMock);
+    const [, keyValues] = getFirstPluginWriteCall(infoLog);
     expect(keyValues.authorization_header).toBe("[REDACTED]");
     expect(keyValues.cookie_value).toBe("[REDACTED]");
     expect(keyValues.password).toBe("[REDACTED]");
@@ -118,80 +134,52 @@ describe("createLogger()", () => {
       errorValue: bigint | symbol | null;
       expected: string;
     }) => {
-      const writeLogMock = vi.fn();
-      vi.doMock("./logTransport", () => ({
-        writeLog: writeLogMock,
-      }));
+      const { createLogger } = await import("./logger");
 
-      const { createLogger, initializeFrontendLogging } =
-        await import("./logger");
-
-      await initializeFrontendLogging();
       createLogger("timer_sync").error("setup_failed", errorValue);
 
-      const [, , keyValues] = getFirstWriteLogCall(writeLogMock);
+      const [, keyValues] = getFirstPluginWriteCall(errorLog);
       expect(keyValues["exception.message"]).toBe(expected);
     },
   );
 
   it("stringifies function errors with the function name", async () => {
-    const writeLogMock = vi.fn();
-    vi.doMock("./logTransport", () => ({
-      writeLog: writeLogMock,
-    }));
-
-    const { createLogger, initializeFrontendLogging } =
-      await import("./logger");
+    const { createLogger } = await import("./logger");
 
     function namedFailure(): string {
       return "ignored";
     }
 
-    await initializeFrontendLogging();
     createLogger("timer_sync").error("setup_failed", namedFailure);
 
-    const [, , keyValues] = getFirstWriteLogCall(writeLogMock);
+    const [, keyValues] = getFirstPluginWriteCall(errorLog);
     expect(keyValues["exception.message"]).toBe("[function namedFailure]");
   });
 
   it("extracts error-like fields from plain objects", async () => {
-    const writeLogMock = vi.fn();
-    vi.doMock("./logTransport", () => ({
-      writeLog: writeLogMock,
-    }));
+    const { createLogger } = await import("./logger");
 
-    const { createLogger, initializeFrontendLogging } =
-      await import("./logger");
-
-    await initializeFrontendLogging();
     createLogger("timer_sync").error("setup_failed", {
       name: 404,
       message: 123n,
       stack: Symbol("trace"),
     });
 
-    const [, , keyValues] = getFirstWriteLogCall(writeLogMock);
+    const [, keyValues] = getFirstPluginWriteCall(errorLog);
     expect(keyValues["exception.type"]).toBe("404");
     expect(keyValues["exception.message"]).toBe("123");
     expect(keyValues["exception.stacktrace"]).toBe("Symbol(trace)");
   });
 
   it("falls back to stringifying plain objects without error-like fields", async () => {
-    const writeLogMock = vi.fn();
-    vi.doMock("./logTransport", () => ({
-      writeLog: writeLogMock,
-    }));
+    const { createLogger } = await import("./logger");
 
-    const { createLogger, initializeFrontendLogging } =
-      await import("./logger");
-
-    await initializeFrontendLogging();
     createLogger("timer_sync").error("setup_failed", {
       reason: "boom",
       retryable: true,
     });
 
-    const [, , keyValues] = getFirstWriteLogCall(writeLogMock);
+    const [, keyValues] = getFirstPluginWriteCall(errorLog);
     expect(keyValues["exception.message"]).toBe(
       JSON.stringify({
         reason: "boom",
@@ -200,56 +188,62 @@ describe("createLogger()", () => {
     );
   });
 
-  it("swallows writeLog failures", async () => {
-    const writeLogMock = vi.fn(() => {
-      throw new Error("transport down");
+  it("escapes CRLF in messages and keyValues before calling plugin-log", async () => {
+    const { createLogger } = await import("./logger");
+
+    createLogger("notifications").warn("preview_failed\nforged_entry", {
+      failure_message: "line1\r\nline2",
     });
-    vi.doMock("./logTransport", () => ({
-      writeLog: writeLogMock,
-    }));
 
-    const { createLogger, initializeFrontendLogging } =
-      await import("./logger");
+    expect(warnLog).toHaveBeenCalledWith(
+      "notifications.preview_failed\\nforged_entry",
+      {
+        keyValues: {
+          failure_message: "line1\\r\\nline2",
+        },
+      },
+    );
+  });
 
-    await initializeFrontendLogging();
+  it("swallows plugin write failures", async () => {
+    errorLog.mockImplementationOnce(() => {
+      throw new Error("plugin down");
+    });
+    const { createLogger } = await import("./logger");
 
     expect(() => {
       createLogger("timer_sync").error("setup_failed", new Error("boom"));
     }).not.toThrow();
 
-    expect(writeLogMock).toHaveBeenCalledTimes(1);
+    expect(errorLog).toHaveBeenCalledTimes(1);
   });
 
-  it("does not write before initialization", async () => {
-    const writeLogMock = vi.fn();
-    vi.doMock("./logTransport", () => ({
-      writeLog: writeLogMock,
-    }));
+  it("does not write logs outside the tauri environment", async () => {
+    const originalTauriInternals = getTauriInternals();
+    Reflect.deleteProperty(globalThis, "__TAURI_INTERNALS__");
 
+    try {
+      const { createLogger } = await import("./logger");
+
+      createLogger("bootstrap").info("completed");
+
+      expect(traceLog).not.toHaveBeenCalled();
+      expect(debugLog).not.toHaveBeenCalled();
+      expect(infoLog).not.toHaveBeenCalled();
+      expect(warnLog).not.toHaveBeenCalled();
+      expect(errorLog).not.toHaveBeenCalled();
+    } finally {
+      setTauriInternals(originalTauriInternals);
+    }
+  });
+
+  it("normalizes blank scope and event identifiers", async () => {
     const { createLogger } = await import("./logger");
 
-    createLogger("bootstrap").info("completed");
+    createLogger("   ").info("   ");
 
-    expect(writeLogMock).not.toHaveBeenCalled();
-  });
-
-  it("writes through the transport after initialization", async () => {
-    const writeLogMock = vi.fn();
-    vi.doMock("./logTransport", () => ({
-      writeLog: writeLogMock,
-    }));
-
-    const { createLogger, initializeFrontendLogging } =
-      await import("./logger");
-
-    await expect(initializeFrontendLogging()).resolves.toBeUndefined();
-    expect(() => {
-      createLogger("bootstrap").info("completed");
-    }).not.toThrow();
-    expect(writeLogMock).toHaveBeenCalledWith(
-      "info",
-      "bootstrap.completed",
-      {},
-    );
+    expect(infoLog).toHaveBeenCalledWith("unknown_scope.unknown_event", {
+      keyValues: {},
+    });
   });
 });
