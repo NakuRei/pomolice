@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { resolveResource } from "@tauri-apps/api/path";
+import { FRONTEND_LOG_EVENT_IDS } from "@/logging/logEvents";
 
 const mockNotificationsLogger = {
   trace: vi.fn(),
@@ -157,7 +158,7 @@ describe("playNotificationSoundPreview()", () => {
     expect(result).toEqual({ status: "unavailable" });
     expect(audioInstances).toHaveLength(0);
     expect(mockNotificationsLogger.warn).toHaveBeenCalledWith(
-      "sound_path_resolution_failed",
+      FRONTEND_LOG_EVENT_IDS.notificationSoundPathResolutionFailed,
       expect.objectContaining({
         notification_sound_type: "long_break",
       }),
@@ -203,7 +204,7 @@ describe("playNotificationSoundPreview()", () => {
 
     expect(result).toEqual({ status: "error" });
     expect(mockNotificationsLogger.warn).toHaveBeenCalledWith(
-      "sound_preview_playback_failed",
+      FRONTEND_LOG_EVENT_IDS.notificationSoundPreviewPlaybackFailed,
       expect.objectContaining({
         notification_sound_type: "work",
       }),

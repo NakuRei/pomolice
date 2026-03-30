@@ -8,6 +8,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { useTimerStore, TimerStatus, SessionType } from "@/store/timerStore";
+import { FRONTEND_LOG_EVENT_IDS } from "@/logging/logEvents";
 import {
   notifyWorkComplete,
   notifyBreakAutoStarted,
@@ -199,11 +200,12 @@ describe("useTimerSync", () => {
 
     await waitFor(() => {
       expect(mockTimerSyncLogger.error).toHaveBeenCalledWith(
-        "setup_failed",
+        FRONTEND_LOG_EVENT_IDS.timerSyncSetupFailed,
         expect.any(Error),
         expect.objectContaining({
           retry_attempt: 0,
           max_connection_retries: 3,
+          failure_message: "Error: listen failed",
         }),
       );
     });

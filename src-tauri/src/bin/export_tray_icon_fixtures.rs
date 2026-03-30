@@ -2,7 +2,8 @@ use std::fs::{self, File};
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 
-use tracing::{info, Level};
+use log::{Level, LevelFilter, Metadata, Record};
+use pomolice_lib::{log_info_event, BackendLogEvent};
 
 #[path = "../tray_icon_renderer.rs"]
 mod tray_icon_renderer;
@@ -100,19 +101,39 @@ fn main() -> Result<(), String> {
         let size = tray_icon_renderer::icon_size();
         let output_path = output_directory.join(format!("{}.png", instruction.output_name));
         write_png_rgba(&output_path, size, size, &rgba)?;
-        info!(path = %output_path.display(), "Exported tray icon fixture");
+        log_info_event(
+            BackendLogEvent::ToolingTrayIconFixtureExported,
+            &[("path", output_path.display().to_string())],
+        );
     }
 
-    info!(path = %output_directory.display(), "Tray icon fixture export complete");
+    log_info_event(
+        BackendLogEvent::ToolingTrayIconFixtureExportCompleted,
+        &[("output_directory", output_directory.display().to_string())],
+    );
     Ok(())
 }
 
 fn initialize_logging() {
-    let _ = tracing_subscriber::fmt()
-        .with_max_level(Level::INFO)
-        .with_target(false)
-        .without_time()
-        .try_init();
+    static LOGGER: FixtureExportLogger = FixtureExportLogger;
+
+    let _ = log::set_logger(&LOGGER).map(|()| log::set_max_level(LevelFilter::Info));
+}
+
+struct FixtureExportLogger;
+
+impl log::Log for FixtureExportLogger {
+    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+        metadata.level() <= Level::Info
+    }
+
+    fn log(&self, record: &Record<'_>) {
+        if self.enabled(record.metadata()) {
+            println!("{}", record.args());
+        }
+    }
+
+    fn flush(&self) {}
 }
 
 fn render_rgba(render_action: IconRenderAction) -> Vec<u8> {

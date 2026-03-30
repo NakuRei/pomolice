@@ -2,7 +2,6 @@
 // Central hub for all state, managed via Tauri's State mechanism
 
 use chrono::{DateTime, Duration as ChronoDuration, Local};
-use log::info;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex as StdMutex};
 use tauri::async_runtime::JoinHandle;
@@ -10,6 +9,7 @@ use tauri::AppHandle;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
+use crate::logging_event::{log_info_event, BackendLogEvent};
 use crate::managers::clock::{Clock, SystemClock};
 use crate::managers::input_monitor::InputMonitorManager;
 use crate::managers::persistence::PersistenceManager;
@@ -67,7 +67,7 @@ impl AppState {
         app_handle: &AppHandle,
         clock: Arc<dyn Clock + Send + Sync>,
     ) -> Self {
-        info!("Creating new AppState");
+        log_info_event(BackendLogEvent::AppStateCreated, &[]);
         let persistence = PersistenceManager::new(Arc::clone(&clock));
 
         // Load persisted state if available
@@ -78,9 +78,24 @@ impl AppState {
             };
 
         if initial_timer_state.is_some() {
-            info!("Restored timer state from persistence");
+            let restored_status = initial_timer_state
+                .as_ref()
+                .map(|timer_state| format!("{:?}", timer_state.status))
+                .unwrap_or_else(|| "unknown".to_string());
+            log_info_event(
+                BackendLogEvent::AppStateRestoredFromPersistence,
+                &[
+                    ("state_status", restored_status),
+                    (
+                        "saved_at",
+                        restored_saved_at_utc
+                            .map(|saved_at| saved_at.to_rfc3339())
+                            .unwrap_or_else(|| "unknown".to_string()),
+                    ),
+                ],
+            );
         } else {
-            info!("No persisted state found, using defaults");
+            log_info_event(BackendLogEvent::AppStateUsingDefaults, &[]);
         }
 
         let restored_running_saved_at_local =
@@ -148,10 +163,13 @@ impl AppState {
     /// Returns a tick payload to emit if the timer was running when the app closed,
     /// or `None` if the timer was idle. The caller is responsible for emitting the event.
     pub(crate) async fn initialize(&self) -> Option<TimerTickPayload> {
-        info!("Initializing application state");
+        log_info_event(BackendLogEvent::AppStateInitializationStarted, &[]);
         let mut timer = self.timer_manager.lock().await;
         let result = timer.initialize_from_persisted_state();
-        info!("Application state initialized successfully");
+        log_info_event(
+            BackendLogEvent::AppStateInitializationCompleted,
+            &[("is_running", result.is_some().to_string())],
+        );
         result
     }
 }

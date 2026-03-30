@@ -28,6 +28,7 @@ vi.mock("@/logging/logger", () => ({
 
 import { SessionType, TimerStatus, useTimerStore } from "./timerStore";
 import { useSettingsStore } from "./settingsStore";
+import { FRONTEND_LOG_EVENT_IDS } from "@/logging/logEvents";
 
 function expectRecord(
   value: unknown,
@@ -230,7 +231,7 @@ describe("timerStore syncSettings command routing", () => {
       useTimerStore.getState().syncSettings(),
     ).resolves.toBeUndefined();
     expect(mockSettingsSyncLogger.warn).toHaveBeenCalledWith(
-      "sync_failed",
+      FRONTEND_LOG_EVENT_IDS.settingsSyncFailed,
       expect.objectContaining({
         failure_message: "Error: sync failed",
         timer_status: TimerStatus.IDLE,

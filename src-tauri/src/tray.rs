@@ -7,12 +7,12 @@ use std::sync::{
     OnceLock,
 };
 
-use log::{info, warn};
 use tauri::image::Image;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
 
+use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
 use crate::tray_icon_renderer;
 use crate::types::{TimerStatus, TimerTickPayload};
 
@@ -89,10 +89,10 @@ pub(crate) fn setup_tray(
                 // Phantom WM_COMMAND messages from overlay window destruction are
                 // ignored because MENU_OPENED_BY_USER will be false.
                 if MENU_OPENED_BY_USER.swap(false, Ordering::SeqCst) {
-                    info!("Tray menu: Exit selected");
+                    log_info_event(BackendLogEvent::AppTrayMenuExitSelected, &[]);
                     app.exit(0);
                 } else {
-                    warn!("Ignored phantom tray menu event (not triggered by user)");
+                    log_warn_event(BackendLogEvent::AppTrayPhantomMenuEventIgnored, &[]);
                 }
             }
         })
@@ -118,7 +118,7 @@ pub(crate) fn setup_tray(
         })
         .build(app)?;
 
-    info!("System tray icon initialized");
+    log_info_event(BackendLogEvent::AppTrayInitialized, &[]);
     Ok(())
 }
 
@@ -129,10 +129,16 @@ pub(crate) fn update_tray_icon(app: &AppHandle, payload: &TimerTickPayload) {
 
     if let Some(tray) = app.tray_by_id("pomolice-tray") {
         if let Err(e) = tray.set_icon(Some(icon)) {
-            warn!("Failed to update tray icon: {e}");
+            log_warn_event(
+                BackendLogEvent::AppTrayIconUpdateFailed,
+                &[("error_message", e.to_string())],
+            );
         }
         if let Err(e) = tray.set_tooltip(Some(&visual_spec.tooltip)) {
-            warn!("Failed to update tray tooltip: {e}");
+            log_warn_event(
+                BackendLogEvent::AppTrayTooltipUpdateFailed,
+                &[("error_message", e.to_string())],
+            );
         }
     }
 }
@@ -200,7 +206,7 @@ fn render_icon_rgba(
             if let Some(icon) = idle_app_icon() {
                 (icon.rgba.clone(), icon.width, icon.height)
             } else {
-                warn!("Idle app icon not initialized; falling back to renderer");
+                log_warn_event(BackendLogEvent::AppTrayIdleAppIconMissing, &[]);
                 let size = tray_icon_renderer::icon_size();
                 (tray_icon_renderer::render_idle_icon(), size, size)
             }

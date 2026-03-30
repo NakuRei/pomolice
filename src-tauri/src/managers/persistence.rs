@@ -4,13 +4,13 @@
 use atomic_write_file::AtomicWriteFile;
 use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
-use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::logging_event::{log_error_event, log_info_event, log_warn_event, BackendLogEvent};
 use crate::managers::clock::{Clock, SystemClock};
 use crate::types::{
     ScheduledStopState, SessionType, TimerSettings, TimerStartSource, TimerState, TimerStatus,
@@ -108,8 +108,15 @@ impl PersistedState {
 
         if schema_version != PERSISTED_STATE_SCHEMA_VERSION_V3 {
             let expected_schema_version = PERSISTED_STATE_SCHEMA_VERSION_V3;
-            warn!(
-                "Persisted schema version is unsupported. Resetting timer state to defaults: schema_version={schema_version}, expected_schema_version={expected_schema_version}"
+            log_warn_event(
+                BackendLogEvent::StoragePersistenceSchemaVersionUnsupported,
+                &[
+                    ("schema_version", schema_version.to_string()),
+                    (
+                        "expected_schema_version",
+                        expected_schema_version.to_string(),
+                    ),
+                ],
             );
             return TimerState::default();
         }
@@ -128,8 +135,14 @@ impl PersistedState {
                 || session_type != SessionType::Work
                 || remaining_seconds != settings.work_duration_secs
             {
-                warn!(
-                    "Persisted post-break pending state was inconsistent. Normalizing to idle work preview: status={status:?}, session_type={session_type:?}, remaining_seconds={remaining_seconds}"
+                log_warn_event(
+                    BackendLogEvent::StoragePersistenceRestoreNormalized,
+                    &[
+                        ("status", format!("{status:?}")),
+                        ("session_type", format!("{session_type:?}")),
+                        ("remaining_seconds", remaining_seconds.to_string()),
+                        ("completed_pomodoros", completed_pomodoros.to_string()),
+                    ],
                 );
             }
 
@@ -141,8 +154,14 @@ impl PersistedState {
         }
 
         if normalized_status == TimerStatus::OnBreak {
-            warn!(
-                "Persisted break session cannot be resumed safely. Resetting to idle work preview: session_type={session_type:?}, remaining_seconds={remaining_seconds}, completed_pomodoros={completed_pomodoros}"
+            log_warn_event(
+                BackendLogEvent::StoragePersistenceRestoreNormalized,
+                &[
+                    ("status", format!("{status:?}")),
+                    ("session_type", format!("{session_type:?}")),
+                    ("remaining_seconds", remaining_seconds.to_string()),
+                    ("completed_pomodoros", completed_pomodoros.to_string()),
+                ],
             );
 
             normalized_status = TimerStatus::Idle;
@@ -224,20 +243,30 @@ impl PersistenceManager {
 
     /// Save timer state to disk.
     pub(crate) fn save_state(&self, state: &TimerState) {
-        info!("Saving timer state to disk");
         let persisted_state = PersistedState::from_timer_state(state, self.clock.as_ref());
 
         if let Some(path) = Self::get_state_file_path() {
+            log_info_event(
+                BackendLogEvent::StoragePersistenceWriteStarted,
+                &[("path", path.display().to_string())],
+            );
             if let Err(write_error) = Self::save_persisted_state_to_path(&persisted_state, &path) {
-                error!(
-                    "Failed to save timer state to {}: {write_error}",
-                    path.display()
+                log_error_event(
+                    BackendLogEvent::StoragePersistenceWriteFailed,
+                    &[
+                        ("path", path.display().to_string()),
+                        ("error_message", write_error),
+                    ],
+                    None,
                 );
             } else {
-                info!("Successfully saved state to {}", path.display());
+                log_info_event(
+                    BackendLogEvent::StoragePersistenceWriteCompleted,
+                    &[("path", path.display().to_string())],
+                );
             }
         } else {
-            warn!("Could not determine state file path");
+            log_warn_event(BackendLogEvent::StoragePersistencePathUnavailable, &[]);
         }
     }
 
@@ -278,16 +307,26 @@ impl PersistenceManager {
 
     fn load_persisted_state_from_path(path: &Path) -> Option<PersistedState> {
         if !path.exists() {
-            info!("No persisted state file found at {}", path.display());
+            log_info_event(
+                BackendLogEvent::StoragePersistenceNoStateFile,
+                &[("path", path.display().to_string())],
+            );
             return None;
         }
 
-        info!("Loading timer state from {}", path.display());
+        log_info_event(
+            BackendLogEvent::StoragePersistenceReadStarted,
+            &[("path", path.display().to_string())],
+        );
 
         let raw_json = match fs::read_to_string(path) {
             Ok(content) => content,
             Err(read_error) => {
-                error!("Failed to read state file {}: {read_error}", path.display());
+                log_error_event(
+                    BackendLogEvent::StoragePersistenceReadFailed,
+                    &[("path", path.display().to_string())],
+                    Some(&read_error),
+                );
                 return None;
             }
         };
@@ -295,15 +334,18 @@ impl PersistenceManager {
         let persisted_state = match serde_json::from_str::<PersistedState>(&raw_json) {
             Ok(parsed) => parsed,
             Err(deserialize_error) => {
-                warn!(
-                    "Persisted state parse failed. Resetting to default state on startup. path={}, error={deserialize_error}",
-                    path.display()
+                log_warn_event(
+                    BackendLogEvent::StoragePersistenceParseFailed,
+                    &[
+                        ("path", path.display().to_string()),
+                        ("error_message", deserialize_error.to_string()),
+                    ],
                 );
                 return None;
             }
         };
 
-        info!("Successfully loaded persisted state");
+        log_info_event(BackendLogEvent::StoragePersistenceLoaded, &[]);
         Some(persisted_state)
     }
 

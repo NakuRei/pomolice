@@ -55,65 +55,74 @@ describe("createLogger()", () => {
     vi.resetModules();
   });
 
-  it("writes scoped info records via @tauri-apps/plugin-log without initialization", async () => {
+  it("writes registered info events via @tauri-apps/plugin-log", async () => {
     const { createLogger } = await import("./logger");
 
-    createLogger("timer_sync").info("completed", {
-      retry_attempt: 1,
-    });
+    createLogger("bootstrap").info("app.startup.completed");
 
     expect(infoLog).toHaveBeenCalledTimes(1);
-    expect(infoLog).toHaveBeenCalledWith("timer_sync.completed", {
+    expect(infoLog).toHaveBeenCalledWith("app.startup.completed", {
       keyValues: {
-        retry_attempt: "1",
+        logger_scope: "bootstrap",
       },
     });
   });
 
-  it("writes error records via @tauri-apps/plugin-log with sanitized keyValues", async () => {
+  it("writes error events with normalized exception fields", async () => {
     const { createLogger } = await import("./logger");
 
-    createLogger("timer_sync").error("setup_failed", new Error("boom"), {
-      retry_attempt: 1,
-    });
+    createLogger("timer_sync").error(
+      "timer.sync.setup_failed",
+      new Error("boom"),
+      {
+        max_connection_retries: 3,
+        retry_attempt: 1,
+      },
+    );
 
     expect(errorLog).toHaveBeenCalledTimes(1);
 
     const [message, keyValues] = getFirstPluginWriteCall(errorLog);
-    expect(message).toBe("timer_sync.setup_failed");
+    expect(message).toBe("timer.sync.setup_failed");
+    expect(keyValues.logger_scope).toBe("timer_sync");
+    expect(keyValues.max_connection_retries).toBe("3");
     expect(keyValues.retry_attempt).toBe("1");
     expect(keyValues["exception.type"]).toBe("Error");
     expect(keyValues["exception.message"]).toBe("boom");
   });
 
-  it("keeps caller error detail fields separate from canonical exception fields", async () => {
+  it("keeps caller detail fields separate from canonical exception fields", async () => {
     const { createLogger } = await import("./logger");
 
-    createLogger("timer_sync").error("setup_failed", new Error("boom"), {
-      error_message: "caller detail",
-    });
+    createLogger("timer_sync").error(
+      "timer.sync.setup_failed",
+      new Error("boom"),
+      {
+        failure_message: "caller detail",
+      } as never,
+    );
 
     expect(errorLog).toHaveBeenCalledTimes(1);
 
     const [, keyValues] = getFirstPluginWriteCall(errorLog);
-    expect(keyValues.error_message).toBe("caller detail");
+    expect(keyValues.failure_message).toBe("caller detail");
     expect(keyValues["exception.message"]).toBe("boom");
   });
 
-  it("redacts sensitive field values before calling plugin-log", async () => {
+  it("redacts secret-looking field values before calling plugin-log", async () => {
     const { createLogger } = await import("./logger");
 
-    createLogger("settings_sync").info("config_applied", {
+    createLogger("settings_sync").warn("settings.sync.failed", {
       authorization_header: "Bearer secret",
       cookie_value: "session=abc",
       password: "super-secret",
       retry_attempt: 2,
       token: "abc",
-    });
+    } as never);
 
-    expect(infoLog).toHaveBeenCalledTimes(1);
+    expect(warnLog).toHaveBeenCalledTimes(1);
 
-    const [, keyValues] = getFirstPluginWriteCall(infoLog);
+    const [, keyValues] = getFirstPluginWriteCall(warnLog);
     expect(keyValues.authorization_header).toBe("[REDACTED]");
     expect(keyValues.cookie_value).toBe("[REDACTED]");
     expect(keyValues.password).toBe("[REDACTED]");
@@ -126,7 +135,7 @@ describe("createLogger()", () => {
     { label: "symbol", errorValue: Symbol("boom"), expected: "Symbol(boom)" },
     { label: "null", errorValue: null, expected: "null" },
   ])(
-    "stringifies %s error values",
+    "stringifies $label error values",
     async ({
       errorValue,
       expected,
@@ -136,7 +145,7 @@ describe("createLogger()", () => {
     }) => {
       const { createLogger } = await import("./logger");
 
-      createLogger("timer_sync").error("setup_failed", errorValue);
+      createLogger("timer_sync").error("timer.sync.setup_failed", errorValue);
 
       const [, keyValues] = getFirstPluginWriteCall(errorLog);
       expect(keyValues["exception.message"]).toBe(expected);
@@ -150,7 +159,7 @@ describe("createLogger()", () => {
       return "ignored";
     }
 
-    createLogger("timer_sync").error("setup_failed", namedFailure);
+    createLogger("timer_sync").error("timer.sync.setup_failed", namedFailure);
 
     const [, keyValues] = getFirstPluginWriteCall(errorLog);
     expect(keyValues["exception.message"]).toBe("[function namedFailure]");
@@ -159,7 +168,7 @@ describe("createLogger()", () => {
   it("extracts error-like fields from plain objects", async () => {
     const { createLogger } = await import("./logger");
 
-    createLogger("timer_sync").error("setup_failed", {
+    createLogger("timer_sync").error("timer.sync.setup_failed", {
       name: 404,
       message: 123n,
       stack: Symbol("trace"),
@@ -174,7 +183,7 @@ describe("createLogger()", () => {
   it("falls back to stringifying plain objects without error-like fields", async () => {
     const { createLogger } = await import("./logger");
 
-    createLogger("timer_sync").error("setup_failed", {
+    createLogger("timer_sync").error("timer.sync.setup_failed", {
       reason: "boom",
       retryable: true,
     });
@@ -191,15 +200,19 @@ describe("createLogger()", () => {
   it("escapes CRLF in messages and keyValues before calling plugin-log", async () => {
     const { createLogger } = await import("./logger");
 
-    createLogger("notifications").warn("preview_failed\nforged_entry", {
-      failure_message: "line1\r\nline2",
-    });
+    createLogger("notifications").warn(
+      "notification.sound_preview_playback_failed",
+      {
+        failure_message: "line1\r\nline2",
+      },
+    );
 
     expect(warnLog).toHaveBeenCalledWith(
-      "notifications.preview_failed\\nforged_entry",
+      "notification.sound_preview_playback_failed",
       {
         keyValues: {
           failure_message: "line1\\r\\nline2",
+          logger_scope: "notifications",
         },
       },
     );
@@ -212,10 +225,21 @@ describe("createLogger()", () => {
     const { createLogger } = await import("./logger");
 
     expect(() => {
-      createLogger("timer_sync").error("setup_failed", new Error("boom"));
+      createLogger("timer_sync").error(
+        "timer.sync.setup_failed",
+        new Error("boom"),
+      );
     }).not.toThrow();
 
     expect(errorLog).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects unregistered event ids", async () => {
+    const { createLogger } = await import("./logger");
+
+    expect(() => {
+      createLogger("bootstrap").info("missing.event" as never);
+    }).toThrow(/Unknown frontend log event/u);
   });
 
   it("does not write logs outside the tauri environment", async () => {
@@ -225,7 +249,7 @@ describe("createLogger()", () => {
     try {
       const { createLogger } = await import("./logger");
 
-      createLogger("bootstrap").info("completed");
+      createLogger("bootstrap").info("app.startup.completed");
 
       expect(traceLog).not.toHaveBeenCalled();
       expect(debugLog).not.toHaveBeenCalled();
@@ -237,13 +261,15 @@ describe("createLogger()", () => {
     }
   });
 
-  it("normalizes blank scope and event identifiers", async () => {
+  it("normalizes blank scopes to unknown_scope", async () => {
     const { createLogger } = await import("./logger");
 
-    createLogger("   ").info("   ");
+    createLogger("   " as never).info("app.startup.completed");
 
-    expect(infoLog).toHaveBeenCalledWith("unknown_scope.unknown_event", {
-      keyValues: {},
+    expect(infoLog).toHaveBeenCalledWith("app.startup.completed", {
+      keyValues: {
+        logger_scope: "unknown_scope",
+      },
     });
   });
 });

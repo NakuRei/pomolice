@@ -1,12 +1,13 @@
 // Input Monitor Manager
 // Manages global input monitoring without global statics
 
-use log::{error, info};
 use rdev::{listen, Event, EventType, Key};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+
+use crate::logging_event::{log_error_event, log_info_event, BackendLogEvent};
 
 const INPUT_MONITOR_MAX_BACKOFF: Duration = Duration::from_secs(30);
 
@@ -79,12 +80,12 @@ impl InputMonitorManager {
     /// call re-enables callbacks without spawning a new thread. Otherwise it resets
     /// the shutdown signal, marks the thread as alive, and spawns a new supervisor.
     pub(crate) fn start(&mut self) {
-        info!("Starting global input monitoring");
+        log_info_event(BackendLogEvent::InputMonitoringStarted, &[]);
 
         // If the supervisor thread is already running, just re-enable callbacks.
         if self.listener_alive.load(Ordering::SeqCst) {
             self.enabled.store(true, Ordering::SeqCst);
-            info!("Input monitoring already running; callbacks re-enabled");
+            log_info_event(BackendLogEvent::InputMonitoringAlreadyRunning, &[]);
             return;
         }
 
@@ -111,19 +112,29 @@ impl InputMonitorManager {
                     Arc::clone(&on_input_detected),
                 );
 
-                info!("Starting input event listener");
+                log_info_event(BackendLogEvent::InputMonitoringListenerStarted, &[]);
                 match listen(callback) {
                     Ok(()) => {
                         // rdev returned cleanly. Treat as a stop signal.
-                        info!("Input event listener stopped cleanly");
+                        log_info_event(BackendLogEvent::InputMonitoringListenerStoppedCleanly, &[]);
                         break;
                     }
                     Err(e) => {
                         if shutdown_requested.load(Ordering::SeqCst) {
-                            info!("Input monitoring shut down on request after listener error");
+                            log_info_event(
+                                BackendLogEvent::InputMonitoringShutdownRequestedAfterError,
+                                &[],
+                            );
                             break;
                         }
-                        error!("Input monitoring listener failed: {e:?}; retrying in {backoff:?}");
+                        log_error_event(
+                            BackendLogEvent::InputMonitoringListenerFailed,
+                            &[
+                                ("backoff", format!("{backoff:?}")),
+                                ("error_message", format!("{e:?}")),
+                            ],
+                            None,
+                        );
                         thread::sleep(backoff);
                         backoff = (backoff * 2).min(INPUT_MONITOR_MAX_BACKOFF);
                     }
@@ -138,11 +149,11 @@ impl InputMonitorManager {
     /// Stop global input monitoring
     pub(crate) fn stop(&mut self) {
         if !self.enabled.swap(false, Ordering::SeqCst) {
-            info!("Input monitoring already stopped");
+            log_info_event(BackendLogEvent::InputMonitoringAlreadyStopped, &[]);
             return; // Already stopped, not an error
         }
 
-        info!("Stopping global input monitoring");
+        log_info_event(BackendLogEvent::InputMonitoringStopping, &[]);
 
         // Signal the supervisor loop to exit on its next iteration rather than retry.
         self.shutdown_requested.store(true, Ordering::SeqCst);

@@ -6,6 +6,7 @@ import { useSettingsStore, VALIDATION_RULES } from "./settingsStore";
 import { useErrorStore } from "./errorStore";
 import { classifyBackendError } from "../errors/classifyBackendError";
 import { createLogger } from "../logging/logger";
+import { FRONTEND_LOG_EVENT_IDS } from "../logging/logEvents";
 import type { WeekdayKey } from "../types/weeklyAutoRun";
 import type {
   PostBreakDecisionAction,
@@ -374,7 +375,7 @@ export const useTimerStore = create<TimerStore>()(
           }
           await invoke("sync_automation_policies", automationPoliciesPayload);
         } catch (error) {
-          logger.warn("sync_failed", {
+          logger.warn(FRONTEND_LOG_EVENT_IDS.settingsSyncFailed, {
             failure_message: String(error),
             timer_status: timerStatus,
           });

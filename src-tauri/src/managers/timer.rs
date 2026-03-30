@@ -1,12 +1,12 @@
 // Timer State Manager
 // Manages timer state and session lifecycle without global statics
 
-use log::{info, warn};
 use std::time::{Duration, Instant};
 use tauri::AppHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::{PomoliceError, Result};
+use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
 use crate::types::{
     FullStatePayload, PostBreakDecisionAction, PostBreakTransitionPolicy, ScheduledStopState,
     SessionCompletedPayload, SessionTransitionOutcome, SessionTransitionReason, SessionType,
@@ -73,13 +73,14 @@ impl TimerStateManager {
         settings: TimerSettings,
         timer_start_source: TimerStartSource,
     ) -> Result<(TimerTickPayload, u64)> {
-        info!(
-            "Starting work session with duration: {}s",
-            settings.work_duration_secs
-        );
-
         if self.state.status != TimerStatus::Idle {
-            warn!("Cannot start work from {:?} state", self.state.status);
+            log_warn_event(
+                BackendLogEvent::TimerStartRejected,
+                &[
+                    ("reason", "invalid_state_transition".to_string()),
+                    ("current_state", format!("{:?}", self.state.status)),
+                ],
+            );
             return Err(PomoliceError::InvalidStateTransition {
                 action: "start work".to_string(),
                 current_state: self.state.status,
@@ -88,7 +89,13 @@ impl TimerStateManager {
 
         if timer_start_source != TimerStartSource::ScheduledAutoStart {
             if let Some(remaining_ms) = self.rate_limit_remaining_ms() {
-                warn!("Start work action is rate limited ({remaining_ms}ms remaining)");
+                log_warn_event(
+                    BackendLogEvent::TimerStartRejected,
+                    &[
+                        ("reason", "rate_limited".to_string()),
+                        ("current_state", format!("{:?}", self.state.status)),
+                    ],
+                );
                 return Err(PomoliceError::RateLimited { remaining_ms });
             }
         }
@@ -113,6 +120,17 @@ impl TimerStateManager {
 
         self.state.last_transition = Some(Instant::now());
 
+        log_info_event(
+            BackendLogEvent::TimerWorkSessionStarted,
+            &[
+                (
+                    "duration_secs",
+                    self.state.settings.work_duration_secs.to_string(),
+                ),
+                ("timer_start_source", format!("{timer_start_source:?}")),
+            ],
+        );
+
         // Note: caller must call cancel_and_take_task() before the lock,
         // await the old handle outside the lock, then call spawn_timer_task()
         // inside a new lock. See commands/timer.rs for the call sequence.
@@ -126,9 +144,16 @@ impl TimerStateManager {
         action: PostBreakDecisionAction,
     ) -> Result<TimerTickPayload> {
         if self.state.status != TimerStatus::Idle || !self.state.post_break_decision_pending {
-            warn!(
-                "Cannot resolve post-break decision from {:?} state (pending: {})",
-                self.state.status, self.state.post_break_decision_pending
+            log_warn_event(
+                BackendLogEvent::TimerTransitionRejected,
+                &[
+                    ("action", "resolve_post_break_decision".to_string()),
+                    ("current_state", format!("{:?}", self.state.status)),
+                    (
+                        "pending",
+                        self.state.post_break_decision_pending.to_string(),
+                    ),
+                ],
             );
             return Err(PomoliceError::InvalidStateTransition {
                 action: "resolve post-break decision".to_string(),
@@ -204,6 +229,11 @@ impl TimerStateManager {
         if self.state.session_type == SessionType::Work {
             self.state.remaining_seconds = self.state.settings.work_duration_secs;
         }
+
+        log_info_event(
+            BackendLogEvent::SettingsSyncApplied,
+            &[("timer_status", format!("{:?}", self.state.status))],
+        );
 
         Ok(self.state.to_tick_payload())
     }
@@ -285,11 +315,6 @@ impl TimerStateManager {
         let break_type = get_break_type(
             self.state.current_cycle,
             self.state.settings.long_break_interval,
-        );
-
-        info!(
-            "Transitioning to {:?} (completed {} pomodoros)",
-            break_type, self.state.completed_pomodoros
         );
 
         self.state.session_type = break_type;
@@ -455,25 +480,61 @@ impl TimerStateManager {
         transition_stage: &'static str,
         transition_reason: SessionTransitionReason,
     ) {
-        info!(
-            "Timer transition snapshot: stage={}, reason={:?}, policy={:?}, post_break_decision_pending={}, scheduled_stop_state={:?}, timer_start_source={:?}",
-            transition_stage,
-            transition_reason,
-            self.state.settings.post_break_transition_policy,
-            self.state.post_break_decision_pending,
-            self.state.scheduled_stop_state,
-            self.state.timer_start_source
+        log_info_event(
+            BackendLogEvent::TimerTransitionCompleted,
+            &[
+                ("transition_stage", transition_stage.to_string()),
+                ("transition_reason", format!("{transition_reason:?}")),
+                (
+                    "policy",
+                    format!("{:?}", self.state.settings.post_break_transition_policy),
+                ),
+                (
+                    "post_break_decision_pending",
+                    self.state.post_break_decision_pending.to_string(),
+                ),
+                (
+                    "scheduled_stop_state",
+                    format!("{:?}", self.state.scheduled_stop_state),
+                ),
+                (
+                    "timer_start_source",
+                    format!("{:?}", self.state.timer_start_source),
+                ),
+            ],
         );
     }
 
     fn log_manual_decision_snapshot(&self, action: PostBreakDecisionAction) {
-        info!(
-            "Timer transition snapshot: stage=resolve_post_break_decision, reason=manual_post_break_decision, action={:?}, policy={:?}, post_break_decision_pending={}, scheduled_stop_state={:?}, timer_start_source={:?}",
-            action,
-            self.state.settings.post_break_transition_policy,
-            self.state.post_break_decision_pending,
-            self.state.scheduled_stop_state,
-            self.state.timer_start_source
+        log_info_event(
+            BackendLogEvent::TimerTransitionCompleted,
+            &[
+                (
+                    "transition_stage",
+                    "resolve_post_break_decision".to_string(),
+                ),
+                (
+                    "transition_reason",
+                    "manual_post_break_decision".to_string(),
+                ),
+                ("action", format!("{action:?}")),
+                (
+                    "policy",
+                    format!("{:?}", self.state.settings.post_break_transition_policy),
+                ),
+                (
+                    "post_break_decision_pending",
+                    self.state.post_break_decision_pending.to_string(),
+                ),
+                (
+                    "scheduled_stop_state",
+                    format!("{:?}", self.state.scheduled_stop_state),
+                ),
+                (
+                    "timer_start_source",
+                    format!("{:?}", self.state.timer_start_source),
+                ),
+            ],
         );
     }
 
@@ -510,6 +571,11 @@ impl TimerStateManager {
         self.state.auto_run_feature_enabled = auto_run_feature_enabled;
         self.state.weekly_auto_run_config = weekly_auto_run_config;
         self.state.settings.post_break_transition_policy = post_break_transition_policy;
+
+        log_info_event(
+            BackendLogEvent::SettingsSyncApplied,
+            &[("timer_status", format!("{:?}", self.state.status))],
+        );
 
         if !self.state.auto_run_feature_enabled {
             self.state.scheduled_stop_state = ScheduledStopState::None;

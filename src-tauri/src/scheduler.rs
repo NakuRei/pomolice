@@ -1,5 +1,4 @@
 use chrono::{DateTime, Duration as ChronoDuration, Local};
-use log::info;
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -7,6 +6,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 
+use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
 use crate::managers::weekly_schedule::{
     collect_crossed_end_boundaries, collect_crossed_start_boundaries,
 };
@@ -79,15 +79,26 @@ pub async fn lib_start_scheduler_task(app: AppHandle) {
             last_seen_config_revision: state_handle.config_revision.load(Ordering::Acquire),
         };
 
-        info!(
-            "Weekly scheduler started (previous_local: {}, blocked_until_idle: {})",
-            runtime_state.last_checked_local, runtime_state.start_boundaries_blocked_until_idle
+        log_info_event(
+            BackendLogEvent::SchedulerStarted,
+            &[
+                (
+                    "previous_local",
+                    runtime_state.last_checked_local.to_rfc3339(),
+                ),
+                (
+                    "blocked_until_idle",
+                    runtime_state
+                        .start_boundaries_blocked_until_idle
+                        .to_string(),
+                ),
+            ],
         );
 
         loop {
             tokio::select! {
                 () = scheduler_cancellation_token.cancelled() => {
-                    info!("Weekly scheduler received cancellation");
+                    log_info_event(BackendLogEvent::SchedulerReceivedCancellation, &[]);
                     break;
                 }
                 _ = scheduler_interval.tick() => {
@@ -96,7 +107,7 @@ pub async fn lib_start_scheduler_task(app: AppHandle) {
             }
         }
 
-        info!("Weekly scheduler stopped");
+        log_info_event(BackendLogEvent::SchedulerStopped, &[]);
     });
 
     if let Ok(mut scheduler_task_state) = state_handle.scheduler_task_state.lock() {
@@ -163,7 +174,10 @@ fn resume_start_boundary_evaluation_when_idle(
 ) {
     if runtime_state.start_boundaries_blocked_until_idle && timer_status == TimerStatus::Idle {
         runtime_state.start_boundaries_blocked_until_idle = false;
-        info!("Weekly scheduler resumed start-boundary evaluation after idle transition");
+        log_info_event(
+            BackendLogEvent::SchedulerResumedStartBoundaryEvaluation,
+            &[],
+        );
     }
 }
 
@@ -182,7 +196,10 @@ fn build_scheduler_tick_plan(
         runtime_state.last_checked_local = now_local;
         runtime_state.last_seen_config_revision = config_revision;
         skip_start_boundaries_this_tick = true;
-        info!("Weekly scheduler detected config revision change: {config_revision}");
+        log_info_event(
+            BackendLogEvent::SchedulerConfigRevisionChanged,
+            &[("config_revision", config_revision.to_string())],
+        );
         now_local - ChronoDuration::seconds(1)
     } else {
         runtime_state.last_checked_local
@@ -233,13 +250,16 @@ async fn process_crossed_end_boundaries(
             continue;
         }
 
-        info!("Weekly scheduler crossed end boundary: {}", end_boundary.0);
+        log_info_event(
+            BackendLogEvent::SchedulerCrossedEndBoundary,
+            &[("boundary_id", end_boundary.0.clone())],
+        );
         let did_mark_stop_pending =
             mark_scheduled_stop_pending_for_current_session(app.clone()).await;
         if did_mark_stop_pending {
-            info!(
-                "Weekly scheduler marked scheduled stop as pending at end boundary: {}",
-                end_boundary.0
+            log_info_event(
+                BackendLogEvent::SchedulerMarkedStopPending,
+                &[("boundary_id", end_boundary.0.clone())],
             );
         }
     }
@@ -263,9 +283,9 @@ async fn process_crossed_start_boundaries(
             continue;
         }
 
-        info!(
-            "Weekly scheduler crossed start boundary: {}",
-            start_boundary.0
+        log_info_event(
+            BackendLogEvent::SchedulerCrossedStartBoundary,
+            &[("boundary_id", start_boundary.0.clone())],
         );
         let did_start = start_work_from_scheduler_when_idle(
             app.clone(),
@@ -276,9 +296,9 @@ async fn process_crossed_start_boundaries(
         .await;
 
         if did_start {
-            info!(
-                "Weekly scheduler started a work session from start boundary: {}",
-                start_boundary.0
+            log_info_event(
+                BackendLogEvent::SchedulerStartedWorkFromBoundary,
+                &[("boundary_id", start_boundary.0.clone())],
             );
         }
     }
@@ -353,9 +373,9 @@ async fn start_work_from_scheduler_when_idle(
         let Ok((payload, duration_secs)) = timer_manager
             .start_work_with_source(timer_settings, TimerStartSource::ScheduledAutoStart)
         else {
-            info!(
-                "Weekly scheduler skipped auto-start due to start_work rejection at boundary {}",
-                start_boundary.0
+            log_warn_event(
+                BackendLogEvent::SchedulerSkippedAutoStartDueToRejection,
+                &[("boundary_id", start_boundary.0.clone())],
             );
             return false;
         };

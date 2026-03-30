@@ -1,6 +1,6 @@
-use log::{error, info};
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::logging_event::{log_error_event, log_info_event, BackendLogEvent};
 use crate::state;
 use crate::tray;
 use crate::types;
@@ -135,13 +135,34 @@ pub async fn lib_handle_session_complete(app: AppHandle) {
         )
     };
 
-    info!(
-        "Session completion pipeline finalized transition state: reason={:?}, policy={:?}, decision_pending={}, scheduled_stop_state={:?}, timer_start_source={:?}",
-        transition_outcome.transition_reason,
-        final_post_break_transition_policy,
-        final_post_break_decision_pending,
-        final_scheduled_stop_state,
-        final_timer_start_source
+    log_info_event(
+        BackendLogEvent::TimerTransitionCompleted,
+        &[
+            (
+                "transition_stage",
+                "session_completion_pipeline_finalized".to_string(),
+            ),
+            (
+                "transition_reason",
+                format!("{:?}", transition_outcome.transition_reason),
+            ),
+            (
+                "policy",
+                format!("{:?}", final_post_break_transition_policy),
+            ),
+            (
+                "post_break_decision_pending",
+                final_post_break_decision_pending.to_string(),
+            ),
+            (
+                "scheduled_stop_state",
+                format!("{:?}", final_scheduled_stop_state),
+            ),
+            (
+                "timer_start_source",
+                format!("{:?}", final_timer_start_source),
+            ),
+        ],
     );
 
     for emit_event in session_completion_emit_order(transition_outcome.transition_reason) {
@@ -166,13 +187,13 @@ pub async fn lib_handle_session_complete(app: AppHandle) {
 }
 
 async fn enter_break_mode(app: AppHandle) {
-    info!("Entering fullscreen break mode");
+    log_info_event(BackendLogEvent::SessionFullscreenBreakEnterStarted, &[]);
     let state_handle = app.state::<state::AppState>();
 
     {
         let mut input_monitor = state_handle.input_monitor.lock().await;
         input_monitor.start();
-        info!("Input monitoring started successfully");
+        log_info_event(BackendLogEvent::InputMonitoringStarted, &[]);
     }
 
     {
@@ -181,10 +202,14 @@ async fn enter_break_mode(app: AppHandle) {
             .enter_fullscreen_all_monitors(app.clone())
             .await
         {
-            error!("Failed to enter fullscreen: {e:?}");
+            log_error_event(
+                BackendLogEvent::SessionFullscreenBreakEnterFailed,
+                &[("error_message", e.to_string())],
+                None,
+            );
             return;
         }
-        info!("Entered fullscreen mode on all monitors");
+        log_info_event(BackendLogEvent::SessionFullscreenBreakEntered, &[]);
     }
 
     {
@@ -196,22 +221,26 @@ async fn enter_break_mode(app: AppHandle) {
 }
 
 async fn exit_break_mode(app: AppHandle) {
-    info!("Exiting fullscreen break mode");
+    log_info_event(BackendLogEvent::SessionFullscreenBreakExitStarted, &[]);
     let state_handle = app.state::<state::AppState>();
 
     {
         let mut input_monitor = state_handle.input_monitor.lock().await;
         input_monitor.stop();
-        info!("Input monitoring stopped successfully");
+        log_info_event(BackendLogEvent::InputMonitoringStopping, &[]);
     }
 
     {
         let mut window_manager = state_handle.window_manager.lock().await;
         if let Err(e) = window_manager.exit_fullscreen_all_monitors(&app) {
-            error!("Failed to exit fullscreen: {e:?}");
+            log_error_event(
+                BackendLogEvent::SessionFullscreenBreakExitFailed,
+                &[("error_message", e.to_string())],
+                None,
+            );
             return;
         }
-        info!("Exited fullscreen mode on all monitors");
+        log_info_event(BackendLogEvent::SessionFullscreenBreakExited, &[]);
     }
 
     {

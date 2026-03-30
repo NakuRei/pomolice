@@ -8,6 +8,7 @@ import { useEffect } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { createLogger } from "../logging/logger";
+import { FRONTEND_LOG_EVENT_IDS } from "../logging/logEvents";
 import {
   type TimerTickPayload,
   type SessionCompletedPayload,
@@ -134,9 +135,10 @@ export function useTimerSync(): void {
           useErrorStore.getState().clearError("connection");
         }
       } catch (error) {
-        logger.error("setup_failed", error, {
+        logger.error(FRONTEND_LOG_EVENT_IDS.timerSyncSetupFailed, error, {
           retry_attempt: retryAttempt,
           max_connection_retries: MAX_CONNECTION_RETRIES,
+          failure_message: String(error),
         });
 
         if (!mounted) {

@@ -1,12 +1,12 @@
 // Timer commands using dependency injection
 
-use log::{info, warn};
 use std::sync::atomic::Ordering;
 
 use chrono::{DateTime, Local};
 use tauri::{Emitter, Manager, State, WebviewWindow};
 
 use crate::error::{PomoliceError, Result};
+use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
 use crate::managers::weekly_schedule::{
     find_first_overlapping_weekday_pair, is_now_inside_schedule_window, ActiveWindow,
 };
@@ -27,9 +27,12 @@ pub(crate) async fn start_work(
     long_break_interval: u32,
     post_break_transition_policy: PostBreakTransitionPolicy,
 ) -> Result<()> {
-    info!(
-        "Command: start_work called from window '{}'",
-        window.label()
+    log_info_event(
+        BackendLogEvent::TimerCommandInvoked,
+        &[
+            ("command_name", "start_work".to_string()),
+            ("window_label", window.label().to_string()),
+        ],
     );
     authorize_main_window(&window, "start_work")?;
 
@@ -152,9 +155,12 @@ pub(crate) async fn emergency_stop(
     window: WebviewWindow,
     state: State<'_, AppState>,
 ) -> Result<()> {
-    warn!(
-        "Command: emergency_stop called from window '{}'",
-        window.label()
+    log_info_event(
+        BackendLogEvent::TimerCommandInvoked,
+        &[
+            ("command_name", "emergency_stop".to_string()),
+            ("window_label", window.label().to_string()),
+        ],
     );
     authorize_main_window(&window, "emergency_stop")?;
 
@@ -297,7 +303,13 @@ fn authorize_main_window_label(window_label: &str) -> Result<()> {
 fn authorize_main_window(window: &WebviewWindow, command_name: &'static str) -> Result<()> {
     let window_label = window.label();
     if let Err(error) = authorize_main_window_label(window_label) {
-        warn!("Unauthorized {command_name} attempt from window '{window_label}'");
+        log_warn_event(
+            BackendLogEvent::TimerCommandUnauthorized,
+            &[
+                ("command_name", command_name.to_string()),
+                ("window_label", window_label.to_string()),
+            ],
+        );
         return Err(error);
     }
 

@@ -6,6 +6,7 @@ import {
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
+import { FRONTEND_LOG_EVENT_IDS } from "@/logging/logEvents";
 
 const mockNotificationsLogger = {
   trace: vi.fn(),
@@ -174,8 +175,11 @@ describe("session complete notifications", () => {
     await notifyBreakComplete();
 
     expect(mockNotificationsLogger.error).toHaveBeenCalledWith(
-      "permission_request_failed",
+      FRONTEND_LOG_EVENT_IDS.notificationPermissionRequestFailed,
       expect.any(Error),
+      expect.objectContaining({
+        failure_message: "Error: permission lookup failed",
+      }),
     );
     expect(sendNotification).not.toHaveBeenCalled();
   });
@@ -212,11 +216,12 @@ describe("session complete notifications", () => {
     await notifyBreakComplete();
 
     expect(mockNotificationsLogger.error).toHaveBeenCalledWith(
-      "session_complete_notification_failed",
+      FRONTEND_LOG_EVENT_IDS.notificationSessionCompleteNotificationFailed,
       expect.any(Error),
       expect.objectContaining({
         notification_sound_type: "work",
         notification_title: "作業に戻りましょう！",
+        failure_message: "Error: display failed",
       }),
     );
   });

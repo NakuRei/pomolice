@@ -13,6 +13,18 @@ mod lock_ordering_test;
 mod scheduler_concurrency_test;
 
 #[cfg(test)]
+mod log_redaction_test;
+
+#[cfg(test)]
+mod logging_config_test;
+
+#[cfg(test)]
+mod logging_event_test;
+
+#[cfg(test)]
+mod log_rotation_test;
+
+#[cfg(test)]
 mod basic_tests {
     #[test]
     fn test_basic_assertion() {

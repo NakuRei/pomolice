@@ -6,43 +6,70 @@ import {
   warn as writeWarnLog,
   type LogOptions,
 } from "@tauri-apps/plugin-log";
+import {
+  getFrontendLogEventDefinition,
+  isFrontendEventId,
+  type FrontendEventId,
+  type FrontendFieldsByEvent,
+  type FrontendLogSeverity,
+  type FrontendScope,
+  type LogFieldValue,
+} from "./logEvents";
+import {
+  EXCEPTION_MESSAGE_FIELD,
+  EXCEPTION_STACKTRACE_FIELD,
+  EXCEPTION_TYPE_FIELD,
+  LOGGER_SCOPE_FIELD,
+  sanitizeFrontendLogFields,
+} from "./redaction";
 
-export type LogFieldValue = string | number | boolean | null;
-export type LogFields = Record<string, LogFieldValue>;
+export type {
+  FrontendEventId,
+  FrontendScope,
+  LogFieldValue,
+} from "./logEvents";
 
 export interface FrontendLogger {
-  trace(event: string, fields?: LogFields): void;
-  debug(event: string, fields?: LogFields): void;
-  info(event: string, fields?: LogFields): void;
-  warn(event: string, fields?: LogFields): void;
-  error(event: string, error?: unknown, fields?: LogFields): void;
+  trace<E extends FrontendEventId>(
+    eventId: E,
+    fields?: FrontendFieldsByEvent[E],
+  ): void;
+  debug<E extends FrontendEventId>(
+    eventId: E,
+    fields?: FrontendFieldsByEvent[E],
+  ): void;
+  info<E extends FrontendEventId>(
+    eventId: E,
+    fields?: FrontendFieldsByEvent[E],
+  ): void;
+  warn<E extends FrontendEventId>(
+    eventId: E,
+    fields?: FrontendFieldsByEvent[E],
+  ): void;
+  error<E extends FrontendEventId>(
+    eventId: E,
+    error?: unknown,
+    fields?: FrontendFieldsByEvent[E],
+  ): void;
 }
 
-const REDACTED_VALUE = "[REDACTED]";
-const redactedFieldPattern = /password|token|secret|authorization|cookie/iu;
-const noop = (): void => undefined;
-const EXCEPTION_TYPE_FIELD = "exception.type";
-const EXCEPTION_MESSAGE_FIELD = "exception.message";
-const EXCEPTION_STACKTRACE_FIELD = "exception.stacktrace";
-
-type LogLevel = "trace" | "debug" | "info" | "warn" | "error";
+type LogFields = Record<string, LogFieldValue>;
 type PluginLogWriter = (message: string, options?: LogOptions) => Promise<void>;
 
-const pluginLogWriterByLogLevel: Record<LogLevel, PluginLogWriter> = {
-  trace: writeTraceLog,
-  debug: writeDebugLog,
-  info: writeInfoLog,
-  warn: writeWarnLog,
-  error: writeErrorLog,
-};
+const pluginLogWriterByLogLevel: Record<FrontendLogSeverity, PluginLogWriter> =
+  {
+    trace: writeTraceLog,
+    debug: writeDebugLog,
+    info: writeInfoLog,
+    warn: writeWarnLog,
+    error: writeErrorLog,
+  };
 
-function normalizeIdentifier(value: string, fallback: string): string {
-  const trimmedValue = value.trim();
-  return trimmedValue === "" ? fallback : trimmedValue;
-}
+const noop = (): void => undefined;
 
-function stringifyLogFieldValue(value: LogFieldValue): string {
-  return value === null ? "null" : String(value);
+function normalizeScope(scope: string): string {
+  const trimmedScope = scope.trim();
+  return trimmedScope === "" ? "unknown_scope" : trimmedScope;
 }
 
 function stringifyUnknownError(error: object): string {
@@ -60,7 +87,7 @@ function stringifyPrimitiveError(
     return "null";
   }
 
-  return typeof error === "symbol" || typeof error === "bigint"
+  return typeof error === "bigint" || typeof error === "symbol"
     ? error.toString()
     : String(error);
 }
@@ -77,7 +104,7 @@ function isCallableError(error: unknown): error is () => unknown {
 
 function readErrorProperty(
   error: object,
-  propertyName: "name" | "message" | "stack",
+  propertyName: "message" | "name" | "stack",
 ): string | undefined {
   const propertyValue: unknown = Reflect.get(error, propertyName);
   if (propertyValue === undefined || propertyValue === null) {
@@ -89,9 +116,9 @@ function readErrorProperty(
   }
 
   if (
-    typeof propertyValue === "number" ||
-    typeof propertyValue === "boolean" ||
     typeof propertyValue === "bigint" ||
+    typeof propertyValue === "boolean" ||
+    typeof propertyValue === "number" ||
     typeof propertyValue === "symbol"
   ) {
     return propertyValue.toString();
@@ -104,9 +131,9 @@ function createExceptionFieldsFromError(error: Error): LogFields {
   return {
     [EXCEPTION_TYPE_FIELD]: error.name,
     [EXCEPTION_MESSAGE_FIELD]: error.message,
-    ...(error.stack !== undefined
-      ? { [EXCEPTION_STACKTRACE_FIELD]: error.stack }
-      : {}),
+    ...(error.stack === undefined
+      ? {}
+      : { [EXCEPTION_STACKTRACE_FIELD]: error.stack }),
   };
 }
 
@@ -124,26 +151,28 @@ function createExceptionFieldsFromObject(error: object): LogFields | null {
   }
 
   return {
-    ...(errorName !== undefined ? { [EXCEPTION_TYPE_FIELD]: errorName } : {}),
-    ...(errorMessage !== undefined
-      ? { [EXCEPTION_MESSAGE_FIELD]: errorMessage }
-      : {}),
-    ...(errorStack !== undefined
-      ? { [EXCEPTION_STACKTRACE_FIELD]: errorStack }
-      : {}),
+    ...(errorName === undefined ? {} : { [EXCEPTION_TYPE_FIELD]: errorName }),
+    ...(errorMessage === undefined
+      ? {}
+      : { [EXCEPTION_MESSAGE_FIELD]: errorMessage }),
+    ...(errorStack === undefined
+      ? {}
+      : { [EXCEPTION_STACKTRACE_FIELD]: errorStack }),
   };
 }
 
 function createExceptionFieldsFromNonObject(error: unknown): LogFields {
   if (
-    typeof error === "string" ||
-    typeof error === "number" ||
-    typeof error === "boolean" ||
     typeof error === "bigint" ||
+    typeof error === "boolean" ||
+    typeof error === "number" ||
+    typeof error === "string" ||
     typeof error === "symbol" ||
     error === null
   ) {
-    return { [EXCEPTION_MESSAGE_FIELD]: stringifyPrimitiveError(error) };
+    return {
+      [EXCEPTION_MESSAGE_FIELD]: stringifyPrimitiveError(error),
+    };
   }
 
   return {
@@ -173,19 +202,24 @@ function createExceptionFields(error: unknown): LogFields {
   return createExceptionFieldsFromNonObject(error);
 }
 
-function sanitizeFields(fields?: LogFields): Record<string, string> {
-  if (!fields) {
-    return {};
+function assertKnownFrontendEventId(
+  value: string,
+): asserts value is FrontendEventId {
+  if (!isFrontendEventId(value)) {
+    throw new Error(`Unknown frontend log event: ${value}`);
   }
+}
 
-  return Object.fromEntries(
-    Object.entries(fields).map(([key, value]) => [
-      key,
-      redactedFieldPattern.test(key)
-        ? REDACTED_VALUE
-        : stringifyLogFieldValue(value),
-    ]),
-  );
+function assertEventSeverity(
+  eventId: FrontendEventId,
+  level: FrontendLogSeverity,
+): void {
+  const definition = getFrontendLogEventDefinition(eventId);
+  if (definition.severity !== level) {
+    throw new Error(
+      `Frontend log event "${eventId}" must be logged at ${definition.severity}`,
+    );
+  }
 }
 
 function isTauriEnvironment(): boolean {
@@ -196,76 +230,57 @@ function escapeLogText(value: string): string {
   return value.replace(/\r/gu, "\\r").replace(/\n/gu, "\\n");
 }
 
-function writeRecord(
-  level: LogLevel,
-  scope: string,
-  event: string,
+function writeRecord<E extends FrontendEventId>(
+  level: FrontendLogSeverity,
+  scope: FrontendScope,
+  eventId: E,
   error?: unknown,
-  fields?: LogFields,
+  fields?: FrontendFieldsByEvent[E],
 ): void {
+  assertKnownFrontendEventId(eventId);
+  assertEventSeverity(eventId, level);
+
   if (!isTauriEnvironment()) {
     return;
   }
 
-  const normalizedEvent = normalizeIdentifier(event, "unknown_event");
   const mergedFields: LogFields = {
+    [LOGGER_SCOPE_FIELD]: normalizeScope(scope),
     ...(fields ?? {}),
     ...createExceptionFields(error),
   };
 
+  const keyValues = Object.fromEntries(
+    Object.entries(sanitizeFrontendLogFields(eventId, mergedFields)).map(
+      ([fieldName, fieldValue]) => [fieldName, escapeLogText(fieldValue)],
+    ),
+  );
+
   try {
-    void pluginLogWriterByLogLevel[level](
-      escapeLogText(`${scope}.${normalizedEvent}`),
-      {
-        keyValues: Object.fromEntries(
-          Object.entries(sanitizeFields(mergedFields)).map(([key, value]) => [
-            key,
-            escapeLogText(value),
-          ]),
-        ),
-      },
-    ).catch(noop);
+    void pluginLogWriterByLogLevel[level](escapeLogText(eventId), {
+      keyValues,
+    }).catch(noop);
   } catch {
     noop();
   }
 }
 
-function log(
-  level: LogLevel,
-  scope: string,
-  event: string,
-  fields?: LogFields,
-): void {
-  writeRecord(level, scope, event, undefined, fields);
-}
-
-function logError(
-  scope: string,
-  event: string,
-  error?: unknown,
-  fields?: LogFields,
-): void {
-  writeRecord("error", scope, event, error, fields);
-}
-
-export function createLogger(scope: string): FrontendLogger {
-  const normalizedScope = normalizeIdentifier(scope, "unknown_scope");
-
+export function createLogger(scope: FrontendScope): FrontendLogger {
   return {
-    trace: (event, fields): void => {
-      log("trace", normalizedScope, event, fields);
+    trace: (eventId, fields): void => {
+      writeRecord("trace", scope, eventId, undefined, fields);
     },
-    debug: (event, fields): void => {
-      log("debug", normalizedScope, event, fields);
+    debug: (eventId, fields): void => {
+      writeRecord("debug", scope, eventId, undefined, fields);
     },
-    info: (event, fields): void => {
-      log("info", normalizedScope, event, fields);
+    info: (eventId, fields): void => {
+      writeRecord("info", scope, eventId, undefined, fields);
     },
-    warn: (event, fields): void => {
-      log("warn", normalizedScope, event, fields);
+    warn: (eventId, fields): void => {
+      writeRecord("warn", scope, eventId, undefined, fields);
     },
-    error: (event, error, fields): void => {
-      logError(normalizedScope, event, error, fields);
+    error: (eventId, error, fields): void => {
+      writeRecord("error", scope, eventId, error, fields);
     },
   };
 }

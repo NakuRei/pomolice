@@ -1,4 +1,3 @@
-use log::{error, info};
 use tauri::{Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 
@@ -6,7 +5,9 @@ type RunResult = std::result::Result<(), Box<dyn std::error::Error>>;
 
 mod commands;
 mod error;
+mod log_redaction;
 mod logging;
+mod logging_event;
 mod managers;
 mod scheduler;
 mod session_pipeline;
@@ -15,6 +16,7 @@ mod tray;
 mod tray_icon_renderer;
 mod types;
 
+pub use crate::logging_event::{log_error_event, log_info_event, log_warn_event, BackendLogEvent};
 pub use scheduler::lib_start_scheduler_task;
 #[cfg(test)]
 pub(crate) use scheduler::{extract_boundary_epoch_seconds, trim_old_processed_boundaries};
@@ -37,12 +39,11 @@ pub fn run() -> RunResult {
         .plugin(logging::build_log_plugin())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
-            info!("Starting Pomolice application");
-            info!("Initializing application state");
             let app_state = state::AppState::new(app.handle());
 
             let tick_payload =
                 tauri::async_runtime::block_on(async { app_state.initialize().await });
+            let has_persisted_state = tick_payload.is_some();
 
             if let Some(payload) = tick_payload {
                 let _ = app.emit("timer_tick", &payload);
@@ -51,13 +52,33 @@ pub fn run() -> RunResult {
             app.manage(app_state);
 
             if let Err(e) = tray::setup_tray(app.handle()) {
-                error!("Failed to setup tray icon: {e:?}");
+                log_error_event(
+                    BackendLogEvent::AppTraySetupFailed,
+                    &[("error_message", e.to_string())],
+                    None,
+                );
             }
 
             let scheduler_app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 lib_start_scheduler_task(scheduler_app_handle).await;
             });
+
+            log_info_event(
+                BackendLogEvent::AppStartupCompleted,
+                &[
+                    ("startup_phase", "setup".to_string()),
+                    ("has_persisted_state", has_persisted_state.to_string()),
+                    (
+                        "restored_state_status",
+                        if has_persisted_state {
+                            "running".to_string()
+                        } else {
+                            "idle".to_string()
+                        },
+                    ),
+                ],
+            );
 
             Ok(())
         })
@@ -68,7 +89,10 @@ pub fn run() -> RunResult {
                     let _ = window.hide();
 
                     if tray::should_show_tray_notification() {
-                        info!("Window minimized to tray (first time notification)");
+                        log_info_event(
+                            BackendLogEvent::AppWindowHiddenToTray,
+                            &[("first_notification", "true".to_string())],
+                        );
                         let _ = window
                             .app_handle()
                             .notification()

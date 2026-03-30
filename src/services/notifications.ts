@@ -11,6 +11,7 @@ import {
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { resolveResource } from "@tauri-apps/api/path";
 import { createLogger } from "../logging/logger";
+import { FRONTEND_LOG_EVENT_IDS } from "../logging/logEvents";
 import { useSettingsStore } from "../store/settingsStore";
 import type { SessionTypeValue } from "../store/timerStore";
 
@@ -121,7 +122,7 @@ export async function resolveNotificationSoundResourcePath(
     });
     return resolvedPath;
   } catch (error) {
-    logger.warn("sound_path_resolution_failed", {
+    logger.warn(FRONTEND_LOG_EVENT_IDS.notificationSoundPathResolutionFailed, {
       notification_sound_type: notificationSoundType,
       failure_message: String(error),
     });
@@ -180,7 +181,7 @@ export async function playNotificationSoundPreview(
     currentNotificationPreviewAudio = previewAudio;
     return { status: "played" };
   } catch (error) {
-    logger.warn("sound_preview_playback_failed", {
+    logger.warn(FRONTEND_LOG_EVENT_IDS.notificationSoundPreviewPlaybackFailed, {
       notification_sound_type: options.soundType,
       failure_message: String(error),
     });
@@ -235,7 +236,13 @@ async function ensureNotificationPermission(): Promise<boolean> {
 
     return permissionGranted;
   } catch (error) {
-    logger.error("permission_request_failed", error);
+    logger.error(
+      FRONTEND_LOG_EVENT_IDS.notificationPermissionRequestFailed,
+      error,
+      {
+        failure_message: String(error),
+      },
+    );
     return false;
   }
 }
@@ -282,10 +289,15 @@ async function sendSessionCompleteNotification(
     );
     await playNotificationAudioAtGain(resolvedPath, notificationGain);
   } catch (error) {
-    logger.error("session_complete_notification_failed", error, {
-      notification_sound_type: payload.soundType,
-      notification_title: payload.title,
-    });
+    logger.error(
+      FRONTEND_LOG_EVENT_IDS.notificationSessionCompleteNotificationFailed,
+      error,
+      {
+        notification_sound_type: payload.soundType,
+        notification_title: payload.title,
+        failure_message: String(error),
+      },
+    );
   }
 }
 
