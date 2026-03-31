@@ -74,10 +74,6 @@ fn test_should_log_allows_app_targets_and_filters_noisy_dependencies() {
 
 #[test]
 fn test_build_log_plugin_for_directory_is_available_for_wry_runtime() {
-    let _factory = crate::logging::build_log_plugin_for_directory::<tauri::Wry>;
-}
-
-#[test]
-fn test_build_log_plugin_for_directory_function_is_callable_for_wry_runtime() {
-    let _factory = crate::logging::build_log_plugin_for_directory::<tauri::Wry>;
+    let factory = crate::logging::build_log_plugin_for_directory::<tauri::Wry>;
+    std::hint::black_box(factory);
 }

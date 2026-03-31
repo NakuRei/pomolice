@@ -59,6 +59,79 @@ pub(crate) struct PersistedState {
     pub scheduled_stop_state: ScheduledStopState,
 }
 
+struct RestoredSessionState {
+    status: TimerStatus,
+    session_type: SessionType,
+    remaining_seconds: u64,
+    current_cycle: u32,
+    completed_pomodoros: u32,
+    timer_start_source: Option<TimerStartSource>,
+    scheduled_stop_state: ScheduledStopState,
+}
+
+fn log_restore_normalized(state: &RestoredSessionState) {
+    log_warn_event(
+        BackendLogEvent::StoragePersistenceRestoreNormalized,
+        &[
+            ("status", format!("{:?}", state.status)),
+            ("session_type", format!("{:?}", state.session_type)),
+            ("remaining_seconds", state.remaining_seconds.to_string()),
+            ("completed_pomodoros", state.completed_pomodoros.to_string()),
+        ],
+    );
+}
+
+fn normalize_pending_post_break_decision(
+    state: &mut RestoredSessionState,
+    settings: &TimerSettings,
+    post_break_decision_pending: bool,
+) {
+    if !post_break_decision_pending {
+        return;
+    }
+
+    if state.status != TimerStatus::Idle
+        || state.session_type != SessionType::Work
+        || state.remaining_seconds != settings.work_duration_secs
+    {
+        log_restore_normalized(state);
+    }
+
+    state.status = TimerStatus::Idle;
+    state.session_type = SessionType::Work;
+    state.remaining_seconds = settings.work_duration_secs;
+    state.timer_start_source = None;
+    state.scheduled_stop_state = ScheduledStopState::None;
+}
+
+fn normalize_restored_break_session(state: &mut RestoredSessionState, settings: &TimerSettings) {
+    if state.status != TimerStatus::OnBreak {
+        return;
+    }
+
+    log_restore_normalized(state);
+    state.status = TimerStatus::Idle;
+    state.session_type = SessionType::Work;
+    state.remaining_seconds = settings.work_duration_secs;
+    state.completed_pomodoros = state.completed_pomodoros.saturating_sub(1);
+    state.timer_start_source = None;
+    state.scheduled_stop_state = ScheduledStopState::None;
+}
+
+fn adjusted_remaining_seconds(state: &RestoredSessionState, elapsed_seconds: u64) -> u64 {
+    debug_assert_ne!(
+        state.status,
+        TimerStatus::OnBreak,
+        "OnBreak should be normalized before elapsed subtraction"
+    );
+
+    if state.status == TimerStatus::Working {
+        state.remaining_seconds.saturating_sub(elapsed_seconds)
+    } else {
+        state.remaining_seconds
+    }
+}
+
 impl PersistedState {
     /// Build persisted schema v3 from current runtime state.
     pub(crate) fn from_timer_state(state: &TimerState, clock: &dyn Clock) -> Self {
@@ -121,79 +194,35 @@ impl PersistedState {
             return TimerState::default();
         }
 
-        let mut normalized_status = status;
-        let mut normalized_session_type = session_type;
-        let mut normalized_remaining_seconds = remaining_seconds;
-        let mut normalized_current_cycle = current_cycle;
-        let mut normalized_completed_pomodoros = completed_pomodoros;
-        let mut normalized_timer_start_source = timer_start_source;
-        let mut normalized_scheduled_stop_state = scheduled_stop_state;
-
-        // Manual decision pending is valid only in idle state with work preview.
-        if post_break_decision_pending {
-            if status != TimerStatus::Idle
-                || session_type != SessionType::Work
-                || remaining_seconds != settings.work_duration_secs
-            {
-                log_warn_event(
-                    BackendLogEvent::StoragePersistenceRestoreNormalized,
-                    &[
-                        ("status", format!("{status:?}")),
-                        ("session_type", format!("{session_type:?}")),
-                        ("remaining_seconds", remaining_seconds.to_string()),
-                        ("completed_pomodoros", completed_pomodoros.to_string()),
-                    ],
-                );
-            }
-
-            normalized_status = TimerStatus::Idle;
-            normalized_session_type = SessionType::Work;
-            normalized_remaining_seconds = settings.work_duration_secs;
-            normalized_timer_start_source = None;
-            normalized_scheduled_stop_state = ScheduledStopState::None;
-        }
-
-        if normalized_status == TimerStatus::OnBreak {
-            log_warn_event(
-                BackendLogEvent::StoragePersistenceRestoreNormalized,
-                &[
-                    ("status", format!("{status:?}")),
-                    ("session_type", format!("{session_type:?}")),
-                    ("remaining_seconds", remaining_seconds.to_string()),
-                    ("completed_pomodoros", completed_pomodoros.to_string()),
-                ],
-            );
-
-            normalized_status = TimerStatus::Idle;
-            normalized_session_type = SessionType::Work;
-            normalized_remaining_seconds = settings.work_duration_secs;
-            normalized_current_cycle = current_cycle;
-            normalized_completed_pomodoros = completed_pomodoros.saturating_sub(1);
-            normalized_timer_start_source = None;
-            normalized_scheduled_stop_state = ScheduledStopState::None;
-        }
-
-        let adjusted_remaining_seconds = if normalized_status == TimerStatus::Working
-            || normalized_status == TimerStatus::OnBreak
-        {
-            normalized_remaining_seconds.saturating_sub(elapsed_seconds)
-        } else {
-            normalized_remaining_seconds
+        let mut restored_state = RestoredSessionState {
+            status,
+            session_type,
+            remaining_seconds,
+            current_cycle,
+            completed_pomodoros,
+            timer_start_source,
+            scheduled_stop_state,
         };
+        normalize_pending_post_break_decision(
+            &mut restored_state,
+            &settings,
+            post_break_decision_pending,
+        );
+        normalize_restored_break_session(&mut restored_state, &settings);
 
         let (normalized_timer_start_source, normalized_scheduled_stop_state) =
             normalize_recovered_session_stop_behavior(
-                normalized_status,
-                normalized_timer_start_source,
-                normalized_scheduled_stop_state,
+                restored_state.status,
+                restored_state.timer_start_source,
+                restored_state.scheduled_stop_state,
             );
 
         TimerState {
-            status: normalized_status,
-            remaining_seconds: adjusted_remaining_seconds,
-            session_type: normalized_session_type,
-            current_cycle: normalized_current_cycle,
-            completed_pomodoros: normalized_completed_pomodoros,
+            status: restored_state.status,
+            remaining_seconds: adjusted_remaining_seconds(&restored_state, elapsed_seconds),
+            session_type: restored_state.session_type,
+            current_cycle: restored_state.current_cycle,
+            completed_pomodoros: restored_state.completed_pomodoros,
             break_interaction_count: 0,
             last_penalty_time: None,
             settings,

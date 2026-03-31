@@ -11,6 +11,15 @@ const SENSITIVE_VALUE_LIMIT: usize = 160;
 const EXCEPTION_MESSAGE_LIMIT: usize = 256;
 #[cfg(test)]
 const STACKTRACE_LIMIT: usize = 1024;
+const HIGH_RISK_ASSIGNMENT_KEYS: [&str; 6] = [
+    "password",
+    "token",
+    "secret",
+    "authorization",
+    "cookie",
+    "api_key",
+];
+const HIGH_RISK_BEARER_PREFIX: &str = "bearer";
 
 pub(crate) fn redact_field_value(classification: RedactionClass, value: &str) -> String {
     match classification {
@@ -77,28 +86,10 @@ fn mask_high_risk_segment(segment: &str) -> String {
     });
     let trailing = &segment[stripped.len()..];
 
-    if let Some(redacted) = redact_assignment_token(stripped, "password") {
-        return format!("{redacted}{trailing}");
-    }
-
-    if let Some(redacted) = redact_assignment_token(stripped, "token") {
-        return format!("{redacted}{trailing}");
-    }
-
-    if let Some(redacted) = redact_assignment_token(stripped, "secret") {
-        return format!("{redacted}{trailing}");
-    }
-
-    if let Some(redacted) = redact_assignment_token(stripped, "cookie") {
-        return format!("{redacted}{trailing}");
-    }
-
-    if let Some(redacted) = redact_assignment_token(stripped, "authorization") {
-        return format!("{redacted}{trailing}");
-    }
-
-    if let Some(redacted) = redact_assignment_token(stripped, "api_key") {
-        return format!("{redacted}{trailing}");
+    for key in HIGH_RISK_ASSIGNMENT_KEYS {
+        if let Some(redacted) = redact_assignment_token(stripped, key) {
+            return format!("{redacted}{trailing}");
+        }
     }
 
     if let Some(redacted) = redact_bearer_token(stripped) {
@@ -118,7 +109,7 @@ fn redact_assignment_token(segment: &str, key: &str) -> Option<String> {
 }
 
 fn redact_bearer_token(segment: &str) -> Option<String> {
-    let prefix = "bearer";
+    let prefix = HIGH_RISK_BEARER_PREFIX;
     if segment.len() < prefix.len() {
         return None;
     }

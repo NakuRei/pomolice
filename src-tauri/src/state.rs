@@ -78,19 +78,20 @@ impl AppState {
             };
 
         if initial_timer_state.is_some() {
-            let restored_status = initial_timer_state
-                .as_ref()
-                .map(|timer_state| format!("{:?}", timer_state.status))
-                .unwrap_or_else(|| "unknown".to_string());
+            let restored_status = initial_timer_state.as_ref().map_or_else(
+                || "unknown".to_string(),
+                |timer_state| format!("{:?}", timer_state.status),
+            );
             log_info_event(
                 BackendLogEvent::AppStateRestoredFromPersistence,
                 &[
                     ("state_status", restored_status),
                     (
                         "saved_at",
-                        restored_saved_at_utc
-                            .map(|saved_at| saved_at.to_rfc3339())
-                            .unwrap_or_else(|| "unknown".to_string()),
+                        restored_saved_at_utc.map_or_else(
+                            || "unknown".to_string(),
+                            |saved_at| saved_at.to_rfc3339(),
+                        ),
                     ),
                 ],
             );

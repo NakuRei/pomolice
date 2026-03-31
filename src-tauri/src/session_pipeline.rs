@@ -5,6 +5,21 @@ use crate::state;
 use crate::tray;
 use crate::types;
 
+struct SessionCompletionTransition {
+    completed_payload: types::SessionCompletedPayload,
+    transition_outcome: types::SessionTransitionOutcome,
+    requires_enter_break_mode: bool,
+    requires_exit_break_mode: bool,
+}
+
+struct FinalizedSessionCompletionState {
+    tick_payload: types::TimerTickPayload,
+    post_break_transition_policy: types::PostBreakTransitionPolicy,
+    post_break_decision_pending: bool,
+    scheduled_stop_state: types::ScheduledStopState,
+    timer_start_source: Option<types::TimerStartSource>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SessionCompletionEmitEvent {
     SessionCompleted,
@@ -57,83 +72,101 @@ pub async fn lib_handle_timer_tick(app: AppHandle) {
     }
 }
 
-pub async fn lib_handle_session_complete(app: AppHandle) {
-    use types::{SessionTransitionOutcome, SessionTransitionReason, SessionType};
+fn build_transition_outcome(
+    completed_payload: &types::SessionCompletedPayload,
+) -> types::SessionTransitionOutcome {
+    types::SessionTransitionOutcome {
+        transition_reason: completed_payload.transition_reason,
+        completed_session_type: completed_payload.completed_session_type,
+        next_status: completed_payload.next_status,
+        next_session_type: completed_payload.next_session_type,
+        requires_manual_continue_decision: completed_payload.requires_manual_continue_decision,
+    }
+}
 
+fn transition_requires_task_cancellation(
+    transition_reason: types::SessionTransitionReason,
+) -> bool {
+    matches!(
+        transition_reason,
+        types::SessionTransitionReason::BreakWaitingDecision
+            | types::SessionTransitionReason::ScheduledStopExecuted
+    )
+}
+
+fn break_mode_requirements(transition_outcome: &types::SessionTransitionOutcome) -> (bool, bool) {
+    let requires_enter_break_mode =
+        transition_outcome.transition_reason == types::SessionTransitionReason::WorkToBreak;
+    let requires_exit_break_mode = matches!(
+        transition_outcome.completed_session_type,
+        types::SessionType::ShortBreak | types::SessionType::LongBreak
+    );
+
+    (requires_enter_break_mode, requires_exit_break_mode)
+}
+
+async fn complete_session_transition(app: &AppHandle) -> SessionCompletionTransition {
     let state_handle = app.state::<state::AppState>();
-    let (
+    let mut timer = state_handle.timer_manager.lock().await;
+    let completed_payload = match timer.get_state().session_type {
+        types::SessionType::Work => timer.complete_work_session_transition(),
+        types::SessionType::ShortBreak | types::SessionType::LongBreak => {
+            timer.complete_break_session_transition()
+        }
+    };
+    let transition_outcome = build_transition_outcome(&completed_payload);
+
+    if transition_requires_task_cancellation(transition_outcome.transition_reason) {
+        let _ = timer.cancel_and_take_task();
+    }
+
+    let (requires_enter_break_mode, requires_exit_break_mode) =
+        break_mode_requirements(&transition_outcome);
+
+    SessionCompletionTransition {
         completed_payload,
         transition_outcome,
         requires_enter_break_mode,
         requires_exit_break_mode,
-    ) = {
-        let mut timer = state_handle.timer_manager.lock().await;
-        let completed_payload = match timer.get_state().session_type {
-            SessionType::Work => timer.complete_work_session_transition(),
-            SessionType::ShortBreak | SessionType::LongBreak => {
-                timer.complete_break_session_transition()
-            }
-        };
+    }
+}
 
-        let transition_outcome = SessionTransitionOutcome {
-            transition_reason: completed_payload.transition_reason,
-            completed_session_type: completed_payload.completed_session_type,
-            next_status: completed_payload.next_status,
-            next_session_type: completed_payload.next_session_type,
-            requires_manual_continue_decision: completed_payload.requires_manual_continue_decision,
-        };
-
-        if matches!(
-            transition_outcome.transition_reason,
-            SessionTransitionReason::BreakWaitingDecision
-                | SessionTransitionReason::ScheduledStopExecuted
-        ) {
-            let _ = timer.cancel_and_take_task();
-        }
-
-        let requires_enter_break_mode =
-            transition_outcome.transition_reason == SessionTransitionReason::WorkToBreak;
-        let requires_exit_break_mode = matches!(
-            transition_outcome.completed_session_type,
-            SessionType::ShortBreak | SessionType::LongBreak
-        );
-
-        (
-            completed_payload,
-            transition_outcome,
-            requires_enter_break_mode,
-            requires_exit_break_mode,
-        )
-    };
-
+async fn apply_break_mode_transition(app: &AppHandle, transition: &SessionCompletionTransition) {
     debug_assert!(
-        !(requires_enter_break_mode && requires_exit_break_mode),
+        !(transition.requires_enter_break_mode && transition.requires_exit_break_mode),
         "session transition cannot enter and exit fullscreen break mode at the same time"
     );
 
-    if requires_enter_break_mode {
+    if transition.requires_enter_break_mode {
         enter_break_mode(app.clone()).await;
-    } else if requires_exit_break_mode {
+    } else if transition.requires_exit_break_mode {
         exit_break_mode(app.clone()).await;
     }
+}
 
-    let (
-        final_tick_payload,
-        final_post_break_transition_policy,
-        final_post_break_decision_pending,
-        final_scheduled_stop_state,
-        final_timer_start_source,
-    ) = {
-        let timer = state_handle.timer_manager.lock().await;
-        let state = timer.get_state();
-        (
-            state.to_tick_payload(),
-            state.settings.post_break_transition_policy,
-            state.post_break_decision_pending,
-            state.scheduled_stop_state,
-            state.timer_start_source,
-        )
-    };
+async fn finalized_session_completion_state(app: &AppHandle) -> FinalizedSessionCompletionState {
+    let state_handle = app.state::<state::AppState>();
+    let timer = state_handle.timer_manager.lock().await;
+    let state = timer.get_state();
+
+    FinalizedSessionCompletionState {
+        tick_payload: state.to_tick_payload(),
+        post_break_transition_policy: state.settings.post_break_transition_policy,
+        post_break_decision_pending: state.post_break_decision_pending,
+        scheduled_stop_state: state.scheduled_stop_state,
+        timer_start_source: state.timer_start_source,
+    }
+}
+
+fn log_session_completion_finalized(
+    transition_outcome: &types::SessionTransitionOutcome,
+    finalized_state: &FinalizedSessionCompletionState,
+) {
+    let transition_reason = transition_outcome.transition_reason;
+    let post_break_transition_policy = finalized_state.post_break_transition_policy;
+    let post_break_decision_pending = finalized_state.post_break_decision_pending;
+    let scheduled_stop_state = finalized_state.scheduled_stop_state;
+    let timer_start_source = finalized_state.timer_start_source;
 
     log_info_event(
         BackendLogEvent::TimerTransitionCompleted,
@@ -142,48 +175,54 @@ pub async fn lib_handle_session_complete(app: AppHandle) {
                 "transition_stage",
                 "session_completion_pipeline_finalized".to_string(),
             ),
-            (
-                "transition_reason",
-                format!("{:?}", transition_outcome.transition_reason),
-            ),
-            (
-                "policy",
-                format!("{:?}", final_post_break_transition_policy),
-            ),
+            ("transition_reason", format!("{transition_reason:?}")),
+            ("policy", format!("{post_break_transition_policy:?}")),
             (
                 "post_break_decision_pending",
-                final_post_break_decision_pending.to_string(),
+                post_break_decision_pending.to_string(),
             ),
-            (
-                "scheduled_stop_state",
-                format!("{:?}", final_scheduled_stop_state),
-            ),
-            (
-                "timer_start_source",
-                format!("{:?}", final_timer_start_source),
-            ),
+            ("scheduled_stop_state", format!("{scheduled_stop_state:?}")),
+            ("timer_start_source", format!("{timer_start_source:?}")),
         ],
     );
+}
 
-    for emit_event in session_completion_emit_order(transition_outcome.transition_reason) {
+fn emit_session_completion_events(
+    app: &AppHandle,
+    transition: &SessionCompletionTransition,
+    finalized_state: &FinalizedSessionCompletionState,
+) {
+    for emit_event in session_completion_emit_order(transition.transition_outcome.transition_reason)
+    {
         match emit_event {
             SessionCompletionEmitEvent::SessionCompleted => {
-                let _ = app.emit("session_completed", &completed_payload);
+                let _ = app.emit("session_completed", &transition.completed_payload);
             }
             SessionCompletionEmitEvent::AutoRunStopped => {
                 let _ = app.emit("auto_run_stopped", serde_json::json!({}));
             }
             SessionCompletionEmitEvent::TimerTick => {
-                let _ = app.emit("timer_tick", &final_tick_payload);
-                tray::update_tray_icon(&app, &final_tick_payload);
+                let _ = app.emit("timer_tick", &finalized_state.tick_payload);
+                tray::update_tray_icon(app, &finalized_state.tick_payload);
             }
         }
     }
+}
 
-    {
-        let timer = state_handle.timer_manager.lock().await;
-        state_handle.persistence.save_state(timer.get_state());
-    }
+async fn persist_timer_state(app: &AppHandle) {
+    let state_handle = app.state::<state::AppState>();
+    let timer = state_handle.timer_manager.lock().await;
+    state_handle.persistence.save_state(timer.get_state());
+}
+
+pub async fn lib_handle_session_complete(app: AppHandle) {
+    let transition = complete_session_transition(&app).await;
+    apply_break_mode_transition(&app, &transition).await;
+    let finalized_state = finalized_session_completion_state(&app).await;
+
+    log_session_completion_finalized(&transition.transition_outcome, &finalized_state);
+    emit_session_completion_events(&app, &transition, &finalized_state);
+    persist_timer_state(&app).await;
 }
 
 async fn enter_break_mode(app: AppHandle) {

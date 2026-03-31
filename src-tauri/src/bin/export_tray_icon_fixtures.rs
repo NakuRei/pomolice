@@ -1,5 +1,5 @@
 use std::fs::{self, File};
-use std::io::BufWriter;
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use log::{Level, LevelFilter, Metadata, Record};
@@ -129,7 +129,8 @@ impl log::Log for FixtureExportLogger {
 
     fn log(&self, record: &Record<'_>) {
         if self.enabled(record.metadata()) {
-            println!("{}", record.args());
+            let mut stderr = std::io::stderr().lock();
+            let _ = writeln!(stderr, "{}", record.args());
         }
     }
 

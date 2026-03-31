@@ -109,25 +109,56 @@ describe("createLogger()", () => {
     expect(keyValues["exception.message"]).toBe("boom");
   });
 
-  it("redacts secret-looking field values before calling plugin-log", async () => {
+  it("throws when runtime fields include keys outside the event catalog in development", async () => {
+    const { createLogger } = await import("./logger");
+
+    expect(() => {
+      createLogger("settings_sync").warn("settings.sync.failed", {
+        timer_status: "idle",
+        unknown_field: "boom",
+      } as never);
+    }).toThrow(/Unknown frontend log field\(s\)/u);
+
+    expect(warnLog).not.toHaveBeenCalled();
+  });
+
+  it("does not pass unknown fields to plugin-log in production", async () => {
+    const { setProductionEnvironmentOverrideForTest } =
+      await import("./redaction");
+    setProductionEnvironmentOverrideForTest(true);
     const { createLogger } = await import("./logger");
 
     createLogger("settings_sync").warn("settings.sync.failed", {
-      authorization_header: "Bearer secret",
-      cookie_value: "session=abc",
-      password: "super-secret",
-      retry_attempt: 2,
-      token: "abc",
+      timer_status: "idle",
+      unknown_field: "boom",
     } as never);
 
     expect(warnLog).toHaveBeenCalledTimes(1);
 
     const [, keyValues] = getFirstPluginWriteCall(warnLog);
-    expect(keyValues.authorization_header).toBe("[REDACTED]");
-    expect(keyValues.cookie_value).toBe("[REDACTED]");
-    expect(keyValues.password).toBe("[REDACTED]");
-    expect(keyValues.retry_attempt).toBe("2");
-    expect(keyValues.token).toBe("[REDACTED]");
+    expect(keyValues.logger_scope).toBe("settings_sync");
+    expect(keyValues.timer_status).toBe("idle");
+    expect(keyValues.unknown_field).toBeUndefined();
+  });
+
+  it("masks api_key in sensitive and exception fields before calling plugin-log", async () => {
+    const { createLogger } = await import("./logger");
+
+    createLogger("timer_sync").error(
+      "timer.sync.setup_failed",
+      new Error("request failed with api_key=exception-secret"),
+      {
+        failure_message: "request failed with api_key=field-secret",
+      },
+    );
+
+    expect(errorLog).toHaveBeenCalledTimes(1);
+
+    const [, keyValues] = getFirstPluginWriteCall(errorLog);
+    expect(keyValues.failure_message).toBe("request failed with [REDACTED]");
+    expect(keyValues["exception.message"]).toBe(
+      "request failed with [REDACTED]",
+    );
   });
 
   it.each([
@@ -232,6 +263,16 @@ describe("createLogger()", () => {
     }).not.toThrow();
 
     expect(errorLog).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects event severity mismatches before transport", async () => {
+    const { createLogger } = await import("./logger");
+
+    expect(() => {
+      createLogger("bootstrap").warn("app.startup.completed" as never);
+    }).toThrow(/must be logged at info/u);
+
+    expect(warnLog).not.toHaveBeenCalled();
   });
 
   it("rejects unregistered event ids", async () => {
