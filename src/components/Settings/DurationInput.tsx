@@ -1,4 +1,4 @@
-import { useEffect, useState, type ChangeEvent } from "react";
+import { useEffect, useId, useState, type ChangeEvent } from "react";
 /**
  * DurationInput Component
  * Reusable input component for duration settings with validation
@@ -78,6 +78,7 @@ export function DurationInput({
   disabled = false,
   allowDecimal = true,
 }: DurationInputProps): React.ReactElement {
+  const generatedInputId = useId();
   const [inputValue, setInputValue] = useState(toDisplayValue(value));
 
   useEffect(() => {
@@ -94,12 +95,16 @@ export function DurationInput({
   const inputStateClassName = getInputStateClassName(isValid);
   const inputTestId = createElementTestId(testId, "input");
   const errorTestId = createElementTestId(testId, "error");
+  const inputId = inputTestId ?? generatedInputId;
 
   return (
     <div className="flex flex-col gap-2" data-testid={testId}>
-      <label className="text-sm font-medium text-text">{label}</label>
+      <label htmlFor={inputId} className="text-sm font-medium text-text">
+        {label}
+      </label>
       <div className="flex items-center gap-2">
         <input
+          id={inputId}
           type="number"
           value={inputValue}
           onChange={handleChange}
