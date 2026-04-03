@@ -59,7 +59,9 @@ describe("HomeScreen", () => {
       screen.getByRole("heading", { name: "Pomolice" }),
     ).toBeInTheDocument();
     expect(screen.getByTestId("timer-display")).toBeInTheDocument();
-    expect(screen.getByTestId("start-button")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "タイマーを開始" }),
+    ).toBeInTheDocument();
   });
 
   it("calls onOpenSettingsTopScreen when settings button is clicked", async () => {

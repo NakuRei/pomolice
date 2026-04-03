@@ -30,13 +30,9 @@ describe("Button", () => {
   ] as const)(
     "applies the %s appearance token classes",
     ({ appearance, expectedClassNames }) => {
-      render(
-        <Button appearance={appearance} testId={`${appearance}-button`}>
-          Action
-        </Button>,
-      );
+      render(<Button appearance={appearance}>Action</Button>);
 
-      const button = screen.getByTestId(`${appearance}-button`);
+      const button = screen.getByRole("button", { name: "Action" });
 
       expectedClassNames.forEach((expectedClassName) => {
         expect(button).toHaveClass(expectedClassName);
@@ -45,9 +41,9 @@ describe("Button", () => {
   );
 
   it("renders a standard button with the default type and default styling tokens", () => {
-    render(<Button testId="default-button">Save</Button>);
+    render(<Button>Save</Button>);
 
-    const button = screen.getByTestId("default-button");
+    const button = screen.getByRole("button", { name: "Save" });
 
     expect(button).toHaveAttribute("type", "button");
     expect(button).toHaveClass("border");
@@ -61,18 +57,12 @@ describe("Button", () => {
 
   it("applies the requested appearance, size, width, and custom layout classes", () => {
     render(
-      <Button
-        appearance="danger"
-        size="lg"
-        width="full"
-        className="flex-1"
-        testId="danger-button"
-      >
+      <Button appearance="danger" size="lg" width="full" className="flex-1">
         Delete
       </Button>,
     );
 
-    const button = screen.getByTestId("danger-button");
+    const button = screen.getByRole("button", { name: "Delete" });
 
     expect(button).toHaveClass("bg-danger-600");
     expect(button).toHaveClass("px-8");
@@ -96,17 +86,12 @@ describe("Button", () => {
     const handleClick = vi.fn();
 
     render(
-      <Button
-        onClick={handleClick}
-        disabled
-        aria-label="Save settings"
-        testId="disabled-button"
-      >
+      <Button onClick={handleClick} disabled aria-label="Save settings">
         Save
       </Button>,
     );
 
-    const button = screen.getByTestId("disabled-button");
+    const button = screen.getByRole("button", { name: "Save settings" });
 
     expect(button).toBeDisabled();
     expect(button).toHaveAccessibleName("Save settings");
@@ -117,13 +102,9 @@ describe("Button", () => {
   });
 
   it("preserves an explicit button type instead of forcing the default", () => {
-    render(
-      <Button type="submit" testId="submit-button">
-        Save
-      </Button>,
-    );
+    render(<Button type="submit">Save</Button>);
 
-    expect(screen.getByTestId("submit-button")).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Save" })).toHaveAttribute(
       "type",
       "submit",
     );

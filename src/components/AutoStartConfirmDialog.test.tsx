@@ -27,6 +27,10 @@ function setDialogVisible(): void {
   });
 }
 
+function getAutoStartConfirmDialog(): HTMLElement {
+  return screen.getByRole("dialog", { name: "作業を開始しますか？" });
+}
+
 describe("AutoStartConfirmDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -48,7 +52,7 @@ describe("AutoStartConfirmDialog", () => {
   it("does not render when startup prompt is not required", () => {
     render(<AutoStartConfirmDialog />);
     expect(
-      screen.queryByTestId("auto-start-confirm-dialog"),
+      screen.queryByRole("dialog", { name: "作業を開始しますか？" }),
     ).not.toBeInTheDocument();
   });
 
@@ -60,7 +64,7 @@ describe("AutoStartConfirmDialog", () => {
 
     render(<AutoStartConfirmDialog />);
     expect(
-      screen.queryByTestId("auto-start-confirm-dialog"),
+      screen.queryByRole("dialog", { name: "作業を開始しますか？" }),
     ).not.toBeInTheDocument();
   });
 
@@ -77,7 +81,7 @@ describe("AutoStartConfirmDialog", () => {
 
     render(<AutoStartConfirmDialog />);
     expect(
-      screen.queryByTestId("auto-start-confirm-dialog"),
+      screen.queryByRole("dialog", { name: "作業を開始しますか？" }),
     ).not.toBeInTheDocument();
   });
 
@@ -85,9 +89,9 @@ describe("AutoStartConfirmDialog", () => {
     setDialogVisible();
     render(<AutoStartConfirmDialog />);
 
-    const dialog = screen.getByRole("dialog");
+    const dialog = getAutoStartConfirmDialog();
 
-    expect(screen.getByTestId("auto-start-confirm-dialog")).toBeInTheDocument();
+    expect(dialog).toBeInTheDocument();
     expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(dialog).toHaveAttribute(
       "aria-labelledby",
@@ -107,7 +111,7 @@ describe("AutoStartConfirmDialog", () => {
     setDialogVisible();
     render(<AutoStartConfirmDialog />);
 
-    const startButton = screen.getByTestId("auto-start-confirm-start");
+    const startButton = screen.getByRole("button", { name: "開始する" });
     await waitFor(() => {
       expect(startButton).toHaveFocus();
     });
@@ -119,7 +123,7 @@ describe("AutoStartConfirmDialog", () => {
     setDialogVisible();
     render(<AutoStartConfirmDialog />);
 
-    await user.click(screen.getByTestId("auto-start-confirm-start"));
+    await user.click(screen.getByRole("button", { name: "開始する" }));
 
     expect(invokeMock).toHaveBeenCalledWith("resolve_boot_auto_start_prompt", {
       startNow: true,
@@ -132,7 +136,7 @@ describe("AutoStartConfirmDialog", () => {
     setDialogVisible();
     render(<AutoStartConfirmDialog />);
 
-    await user.click(screen.getByTestId("auto-start-confirm-later"));
+    await user.click(screen.getByRole("button", { name: "あとで開始する" }));
 
     expect(invokeMock).toHaveBeenCalledWith("resolve_boot_auto_start_prompt", {
       startNow: false,
@@ -144,11 +148,11 @@ describe("AutoStartConfirmDialog", () => {
     setDialogVisible();
     render(<AutoStartConfirmDialog />);
 
-    await user.click(screen.getByTestId("auto-start-confirm-later"));
+    await user.click(screen.getByRole("button", { name: "あとで開始する" }));
 
     await waitFor(() => {
       expect(
-        screen.queryByTestId("auto-start-confirm-dialog"),
+        screen.queryByRole("dialog", { name: "作業を開始しますか？" }),
       ).not.toBeInTheDocument();
     });
   });
@@ -158,10 +162,10 @@ describe("AutoStartConfirmDialog", () => {
     setDialogVisible();
     render(<AutoStartConfirmDialog />);
 
-    await user.click(screen.getByTestId("auto-start-confirm-later"));
+    await user.click(screen.getByRole("button", { name: "あとで開始する" }));
     await waitFor(() => {
       expect(
-        screen.queryByTestId("auto-start-confirm-dialog"),
+        screen.queryByRole("dialog", { name: "作業を開始しますか？" }),
       ).not.toBeInTheDocument();
     });
 
@@ -175,7 +179,7 @@ describe("AutoStartConfirmDialog", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByTestId("auto-start-confirm-dialog"),
+        screen.getByRole("dialog", { name: "作業を開始しますか？" }),
       ).toBeInTheDocument();
     });
   });
@@ -206,6 +210,6 @@ describe("AutoStartConfirmDialog", () => {
     await user.click(screen.getByTestId("auto-start-confirm-dialog-overlay"));
 
     expect(invokeMock).not.toHaveBeenCalled();
-    expect(screen.getByTestId("auto-start-confirm-dialog")).toBeInTheDocument();
+    expect(getAutoStartConfirmDialog()).toBeInTheDocument();
   });
 });

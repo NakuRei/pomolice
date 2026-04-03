@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { EmergencyStopButton } from "./EmergencyStopButton";
 import { useErrorStore } from "@/store/errorStore";
@@ -9,6 +15,18 @@ import { useTimerStore, TimerStatus, SessionType } from "@/store/timerStore";
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockResolvedValue(undefined),
 }));
+
+function renderWorkingEmergencyStopButton(): void {
+  useTimerStore.setState({ status: TimerStatus.WORKING });
+  render(<EmergencyStopButton />);
+}
+
+async function openEmergencyStopDialog(
+  user: ReturnType<typeof userEvent.setup>,
+): Promise<HTMLElement> {
+  await user.click(screen.getByRole("button", { name: "緊急停止" }));
+  return screen.getByRole("dialog", { name: "緊急停止しますか？" });
+}
 
 describe("EmergencyStopButton", () => {
   beforeEach(() => {
@@ -31,139 +49,84 @@ describe("EmergencyStopButton", () => {
   describe("Visibility", () => {
     it("should not render when timer is idle", () => {
       render(<EmergencyStopButton />);
-      const button = screen.queryByTestId("emergency-stop-button");
+      const button = screen.queryByRole("button", { name: "緊急停止" });
       expect(button).not.toBeInTheDocument();
     });
 
-    it("should render when timer is working", () => {
-      useTimerStore.setState({ status: TimerStatus.WORKING });
-      render(<EmergencyStopButton />);
-      const button = screen.getByTestId("emergency-stop-button");
-      expect(button).toBeInTheDocument();
-    });
-  });
-
-  describe("Button Appearance", () => {
-    it("should have correct text", () => {
-      useTimerStore.setState({ status: TimerStatus.WORKING });
-      render(<EmergencyStopButton />);
-      const button = screen.getByTestId("emergency-stop-button");
+    it("should render a named emergency stop button when timer is working", () => {
+      renderWorkingEmergencyStopButton();
+      const button = screen.getByRole("button", { name: "緊急停止" });
       expect(button).toHaveTextContent("緊急停止");
-    });
-
-    it("should have aria-label", () => {
-      useTimerStore.setState({ status: TimerStatus.WORKING });
-      render(<EmergencyStopButton />);
-      const button = screen.getByTestId("emergency-stop-button");
       expect(button).toHaveAttribute("aria-label", "緊急停止");
     });
   });
 
   describe("Confirmation Dialog", () => {
-    it("should show dialog when button is clicked", async () => {
+    it("should open an accessible confirmation dialog with warning text and actions", async () => {
       const user = userEvent.setup();
-      useTimerStore.setState({ status: TimerStatus.WORKING });
-      render(<EmergencyStopButton />);
+      renderWorkingEmergencyStopButton();
 
-      const button = screen.getByTestId("emergency-stop-button");
-      await user.click(button);
-
-      const dialog = screen.getByTestId("emergency-stop-dialog");
-      expect(dialog).toBeInTheDocument();
-    });
-
-    it("should show correct dialog title", async () => {
-      const user = userEvent.setup();
-      useTimerStore.setState({ status: TimerStatus.WORKING });
-      render(<EmergencyStopButton />);
-
-      await user.click(screen.getByTestId("emergency-stop-button"));
-
-      expect(screen.getByText("緊急停止しますか？")).toBeInTheDocument();
-    });
-
-    it("should expose the confirmation panel as an accessible dialog", async () => {
-      const user = userEvent.setup();
-      useTimerStore.setState({ status: TimerStatus.WORKING });
-      render(<EmergencyStopButton />);
-
-      await user.click(screen.getByTestId("emergency-stop-button"));
-
-      const dialog = screen.getByRole("dialog");
+      const dialog = await openEmergencyStopDialog(user);
 
       expect(dialog).toHaveAttribute("aria-modal", "true");
       expect(dialog).toHaveAttribute(
         "aria-labelledby",
         "emergency-stop-dialog-title",
       );
-    });
-
-    it("should show warning message", async () => {
-      const user = userEvent.setup();
-      useTimerStore.setState({ status: TimerStatus.WORKING });
-      render(<EmergencyStopButton />);
-
-      await user.click(screen.getByTestId("emergency-stop-button"));
-
       expect(
-        screen.getByText(/現在のポモドーロセッションは記録されません/u),
+        within(dialog).getByText(/現在のポモドーロセッションは記録されません/u),
       ).toBeInTheDocument();
-    });
-
-    it("should have cancel and confirm buttons", async () => {
-      const user = userEvent.setup();
-      useTimerStore.setState({ status: TimerStatus.WORKING });
-      render(<EmergencyStopButton />);
-
-      await user.click(screen.getByTestId("emergency-stop-button"));
-
-      expect(screen.getByTestId("emergency-stop-cancel")).toBeInTheDocument();
-      expect(screen.getByTestId("emergency-stop-confirm")).toBeInTheDocument();
+      expect(
+        within(dialog).getByRole("button", { name: "キャンセル" }),
+      ).toBeInTheDocument();
+      expect(
+        within(dialog).getByRole("button", { name: "停止する" }),
+      ).toBeInTheDocument();
     });
   });
 
   describe("Dialog Actions", () => {
     it("should close dialog when cancel is clicked", async () => {
       const user = userEvent.setup();
-      useTimerStore.setState({ status: TimerStatus.WORKING });
-      render(<EmergencyStopButton />);
+      renderWorkingEmergencyStopButton();
 
-      await user.click(screen.getByTestId("emergency-stop-button"));
-      expect(screen.getByTestId("emergency-stop-dialog")).toBeInTheDocument();
+      const dialog = await openEmergencyStopDialog(user);
 
-      await user.click(screen.getByTestId("emergency-stop-cancel"));
+      await user.click(
+        within(dialog).getByRole("button", { name: "キャンセル" }),
+      );
 
       await waitFor(() => {
         expect(
-          screen.queryByTestId("emergency-stop-dialog"),
+          screen.queryByRole("dialog", { name: "緊急停止しますか？" }),
         ).not.toBeInTheDocument();
       });
     });
 
     it("should focus the cancel button when the dialog opens", async () => {
       const user = userEvent.setup();
-      useTimerStore.setState({ status: TimerStatus.WORKING });
-      render(<EmergencyStopButton />);
+      renderWorkingEmergencyStopButton();
 
-      await user.click(screen.getByTestId("emergency-stop-button"));
+      const dialog = await openEmergencyStopDialog(user);
 
       await waitFor(() => {
-        expect(screen.getByTestId("emergency-stop-cancel")).toHaveFocus();
+        expect(
+          within(dialog).getByRole("button", { name: "キャンセル" }),
+        ).toHaveFocus();
       });
     });
 
     it("should close the dialog on Escape without calling the backend", async () => {
       const { invoke } = await import("@tauri-apps/api/core");
       const user = userEvent.setup();
-      useTimerStore.setState({ status: TimerStatus.WORKING });
-      render(<EmergencyStopButton />);
+      renderWorkingEmergencyStopButton();
 
-      await user.click(screen.getByTestId("emergency-stop-button"));
+      await openEmergencyStopDialog(user);
       fireEvent.keyDown(window, { key: "Escape" });
 
       await waitFor(() => {
         expect(
-          screen.queryByTestId("emergency-stop-dialog"),
+          screen.queryByRole("dialog", { name: "緊急停止しますか？" }),
         ).not.toBeInTheDocument();
       });
       expect(invoke).not.toHaveBeenCalled();
@@ -171,26 +134,28 @@ describe("EmergencyStopButton", () => {
 
     it("should not change timer status when cancel is clicked", async () => {
       const user = userEvent.setup();
-      useTimerStore.setState({ status: TimerStatus.WORKING });
-      render(<EmergencyStopButton />);
+      renderWorkingEmergencyStopButton();
 
-      await user.click(screen.getByTestId("emergency-stop-button"));
-      await user.click(screen.getByTestId("emergency-stop-cancel"));
+      const dialog = await openEmergencyStopDialog(user);
+      await user.click(
+        within(dialog).getByRole("button", { name: "キャンセル" }),
+      );
 
       expect(useTimerStore.getState().status).toBe(TimerStatus.WORKING);
     });
 
     it("should close dialog after confirming", async () => {
       const user = userEvent.setup();
-      useTimerStore.setState({ status: TimerStatus.WORKING });
-      render(<EmergencyStopButton />);
+      renderWorkingEmergencyStopButton();
 
-      await user.click(screen.getByTestId("emergency-stop-button"));
-      await user.click(screen.getByTestId("emergency-stop-confirm"));
+      const dialog = await openEmergencyStopDialog(user);
+      await user.click(
+        within(dialog).getByRole("button", { name: "停止する" }),
+      );
 
       await waitFor(() => {
         expect(
-          screen.queryByTestId("emergency-stop-dialog"),
+          screen.queryByRole("dialog", { name: "緊急停止しますか？" }),
         ).not.toBeInTheDocument();
       });
     });
@@ -200,17 +165,22 @@ describe("EmergencyStopButton", () => {
       vi.mocked(invoke).mockRejectedValueOnce("Failed to lock state: busy");
 
       const user = userEvent.setup();
-      useTimerStore.setState({ status: TimerStatus.WORKING });
-      render(<EmergencyStopButton />);
+      renderWorkingEmergencyStopButton();
 
-      await user.click(screen.getByTestId("emergency-stop-button"));
-      await user.click(screen.getByTestId("emergency-stop-confirm"));
+      const dialog = await openEmergencyStopDialog(user);
+      await user.click(
+        within(dialog).getByRole("button", { name: "停止する" }),
+      );
 
       await waitFor(() => {
-        expect(screen.getByTestId("emergency-stop-dialog")).toBeInTheDocument();
+        expect(
+          screen.getByRole("dialog", { name: "緊急停止しますか？" }),
+        ).toBeInTheDocument();
       });
       expect(
-        screen.getByTestId("inline-error-emergency_stop"),
+        within(
+          screen.getByRole("dialog", { name: "緊急停止しますか？" }),
+        ).getByRole("alert"),
       ).toHaveTextContent("緊急停止に失敗しました。もう一度試してください");
     });
   });
@@ -226,8 +196,10 @@ describe("EmergencyStopButton", () => {
       });
       render(<EmergencyStopButton />);
 
-      await user.click(screen.getByTestId("emergency-stop-button"));
-      await user.click(screen.getByTestId("emergency-stop-confirm"));
+      const dialog = await openEmergencyStopDialog(user);
+      await user.click(
+        within(dialog).getByRole("button", { name: "停止する" }),
+      );
 
       expect(invoke).toHaveBeenCalledWith("emergency_stop");
     });
@@ -241,8 +213,10 @@ describe("EmergencyStopButton", () => {
       });
       render(<EmergencyStopButton />);
 
-      await user.click(screen.getByTestId("emergency-stop-button"));
-      await user.click(screen.getByTestId("emergency-stop-confirm"));
+      const dialog = await openEmergencyStopDialog(user);
+      await user.click(
+        within(dialog).getByRole("button", { name: "停止する" }),
+      );
 
       // The backend handles state, so pomodoro count is preserved until backend responds
       const state = useTimerStore.getState();

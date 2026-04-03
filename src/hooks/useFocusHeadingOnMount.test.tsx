@@ -6,7 +6,7 @@ function HeadingHarness(): React.ReactElement {
   const headingRef = useFocusHeadingOnMount();
 
   return (
-    <h1 ref={headingRef} tabIndex={-1} data-testid="focus-heading">
+    <h1 ref={headingRef} tabIndex={-1}>
       Settings
     </h1>
   );
@@ -15,7 +15,7 @@ function HeadingHarness(): React.ReactElement {
 function UnattachedHeadingRefHarness(): React.ReactElement {
   useFocusHeadingOnMount();
 
-  return <div data-testid="unattached-heading-ref">Settings</div>;
+  return <div>Settings</div>;
 }
 
 describe("useFocusHeadingOnMount", () => {
@@ -23,13 +23,13 @@ describe("useFocusHeadingOnMount", () => {
     render(<HeadingHarness />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("focus-heading")).toHaveFocus();
+      expect(screen.getByRole("heading", { name: "Settings" })).toHaveFocus();
     });
   });
 
   it("does not throw when the ref is not attached to a heading element", () => {
     expect(() => render(<UnattachedHeadingRefHarness />)).not.toThrow();
 
-    expect(screen.getByTestId("unattached-heading-ref")).toBeInTheDocument();
+    expect(screen.getByText("Settings")).toBeInTheDocument();
   });
 });

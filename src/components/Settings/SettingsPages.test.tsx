@@ -71,18 +71,18 @@ describe("Settings Pages", () => {
       />,
     );
 
-    expect(screen.getByTestId("settings-top-row-timer")).toHaveTextContent(
-      "作業30分 / 短休憩6分 / 長休憩20分 / 間隔5回",
-    );
-    expect(screen.getByTestId("settings-top-row-auto-run")).toHaveTextContent(
-      "月火 09:00-18:00",
-    );
     expect(
-      screen.getByTestId("settings-top-row-post-break-policy"),
-    ).toHaveTextContent("休憩後に自動で次の作業を開始する");
+      screen.getByRole("button", { name: /^タイマー設定/u }),
+    ).toHaveTextContent("作業30分 / 短休憩6分 / 長休憩20分 / 間隔5回");
     expect(
-      screen.getByTestId("settings-top-row-notification"),
-    ).toHaveTextContent("ミュートON / 音量35%");
+      screen.getByRole("button", { name: /^曜日別自動実行/u }),
+    ).toHaveTextContent("月火 09:00-18:00");
+    expect(
+      screen.getByText("休憩後に自動で次の作業を開始する"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^通知/u })).toHaveTextContent(
+      "ミュートON / 音量35%",
+    );
   });
 
   it("focuses the settings top heading on mount", async () => {
@@ -143,9 +143,9 @@ describe("Settings Pages", () => {
       />,
     );
 
-    expect(screen.getByTestId("settings-top-row-auto-run")).toHaveTextContent(
-      "有効2日（詳細参照）",
-    );
+    expect(
+      screen.getByRole("button", { name: /^曜日別自動実行/u }),
+    ).toHaveTextContent("有効2日（詳細参照）");
   });
 
   it("switches post-break transition policy on settings top", async () => {
@@ -164,9 +164,7 @@ describe("Settings Pages", () => {
       />,
     );
 
-    expect(
-      screen.getByTestId("settings-top-row-post-break-policy"),
-    ).toHaveTextContent("毎回確認する");
+    expect(screen.getByText("毎回確認する")).toBeInTheDocument();
 
     await user.click(
       screen.getByRole("button", { name: "自動継続をONにする" }),
@@ -179,8 +177,8 @@ describe("Settings Pages", () => {
       screen.getByRole("button", { name: "毎回確認に戻す" }),
     ).toHaveAttribute("aria-pressed", "true");
     expect(
-      screen.getByTestId("settings-top-row-post-break-policy"),
-    ).toHaveTextContent("休憩後に自動で次の作業を開始する");
+      screen.getByText("休憩後に自動で次の作業を開始する"),
+    ).toBeInTheDocument();
   });
 
   it("saves timer settings and keeps unrelated settings unchanged", async () => {
@@ -196,10 +194,10 @@ describe("Settings Pages", () => {
 
     render(<SettingsTimerPage openSettingsTopScreen={openSettingsTopScreen} />);
 
-    const workInput = screen.getByTestId("settings-work-duration-input");
+    const workInput = screen.getByRole("spinbutton", { name: "作業時間" });
     await user.clear(workInput);
     await user.type(workInput, "32");
-    await user.click(screen.getByTestId("settings-save"));
+    await user.click(screen.getByRole("button", { name: "保存" }));
 
     expect(useSettingsStore.getState().workDuration).toBe(32);
     expect(useSettingsStore.getState().postBreakTransitionPolicy).toBe(
@@ -218,10 +216,10 @@ describe("Settings Pages", () => {
 
     render(<SettingsTimerPage openSettingsTopScreen={openSettingsTopScreen} />);
 
-    const workInput = screen.getByTestId("settings-work-duration-input");
+    const workInput = screen.getByRole("spinbutton", { name: "作業時間" });
     await user.clear(workInput);
     await user.type(workInput, "44");
-    await user.click(screen.getByTestId("settings-cancel"));
+    await user.click(screen.getByRole("button", { name: "キャンセル" }));
 
     expect(useSettingsStore.getState().workDuration).toBe(25);
     expect(openSettingsTopScreen).toHaveBeenCalledTimes(1);
@@ -233,13 +231,15 @@ describe("Settings Pages", () => {
 
     render(<SettingsTimerPage openSettingsTopScreen={openSettingsTopScreen} />);
 
-    const intervalInput = screen.getByTestId("settings-interval-input");
+    const intervalInput = screen.getByRole("spinbutton", {
+      name: "長い休憩の間隔",
+    });
     await user.clear(intervalInput);
     await user.type(intervalInput, "2.5");
 
-    expect(screen.getByTestId("settings-save")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
 
-    await user.click(screen.getByTestId("settings-save"));
+    await user.click(screen.getByRole("button", { name: "保存" }));
 
     expect(useSettingsStore.getState().longBreakInterval).toBe(4);
     expect(openSettingsTopScreen).not.toHaveBeenCalled();
@@ -250,13 +250,16 @@ describe("Settings Pages", () => {
 
     render(<SettingsTimerPage openSettingsTopScreen={() => undefined} />);
 
-    expect(screen.getByTestId("settings-timer-footer")).toBeInTheDocument();
-    expect(screen.getByTestId("settings-work-duration-input")).toBeDisabled();
-    expect(screen.getByTestId("settings-short-break-input")).toBeDisabled();
-    expect(screen.getByTestId("settings-long-break-input")).toBeDisabled();
-    expect(screen.getByTestId("settings-interval-input")).toBeDisabled();
+    expect(screen.getByRole("spinbutton", { name: "作業時間" })).toBeDisabled();
+    expect(screen.getByRole("spinbutton", { name: "短い休憩" })).toBeDisabled();
+    expect(screen.getByRole("spinbutton", { name: "長い休憩" })).toBeDisabled();
     expect(
-      screen.getByTestId("settings-duration-edit-disabled-message"),
+      screen.getByRole("spinbutton", { name: "長い休憩の間隔" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByText(
+        "タイマー実行中は時間長設定を変更できません。曜日別スケジュールのみ編集できます。",
+      ),
     ).toBeInTheDocument();
   });
 
@@ -359,10 +362,9 @@ describe("Settings Pages", () => {
       target: { value: "invalid-time" },
     });
 
-    expect(
-      screen.getByTestId("settings-auto-run-day-error-mon"),
-    ).toBeInTheDocument();
-    expect(screen.getByTestId("settings-auto-run-footer")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Start time for mon must use HH:MM (24-hour).",
+    );
     expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
     expect(openSettingsTopScreen).not.toHaveBeenCalled();
   });
@@ -387,9 +389,7 @@ describe("Settings Pages", () => {
 
     render(<SettingsAutoRunPage openSettingsTopScreen={() => undefined} />);
 
-    const weeklyErrorNotice = screen.getByTestId(
-      "settings-auto-run-weekly-errors",
-    );
+    const weeklyErrorNotice = screen.getByRole("alert");
 
     expect(weeklyErrorNotice).toHaveAttribute("role", "alert");
     expect(weeklyErrorNotice).toHaveTextContent(
@@ -499,6 +499,9 @@ describe("Settings Pages", () => {
     expect(previewTypeSelect).toHaveValue("work");
     expect(
       screen.getByTestId("settings-notification-sound-preview-status"),
+    ).toHaveAttribute("aria-live", "polite");
+    expect(
+      screen.getByTestId("settings-notification-sound-preview-status"),
     ).toHaveTextContent("");
   });
 
@@ -546,20 +549,18 @@ describe("Settings Pages", () => {
     const timerPageRenderResult = render(
       <SettingsTimerPage openSettingsTopScreen={() => undefined} />,
     );
-    const workInput = screen.getByTestId("settings-work-duration-input");
+    const workInput = screen.getByRole("spinbutton", { name: "作業時間" });
     await user.clear(workInput);
     await user.type(workInput, "40");
-    await user.click(screen.getByTestId("settings-cancel"));
+    await user.click(screen.getByRole("button", { name: "キャンセル" }));
     timerPageRenderResult.unmount();
 
     render(
       <SettingsNotificationPage openSettingsTopScreen={() => undefined} />,
     );
-    const volumeSlider = screen.getByTestId(
-      "settings-notification-sound-volume",
-    );
+    const volumeSlider = screen.getByRole("slider", { name: "通知音量" });
     fireEvent.change(volumeSlider, { target: { value: "30" } });
-    await user.click(screen.getByTestId("settings-save"));
+    await user.click(screen.getByRole("button", { name: "保存" }));
 
     expect(useSettingsStore.getState().workDuration).toBe(25);
     expect(useSettingsStore.getState().notificationSoundVolumePercent).toBe(30);

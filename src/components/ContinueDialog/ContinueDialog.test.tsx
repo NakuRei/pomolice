@@ -5,6 +5,7 @@ import {
   act,
   fireEvent,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ContinueDialog } from "./ContinueDialog";
@@ -14,6 +15,17 @@ import { useTimerStore, TimerStatus, SessionType } from "@/store/timerStore";
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockResolvedValue(undefined),
 }));
+
+function showContinueDialog(completedPomodoros = 3): void {
+  useTimerStore.setState({
+    requiresManualContinueDecision: true,
+    completedPomodoros,
+  });
+}
+
+function getContinueDialog(): HTMLElement {
+  return screen.getByRole("dialog", { name: "1サイクル完了しました！" });
+}
 
 describe("ContinueDialog", () => {
   beforeEach(() => {
@@ -34,22 +46,17 @@ describe("ContinueDialog", () => {
   describe("Visibility", () => {
     it("should not render when requiresManualContinueDecision is false", () => {
       render(<ContinueDialog />);
-      const dialog = screen.queryByTestId("continue-dialog");
+      const dialog = screen.queryByRole("dialog", {
+        name: "1サイクル完了しました！",
+      });
       expect(dialog).not.toBeInTheDocument();
     });
 
-    it("should render when requiresManualContinueDecision is true", () => {
-      useTimerStore.setState({ requiresManualContinueDecision: true });
-      render(<ContinueDialog />);
-      const dialog = screen.getByTestId("continue-dialog");
-      expect(dialog).toBeInTheDocument();
-    });
-
-    it("should expose the panel as an accessible dialog with a labelled title", () => {
-      useTimerStore.setState({ requiresManualContinueDecision: true });
+    it("should render an accessible dialog with a labelled title when a manual decision is required", () => {
+      showContinueDialog();
       render(<ContinueDialog />);
 
-      const dialog = screen.getByRole("dialog");
+      const dialog = getContinueDialog();
 
       expect(dialog).toHaveAttribute("aria-modal", "true");
       expect(dialog).toHaveAttribute(
@@ -61,52 +68,27 @@ describe("ContinueDialog", () => {
 
   describe("Dialog Content", () => {
     beforeEach(() => {
-      useTimerStore.setState({
-        requiresManualContinueDecision: true,
-        completedPomodoros: 3,
-      });
+      showContinueDialog(3);
     });
 
-    it("should display completion message", () => {
+    it("should display the completion summary, manual decision notice, and actions", () => {
       render(<ContinueDialog />);
-      expect(screen.getByText("1サイクル完了しました！")).toBeInTheDocument();
-    });
+      const dialog = getContinueDialog();
 
-    it("should display completion confirmation", () => {
-      render(<ContinueDialog />);
-      expect(
-        screen.getByText("お疲れ様でした。休憩が完了しました。"),
-      ).toBeInTheDocument();
-    });
-
-    it("should display completed pomodoros count", () => {
-      render(<ContinueDialog />);
-      expect(screen.getByText(/完了したポモドーロ:/u)).toBeInTheDocument();
-      expect(screen.getByText("3")).toBeInTheDocument();
-    });
-
-    it("should display continue question", () => {
-      render(<ContinueDialog />);
-      expect(
-        screen.getByText("次のポモドーロを続けますか？"),
-      ).toBeInTheDocument();
-    });
-
-    it("should display manual decision pending explanation", () => {
-      render(<ContinueDialog />);
-      expect(
-        screen.getByTestId("continue-dialog-manual-decision-message"),
-      ).toHaveTextContent(
+      expect(dialog).toHaveTextContent("お疲れ様でした。休憩が完了しました。");
+      expect(dialog).toHaveTextContent(
         "現在、手動判断待ちです。続けるか終了を選んでください。",
       );
-    });
-
-    it("should have continue and end buttons", () => {
-      render(<ContinueDialog />);
+      expect(dialog).toHaveTextContent("完了したポモドーロ: 3");
       expect(
-        screen.getByTestId("continue-dialog-continue"),
+        within(dialog).getByText("次のポモドーロを続けますか？"),
       ).toBeInTheDocument();
-      expect(screen.getByTestId("continue-dialog-end")).toBeInTheDocument();
+      expect(
+        within(dialog).getByRole("button", { name: "続ける" }),
+      ).toBeInTheDocument();
+      expect(
+        within(dialog).getByRole("button", { name: "終了" }),
+      ).toBeInTheDocument();
     });
   });
 
@@ -125,7 +107,7 @@ describe("ContinueDialog", () => {
       const user = userEvent.setup();
       render(<ContinueDialog />);
 
-      const continueButton = screen.getByTestId("continue-dialog-continue");
+      const continueButton = screen.getByRole("button", { name: "続ける" });
       await user.click(continueButton);
 
       // Backend receives the unified manual decision command.
@@ -139,7 +121,7 @@ describe("ContinueDialog", () => {
       const user = userEvent.setup();
       render(<ContinueDialog />);
 
-      const endButton = screen.getByTestId("continue-dialog-end");
+      const endButton = screen.getByRole("button", { name: "終了" });
       await user.click(endButton);
 
       // Backend receives the unified manual decision command.
@@ -149,12 +131,10 @@ describe("ContinueDialog", () => {
     });
 
     it("should focus the continue button when the dialog opens", async () => {
-      useTimerStore.setState({
-        requiresManualContinueDecision: true,
-      });
+      showContinueDialog();
       render(<ContinueDialog />);
 
-      const continueButton = screen.getByTestId("continue-dialog-continue");
+      const continueButton = screen.getByRole("button", { name: "続ける" });
 
       await waitFor(() => {
         expect(continueButton).toHaveFocus();
@@ -163,9 +143,7 @@ describe("ContinueDialog", () => {
 
     it("should treat Escape as choosing stop_cycle", async () => {
       const { invoke } = await import("@tauri-apps/api/core");
-      useTimerStore.setState({
-        requiresManualContinueDecision: true,
-      });
+      showContinueDialog();
       render(<ContinueDialog />);
 
       fireEvent.keyDown(window, { key: "Escape" });
@@ -180,13 +158,10 @@ describe("ContinueDialog", () => {
 
   describe("Dynamic Updates", () => {
     it("should update pomodoro count display", () => {
-      useTimerStore.setState({
-        requiresManualContinueDecision: true,
-        completedPomodoros: 5,
-      });
+      showContinueDialog(5);
       const { rerender } = render(<ContinueDialog />);
 
-      expect(screen.getByText("5")).toBeInTheDocument();
+      expect(getContinueDialog()).toHaveTextContent("完了したポモドーロ: 5");
 
       // Update count
       act(() => {
@@ -194,14 +169,14 @@ describe("ContinueDialog", () => {
       });
       rerender(<ContinueDialog />);
 
-      expect(screen.getByText("10")).toBeInTheDocument();
+      expect(getContinueDialog()).toHaveTextContent("完了したポモドーロ: 10");
     });
 
     it("should hide when requiresManualContinueDecision becomes false", () => {
-      useTimerStore.setState({ requiresManualContinueDecision: true });
+      showContinueDialog();
       const { rerender } = render(<ContinueDialog />);
 
-      expect(screen.getByTestId("continue-dialog")).toBeInTheDocument();
+      expect(getContinueDialog()).toBeInTheDocument();
 
       // Hide dialog
       act(() => {
@@ -209,47 +184,25 @@ describe("ContinueDialog", () => {
       });
       rerender(<ContinueDialog />);
 
-      expect(screen.queryByTestId("continue-dialog")).not.toBeInTheDocument();
-    });
-  });
-
-  describe("Button Labels", () => {
-    beforeEach(() => {
-      useTimerStore.setState({ requiresManualContinueDecision: true });
-    });
-
-    it("should have correct text on continue button", () => {
-      render(<ContinueDialog />);
-      const continueButton = screen.getByTestId("continue-dialog-continue");
-      expect(continueButton).toHaveTextContent("続ける");
-    });
-
-    it("should have correct text on end button", () => {
-      render(<ContinueDialog />);
-      const endButton = screen.getByTestId("continue-dialog-end");
-      expect(endButton).toHaveTextContent("終了");
+      expect(
+        screen.queryByRole("dialog", { name: "1サイクル完了しました！" }),
+      ).not.toBeInTheDocument();
     });
   });
 
   describe("Edge Cases", () => {
     it("should handle zero completed pomodoros", () => {
-      useTimerStore.setState({
-        requiresManualContinueDecision: true,
-        completedPomodoros: 0,
-      });
+      showContinueDialog(0);
       render(<ContinueDialog />);
 
-      expect(screen.getByText("0")).toBeInTheDocument();
+      expect(getContinueDialog()).toHaveTextContent("完了したポモドーロ: 0");
     });
 
     it("should handle large pomodoro counts", () => {
-      useTimerStore.setState({
-        requiresManualContinueDecision: true,
-        completedPomodoros: 100,
-      });
+      showContinueDialog(100);
       render(<ContinueDialog />);
 
-      expect(screen.getByText("100")).toBeInTheDocument();
+      expect(getContinueDialog()).toHaveTextContent("完了したポモドーロ: 100");
     });
   });
 });

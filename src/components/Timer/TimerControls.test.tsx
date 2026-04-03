@@ -36,6 +36,8 @@ function getInvokeCall(callIndex: number): {
 
 describe("TimerControls", () => {
   beforeEach(() => {
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue(undefined);
     // Reset store to initial state before each test
     useTimerStore.setState({
       status: TimerStatus.IDLE,
@@ -51,16 +53,18 @@ describe("TimerControls", () => {
   });
 
   describe("Initial State (IDLE)", () => {
-    it("should render start button when timer is idle", () => {
+    it("should render a named start button when timer is idle", () => {
       render(<TimerControls />);
-      const startButton = screen.getByTestId("start-button");
-      expect(startButton).toBeInTheDocument();
+      const startButton = screen.getByRole("button", {
+        name: "タイマーを開始",
+      });
       expect(startButton).toHaveTextContent("開始");
+      expect(startButton).toBeInTheDocument();
     });
 
     it("should not render stop button when timer is idle", () => {
       render(<TimerControls />);
-      const stopButton = screen.queryByTestId("stop-button");
+      const stopButton = screen.queryByRole("button", { name: "緊急停止" });
       expect(stopButton).not.toBeInTheDocument();
     });
 
@@ -68,7 +72,9 @@ describe("TimerControls", () => {
       const user = userEvent.setup();
       render(<TimerControls />);
 
-      const startButton = screen.getByTestId("start-button");
+      const startButton = screen.getByRole("button", {
+        name: "タイマーを開始",
+      });
       await user.click(startButton);
 
       const { command, payload } = getInvokeCall(0);
@@ -93,33 +99,30 @@ describe("TimerControls", () => {
 
     it("should not render start button when timer is working", () => {
       render(<TimerControls />);
-      const startButton = screen.queryByTestId("start-button");
+      const startButton = screen.queryByRole("button", {
+        name: "タイマーを開始",
+      });
       expect(startButton).not.toBeInTheDocument();
     });
 
     it("should render emergency stop button when timer is working", () => {
       render(<TimerControls />);
-      const emergencyStopButton = screen.getByTestId("emergency-stop-button");
-      expect(emergencyStopButton).toBeInTheDocument();
+      const emergencyStopButton = screen.getByRole("button", {
+        name: "緊急停止",
+      });
       expect(emergencyStopButton).toHaveTextContent("緊急停止");
+      expect(emergencyStopButton).toBeInTheDocument();
     });
 
     it("should open emergency stop dialog when button is clicked", async () => {
       const user = userEvent.setup();
       render(<TimerControls />);
 
-      await user.click(screen.getByTestId("emergency-stop-button"));
+      await user.click(screen.getByRole("button", { name: "緊急停止" }));
 
-      expect(screen.getByTestId("emergency-stop-dialog")).toBeInTheDocument();
-      expect(screen.getByText("緊急停止しますか？")).toBeInTheDocument();
-    });
-  });
-
-  describe("Button Accessibility", () => {
-    it("should have aria-label on start button", () => {
-      render(<TimerControls />);
-      const startButton = screen.getByTestId("start-button");
-      expect(startButton).toHaveAttribute("aria-label", "タイマーを開始");
+      expect(
+        screen.getByRole("dialog", { name: "緊急停止しますか？" }),
+      ).toBeInTheDocument();
     });
   });
 
@@ -128,7 +131,9 @@ describe("TimerControls", () => {
       const { rerender } = render(<TimerControls />);
 
       // Initially shows start button
-      expect(screen.getByTestId("start-button")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "タイマーを開始" }),
+      ).toBeInTheDocument();
 
       // Simulate backend response updating state
       act(() => {
@@ -139,7 +144,9 @@ describe("TimerControls", () => {
       rerender(<TimerControls />);
 
       // Start button is hidden (no buttons shown during working)
-      expect(screen.queryByTestId("start-button")).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "タイマーを開始" }),
+      ).not.toBeInTheDocument();
     });
 
     it("should show start button again after emergency stop (backend updates state)", () => {
@@ -150,7 +157,9 @@ describe("TimerControls", () => {
         useTimerStore.setState({ status: TimerStatus.WORKING });
       });
       rerender(<TimerControls />);
-      expect(screen.queryByTestId("start-button")).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "タイマーを開始" }),
+      ).not.toBeInTheDocument();
 
       // Simulate emergency stop response from backend
       act(() => {
@@ -159,7 +168,9 @@ describe("TimerControls", () => {
       rerender(<TimerControls />);
 
       // Start button is visible again
-      expect(screen.getByTestId("start-button")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "タイマーを開始" }),
+      ).toBeInTheDocument();
     });
   });
 });

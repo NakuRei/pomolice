@@ -5,7 +5,7 @@ import { AutoRunDayRow } from "./AutoRunDayRow";
 import type { DayScheduleValidationError } from "@/types/weeklyAutoRun";
 
 describe("AutoRunDayRow", () => {
-  it("renders existing weekday row entry points with stable test ids", () => {
+  it("renders weekday controls with accessible names and an overnight indicator", () => {
     render(
       <AutoRunDayRow
         weekday="mon"
@@ -22,17 +22,10 @@ describe("AutoRunDayRow", () => {
     );
 
     expect(
-      screen.getByTestId("settings-auto-run-day-row-mon"),
+      screen.getByRole("checkbox", { name: "月曜日の自動実行を有効にする" }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByTestId("settings-auto-run-day-enabled-mon"),
-    ).toHaveAccessibleName("月曜日の自動実行を有効にする");
-    expect(
-      screen.getByTestId("settings-auto-run-day-start-mon"),
-    ).toHaveAccessibleName("月曜日の開始時刻");
-    expect(
-      screen.getByTestId("settings-auto-run-day-end-mon"),
-    ).toHaveAccessibleName("月曜日の終了時刻");
+    expect(screen.getByLabelText("月曜日の開始時刻")).toBeInTheDocument();
+    expect(screen.getByLabelText("月曜日の終了時刻")).toBeInTheDocument();
     expect(
       screen.getByTestId("settings-auto-run-day-overnight-mon"),
     ).toBeInTheDocument();
@@ -55,12 +48,10 @@ describe("AutoRunDayRow", () => {
     );
 
     expect(
-      screen.getByTestId("settings-auto-run-day-enabled-mon"),
+      screen.getByRole("checkbox", { name: "月曜日の自動実行を有効にする" }),
     ).toBeDisabled();
-    expect(
-      screen.getByTestId("settings-auto-run-day-start-mon"),
-    ).toBeDisabled();
-    expect(screen.getByTestId("settings-auto-run-day-end-mon")).toBeDisabled();
+    expect(screen.getByLabelText("月曜日の開始時刻")).toBeDisabled();
+    expect(screen.getByLabelText("月曜日の終了時刻")).toBeDisabled();
 
     rerender(
       <AutoRunDayRow
@@ -78,12 +69,10 @@ describe("AutoRunDayRow", () => {
     );
 
     expect(
-      screen.getByTestId("settings-auto-run-day-enabled-mon"),
+      screen.getByRole("checkbox", { name: "月曜日の自動実行を有効にする" }),
     ).toBeEnabled();
-    expect(
-      screen.getByTestId("settings-auto-run-day-start-mon"),
-    ).toBeDisabled();
-    expect(screen.getByTestId("settings-auto-run-day-end-mon")).toBeDisabled();
+    expect(screen.getByLabelText("月曜日の開始時刻")).toBeDisabled();
+    expect(screen.getByLabelText("月曜日の終了時刻")).toBeDisabled();
   });
 
   it("calls row callbacks when enabled, start time, and end time change", async () => {
@@ -107,11 +96,13 @@ describe("AutoRunDayRow", () => {
       />,
     );
 
-    await user.click(screen.getByTestId("settings-auto-run-day-enabled-mon"));
-    fireEvent.change(screen.getByTestId("settings-auto-run-day-start-mon"), {
+    await user.click(
+      screen.getByRole("checkbox", { name: "月曜日の自動実行を有効にする" }),
+    );
+    fireEvent.change(screen.getByLabelText("月曜日の開始時刻"), {
       target: { value: "10:00" },
     });
-    fireEvent.change(screen.getByTestId("settings-auto-run-day-end-mon"), {
+    fireEvent.change(screen.getByLabelText("月曜日の終了時刻"), {
       target: { value: "19:00" },
     });
 
@@ -146,9 +137,7 @@ describe("AutoRunDayRow", () => {
     expect(
       screen.getByTestId("settings-auto-run-day-overnight-mon"),
     ).toHaveClass("text-primary-500");
-    expect(
-      screen.queryByTestId("settings-auto-run-day-error-mon"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
     rerender(
       <AutoRunDayRow
@@ -169,9 +158,9 @@ describe("AutoRunDayRow", () => {
     expect(
       screen.getByTestId("settings-auto-run-day-overnight-mon"),
     ).toHaveClass("text-transparent");
-    expect(
-      screen.getByTestId("settings-auto-run-day-error-mon"),
-    ).toHaveTextContent("Start time for mon must use HH:MM (24-hour).");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Start time for mon must use HH:MM (24-hour).",
+    );
 
     rerender(
       <AutoRunDayRow
@@ -188,8 +177,6 @@ describe("AutoRunDayRow", () => {
       />,
     );
 
-    expect(
-      screen.queryByTestId("settings-auto-run-day-error-mon"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

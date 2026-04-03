@@ -28,7 +28,7 @@ describe("InfoMessageBanner", () => {
 
   it("does not render when there is no info message", () => {
     render(<InfoMessageBanner />);
-    expect(screen.queryByTestId("info-message-banner")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("renders current info message", () => {
@@ -44,7 +44,6 @@ describe("InfoMessageBanner", () => {
 
     const notice = screen.getByRole("status");
 
-    expect(notice).toBe(screen.getByTestId("info-message-banner"));
     expect(notice).toHaveAttribute("aria-live", "polite");
     expect(
       screen.getByText("現在セッション終了後に停止予定"),
@@ -62,13 +61,13 @@ describe("InfoMessageBanner", () => {
     });
 
     render(<InfoMessageBanner />);
-    expect(screen.getByTestId("info-message-banner")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toBeInTheDocument();
 
     act(() => {
       vi.advanceTimersByTime(1000);
     });
 
-    expect(screen.queryByTestId("info-message-banner")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(useTimerStore.getState().infoMessage).toBeNull();
   });
 });

@@ -12,7 +12,7 @@ describe("ConnectionBanner", () => {
   it("renders nothing without a connection error", () => {
     render(<ConnectionBanner />);
 
-    expect(screen.queryByTestId("connection-banner")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("renders connection error banner with alert semantics", () => {
@@ -30,7 +30,6 @@ describe("ConnectionBanner", () => {
 
     const banner = screen.getByRole("alert");
 
-    expect(banner).toBe(screen.getByTestId("connection-banner"));
     expect(banner).toHaveTextContent(
       "バックエンドに接続できません。アプリが正常に動作しない可能性があります。",
     );
@@ -52,7 +51,7 @@ describe("ConnectionBanner", () => {
     const { rerender } = render(<ConnectionBanner />);
 
     expect(
-      screen.queryByTestId("connection-banner-retry"),
+      screen.queryByRole("button", { name: "再試行" }),
     ).not.toBeInTheDocument();
 
     useErrorStore.getState().reportError({
@@ -67,7 +66,7 @@ describe("ConnectionBanner", () => {
 
     rerender(<ConnectionBanner />);
 
-    expect(screen.getByTestId("connection-banner-retry")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "再試行" })).toBeInTheDocument();
   });
 
   it("shows retrying state while retryFn is pending", async () => {
@@ -92,16 +91,18 @@ describe("ConnectionBanner", () => {
 
     render(<ConnectionBanner />);
 
-    await user.click(screen.getByTestId("connection-banner-retry"));
+    const retryButton = screen.getByRole("button", { name: "再試行" });
+
+    await user.click(retryButton);
 
     expect(retryFn).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId("connection-banner-retry")).toBeDisabled();
+    expect(retryButton).toBeDisabled();
     expect(screen.getByText("接続を試みています...")).toBeInTheDocument();
 
     resolveRetry();
 
     await waitFor(() => {
-      expect(screen.getByTestId("connection-banner-retry")).not.toBeDisabled();
+      expect(screen.getByRole("button", { name: "再試行" })).not.toBeDisabled();
     });
   });
 });
