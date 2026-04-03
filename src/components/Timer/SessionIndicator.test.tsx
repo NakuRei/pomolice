@@ -5,6 +5,10 @@ import { useTimerStore } from "@/store/timerStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 
+function getSessionIndicator(): HTMLElement {
+  return screen.getByText(/ポモドーロ \d+\/\d+/u);
+}
+
 describe("SessionIndicator", () => {
   beforeEach(() => {
     resetTimerStoreForTest();
@@ -14,58 +18,43 @@ describe("SessionIndicator", () => {
   describe("Visibility", () => {
     it("should not render when cycle is 0", () => {
       render(<SessionIndicator />);
-      const indicator = screen.queryByTestId("session-indicator");
+      const indicator = screen.queryByText(/ポモドーロ \d+\/\d+/u);
       expect(indicator).not.toBeInTheDocument();
-    });
-
-    it("should render when cycle is 1 or greater", () => {
-      useTimerStore.setState({ currentCycle: 1 });
-      render(<SessionIndicator />);
-      const indicator = screen.getByTestId("session-indicator");
-      expect(indicator).toBeInTheDocument();
     });
   });
 
   describe("Display Content", () => {
-    it("should display current cycle and interval (1/4)", () => {
-      useTimerStore.setState({ currentCycle: 1 });
-      render(<SessionIndicator />);
-      expect(screen.getByTestId("session-indicator")).toHaveTextContent(
-        "ポモドーロ 1/4",
-      );
-    });
+    it.each([
+      { currentCycle: 1, longBreakInterval: 4, expectedText: "ポモドーロ 1/4" },
+      { currentCycle: 2, longBreakInterval: 4, expectedText: "ポモドーロ 2/4" },
+      { currentCycle: 4, longBreakInterval: 4, expectedText: "ポモドーロ 4/4" },
+      {
+        currentCycle: 10,
+        longBreakInterval: 10,
+        expectedText: "ポモドーロ 10/10",
+      },
+    ])(
+      "should display the current cycle summary: $expectedText",
+      ({ currentCycle, longBreakInterval, expectedText }) => {
+        useTimerStore.setState({ currentCycle });
+        useSettingsStore.getState().setLongBreakInterval(longBreakInterval);
+        render(<SessionIndicator />);
 
-    it("should display current cycle and interval (2/4)", () => {
-      useTimerStore.setState({ currentCycle: 2 });
-      render(<SessionIndicator />);
-      expect(screen.getByTestId("session-indicator")).toHaveTextContent(
-        "ポモドーロ 2/4",
-      );
-    });
-
-    it("should display current cycle and interval (4/4)", () => {
-      useTimerStore.setState({ currentCycle: 4 });
-      render(<SessionIndicator />);
-      expect(screen.getByTestId("session-indicator")).toHaveTextContent(
-        "ポモドーロ 4/4",
-      );
-    });
+        expect(getSessionIndicator()).toHaveTextContent(expectedText);
+      },
+    );
 
     it("should update when cycle changes", () => {
       useTimerStore.setState({ currentCycle: 1 });
       const { rerender } = render(<SessionIndicator />);
-      expect(screen.getByTestId("session-indicator")).toHaveTextContent(
-        "ポモドーロ 1/4",
-      );
+      expect(getSessionIndicator()).toHaveTextContent("ポモドーロ 1/4");
 
       // Update cycle
       act(() => {
         useTimerStore.setState({ currentCycle: 3 });
       });
       rerender(<SessionIndicator />);
-      expect(screen.getByTestId("session-indicator")).toHaveTextContent(
-        "ポモドーロ 3/4",
-      );
+      expect(getSessionIndicator()).toHaveTextContent("ポモドーロ 3/4");
     });
   });
 
@@ -74,26 +63,20 @@ describe("SessionIndicator", () => {
       useTimerStore.setState({ currentCycle: 2 });
       useSettingsStore.getState().setLongBreakInterval(6);
       render(<SessionIndicator />);
-      expect(screen.getByTestId("session-indicator")).toHaveTextContent(
-        "ポモドーロ 2/6",
-      );
+      expect(getSessionIndicator()).toHaveTextContent("ポモドーロ 2/6");
     });
 
     it("should update when settings change", () => {
       useTimerStore.setState({ currentCycle: 1 });
       const { rerender } = render(<SessionIndicator />);
-      expect(screen.getByTestId("session-indicator")).toHaveTextContent(
-        "ポモドーロ 1/4",
-      );
+      expect(getSessionIndicator()).toHaveTextContent("ポモドーロ 1/4");
 
       // Change interval setting
       act(() => {
         useSettingsStore.getState().setLongBreakInterval(3);
       });
       rerender(<SessionIndicator />);
-      expect(screen.getByTestId("session-indicator")).toHaveTextContent(
-        "ポモドーロ 1/3",
-      );
+      expect(getSessionIndicator()).toHaveTextContent("ポモドーロ 1/3");
     });
   });
 
@@ -101,19 +84,8 @@ describe("SessionIndicator", () => {
     it("should have aria-label", () => {
       useTimerStore.setState({ currentCycle: 2 });
       render(<SessionIndicator />);
-      const indicator = screen.getByTestId("session-indicator");
+      const indicator = getSessionIndicator();
       expect(indicator).toHaveAttribute("aria-label", "ポモドーロ 2 / 4");
-    });
-  });
-
-  describe("Edge Cases", () => {
-    it("should handle large cycle numbers", () => {
-      useTimerStore.setState({ currentCycle: 10 });
-      useSettingsStore.getState().setLongBreakInterval(10);
-      render(<SessionIndicator />);
-      expect(screen.getByTestId("session-indicator")).toHaveTextContent(
-        "ポモドーロ 10/10",
-      );
     });
   });
 });

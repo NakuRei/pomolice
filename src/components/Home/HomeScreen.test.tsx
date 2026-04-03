@@ -58,7 +58,7 @@ describe("HomeScreen", () => {
     expect(
       screen.getByRole("heading", { name: "Pomolice" }),
     ).toBeInTheDocument();
-    expect(screen.getByTestId("timer-display")).toBeInTheDocument();
+    expect(screen.getByText("25:00")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "タイマーを開始" }),
     ).toBeInTheDocument();
