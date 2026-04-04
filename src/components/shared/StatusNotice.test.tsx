@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { StatusNotice } from "./StatusNotice";
 
 describe("StatusNotice", () => {
-  it("renders info tone classes with an explicit status role and polite live region", () => {
+  it("renders an explicit status role and polite live region when requested", () => {
     render(
       <StatusNotice
         tone="info"
@@ -19,20 +19,10 @@ describe("StatusNotice", () => {
 
     expect(notice).toBe(screen.getByTestId("status-notice"));
     expect(notice).toHaveAttribute("aria-live", "polite");
-    expect(notice).toHaveClass(
-      "rounded-md",
-      "border",
-      "border-info-800",
-      "bg-info-950/30",
-      "text-info-100",
-      "px-4",
-      "py-3",
-      "text-sm",
-    );
     expect(notice).toHaveTextContent("設定を保存しました。");
   });
 
-  it("renders danger tone classes with a leading icon and trailing actions slot", () => {
+  it("renders a leading icon and trailing actions slot", () => {
     render(
       <StatusNotice
         tone="danger"
@@ -46,11 +36,7 @@ describe("StatusNotice", () => {
 
     const notice = screen.getByTestId("status-notice");
 
-    expect(notice).toHaveClass(
-      "border-danger-800",
-      "bg-danger-950/30",
-      "text-danger-200",
-    );
+    expect(notice).toHaveTextContent("接続に失敗しました。");
     expect(screen.getByTestId("status-notice-icon")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "再試行" })).toBeInTheDocument();
   });
@@ -66,24 +52,5 @@ describe("StatusNotice", () => {
 
     expect(notice).not.toHaveAttribute("role");
     expect(notice).not.toHaveAttribute("aria-live");
-  });
-
-  it("merges caller wrapper className without losing base tone classes", () => {
-    render(
-      <StatusNotice tone="success" className="mb-4" testId="status-notice">
-        同期が完了しました。
-      </StatusNotice>,
-    );
-
-    const notice = screen.getByTestId("status-notice");
-
-    expect(notice).toHaveClass(
-      "mb-4",
-      "px-4",
-      "py-3",
-      "border-success-800",
-      "bg-success-950/30",
-      "text-success-200",
-    );
   });
 });

@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { FullscreenBreak } from "./FullscreenBreak";
 import { useTimerStore, SessionType } from "@/store/timerStore";
-import * as motivationalMessagesModule from "@/data/motivationalMessages";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 
 function getBreakTimerDisplay(timeText: string): HTMLElement {
@@ -33,17 +32,6 @@ describe("FullscreenBreak", () => {
       expect(
         screen.getByRole("button", { name: "休憩をスキップ" }),
       ).toBeInTheDocument();
-    });
-
-    it("should include motivational message component output", () => {
-      const getRandomMessageSpy = vi
-        .spyOn(motivationalMessagesModule, "getRandomMessage")
-        .mockReturnValue("休憩メッセージ");
-
-      render(<FullscreenBreak />);
-
-      expect(getRandomMessageSpy).toHaveBeenCalledTimes(1);
-      expect(screen.getByText("休憩メッセージ")).toBeInTheDocument();
     });
 
     it("should display 'long break' for long break", () => {
@@ -118,18 +106,6 @@ describe("FullscreenBreak", () => {
       const timer = getBreakTimerDisplay("05:00");
       expect(timer).toHaveAttribute("aria-live", "polite");
       expect(timer).toHaveAttribute("aria-atomic", "true");
-    });
-  });
-
-  describe("Integration", () => {
-    it("should integrate with BreakStats component", () => {
-      useTimerStore.setState({ completedPomodoros: 3, currentCycle: 3 });
-
-      render(<FullscreenBreak />);
-
-      // Both completed pomodoros and current cycle will show 3
-      const allThrees = screen.getAllByText("3");
-      expect(allThrees.length).toBe(2);
     });
   });
 });

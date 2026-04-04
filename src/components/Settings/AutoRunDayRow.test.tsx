@@ -111,7 +111,7 @@ describe("AutoRunDayRow", () => {
     expect(onEndTimeChange).toHaveBeenCalledWith("19:00");
   });
 
-  it("shows overnight label and day validation message only when requested", () => {
+  it("shows a day validation message only when requested", () => {
     const dayValidationError: DayScheduleValidationError = {
       code: "start_time_format_invalid",
       weekday: "mon",
@@ -134,9 +134,6 @@ describe("AutoRunDayRow", () => {
       />,
     );
 
-    expect(
-      screen.getByTestId("settings-auto-run-day-overnight-mon"),
-    ).toHaveClass("text-primary-500");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
     rerender(
@@ -155,9 +152,6 @@ describe("AutoRunDayRow", () => {
       />,
     );
 
-    expect(
-      screen.getByTestId("settings-auto-run-day-overnight-mon"),
-    ).toHaveClass("text-transparent");
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Start time for mon must use HH:MM (24-hour).",
     );

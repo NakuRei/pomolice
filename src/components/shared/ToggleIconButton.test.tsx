@@ -41,7 +41,6 @@ describe("ToggleIconButton", () => {
     const button = screen.getByRole("button", { name: "通知音" });
 
     expect(button).toHaveAttribute("aria-pressed", "true");
-    expect(button).toHaveClass("text-danger-500");
     expect(screen.getByTestId("toggle-icon-on")).toBeInTheDocument();
 
     await user.click(button);

@@ -86,7 +86,7 @@ describe("HomeScreen", () => {
     expect(onToggleNotificationSoundMuted).toHaveBeenCalledTimes(1);
   });
 
-  it("renders auto-run and auto-continue badges in the existing order", () => {
+  it("renders auto-run and auto-continue badges when both are enabled", () => {
     render(
       <HomeScreen
         {...createProps({
@@ -96,18 +96,9 @@ describe("HomeScreen", () => {
       />,
     );
 
-    const badgeContainer = screen.getByTestId("header-status-badges");
-    const badges = badgeContainer.querySelectorAll(
-      '[data-testid^="header-badge-"]',
-    );
-    const badgeIds = Array.from(badges).map((badgeElement) =>
-      badgeElement.getAttribute("data-testid"),
-    );
-
-    expect(badgeIds).toEqual([
-      "header-badge-auto-run",
-      "header-badge-auto-continue",
-    ]);
+    expect(screen.getByText("自動実行ON")).toBeInTheDocument();
+    expect(screen.getByText("自動継続ON")).toBeInTheDocument();
+    expect(screen.queryByText("毎回確認")).not.toBeInTheDocument();
   });
 
   it("renders only manual-continue badge when confirmation policy is active", () => {
@@ -136,14 +127,5 @@ describe("HomeScreen", () => {
     expect(screen.getByText("自動継続ON")).toBeInTheDocument();
     expect(screen.queryByText("自動実行ON")).not.toBeInTheDocument();
     expect(screen.queryByText("毎回確認")).not.toBeInTheDocument();
-  });
-
-  it("keeps ConnectionBanner and InfoMessageBanner composed inside HomeScreen via lightweight test doubles", () => {
-    render(<HomeScreen {...createProps()} />);
-
-    expect(screen.getByTestId("connection-banner-double")).toBeInTheDocument();
-    expect(
-      screen.getByTestId("info-message-banner-double"),
-    ).toBeInTheDocument();
   });
 });

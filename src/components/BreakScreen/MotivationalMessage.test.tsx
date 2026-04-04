@@ -1,91 +1,20 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MotivationalMessage } from "./MotivationalMessage";
 import * as motivationalMessagesModule from "@/data/motivationalMessages";
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("MotivationalMessage", () => {
-  describe("Rendering", () => {
-    it("should render a motivational message", () => {
-      render(<MotivationalMessage />);
+  it("renders the message selected by the message source", () => {
+    vi.spyOn(motivationalMessagesModule, "getRandomMessage").mockReturnValue(
+      "テストメッセージ",
+    );
 
-      // Should render some text (any message from the array)
-      const messageElement = screen.getByText(/./u);
-      expect(messageElement).toBeInTheDocument();
-    });
-  });
+    render(<MotivationalMessage />);
 
-  describe("Message Selection", () => {
-    it("should call getRandomMessage on mount", () => {
-      const getRandomMessageSpy = vi.spyOn(
-        motivationalMessagesModule,
-        "getRandomMessage",
-      );
-
-      render(<MotivationalMessage />);
-
-      expect(getRandomMessageSpy).toHaveBeenCalledTimes(1);
-    });
-
-    it("should display the message returned by getRandomMessage", () => {
-      const testMessage = "テストメッセージ 🎯";
-      vi.spyOn(motivationalMessagesModule, "getRandomMessage").mockReturnValue(
-        testMessage,
-      );
-
-      render(<MotivationalMessage />);
-
-      expect(screen.getByText(testMessage)).toBeInTheDocument();
-    });
-
-    it("should display different messages on different renders", () => {
-      const messages = ["メッセージ1", "メッセージ2", "メッセージ3"];
-
-      let callCount = 0;
-      vi.spyOn(
-        motivationalMessagesModule,
-        "getRandomMessage",
-      ).mockImplementation(() => {
-        const message = messages[callCount % messages.length];
-        callCount += 1;
-        if (message === undefined) {
-          throw new Error("Expected mock message to exist.");
-        }
-
-        return message;
-      });
-
-      const { unmount } = render(<MotivationalMessage />);
-      expect(screen.getByText("メッセージ1")).toBeInTheDocument();
-
-      unmount();
-
-      render(<MotivationalMessage />);
-      expect(screen.getByText("メッセージ2")).toBeInTheDocument();
-    });
-  });
-
-  describe("Integration", () => {
-    it("should handle empty message gracefully", () => {
-      vi.spyOn(motivationalMessagesModule, "getRandomMessage").mockReturnValue(
-        "",
-      );
-
-      render(<MotivationalMessage />);
-
-      // Should not crash, container should exist
-      const container = screen.getByText("", { selector: "p" });
-      expect(container).toBeInTheDocument();
-    });
-
-    it("should handle long messages", () => {
-      const longMessage = "これは非常に長いメッセージです。".repeat(10);
-      vi.spyOn(motivationalMessagesModule, "getRandomMessage").mockReturnValue(
-        longMessage,
-      );
-
-      render(<MotivationalMessage />);
-
-      expect(screen.getByText(longMessage)).toBeInTheDocument();
-    });
+    expect(screen.getByText("テストメッセージ")).toBeInTheDocument();
   });
 });

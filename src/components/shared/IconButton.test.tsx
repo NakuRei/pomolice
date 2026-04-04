@@ -24,7 +24,7 @@ describe("IconButton", () => {
     expect(handleClick).toHaveBeenCalledTimes(1);
   });
 
-  it("passes through disabled and appearance styling", () => {
+  it("passes through disabled state and title", () => {
     render(
       <IconButton label="削除" appearance="danger" disabled>
         <span>trash</span>
@@ -34,6 +34,6 @@ describe("IconButton", () => {
     const button = screen.getByRole("button", { name: "削除" });
 
     expect(button).toBeDisabled();
-    expect(button).toHaveClass("text-danger-500");
+    expect(button).toHaveAttribute("title", "削除");
   });
 });

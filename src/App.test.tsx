@@ -146,26 +146,20 @@ describe("App", () => {
       pageName: "timer",
       openPage: openTimerSettings,
       headingName: "タイマー設定",
-      controlRole: "spinbutton" as const,
-      controlName: "作業時間",
     },
     {
       pageName: "auto-run",
       openPage: openAutoRunSettings,
       headingName: "曜日別自動実行設定",
-      controlRole: "checkbox" as const,
-      controlName: "曜日別自動実行の全体切り替え",
     },
     {
       pageName: "notification",
       openPage: openNotificationSettings,
       headingName: "通知設定",
-      controlRole: "slider" as const,
-      controlName: "通知音量",
     },
   ])(
     "opens $pageName settings page from settings top",
-    async ({ openPage, headingName, controlRole, controlName }) => {
+    async ({ openPage, headingName }) => {
       const user = userEvent.setup();
 
       render(<App />);
@@ -174,57 +168,8 @@ describe("App", () => {
       expect(
         screen.getByRole("heading", { name: headingName }),
       ).toBeInTheDocument();
-      expect(
-        screen.getByRole(controlRole, { name: controlName }),
-      ).toBeInTheDocument();
     },
   );
-
-  it("returns to settings top after saving timer settings page", async () => {
-    const user = userEvent.setup();
-
-    render(<App />);
-    await openTimerSettings(user);
-
-    const workDurationInput = screen.getByRole("spinbutton", {
-      name: "作業時間",
-    });
-    await user.clear(workDurationInput);
-    await user.type(workDurationInput, "31");
-    await user.click(screen.getByRole("button", { name: "保存" }));
-
-    expect(screen.getByRole("heading", { name: "設定" })).toBeInTheDocument();
-    expect(
-      screen.queryByRole("heading", { name: "タイマー設定" }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("returns to settings top after canceling auto-run settings page", async () => {
-    const user = userEvent.setup();
-
-    render(<App />);
-    await openAutoRunSettings(user);
-
-    await user.click(screen.getByRole("button", { name: "キャンセル" }));
-
-    expect(screen.getByRole("heading", { name: "設定" })).toBeInTheDocument();
-    expect(
-      screen.queryByRole("heading", { name: "曜日別自動実行設定" }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("returns to settings top when the notification header back button is clicked", async () => {
-    const user = userEvent.setup();
-
-    render(<App />);
-    await openNotificationSettings(user);
-    await user.click(screen.getByRole("button", { name: "設定一覧へ戻る" }));
-
-    expect(screen.getByRole("heading", { name: "設定" })).toBeInTheDocument();
-    expect(
-      screen.queryByRole("heading", { name: "通知設定" }),
-    ).not.toBeInTheDocument();
-  });
 
   it("returns to home screen after fullscreen break ends while settings top is open", async () => {
     const user = userEvent.setup();

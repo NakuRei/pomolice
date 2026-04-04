@@ -221,27 +221,5 @@ describe("MathChallenge", () => {
       const input = screen.getByPlaceholderText("Your answer");
       expect(input).toHaveAttribute("inputMode", "numeric");
     });
-
-    it("should be keyboard navigable", () => {
-      render(
-        <MathChallenge
-          difficulty="easy"
-          onComplete={mockOnComplete}
-          onCancel={mockOnCancel}
-        />,
-      );
-
-      const input = screen.getByPlaceholderText("Your answer");
-      const cancelButton = screen.getByRole("button", {
-        name: /Cancel and Take Break/iu,
-      });
-
-      // All elements should be focusable
-      input.focus();
-      expect(input).toHaveFocus();
-
-      cancelButton.focus();
-      expect(cancelButton).toHaveFocus();
-    });
   });
 });

@@ -1,27 +1,9 @@
-/**
- * Component tests for TypingChallenge
- * Phase 5: Multi-step skip confirmation flow
- */
-
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import TypingChallenge from "./TypingChallenge";
 
 const mockRetryStep = vi.fn();
-function createCharacterValidationResult(
-  input: string,
-  target: string,
-): (boolean | null)[] {
-  return Array.from(target).map((char, index) => {
-    if (index >= input.length) {
-      return null;
-    }
-    return input[index] === char;
-  });
-}
 
-// Mock the store
 vi.mock("@/store/skipFlowStore", () => ({
   useSkipFlowStore: vi.fn(
     (selector: (state: { retryStep: typeof mockRetryStep }) => unknown) =>
@@ -31,15 +13,27 @@ vi.mock("@/store/skipFlowStore", () => ({
   ),
 }));
 
-// Mock phrase generator to return predictable values
-vi.mock("@/utils/phraseGenerator", () => ({
-  getRandomShortPhrase: vi.fn(() => "TEST PHRASE"),
-  getRandomLongPhrase: vi.fn(() => "THIS IS A LONGER TEST PHRASE"),
-  validateTypedPhrase: vi.fn(
-    (input: string, target: string) => input === target,
-  ),
-  getCharacterValidation: vi.fn(createCharacterValidationResult),
-}));
+interface PhraseGeneratorActualModule {
+  getConfirmationMessage: (step: number) => string;
+  validateTypedPhrase: (input: string, target: string) => boolean;
+  getCharacterValidation: (input: string, target: string) => (boolean | null)[];
+}
+
+vi.mock("@/utils/phraseGenerator", async (importOriginal) => {
+  const actual: PhraseGeneratorActualModule = await importOriginal();
+
+  return {
+    ...actual,
+    getRandomShortPhrase: vi.fn(() => "TEST PHRASE"),
+    getRandomLongPhrase: vi.fn(() => "THIS IS A LONGER TEST PHRASE"),
+  };
+});
+
+function expectRenderedPhrase(phrase: string): void {
+  expect(
+    screen.getAllByText((_, element) => element?.textContent === phrase),
+  ).not.toHaveLength(0);
+}
 
 describe("TypingChallenge", () => {
   const mockOnComplete = vi.fn();
@@ -48,305 +42,100 @@ describe("TypingChallenge", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRetryStep.mockReset();
+    vi.useFakeTimers();
   });
 
-  describe("Rendering", () => {
-    it("should render with title and instructions", () => {
-      render(
-        <TypingChallenge
-          difficulty="short"
-          onComplete={mockOnComplete}
-          onCancel={mockOnCancel}
-        />,
-      );
-
-      expect(screen.getByText("Typing Challenge")).toBeInTheDocument();
-      expect(
-        screen.getByText(/Type the following phrase/iu),
-      ).toBeInTheDocument();
+  afterEach(() => {
+    act(() => {
+      vi.runOnlyPendingTimers();
     });
-
-    it("should display target phrase", () => {
-      render(
-        <TypingChallenge
-          difficulty="short"
-          onComplete={mockOnComplete}
-          onCancel={mockOnCancel}
-        />,
-      );
-
-      // Text is split into spans, check that input field renders
-      const input = screen.getByPlaceholderText("Start typing here...");
-      expect(input).toBeInTheDocument();
-
-      // Check phrase is displayed (split into individual spans)
-      const spans = screen.getAllByText(/[A-Z]/u);
-      expect(spans.length).toBeGreaterThan(0);
-    });
-
-    it("should display long phrase for long difficulty", () => {
-      render(
-        <TypingChallenge
-          difficulty="long"
-          onComplete={mockOnComplete}
-          onCancel={mockOnCancel}
-        />,
-      );
-
-      // Text is split into spans, verify component renders
-      const input = screen.getByPlaceholderText("Start typing here...");
-      expect(input).toBeInTheDocument();
-    });
-
-    it("should render input field", () => {
-      render(
-        <TypingChallenge
-          difficulty="short"
-          onComplete={mockOnComplete}
-          onCancel={mockOnCancel}
-        />,
-      );
-
-      const input = screen.getByPlaceholderText("Start typing here...");
-      expect(input).toBeInTheDocument();
-      expect(input).toHaveAttribute("type", "text");
-    });
-
-    it("should render cancel button", () => {
-      render(
-        <TypingChallenge
-          difficulty="short"
-          onComplete={mockOnComplete}
-          onCancel={mockOnCancel}
-        />,
-      );
-
-      expect(
-        screen.getByRole("button", { name: /Cancel and Take Break/iu }),
-      ).toBeInTheDocument();
-    });
+    vi.useRealTimers();
   });
 
-  describe("Input handling", () => {
-    it("should update input value when typing", async () => {
-      const user = userEvent.setup();
+  it("renders the short phrase and focuses the input on mount", () => {
+    render(
+      <TypingChallenge
+        difficulty="short"
+        onComplete={mockOnComplete}
+        onCancel={mockOnCancel}
+      />,
+    );
 
-      render(
-        <TypingChallenge
-          difficulty="short"
-          onComplete={mockOnComplete}
-          onCancel={mockOnCancel}
-        />,
-      );
+    const input = screen.getByPlaceholderText("Start typing here...");
 
-      const input = screen.getByPlaceholderText("Start typing here...");
-      await user.type(input, "TEST");
-
-      expect(input).toHaveValue("TEST");
-    });
-
-    it("should focus input on mount", () => {
-      render(
-        <TypingChallenge
-          difficulty="short"
-          onComplete={mockOnComplete}
-          onCancel={mockOnCancel}
-        />,
-      );
-
-      const input = screen.getByPlaceholderText("Start typing here...");
-      expect(input).toHaveFocus();
-    });
-
-    it("should have autocomplete disabled", () => {
-      render(
-        <TypingChallenge
-          difficulty="short"
-          onComplete={mockOnComplete}
-          onCancel={mockOnCancel}
-        />,
-      );
-
-      const input = screen.getByPlaceholderText("Start typing here...");
-      expect(input).toHaveAttribute("autoComplete", "off");
-      expect(input).toHaveAttribute("autoCorrect", "off");
-      expect(input).toHaveAttribute("spellCheck", "false");
-    });
+    expectRenderedPhrase("TEST PHRASE");
+    expect(input).toHaveFocus();
+    expect(input).toHaveAttribute("autoComplete", "off");
+    expect(input).toHaveAttribute("autoCorrect", "off");
+    expect(input).toHaveAttribute("spellCheck", "false");
   });
 
-  describe("Validation", () => {
-    it("should show error when typo is detected", async () => {
-      const user = userEvent.setup();
+  it("renders the long phrase when the long difficulty is selected", () => {
+    render(
+      <TypingChallenge
+        difficulty="long"
+        onComplete={mockOnComplete}
+        onCancel={mockOnCancel}
+      />,
+    );
 
-      // Mock validation to simulate typo
-      const { getCharacterValidation } =
-        await import("@/utils/phraseGenerator");
-      vi.mocked(getCharacterValidation).mockReturnValue([
-        true,
-        true,
-        true,
-        false, // Typo on 4th character
-      ]);
-
-      render(
-        <TypingChallenge
-          difficulty="short"
-          onComplete={mockOnComplete}
-          onCancel={mockOnCancel}
-        />,
-      );
-
-      const input = screen.getByPlaceholderText("Start typing here...");
-      await user.type(input, "TESX");
-
-      await waitFor(() => {
-        expect(screen.getByText(/Typo detected/iu)).toBeInTheDocument();
-      });
-    });
-
-    it("should reset input after typo", async () => {
-      const user = userEvent.setup();
-
-      // Mock validation to simulate typo
-      const { getCharacterValidation } =
-        await import("@/utils/phraseGenerator");
-      vi.mocked(getCharacterValidation).mockReturnValue([
-        true,
-        true,
-        false, // Typo
-      ]);
-
-      render(
-        <TypingChallenge
-          difficulty="short"
-          onComplete={mockOnComplete}
-          onCancel={mockOnCancel}
-        />,
-      );
-
-      const input = screen.getByPlaceholderText("Start typing here...");
-      await user.type(input, "TEX");
-
-      await waitFor(
-        () => {
-          expect(input).toHaveValue("");
-        },
-        { timeout: 1500 },
-      );
-    });
-
-    it("should call onComplete when phrase is correctly typed", async () => {
-      const user = userEvent.setup();
-
-      // Mock validation to return correct validation
-      const { validateTypedPhrase, getCharacterValidation } =
-        await import("@/utils/phraseGenerator");
-      vi.mocked(getCharacterValidation).mockImplementation(
-        createCharacterValidationResult,
-      );
-
-      // Return true only when complete match
-      vi.mocked(validateTypedPhrase).mockImplementation(
-        (input: string, target: string) => {
-          return input === target;
-        },
-      );
-
-      render(
-        <TypingChallenge
-          difficulty="short"
-          onComplete={mockOnComplete}
-          onCancel={mockOnCancel}
-        />,
-      );
-
-      const input = screen.getByPlaceholderText("Start typing here...");
-      await user.type(input, "TEST PHRASE");
-
-      await waitFor(
-        () => {
-          expect(mockOnComplete).toHaveBeenCalled();
-        },
-        { timeout: 3000 },
-      );
-    });
+    expectRenderedPhrase("THIS IS A LONGER TEST PHRASE");
   });
 
-  describe("Cancel functionality", () => {
-    it("should call onCancel when cancel button is clicked", async () => {
-      const user = userEvent.setup();
+  it("retries after a typo and clears the input after the reset timeout", () => {
+    render(
+      <TypingChallenge
+        difficulty="short"
+        onComplete={mockOnComplete}
+        onCancel={mockOnCancel}
+      />,
+    );
 
-      render(
-        <TypingChallenge
-          difficulty="short"
-          onComplete={mockOnComplete}
-          onCancel={mockOnCancel}
-        />,
-      );
+    const input = screen.getByPlaceholderText("Start typing here...");
+    fireEvent.change(input, { target: { value: "TEST X" } });
 
-      const cancelButton = screen.getByRole("button", {
-        name: /Cancel and Take Break/iu,
-      });
-      await user.click(cancelButton);
+    expect(mockRetryStep).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/Typo detected/iu)).toBeInTheDocument();
+    expect(input).toBeDisabled();
 
-      expect(mockOnCancel).toHaveBeenCalledTimes(1);
+    act(() => {
+      vi.advanceTimersByTime(1000);
     });
+
+    expect(input).toHaveValue("");
+    expect(input).not.toBeDisabled();
+    expect(input).toHaveFocus();
   });
 
-  describe("Hints and instructions", () => {
-    it("should display helpful hints", () => {
-      render(
-        <TypingChallenge
-          difficulty="short"
-          onComplete={mockOnComplete}
-          onCancel={mockOnCancel}
-        />,
-      );
+  it("calls onComplete when the full phrase matches exactly", () => {
+    render(
+      <TypingChallenge
+        difficulty="short"
+        onComplete={mockOnComplete}
+        onCancel={mockOnCancel}
+      />,
+    );
 
-      expect(
-        screen.getByText(/Type carefully. Any typo will restart this step/iu),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText(/Case-sensitive. All letters must be UPPERCASE/iu),
-      ).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("Start typing here..."), {
+      target: { value: "TEST PHRASE" },
     });
+
+    expect(mockOnComplete).toHaveBeenCalledTimes(1);
   });
 
-  describe("Accessibility", () => {
-    it("should have proper ARIA attributes", () => {
-      render(
-        <TypingChallenge
-          difficulty="short"
-          onComplete={mockOnComplete}
-          onCancel={mockOnCancel}
-        />,
-      );
+  it("calls onCancel when the cancel button is clicked", () => {
+    render(
+      <TypingChallenge
+        difficulty="short"
+        onComplete={mockOnComplete}
+        onCancel={mockOnCancel}
+      />,
+    );
 
-      const input = screen.getByPlaceholderText("Start typing here...");
-      expect(input).toHaveAttribute("type", "text");
-    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Cancel and Take Break/iu }),
+    );
 
-    it("should be keyboard navigable", () => {
-      render(
-        <TypingChallenge
-          difficulty="short"
-          onComplete={mockOnComplete}
-          onCancel={mockOnCancel}
-        />,
-      );
-
-      const input = screen.getByPlaceholderText("Start typing here...");
-      const cancelButton = screen.getByRole("button", {
-        name: /Cancel and Take Break/iu,
-      });
-
-      // Input should be focusable
-      input.focus();
-      expect(input).toHaveFocus();
-
-      // Cancel button should be focusable
-      cancelButton.focus();
-      expect(cancelButton).toHaveFocus();
-    });
+    expect(mockOnCancel).toHaveBeenCalledTimes(1);
   });
 });

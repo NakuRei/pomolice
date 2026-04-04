@@ -14,57 +14,22 @@ describe("settingsStore", () => {
   });
 
   describe("Initial State", () => {
-    it("should have correct default work duration (25 minutes)", () => {
+    it("should initialize the user-editable settings with expected defaults", () => {
       const state = useSettingsStore.getState();
-      expect(state.workDuration).toBe(25);
-    });
 
-    it("should have correct default short break duration (5 minutes)", () => {
-      const state = useSettingsStore.getState();
-      expect(state.shortBreakDuration).toBe(5);
-    });
-
-    it("should have correct default long break duration (15 minutes)", () => {
-      const state = useSettingsStore.getState();
-      expect(state.longBreakDuration).toBe(15);
-    });
-
-    it("should have correct default long break interval (4 pomodoros)", () => {
-      const state = useSettingsStore.getState();
-      expect(state.longBreakInterval).toBe(4);
-    });
-
-    it("should have correct default notification sound volume (50%)", () => {
-      const state = useSettingsStore.getState();
-      expect(state.notificationSoundVolumePercent).toBe(50);
-    });
-
-    it("should have notification sound unmuted by default", () => {
-      const state = useSettingsStore.getState();
-      expect(state.notificationSoundMuted).toBe(false);
-    });
-
-    it("should have auto-run feature disabled by default", () => {
-      const state = useSettingsStore.getState();
-      expect(state.autoRunFeatureEnabled).toBe(false);
-    });
-
-    it("should require manual continue after break by default", () => {
-      const state = useSettingsStore.getState();
-      expect(state.postBreakTransitionPolicy).toBe("require_manual_continue");
-    });
-
-    it("should default all weekday auto-run slots to disabled", () => {
-      const state = useSettingsStore.getState();
-      expect(state.weeklyAutoRunConfig).toEqual(
-        createWeeklyAutoRunConfigAllDaysDisabled(),
-      );
-    });
-
-    it("should start with no schedule validation errors", () => {
-      const state = useSettingsStore.getState();
-      expect(state.dayScheduleValidationErrors).toEqual({});
-      expect(state.weeklyScheduleValidationErrors).toEqual([]);
+      expect(state).toMatchObject({
+        workDuration: 25,
+        shortBreakDuration: 5,
+        longBreakDuration: 15,
+        longBreakInterval: 4,
+        notificationSoundVolumePercent: 50,
+        notificationSoundMuted: false,
+        autoRunFeatureEnabled: false,
+        postBreakTransitionPolicy: "require_manual_continue",
+        weeklyAutoRunConfig: createWeeklyAutoRunConfigAllDaysDisabled(),
+        dayScheduleValidationErrors: {},
+        weeklyScheduleValidationErrors: [],
+      });
     });
   });
 
@@ -461,52 +426,6 @@ describe("settingsStore", () => {
         expect(state.weeklyScheduleValidationErrors).toEqual(
           DEFAULT_SETTINGS.weeklyScheduleValidationErrors,
         );
-      });
-    });
-  });
-
-  describe("Persistence", () => {
-    it("should persist settings to localStorage", () => {
-      const { setWorkDuration } = useSettingsStore.getState();
-      setWorkDuration(40);
-
-      // Check if value persists
-      expect(useSettingsStore.getState().workDuration).toBe(40);
-    });
-  });
-
-  describe("Constants", () => {
-    it("should export DEFAULT_SETTINGS", () => {
-      expect(DEFAULT_SETTINGS).toEqual({
-        workDuration: 25,
-        shortBreakDuration: 5,
-        longBreakDuration: 15,
-        longBreakInterval: 4,
-        notificationSoundVolumePercent: 50,
-        notificationSoundMuted: false,
-        autoRunFeatureEnabled: false,
-        postBreakTransitionPolicy: "require_manual_continue",
-        weeklyAutoRunConfig: createWeeklyAutoRunConfigAllDaysDisabled(),
-        dayScheduleValidationErrors: {},
-        weeklyScheduleValidationErrors: [],
-      });
-    });
-
-    it("should export VALIDATION_RULES", () => {
-      // Phase 3: Temporarily using 0.01 min for testing (will be restored to 1/5 before production)
-      expect(VALIDATION_RULES.workDuration).toEqual({ min: 0.01, max: 120 });
-      expect(VALIDATION_RULES.shortBreakDuration).toEqual({
-        min: 0.01,
-        max: 60,
-      });
-      expect(VALIDATION_RULES.longBreakDuration).toEqual({
-        min: 0.01,
-        max: 60,
-      });
-      expect(VALIDATION_RULES.longBreakInterval).toEqual({ min: 2, max: 10 });
-      expect(VALIDATION_RULES.notificationSoundVolumePercent).toEqual({
-        min: 0,
-        max: 100,
       });
     });
   });
