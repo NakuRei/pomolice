@@ -1,7 +1,7 @@
-import React from "react";
 import ReactDOM from "react-dom/client";
-import App from "./App";
+import { AppRoot } from "./AppRoot";
 import { initializeFrontendLogDevtools } from "./logging/devtools";
+import { resolveCreateRootOptions } from "./logging/createRootErrorCallbacks";
 import "./index.css";
 
 const rootElement = document.getElementById("root");
@@ -12,8 +12,6 @@ if (!rootElement) {
 
 void initializeFrontendLogDevtools();
 
-ReactDOM.createRoot(rootElement).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
+const rootOptions = resolveCreateRootOptions(import.meta.env.PROD);
+
+ReactDOM.createRoot(rootElement, rootOptions).render(<AppRoot />);

@@ -1,11 +1,17 @@
+import type { AppScreen } from "../types/appScreen";
+
 export type LogFieldValue = string | number | boolean | null;
 
 export type FrontendLogSeverity = "trace" | "debug" | "info" | "warn" | "error";
 
 export type RedactionClassification = "public" | "sensitive" | "secret";
 
+export type ErrorBoundaryScope = "fullscreen_break" | "settings" | "app";
+export type SettingsScreen = Exclude<AppScreen, "home">;
+
 export type FrontendScope =
   | "bootstrap"
+  | "error_boundary"
   | "notifications"
   | "settings_sync"
   | "timer_sync";
@@ -27,6 +33,27 @@ export interface FrontendLogEventDefinition<
 
 export interface FrontendFieldsByEvent {
   "app.startup.completed": NoFields;
+  "error_boundary.boundary_render_error_caught": {
+    boundary_scope: ErrorBoundaryScope;
+    component_stack?: string;
+    current_screen?: SettingsScreen;
+    failure_message?: string;
+  };
+  "error_boundary.recoverable_render_error": {
+    component_stack?: string;
+    failure_message?: string;
+  };
+  "error_boundary.render_error_reset": {
+    boundary_scope: ErrorBoundaryScope;
+  };
+  "error_boundary.root_render_error_caught": {
+    component_stack?: string;
+    failure_message?: string;
+  };
+  "error_boundary.uncaught_render_error": {
+    component_stack?: string;
+    failure_message?: string;
+  };
   "notification.permission.request_failed": {
     failure_message?: string;
   };
@@ -69,6 +96,62 @@ export const frontendLogEventCatalog = {
     messageTemplate: "application startup completed",
     allowedFields: [],
     redactionClassification: {},
+  },
+  "error_boundary.boundary_render_error_caught": {
+    eventId: "error_boundary.boundary_render_error_caught",
+    severity: "error",
+    messageTemplate: "error boundary caught render error",
+    allowedFields: [
+      "boundary_scope",
+      "current_screen",
+      "failure_message",
+      "component_stack",
+    ],
+    redactionClassification: {
+      boundary_scope: "public",
+      current_screen: "public",
+      failure_message: "sensitive",
+      component_stack: "sensitive",
+    },
+  },
+  "error_boundary.recoverable_render_error": {
+    eventId: "error_boundary.recoverable_render_error",
+    severity: "warn",
+    messageTemplate: "root reported recoverable render error",
+    allowedFields: ["failure_message", "component_stack"],
+    redactionClassification: {
+      failure_message: "sensitive",
+      component_stack: "sensitive",
+    },
+  },
+  "error_boundary.render_error_reset": {
+    eventId: "error_boundary.render_error_reset",
+    severity: "info",
+    messageTemplate: "error boundary reset render error state",
+    allowedFields: ["boundary_scope"],
+    redactionClassification: {
+      boundary_scope: "public",
+    },
+  },
+  "error_boundary.root_render_error_caught": {
+    eventId: "error_boundary.root_render_error_caught",
+    severity: "error",
+    messageTemplate: "root caught render error",
+    allowedFields: ["failure_message", "component_stack"],
+    redactionClassification: {
+      failure_message: "sensitive",
+      component_stack: "sensitive",
+    },
+  },
+  "error_boundary.uncaught_render_error": {
+    eventId: "error_boundary.uncaught_render_error",
+    severity: "error",
+    messageTemplate: "root reported uncaught render error",
+    allowedFields: ["failure_message", "component_stack"],
+    redactionClassification: {
+      failure_message: "sensitive",
+      component_stack: "sensitive",
+    },
   },
   "notification.permission.request_failed": {
     eventId: "notification.permission.request_failed",
@@ -143,6 +226,13 @@ export const frontendLogEventCatalog = {
 
 export const FRONTEND_LOG_EVENT_IDS = {
   appStartupCompleted: "app.startup.completed",
+  errorBoundaryBoundaryRenderErrorCaught:
+    "error_boundary.boundary_render_error_caught",
+  errorBoundaryRecoverableRenderError:
+    "error_boundary.recoverable_render_error",
+  errorBoundaryRenderErrorReset: "error_boundary.render_error_reset",
+  errorBoundaryRootRenderErrorCaught: "error_boundary.root_render_error_caught",
+  errorBoundaryUncaughtRenderError: "error_boundary.uncaught_render_error",
   notificationPermissionRequestFailed: "notification.permission.request_failed",
   notificationSessionCompleteNotificationFailed:
     "notification.session_complete_notification_failed",

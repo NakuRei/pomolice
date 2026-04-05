@@ -33,7 +33,11 @@ const RESERVED_FIELD_CLASSIFICATION_BY_NAME = {
 } as const satisfies Record<ReservedFieldName, RedactionClassification>;
 
 const SENSITIVE_VALUE_MAX_LENGTH = 256;
-const STACKTRACE_MAX_LENGTH = 2048;
+const STACK_LIKE_SENSITIVE_VALUE_MAX_LENGTH = 2048;
+const STACK_LIKE_SENSITIVE_FIELD_NAME_SET = new Set<string>([
+  EXCEPTION_STACKTRACE_FIELD,
+  "component_stack",
+]);
 
 let productionEnvironmentOverride: boolean | undefined = undefined;
 
@@ -202,6 +206,10 @@ function redactSensitiveValue(value: string, maxLength: number): string {
   return truncateSensitiveValue(redactHighRiskTokens(value), maxLength);
 }
 
+function isStackLikeSensitiveFieldName(fieldName: string): boolean {
+  return STACK_LIKE_SENSITIVE_FIELD_NAME_SET.has(fieldName);
+}
+
 function redactFieldValue(
   fieldName: string,
   fieldValue: LogFieldValue,
@@ -213,12 +221,13 @@ function redactFieldValue(
     return REDACTED_VALUE;
   }
 
-  if (fieldName === EXCEPTION_STACKTRACE_FIELD) {
-    return redactSensitiveValue(stringValue, STACKTRACE_MAX_LENGTH);
-  }
-
   if (classification === "sensitive") {
-    return redactSensitiveValue(stringValue, SENSITIVE_VALUE_MAX_LENGTH);
+    return redactSensitiveValue(
+      stringValue,
+      isStackLikeSensitiveFieldName(fieldName)
+        ? STACK_LIKE_SENSITIVE_VALUE_MAX_LENGTH
+        : SENSITIVE_VALUE_MAX_LENGTH,
+    );
   }
 
   return stringValue;

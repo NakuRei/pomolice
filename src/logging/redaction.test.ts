@@ -181,4 +181,40 @@ describe("buildSanitizedFrontendLogRecord()", () => {
       "stack-secret",
     );
   });
+
+  it("treats component_stack as a stack-like sensitive field", async () => {
+    const { buildSanitizedFrontendLogRecord } = await import("./redaction");
+    const longComponentStack = `stack api_key=stack-secret ${"x".repeat(2300)}`;
+    const longFailureMessage = `message api_key=field-secret ${"x".repeat(400)}`;
+
+    const record = buildSanitizedFrontendLogRecord(
+      "error_boundary.boundary_render_error_caught",
+      "error_boundary",
+      {
+        boundary_scope: "settings",
+        component_stack: longComponentStack,
+        current_screen: "settingsTimer",
+        failure_message: longFailureMessage,
+      },
+      undefined,
+    );
+
+    expect(record.keyValues.component_stack).toContain("[REDACTED]");
+    expect(record.keyValues.component_stack).not.toContain("stack-secret");
+    expect(record.keyValues.component_stack).toMatch(/\.\.\.\[TRUNCATED\]$/u);
+    expect(record.keyValues.component_stack).toBeDefined();
+    expect(record.keyValues.failure_message).not.toContain("field-secret");
+    expect(record.keyValues.failure_message).toMatch(/\.\.\.\[TRUNCATED\]$/u);
+    expect(record.keyValues.failure_message).toBeDefined();
+
+    const componentStack = record.keyValues.component_stack;
+    const failureMessage = record.keyValues.failure_message;
+
+    if (componentStack === undefined || failureMessage === undefined) {
+      throw new Error("Expected redacted error-boundary fields to be defined");
+    }
+
+    expect(componentStack.length).toBeGreaterThan(256);
+    expect(failureMessage.length).toBeLessThan(componentStack.length);
+  });
 });
