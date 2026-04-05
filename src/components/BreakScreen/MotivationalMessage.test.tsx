@@ -8,13 +8,20 @@ afterEach(() => {
 });
 
 describe("MotivationalMessage", () => {
-  it("renders the message selected by the message source", () => {
-    vi.spyOn(motivationalMessagesModule, "getRandomMessage").mockReturnValue(
-      "テストメッセージ",
-    );
+  it("keeps the initially selected message across rerenders", () => {
+    const getRandomMessage = vi
+      .spyOn(motivationalMessagesModule, "getRandomMessage")
+      .mockReturnValueOnce("最初のメッセージ")
+      .mockReturnValueOnce("次のメッセージ");
 
-    render(<MotivationalMessage />);
+    const { rerender } = render(<MotivationalMessage />);
 
-    expect(screen.getByText("テストメッセージ")).toBeInTheDocument();
+    expect(screen.getByText("最初のメッセージ")).toBeInTheDocument();
+
+    rerender(<MotivationalMessage />);
+
+    expect(getRandomMessage).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("最初のメッセージ")).toBeInTheDocument();
+    expect(screen.queryByText("次のメッセージ")).not.toBeInTheDocument();
   });
 });

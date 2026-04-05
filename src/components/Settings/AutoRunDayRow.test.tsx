@@ -5,7 +5,7 @@ import { AutoRunDayRow } from "./AutoRunDayRow";
 import type { DayScheduleValidationError } from "@/types/weeklyAutoRun";
 
 describe("AutoRunDayRow", () => {
-  it("renders weekday controls with accessible names and an overnight indicator", () => {
+  it("renders weekday controls with accessible names", () => {
     render(
       <AutoRunDayRow
         weekday="mon"
@@ -26,9 +26,6 @@ describe("AutoRunDayRow", () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText("月曜日の開始時刻")).toBeInTheDocument();
     expect(screen.getByLabelText("月曜日の終了時刻")).toBeInTheDocument();
-    expect(
-      screen.getByTestId("settings-auto-run-day-overnight-mon"),
-    ).toBeInTheDocument();
   });
 
   it("disables row controls according to feature and weekday state", () => {

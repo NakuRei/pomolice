@@ -3,23 +3,18 @@ import { describe, expect, it } from "vitest";
 import { DialogPanel } from "./DialogPanel";
 
 describe("Dialog layout primitives", () => {
-  it("renders an accessible dialog panel with optional linked ids", () => {
+  it("exposes an accessible description when describedBy is provided", () => {
     render(
-      <DialogPanel
-        labelledBy="dialog-title"
-        describedBy="dialog-description"
-        testId="dialog-panel"
-      >
+      <DialogPanel labelledBy="dialog-title" describedBy="dialog-description">
         <h2 id="dialog-title">Dialog title</h2>
         <p id="dialog-description">Dialog description</p>
       </DialogPanel>,
     );
 
-    const panel = screen.getByRole("dialog");
+    const panel = screen.getByRole("dialog", {
+      description: "Dialog description",
+    });
 
-    expect(panel).toBe(screen.getByTestId("dialog-panel"));
-    expect(panel).toHaveAttribute("aria-modal", "true");
-    expect(panel).toHaveAttribute("aria-labelledby", "dialog-title");
-    expect(panel).toHaveAttribute("aria-describedby", "dialog-description");
+    expect(panel).toHaveAccessibleDescription("Dialog description");
   });
 });

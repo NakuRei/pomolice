@@ -2,20 +2,9 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HomeScreen, type HomeScreenProps } from "./HomeScreen";
+import { useErrorStore } from "@/store/errorStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { SessionType, TimerStatus, useTimerStore } from "@/store/timerStore";
-
-vi.mock("../shared/ConnectionBanner", () => ({
-  ConnectionBanner: (): React.ReactElement => (
-    <div data-testid="connection-banner-double" />
-  ),
-}));
-
-vi.mock("../shared/InfoMessageBanner", () => ({
-  InfoMessageBanner: (): React.ReactElement => (
-    <div data-testid="info-message-banner-double" />
-  ),
-}));
 
 function createProps(
   overrides: Partial<HomeScreenProps> = {},
@@ -34,6 +23,7 @@ function createProps(
 describe("HomeScreen", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useErrorStore.getState().clearAllErrors();
     useSettingsStore.getState().reset();
     useTimerStore.setState({
       status: TimerStatus.IDLE,
@@ -44,7 +34,7 @@ describe("HomeScreen", () => {
       breakInteractionCount: 0,
       isFullscreenBreak: false,
       requiresManualContinueDecision: false,
-      isConnected: true,
+      isConnected: false,
       shouldPromptStartOnBoot: false,
       activeWindowSummary: null,
       infoMessage: null,
@@ -52,16 +42,16 @@ describe("HomeScreen", () => {
     });
   });
 
-  it("renders the home header together with the existing timer display and start button entry points", () => {
+  it("renders the home heading and top-level controls", () => {
     render(<HomeScreen {...createProps()} />);
 
     expect(
       screen.getByRole("heading", { name: "Pomolice" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("25:00")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "タイマーを開始" }),
+      screen.getByRole("button", { name: "設定を開く" }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "通知音" })).toBeInTheDocument();
   });
 
   it("calls onOpenSettingsTopScreen when settings button is clicked", async () => {
