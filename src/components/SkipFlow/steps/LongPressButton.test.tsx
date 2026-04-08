@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import LongPressButton from "./LongPressButton";
 
 const interactionCases = [
@@ -29,13 +30,14 @@ describe("LongPressButton", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.useFakeTimers();
   });
 
   afterEach(() => {
-    act(() => {
-      vi.runOnlyPendingTimers();
-    });
+    if (vi.isFakeTimers()) {
+      act(() => {
+        vi.runOnlyPendingTimers();
+      });
+    }
     vi.useRealTimers();
   });
 
@@ -56,6 +58,9 @@ describe("LongPressButton", () => {
   it.each(interactionCases)(
     "shows the early-release notice when a $label press ends too soon",
     ({ start, end }) => {
+      // Fake timers are opt-in per test because userEvent clicks deadlock here under Vitest, even with advanceTimers.
+      vi.useFakeTimers();
+
       render(
         <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />,
       );
@@ -74,6 +79,8 @@ describe("LongPressButton", () => {
   );
 
   it("resets when the pointer leaves during an active press", () => {
+    vi.useFakeTimers();
+
     render(
       <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />,
     );
@@ -97,6 +104,8 @@ describe("LongPressButton", () => {
   });
 
   it("calls onComplete after the required hold duration", () => {
+    vi.useFakeTimers();
+
     render(
       <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />,
     );
@@ -112,6 +121,8 @@ describe("LongPressButton", () => {
   });
 
   it("clears the early-release notice after the timeout", () => {
+    vi.useFakeTimers();
+
     render(
       <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />,
     );
@@ -135,12 +146,14 @@ describe("LongPressButton", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("calls onCancel when the cancel button is clicked", () => {
+  it("calls onCancel when the cancel button is clicked", async () => {
+    const user = userEvent.setup();
+
     render(
       <LongPressButton onComplete={mockOnComplete} onCancel={mockOnCancel} />,
     );
 
-    fireEvent.click(
+    await user.click(
       screen.getByRole("button", { name: /Cancel and Take Break/iu }),
     );
 

@@ -1,11 +1,19 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { FullscreenBreak } from "./FullscreenBreak";
 import { useTimerStore, SessionType } from "@/store/timerStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 
 function getBreakTimerDisplay(timeText: string): HTMLElement {
   return screen.getByText(timeText);
+}
+
+async function renderFullscreenBreakWithSkipFlowOpen(): Promise<void> {
+  const user = userEvent.setup();
+  render(<FullscreenBreak />);
+
+  await user.click(screen.getByRole("button", { name: "休憩をスキップ" }));
 }
 
 describe("FullscreenBreak", () => {
@@ -67,11 +75,8 @@ describe("FullscreenBreak", () => {
   });
 
   describe("Skip Button", () => {
-    it("should show skip flow modal when clicked", () => {
-      render(<FullscreenBreak />);
-
-      const skipButton = screen.getByRole("button", { name: "休憩をスキップ" });
-      fireEvent.click(skipButton);
+    it("should show skip flow modal when clicked", async () => {
+      await renderFullscreenBreakWithSkipFlowOpen();
 
       // Phase 5: Shows 10-step skip flow instead of simple dialog
       expect(screen.getByText(/Step/iu)).toBeInTheDocument();
@@ -82,19 +87,17 @@ describe("FullscreenBreak", () => {
   });
 
   describe("Skip Confirmation Dialog", () => {
-    beforeEach(() => {
-      render(<FullscreenBreak />);
-      const skipButton = screen.getByRole("button", { name: "休憩をスキップ" });
-      fireEvent.click(skipButton);
-    });
-
     // Phase 5: Skip flow modal with 10 steps
-    it("should show skip flow progress indicator", () => {
+    it("should show skip flow progress indicator", async () => {
+      await renderFullscreenBreakWithSkipFlowOpen();
+
       expect(screen.getByText(/Step/iu)).toBeInTheDocument();
       expect(screen.getByText(/of 10/iu)).toBeInTheDocument();
     });
 
-    it("should have take break button", () => {
+    it("should have take break button", async () => {
+      await renderFullscreenBreakWithSkipFlowOpen();
+
       expect(screen.getByText(/No, Take Break/iu)).toBeInTheDocument();
     });
   });

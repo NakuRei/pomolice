@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import TypingChallenge from "./TypingChallenge";
 
 const mockRetryStep = vi.fn();
@@ -42,13 +43,14 @@ describe("TypingChallenge", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRetryStep.mockReset();
-    vi.useFakeTimers();
   });
 
   afterEach(() => {
-    act(() => {
-      vi.runOnlyPendingTimers();
-    });
+    if (vi.isFakeTimers()) {
+      act(() => {
+        vi.runOnlyPendingTimers();
+      });
+    }
     vi.useRealTimers();
   });
 
@@ -83,6 +85,9 @@ describe("TypingChallenge", () => {
   });
 
   it("retries after a typo and clears the input after the reset timeout", () => {
+    // Fake timers are opt-in per test because userEvent clicks deadlock here under Vitest, even with advanceTimers.
+    vi.useFakeTimers();
+
     render(
       <TypingChallenge
         difficulty="short"
@@ -123,7 +128,9 @@ describe("TypingChallenge", () => {
     expect(mockOnComplete).toHaveBeenCalledTimes(1);
   });
 
-  it("calls onCancel when the cancel button is clicked", () => {
+  it("calls onCancel when the cancel button is clicked", async () => {
+    const user = userEvent.setup();
+
     render(
       <TypingChallenge
         difficulty="short"
@@ -132,7 +139,7 @@ describe("TypingChallenge", () => {
       />,
     );
 
-    fireEvent.click(
+    await user.click(
       screen.getByRole("button", { name: /Cancel and Take Break/iu }),
     );
 
