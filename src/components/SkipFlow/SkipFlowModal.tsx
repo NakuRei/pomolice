@@ -6,7 +6,7 @@
  * Displays appropriate step component based on current step.
  */
 
-import { useEffect } from "react";
+import { useEffect, useId } from "react";
 import { useSkipFlowStore, SKIP_FLOW_STEPS } from "@/store/skipFlowStore";
 import ProgressIndicator from "./ProgressIndicator";
 import ConfirmationStep from "./steps/ConfirmationStep";
@@ -14,6 +14,8 @@ import TypingChallenge from "./steps/TypingChallenge";
 import MathChallenge from "./steps/MathChallenge";
 import LongPressButton from "./steps/LongPressButton";
 import FinalWarning from "./steps/FinalWarning";
+import { DialogOverlay } from "../shared/DialogOverlay";
+import { DialogPanel } from "../shared/DialogPanel";
 
 const CONFIRMATION_STEPS = new Set<number>([
   SKIP_FLOW_STEPS.CONFIRMATION_1,
@@ -38,6 +40,8 @@ export default function SkipFlowModal({
   onComplete,
   onCancel,
 }: SkipFlowModalProps): React.ReactElement {
+  const titleId = useId();
+  const descriptionId = useId();
   const {
     currentStep,
     nextStep,
@@ -136,14 +140,24 @@ export default function SkipFlowModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-backdrop/90">
-      <div className="w-full max-w-2xl rounded-lg border border-border bg-surface p-8 text-on-surface shadow-2xl shadow-shadow/40">
+    <DialogOverlay className="bg-backdrop/90">
+      <DialogPanel
+        labelledBy={titleId}
+        describedBy={descriptionId}
+        className="max-w-2xl shadow-2xl shadow-shadow/40"
+      >
+        <h2 id={titleId} className="sr-only">
+          休憩スキップ確認
+        </h2>
+        <p id={descriptionId} className="sr-only">
+          休憩をスキップするには、この確認フローを順番に完了してください。各ステップの指示に従って進めてください。
+        </p>
         {/* Progress Indicator */}
         <ProgressIndicator currentStep={currentStep} totalSteps={10} />
 
         {/* Step Content */}
         <div className="mt-8">{renderStep()}</div>
-      </div>
-    </div>
+      </DialogPanel>
+    </DialogOverlay>
   );
 }

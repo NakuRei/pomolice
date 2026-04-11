@@ -6,6 +6,7 @@
  * Each with progressively stronger warning messages
  */
 
+import { useEffect, useRef } from "react";
 import { getConfirmationMessage } from "@/utils/phraseGenerator";
 
 interface ConfirmationStepProps {
@@ -22,7 +23,12 @@ export default function ConfirmationStep({
   onConfirm,
   onCancel,
 }: ConfirmationStepProps): React.ReactElement {
+  const cancelButtonReference = useRef<HTMLButtonElement>(null);
   const message = getConfirmationMessage(step);
+
+  useEffect(() => {
+    cancelButtonReference.current?.focus();
+  }, [step]);
 
   // Get warning level for styling (higher step = stronger warning)
   const getWarningStyle = ():
@@ -62,6 +68,7 @@ export default function ConfirmationStep({
       {/* Action buttons */}
       <div className="flex justify-center space-x-4">
         <button
+          ref={cancelButtonReference}
           onClick={onCancel}
           className="rounded-lg bg-success-700 px-8 py-3 font-semibold text-on-success transition-colors hover:bg-success-800 focus:ring-2 focus:ring-success-600 focus:ring-offset-2 focus:ring-offset-surface focus:outline-none"
         >

@@ -36,6 +36,11 @@ export default function LongPressButton({
   const releaseResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const pressButtonReference = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    pressButtonReference.current?.focus();
+  }, []);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -149,6 +154,7 @@ export default function LongPressButton({
     >
       <div className="flex flex-col items-center space-y-4">
         <button
+          ref={pressButtonReference}
           onMouseDown={handleMouseDown}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseLeave}

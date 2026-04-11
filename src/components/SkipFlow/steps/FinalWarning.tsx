@@ -6,6 +6,8 @@
  * Last chance to reconsider before actually skipping the break
  */
 
+import { useEffect, useRef } from "react";
+
 interface FinalWarningProps {
   onConfirm: () => void;
   onCancel: () => void;
@@ -18,6 +20,12 @@ export default function FinalWarning({
   onConfirm,
   onCancel,
 }: FinalWarningProps): React.ReactElement {
+  const cancelButtonReference = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    cancelButtonReference.current?.focus();
+  }, []);
+
   return (
     <div className="space-y-8">
       {/* Final warning header */}
@@ -70,6 +78,7 @@ export default function FinalWarning({
       {/* Action buttons */}
       <div className="flex justify-center space-x-4">
         <button
+          ref={cancelButtonReference}
           onClick={onCancel}
           className="flex-1 rounded-lg bg-success-700 px-8 py-4 text-lg font-bold text-on-success transition-colors hover:bg-success-800 focus:ring-4 focus:ring-success-600 focus:ring-offset-2 focus:ring-offset-surface focus:outline-none"
         >

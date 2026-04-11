@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fireEvent,
   render,
@@ -16,9 +16,41 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockResolvedValue(undefined),
 }));
 
-function renderWorkingEmergencyStopButton(): void {
+function createRootFixture(): HTMLDivElement {
+  document.body.innerHTML = "";
+
+  const root = document.createElement("div");
+  root.id = "root";
+  document.body.appendChild(root);
+
+  return root;
+}
+
+function isRootInert(root: HTMLElement): boolean {
+  const inertValue = (root as HTMLElement & { inert?: boolean }).inert;
+
+  return inertValue || root.hasAttribute("inert");
+}
+
+function expectRootHidden(root: HTMLElement, isHidden: boolean): void {
+  if (isHidden) {
+    expect(root).toHaveAttribute("aria-hidden", "true");
+  } else {
+    expect(root).not.toHaveAttribute("aria-hidden");
+  }
+
+  expect(isRootInert(root)).toBe(isHidden);
+}
+
+function renderEmergencyStopButton(): HTMLDivElement {
+  const root = createRootFixture();
+  render(<EmergencyStopButton />, { container: root });
+  return root;
+}
+
+function renderWorkingEmergencyStopButton(): HTMLDivElement {
   useTimerStore.setState({ status: TimerStatus.WORKING });
-  render(<EmergencyStopButton />);
+  return renderEmergencyStopButton();
 }
 
 async function openEmergencyStopDialog(
@@ -45,10 +77,9 @@ describe("EmergencyStopButton", () => {
       isConnected: false,
     });
   });
-
   describe("Visibility", () => {
     it("should not render when timer is idle", () => {
-      render(<EmergencyStopButton />);
+      renderEmergencyStopButton();
       const button = screen.queryByRole("button", { name: "緊急停止" });
       expect(button).not.toBeInTheDocument();
     });
@@ -83,6 +114,32 @@ describe("EmergencyStopButton", () => {
         within(dialog).getByRole("button", { name: "停止する" }),
       ).toBeInTheDocument();
     });
+
+    it("keeps Tab and Shift+Tab focus cycling inside the dialog after portal migration", async () => {
+      const user = userEvent.setup();
+      renderWorkingEmergencyStopButton();
+
+      const dialog = await openEmergencyStopDialog(user);
+      const cancelButton = within(dialog).getByRole("button", {
+        name: "キャンセル",
+      });
+      const confirmButton = within(dialog).getByRole("button", {
+        name: "停止する",
+      });
+
+      await waitFor(() => {
+        expect(cancelButton).toHaveFocus();
+      });
+
+      await user.tab();
+      expect(confirmButton).toHaveFocus();
+
+      await user.tab();
+      expect(cancelButton).toHaveFocus();
+
+      await user.tab({ shift: true });
+      expect(confirmButton).toHaveFocus();
+    });
   });
 
   describe("Dialog Actions", () => {
@@ -100,6 +157,21 @@ describe("EmergencyStopButton", () => {
         expect(
           screen.queryByRole("dialog", { name: "緊急停止しますか？" }),
         ).not.toBeInTheDocument();
+      });
+    });
+
+    it("returns focus to the emergency stop trigger after cancel", async () => {
+      const user = userEvent.setup();
+      renderWorkingEmergencyStopButton();
+      const trigger = screen.getByRole("button", { name: "緊急停止" });
+
+      const dialog = await openEmergencyStopDialog(user);
+      await user.click(
+        within(dialog).getByRole("button", { name: "キャンセル" }),
+      );
+
+      await waitFor(() => {
+        expect(trigger).toHaveFocus();
       });
     });
 
@@ -130,6 +202,19 @@ describe("EmergencyStopButton", () => {
         ).not.toBeInTheDocument();
       });
       expect(invoke).not.toHaveBeenCalled();
+    });
+
+    it("returns focus to the emergency stop trigger after Escape", async () => {
+      const user = userEvent.setup();
+      renderWorkingEmergencyStopButton();
+      const trigger = screen.getByRole("button", { name: "緊急停止" });
+
+      await openEmergencyStopDialog(user);
+      fireEvent.keyDown(window, { key: "Escape" });
+
+      await waitFor(() => {
+        expect(trigger).toHaveFocus();
+      });
     });
 
     it("should not change timer status when cancel is clicked", async () => {
@@ -182,6 +267,22 @@ describe("EmergencyStopButton", () => {
           screen.getByRole("dialog", { name: "緊急停止しますか？" }),
         ).getByRole("alert"),
       ).toHaveTextContent("緊急停止に失敗しました。もう一度試してください");
+    });
+
+    it("marks #root inert while the dialog is open and removes inert after the dialog closes", async () => {
+      const user = userEvent.setup();
+      const root = renderWorkingEmergencyStopButton();
+
+      const dialog = await openEmergencyStopDialog(user);
+      expectRootHidden(root, true);
+
+      await user.click(
+        within(dialog).getByRole("button", { name: "キャンセル" }),
+      );
+
+      await waitFor(() => {
+        expectRootHidden(root, false);
+      });
     });
   });
 
