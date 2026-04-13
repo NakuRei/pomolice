@@ -1,4 +1,4 @@
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 use tauri_plugin_notification::NotificationExt;
 
 type RunResult = std::result::Result<(), Box<dyn std::error::Error>>;
@@ -41,13 +41,10 @@ pub fn run() -> RunResult {
         .setup(|app| {
             let app_state = state::AppState::new(app.handle());
 
-            let tick_payload =
+            let initialization_outcome =
                 tauri::async_runtime::block_on(async { app_state.initialize().await });
-            let has_persisted_state = tick_payload.is_some();
-
-            if let Some(payload) = tick_payload {
-                let _ = app.emit("timer_tick", &payload);
-            }
+            let has_persisted_state =
+                initialization_outcome.restore_status == state::AppRestoreStatus::Restored;
 
             app.manage(app_state);
 
@@ -58,6 +55,14 @@ pub fn run() -> RunResult {
                     None,
                 );
             }
+
+            tauri::async_runtime::block_on(async {
+                session_pipeline::lib_handle_startup_restore(
+                    app.handle().clone(),
+                    initialization_outcome.clone(),
+                )
+                .await;
+            });
 
             let scheduler_app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -71,11 +76,7 @@ pub fn run() -> RunResult {
                     ("has_persisted_state", has_persisted_state.to_string()),
                     (
                         "restored_state_status",
-                        if has_persisted_state {
-                            "running".to_string()
-                        } else {
-                            "idle".to_string()
-                        },
+                        format!("{:?}", initialization_outcome.restore_status),
                     ),
                 ],
             );

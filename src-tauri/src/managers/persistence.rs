@@ -3,7 +3,6 @@
 
 use atomic_write_file::AtomicWriteFile;
 use chrono::{DateTime, Utc};
-use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
@@ -14,29 +13,15 @@ use crate::logging_event::{log_error_event, log_info_event, log_warn_event, Back
 use crate::managers::clock::{Clock, SystemClock};
 use crate::types::{
     ScheduledStopState, SessionType, TimerSettings, TimerStartSource, TimerState, TimerStatus,
-    WeeklyAutoRunConfig, PERSISTED_STATE_SCHEMA_VERSION_V3,
+    WeeklyAutoRunConfig, PERSISTED_STATE_SCHEMA_VERSION_V4,
 };
 
+#[derive(Debug, Clone, Copy, Deserialize)]
+struct PersistedSchemaEnvelope {
+    schema_version: u32,
+}
+
 /// Persisted timer state stored in `timer_state.json`.
-///
-/// Usage example:
-/// ```rust,ignore
-/// let persisted = PersistedState {
-///     schema_version: 3,
-///     status: TimerStatus::Working,
-///     remaining_seconds: 1200,
-///     session_type: SessionType::Work,
-///     current_cycle: 2,
-///     completed_pomodoros: 1,
-///     post_break_decision_pending: false,
-///     settings: TimerSettings::default(),
-///     saved_at: chrono::Utc::now(),
-///     auto_run_feature_enabled: true,
-///     weekly_auto_run_config: WeeklyAutoRunConfig::default(),
-///     timer_start_source: Some(TimerStartSource::ManualInsideWindow),
-///     scheduled_stop_state: ScheduledStopState::Pending,
-/// };
-/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct PersistedState {
     pub schema_version: u32,
@@ -51,12 +36,20 @@ pub(crate) struct PersistedState {
     pub saved_at: DateTime<Utc>,
     #[serde(default)]
     pub auto_run_feature_enabled: bool,
-    #[serde(default)]
     pub weekly_auto_run_config: WeeklyAutoRunConfig,
     #[serde(default)]
     pub timer_start_source: Option<TimerStartSource>,
     #[serde(default)]
     pub scheduled_stop_state: ScheduledStopState,
+}
+
+pub(crate) enum PersistenceLoadOutcome {
+    NoState,
+    Restored {
+        timer_state: TimerState,
+        saved_at_utc: DateTime<Utc>,
+    },
+    UnsupportedSchemaFallback,
 }
 
 struct RestoredSessionState {
@@ -92,14 +85,14 @@ fn normalize_pending_post_break_decision(
 
     if state.status != TimerStatus::Idle
         || state.session_type != SessionType::Work
-        || state.remaining_seconds != settings.work_duration_secs
+        || state.remaining_seconds != settings.work_duration_secs.get()
     {
         log_restore_normalized(state);
     }
 
     state.status = TimerStatus::Idle;
     state.session_type = SessionType::Work;
-    state.remaining_seconds = settings.work_duration_secs;
+    state.remaining_seconds = settings.work_duration_secs.get();
     state.timer_start_source = None;
     state.scheduled_stop_state = ScheduledStopState::None;
 }
@@ -112,7 +105,7 @@ fn normalize_restored_break_session(state: &mut RestoredSessionState, settings: 
     log_restore_normalized(state);
     state.status = TimerStatus::Idle;
     state.session_type = SessionType::Work;
-    state.remaining_seconds = settings.work_duration_secs;
+    state.remaining_seconds = settings.work_duration_secs.get();
     state.completed_pomodoros = state.completed_pomodoros.saturating_sub(1);
     state.timer_start_source = None;
     state.scheduled_stop_state = ScheduledStopState::None;
@@ -133,38 +126,50 @@ fn adjusted_remaining_seconds(state: &RestoredSessionState, elapsed_seconds: u64
 }
 
 impl PersistedState {
-    /// Build persisted schema v3 from current runtime state.
-    pub(crate) fn from_timer_state(state: &TimerState, clock: &dyn Clock) -> Self {
+    pub(crate) fn from_timer_state(state: TimerState, clock: &dyn Clock) -> Self {
+        let TimerState {
+            status,
+            remaining_seconds,
+            session_type,
+            current_cycle,
+            completed_pomodoros,
+            post_break_decision_pending,
+            settings,
+            auto_run_feature_enabled,
+            weekly_auto_run_config,
+            timer_start_source,
+            scheduled_stop_state,
+            ..
+        } = state;
+
         Self {
-            schema_version: PERSISTED_STATE_SCHEMA_VERSION_V3,
-            status: state.status,
-            remaining_seconds: state.remaining_seconds,
-            session_type: state.session_type,
-            current_cycle: state.current_cycle,
-            completed_pomodoros: state.completed_pomodoros,
-            post_break_decision_pending: state.post_break_decision_pending,
-            settings: state.settings.clone(),
+            schema_version: PERSISTED_STATE_SCHEMA_VERSION_V4,
+            status,
+            remaining_seconds,
+            session_type,
+            current_cycle,
+            completed_pomodoros,
+            post_break_decision_pending,
+            settings,
             saved_at: clock.now_utc(),
-            auto_run_feature_enabled: state.auto_run_feature_enabled,
-            weekly_auto_run_config: state.weekly_auto_run_config.clone(),
-            timer_start_source: state.timer_start_source,
-            scheduled_stop_state: state.scheduled_stop_state,
+            auto_run_feature_enabled,
+            weekly_auto_run_config,
+            timer_start_source,
+            scheduled_stop_state,
         }
     }
 
-    /// Calculate elapsed seconds since this state was saved.
     pub(crate) fn elapsed_seconds_since_save(&self, clock: &dyn Clock) -> u64 {
         let now = clock.now_utc();
         let elapsed = now.signed_duration_since(self.saved_at);
         u64::try_from(elapsed.num_seconds().max(0)).unwrap_or_default()
     }
 
-    /// Convert persisted state into `TimerState` with schema migration.
     pub(crate) fn into_timer_state(self, clock: &dyn Clock) -> TimerState {
         let elapsed_seconds = self.elapsed_seconds_since_save(clock);
 
         let PersistedState {
-            schema_version,
+            schema_version: _,
             status,
             remaining_seconds,
             session_type,
@@ -178,21 +183,6 @@ impl PersistedState {
             timer_start_source,
             scheduled_stop_state,
         } = self;
-
-        if schema_version != PERSISTED_STATE_SCHEMA_VERSION_V3 {
-            let expected_schema_version = PERSISTED_STATE_SCHEMA_VERSION_V3;
-            log_warn_event(
-                BackendLogEvent::StoragePersistenceSchemaVersionUnsupported,
-                &[
-                    ("schema_version", schema_version.to_string()),
-                    (
-                        "expected_schema_version",
-                        expected_schema_version.to_string(),
-                    ),
-                ],
-            );
-            return TimerState::default();
-        }
 
         let mut restored_state = RestoredSessionState {
             status,
@@ -254,32 +244,43 @@ fn normalize_recovered_session_stop_behavior(
 /// Manager for state persistence.
 pub(crate) struct PersistenceManager {
     clock: Arc<dyn Clock + Send + Sync>,
+    state_file_path: Option<PathBuf>,
 }
 
 impl PersistenceManager {
-    /// Create a new persistence manager.
-    pub(crate) fn new(clock: Arc<dyn Clock + Send + Sync>) -> Self {
-        Self { clock }
+    pub(crate) fn new(clock: Arc<dyn Clock + Send + Sync>, app_data_dir: Option<PathBuf>) -> Self {
+        let state_file_path = app_data_dir.map(|path| path.join("timer_state.json"));
+        Self {
+            clock,
+            state_file_path,
+        }
     }
 
-    /// Get the path to the state file.
-    fn get_state_file_path() -> Option<PathBuf> {
-        ProjectDirs::from("io.github", "NakuRei", "pomolice").map(|dirs| {
-            let data_dir = dirs.data_dir();
-            data_dir.join("timer_state.json")
+    pub(crate) async fn save_state(&self, timer_state: TimerState) {
+        let Some(path) = self.state_file_path.clone() else {
+            log_warn_event(BackendLogEvent::StoragePersistencePathUnavailable, &[]);
+            return;
+        };
+
+        let clock = Arc::clone(&self.clock);
+        log_info_event(
+            BackendLogEvent::StoragePersistenceWriteStarted,
+            &[("path", path.display().to_string())],
+        );
+
+        let path_for_task = path.clone();
+        match tokio::task::spawn_blocking(move || {
+            Self::save_state_to_path(clock.as_ref(), timer_state, &path_for_task)
         })
-    }
-
-    /// Save timer state to disk.
-    pub(crate) fn save_state(&self, state: &TimerState) {
-        let persisted_state = PersistedState::from_timer_state(state, self.clock.as_ref());
-
-        if let Some(path) = Self::get_state_file_path() {
-            log_info_event(
-                BackendLogEvent::StoragePersistenceWriteStarted,
-                &[("path", path.display().to_string())],
-            );
-            if let Err(write_error) = Self::save_persisted_state_to_path(&persisted_state, &path) {
+        .await
+        {
+            Ok(Ok(())) => {
+                log_info_event(
+                    BackendLogEvent::StoragePersistenceWriteCompleted,
+                    &[("path", path.display().to_string())],
+                );
+            }
+            Ok(Err(write_error)) => {
                 log_error_event(
                     BackendLogEvent::StoragePersistenceWriteFailed,
                     &[
@@ -288,24 +289,52 @@ impl PersistenceManager {
                     ],
                     None,
                 );
-            } else {
-                log_info_event(
-                    BackendLogEvent::StoragePersistenceWriteCompleted,
-                    &[("path", path.display().to_string())],
+            }
+            Err(join_error) => {
+                log_error_event(
+                    BackendLogEvent::StoragePersistenceWriteFailed,
+                    &[
+                        ("path", path.display().to_string()),
+                        ("error_message", join_error.to_string()),
+                    ],
+                    None,
                 );
             }
-        } else {
-            log_warn_event(BackendLogEvent::StoragePersistencePathUnavailable, &[]);
         }
     }
 
-    /// Load timer state and the persisted save timestamp.
-    pub(crate) fn load_state_with_saved_at_utc(&self) -> Option<(TimerState, DateTime<Utc>)> {
-        let path = Self::get_state_file_path()?;
-        let persisted_state = Self::load_persisted_state_from_path(&path)?;
-        let saved_at_utc = persisted_state.saved_at;
-        let timer_state = persisted_state.into_timer_state(self.clock.as_ref());
-        Some((timer_state, saved_at_utc))
+    pub(crate) async fn load_state(&self) -> PersistenceLoadOutcome {
+        let Some(path) = self.state_file_path.clone() else {
+            log_warn_event(BackendLogEvent::StoragePersistencePathUnavailable, &[]);
+            return PersistenceLoadOutcome::NoState;
+        };
+
+        let clock = Arc::clone(&self.clock);
+        let path_for_task = path.clone();
+        match tokio::task::spawn_blocking(move || {
+            Self::load_state_from_path(clock.as_ref(), &path_for_task)
+        })
+        .await
+        {
+            Ok(outcome) => outcome,
+            Err(join_error) => {
+                log_error_event(
+                    BackendLogEvent::StoragePersistenceReadFailed,
+                    &[("path", path.display().to_string())],
+                    Some(&join_error),
+                );
+                PersistenceLoadOutcome::NoState
+            }
+        }
+    }
+
+    fn save_state_to_path(
+        clock: &dyn Clock,
+        timer_state: TimerState,
+        path: &Path,
+    ) -> std::result::Result<(), String> {
+        let persisted_state = PersistedState::from_timer_state(timer_state, clock);
+        Self::save_persisted_state_to_path(&persisted_state, path)
     }
 
     fn save_persisted_state_to_path(
@@ -334,13 +363,13 @@ impl PersistenceManager {
         Ok(())
     }
 
-    fn load_persisted_state_from_path(path: &Path) -> Option<PersistedState> {
+    fn load_state_from_path(clock: &dyn Clock, path: &Path) -> PersistenceLoadOutcome {
         if !path.exists() {
             log_info_event(
                 BackendLogEvent::StoragePersistenceNoStateFile,
                 &[("path", path.display().to_string())],
             );
-            return None;
+            return PersistenceLoadOutcome::NoState;
         }
 
         log_info_event(
@@ -356,9 +385,37 @@ impl PersistenceManager {
                     &[("path", path.display().to_string())],
                     Some(&read_error),
                 );
-                return None;
+                return PersistenceLoadOutcome::NoState;
             }
         };
+
+        let envelope = match serde_json::from_str::<PersistedSchemaEnvelope>(&raw_json) {
+            Ok(envelope) => envelope,
+            Err(deserialize_error) => {
+                log_warn_event(
+                    BackendLogEvent::StoragePersistenceParseFailed,
+                    &[
+                        ("path", path.display().to_string()),
+                        ("error_message", deserialize_error.to_string()),
+                    ],
+                );
+                return PersistenceLoadOutcome::NoState;
+            }
+        };
+
+        if envelope.schema_version != PERSISTED_STATE_SCHEMA_VERSION_V4 {
+            log_warn_event(
+                BackendLogEvent::StoragePersistenceSchemaVersionUnsupported,
+                &[
+                    ("schema_version", envelope.schema_version.to_string()),
+                    (
+                        "expected_schema_version",
+                        PERSISTED_STATE_SCHEMA_VERSION_V4.to_string(),
+                    ),
+                ],
+            );
+            return PersistenceLoadOutcome::UnsupportedSchemaFallback;
+        }
 
         let persisted_state = match serde_json::from_str::<PersistedState>(&raw_json) {
             Ok(parsed) => parsed,
@@ -370,24 +427,22 @@ impl PersistenceManager {
                         ("error_message", deserialize_error.to_string()),
                     ],
                 );
-                return None;
+                return PersistenceLoadOutcome::NoState;
             }
         };
 
         log_info_event(BackendLogEvent::StoragePersistenceLoaded, &[]);
-        Some(persisted_state)
-    }
-
-    #[cfg(test)]
-    fn load_state_from_path(clock: &dyn Clock, path: &Path) -> Option<TimerState> {
-        let persisted_state = Self::load_persisted_state_from_path(path)?;
-        Some(persisted_state.into_timer_state(clock))
+        let saved_at_utc = persisted_state.saved_at;
+        PersistenceLoadOutcome::Restored {
+            timer_state: persisted_state.into_timer_state(clock),
+            saved_at_utc,
+        }
     }
 }
 
 impl Default for PersistenceManager {
     fn default() -> Self {
-        Self::new(Arc::new(SystemClock))
+        Self::new(Arc::new(SystemClock), None)
     }
 }
 
@@ -395,26 +450,29 @@ impl Default for PersistenceManager {
 mod tests {
     use super::*;
     use crate::managers::clock::testing::FixedClock;
+    use crate::types::{PERSISTED_STATE_SCHEMA_VERSION_V3, PERSISTED_STATE_SCHEMA_VERSION_V4};
     use chrono::{Local, TimeZone};
     use serde_json::json;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn create_test_state_file_path(test_name: &str) -> PathBuf {
+    fn create_temp_dir(test_name: &str) -> PathBuf {
         let timestamp_nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time should be after unix epoch")
             .as_nanos();
 
-        std::env::temp_dir().join(format!(
-            "pomolice-persistence-{}-{}-{}.json",
+        let path = std::env::temp_dir().join(format!(
+            "pomolice-persistence-{}-{}-{}",
             test_name,
             std::process::id(),
             timestamp_nanos
-        ))
+        ));
+        fs::create_dir_all(&path).expect("temp directory should be created");
+        path
     }
 
-    fn remove_test_state_file(path: &Path) {
-        let _ = fs::remove_file(path);
+    fn cleanup_temp_dir(path: &Path) {
+        let _ = fs::remove_dir_all(path);
     }
 
     fn create_utc_datetime(
@@ -430,408 +488,190 @@ mod tests {
             .expect("valid UTC datetime")
     }
 
-    fn create_fixed_clock_for_utc_datetime(now_utc: DateTime<Utc>) -> Arc<FixedClock> {
+    fn fixed_clock(now_utc: DateTime<Utc>) -> Arc<FixedClock> {
         Arc::new(FixedClock::new(now_utc.with_timezone(&Local)))
     }
 
-    #[test]
-    fn test_elapsed_seconds_calculation() {
-        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
-        let fixed_clock =
-            create_fixed_clock_for_utc_datetime(saved_at_utc + chrono::Duration::seconds(30));
-
-        let persisted = PersistedState {
-            schema_version: PERSISTED_STATE_SCHEMA_VERSION_V3,
-            status: TimerStatus::Working,
-            remaining_seconds: 100,
-            session_type: SessionType::Work,
-            current_cycle: 1,
-            completed_pomodoros: 0,
-            post_break_decision_pending: false,
-            settings: TimerSettings::default(),
-            saved_at: saved_at_utc,
-            auto_run_feature_enabled: false,
-            weekly_auto_run_config: WeeklyAutoRunConfig::default(),
-            timer_start_source: Some(TimerStartSource::ManualOutsideWindow),
-            scheduled_stop_state: ScheduledStopState::None,
-        };
-
-        let elapsed = persisted.elapsed_seconds_since_save(fixed_clock.as_ref());
-        assert_eq!(elapsed, 30);
+    fn default_weekly_config_json() -> serde_json::Value {
+        json!({
+            "mon": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
+            "tue": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
+            "wed": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
+            "thu": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
+            "fri": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
+            "sat": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
+            "sun": { "enabled": false, "start_time": "09:00", "end_time": "18:00" }
+        })
     }
 
-    #[test]
-    fn test_elapsed_seconds_calculation_clamps_negative_values_to_zero() {
-        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
-        let fixed_clock =
-            create_fixed_clock_for_utc_datetime(saved_at_utc - chrono::Duration::seconds(30));
-
-        let persisted = PersistedState {
-            schema_version: PERSISTED_STATE_SCHEMA_VERSION_V3,
-            status: TimerStatus::Working,
-            remaining_seconds: 100,
-            session_type: SessionType::Work,
-            current_cycle: 1,
-            completed_pomodoros: 0,
-            post_break_decision_pending: false,
-            settings: TimerSettings::default(),
-            saved_at: saved_at_utc,
-            auto_run_feature_enabled: false,
-            weekly_auto_run_config: WeeklyAutoRunConfig::default(),
-            timer_start_source: Some(TimerStartSource::ManualOutsideWindow),
-            scheduled_stop_state: ScheduledStopState::None,
-        };
-
-        let elapsed = persisted.elapsed_seconds_since_save(fixed_clock.as_ref());
-        assert_eq!(elapsed, 0);
-    }
-
-    #[test]
-    fn test_state_file_path() {
-        let path = PersistenceManager::get_state_file_path();
-        assert!(path.is_some());
-        assert!(path
-            .expect("state file path should exist")
-            .ends_with("timer_state.json"));
-    }
-
-    #[test]
-    fn test_save_state_writes_schema_version_three() {
-        let path = create_test_state_file_path("save_schema_v3");
-        let fixed_clock =
-            create_fixed_clock_for_utc_datetime(create_utc_datetime(2025, 2, 1, 9, 0, 0));
-
-        let state = TimerState {
-            status: TimerStatus::Working,
-            auto_run_feature_enabled: true,
-            timer_start_source: Some(TimerStartSource::ManualInsideWindow),
-            scheduled_stop_state: ScheduledStopState::Pending,
-            ..TimerState::default()
-        };
-
-        let persisted_state = PersistedState::from_timer_state(&state, fixed_clock.as_ref());
-        PersistenceManager::save_persisted_state_to_path(&persisted_state, &path)
-            .expect("state should be written");
-
-        let raw_json = fs::read_to_string(&path).expect("saved json should be readable");
-        let parsed_json: serde_json::Value =
-            serde_json::from_str(&raw_json).expect("saved json should be valid");
-
-        assert_eq!(
-            parsed_json["schema_version"],
-            json!(PERSISTED_STATE_SCHEMA_VERSION_V3)
-        );
-        assert_eq!(
-            parsed_json["timer_start_source"],
-            json!("manual_inside_window")
-        );
-        assert_eq!(parsed_json["scheduled_stop_state"], json!("pending"));
-
-        remove_test_state_file(&path);
-    }
-
-    #[test]
-    fn test_load_state_schema_v2_resets_to_default_state() {
-        let path = create_test_state_file_path("load_schema_v2");
-        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
-        let fixed_clock = create_fixed_clock_for_utc_datetime(saved_at_utc);
-
-        let legacy_schema_json = json!({
-            "schema_version": 2,
+    fn base_persisted_state_json(
+        schema_version: u32,
+        saved_at_utc: DateTime<Utc>,
+    ) -> serde_json::Value {
+        json!({
+            "schema_version": schema_version,
             "status": "working",
             "remaining_seconds": 1200,
             "session_type": "work",
             "current_cycle": 2,
             "completed_pomodoros": 1,
-            "post_break_decision_pending": true,
-            "settings": {
-                "work_duration_secs": 1500,
-                "short_break_duration_secs": 300,
-                "long_break_duration_secs": 900,
-                "long_break_interval": 4,
-                "post_break_transition_policy": "start_next_work_automatically"
-            },
-            "saved_at": saved_at_utc,
-            "auto_run_feature_enabled": true,
-            "weekly_auto_run_config": {
-                "mon": { "enabled": true, "start_time": "09:00", "end_time": "18:00" },
-                "tue": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
-                "wed": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
-                "thu": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
-                "fri": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
-                "sat": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
-                "sun": { "enabled": false, "start_time": "09:00", "end_time": "18:00" }
-            },
-            "timer_start_source": "manual_inside_window",
-            "scheduled_stop_state": "pending"
-        });
-
-        fs::write(
-            &path,
-            serde_json::to_string_pretty(&legacy_schema_json)
-                .expect("legacy schema json should serialize"),
-        )
-        .expect("legacy schema json should be writable");
-
-        let loaded_state = PersistenceManager::load_state_from_path(fixed_clock.as_ref(), &path)
-            .expect("state should load");
-
-        assert_eq!(loaded_state.status, TimerStatus::Idle);
-        assert_eq!(loaded_state.session_type, SessionType::Work);
-        assert_eq!(
-            loaded_state.remaining_seconds,
-            TimerSettings::default().work_duration_secs
-        );
-        assert!(!loaded_state.auto_run_feature_enabled);
-        assert!(!loaded_state.post_break_decision_pending);
-        assert_eq!(
-            loaded_state.weekly_auto_run_config,
-            WeeklyAutoRunConfig::default()
-        );
-        assert!(loaded_state.timer_start_source.is_none());
-        assert_eq!(loaded_state.scheduled_stop_state, ScheduledStopState::None);
-
-        remove_test_state_file(&path);
-    }
-
-    #[test]
-    fn test_load_state_unknown_schema_version_uses_safe_fallback() {
-        let path = create_test_state_file_path("load_unknown_schema");
-        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
-        let fixed_clock = create_fixed_clock_for_utc_datetime(saved_at_utc);
-
-        let unknown_schema_json = json!({
-            "schema_version": 99,
-            "status": "on_break",
-            "remaining_seconds": 240,
-            "session_type": "short_break",
-            "current_cycle": 3,
-            "completed_pomodoros": 2,
             "post_break_decision_pending": false,
             "settings": {
                 "work_duration_secs": 1500,
                 "short_break_duration_secs": 300,
                 "long_break_duration_secs": 900,
-                "long_break_interval": 4
+                "long_break_interval": 4,
+                "post_break_transition_policy": "require_manual_continue"
             },
             "saved_at": saved_at_utc,
             "auto_run_feature_enabled": true,
-            "weekly_auto_run_config": {
-                "mon": { "enabled": true, "start_time": "09:00", "end_time": "18:00" },
-                "tue": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
-                "wed": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
-                "thu": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
-                "fri": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
-                "sat": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
-                "sun": { "enabled": false, "start_time": "09:00", "end_time": "18:00" }
-            },
+            "weekly_auto_run_config": default_weekly_config_json(),
             "timer_start_source": "manual_inside_window",
             "scheduled_stop_state": "pending"
-        });
+        })
+    }
+
+    #[tokio::test]
+    async fn test_save_state_writes_schema_version_four() {
+        let temp_dir = create_temp_dir("save-schema-v4");
+        let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
+        let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
+
+        let state = TimerState {
+            status: TimerStatus::Working,
+            timer_start_source: Some(TimerStartSource::ManualInsideWindow),
+            scheduled_stop_state: ScheduledStopState::Pending,
+            ..TimerState::default()
+        };
+
+        persistence.save_state(state).await;
+
+        let raw_json = fs::read_to_string(temp_dir.join("timer_state.json"))
+            .expect("saved json should be readable");
+        let parsed_json: serde_json::Value =
+            serde_json::from_str(&raw_json).expect("saved json should be valid");
+
+        assert_eq!(
+            parsed_json["schema_version"],
+            json!(PERSISTED_STATE_SCHEMA_VERSION_V4)
+        );
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_new_with_app_data_dir_saves_to_injected_path_and_loads_back() {
+        let temp_dir = create_temp_dir("save-load-injected-path");
+        let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
+        let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
+
+        let state = TimerState {
+            status: TimerStatus::Working,
+            remaining_seconds: 777,
+            ..TimerState::default()
+        };
+
+        persistence.save_state(state).await;
+        let outcome = persistence.load_state().await;
+
+        match outcome {
+            PersistenceLoadOutcome::Restored { timer_state, .. } => {
+                assert_eq!(timer_state.status, TimerStatus::Working);
+                assert_eq!(timer_state.remaining_seconds, 777);
+            }
+            PersistenceLoadOutcome::NoState => panic!("expected restored state, got no state"),
+            PersistenceLoadOutcome::UnsupportedSchemaFallback => {
+                panic!("expected restored state, got unsupported schema fallback")
+            }
+        }
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_load_v3_file_returns_unsupported_schema_fallback() {
+        let temp_dir = create_temp_dir("load-v3");
+        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
+        let clock = fixed_clock(saved_at_utc);
+        let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
 
         fs::write(
-            &path,
-            serde_json::to_string_pretty(&unknown_schema_json).expect("json should serialize"),
+            temp_dir.join("timer_state.json"),
+            serde_json::to_string_pretty(&base_persisted_state_json(
+                PERSISTED_STATE_SCHEMA_VERSION_V3,
+                saved_at_utc,
+            ))
+            .expect("legacy json should serialize"),
         )
-        .expect("unknown schema json should be writable");
+        .expect("legacy json should be writable");
 
-        let loaded_state = PersistenceManager::load_state_from_path(fixed_clock.as_ref(), &path)
-            .expect("state should load");
+        assert!(matches!(
+            persistence.load_state().await,
+            PersistenceLoadOutcome::UnsupportedSchemaFallback
+        ));
 
-        assert_eq!(loaded_state.status, TimerStatus::Idle);
-        assert_eq!(loaded_state.session_type, SessionType::Work);
-        assert_eq!(
-            loaded_state.remaining_seconds,
-            TimerSettings::default().work_duration_secs
-        );
-        assert!(!loaded_state.auto_run_feature_enabled);
-        assert!(!loaded_state.post_break_decision_pending);
-        assert_eq!(
-            loaded_state.weekly_auto_run_config,
-            WeeklyAutoRunConfig::default()
-        );
-        assert!(loaded_state.timer_start_source.is_none());
-        assert_eq!(loaded_state.scheduled_stop_state, ScheduledStopState::None);
-
-        remove_test_state_file(&path);
+        cleanup_temp_dir(&temp_dir);
     }
 
-    #[test]
-    fn test_running_restore_keeps_pending_stop_state() {
+    #[tokio::test]
+    async fn test_load_invalid_v4_schedule_data_returns_no_state() {
+        let temp_dir = create_temp_dir("invalid-v4-schedule");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
-        let fixed_clock = create_fixed_clock_for_utc_datetime(saved_at_utc);
+        let clock = fixed_clock(saved_at_utc);
+        let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
 
-        let persisted = PersistedState {
-            schema_version: PERSISTED_STATE_SCHEMA_VERSION_V3,
-            status: TimerStatus::Working,
-            remaining_seconds: 800,
-            session_type: SessionType::Work,
-            current_cycle: 2,
-            completed_pomodoros: 1,
-            post_break_decision_pending: false,
-            settings: TimerSettings::default(),
-            saved_at: saved_at_utc,
-            auto_run_feature_enabled: true,
-            weekly_auto_run_config: WeeklyAutoRunConfig::default(),
-            timer_start_source: Some(TimerStartSource::ManualInsideWindow),
-            scheduled_stop_state: ScheduledStopState::Pending,
-        };
+        let mut persisted_json =
+            base_persisted_state_json(PERSISTED_STATE_SCHEMA_VERSION_V4, saved_at_utc);
+        persisted_json["weekly_auto_run_config"]["mon"]["start_time"] = json!("24:00");
 
-        let restored_state = persisted.into_timer_state(fixed_clock.as_ref());
-        assert_eq!(
-            restored_state.timer_start_source,
-            Some(TimerStartSource::ManualInsideWindow)
-        );
-        assert_eq!(
-            restored_state.scheduled_stop_state,
-            ScheduledStopState::Pending
-        );
+        fs::write(
+            temp_dir.join("timer_state.json"),
+            serde_json::to_string_pretty(&persisted_json).expect("json should serialize"),
+        )
+        .expect("json should be writable");
+
+        assert!(matches!(
+            persistence.load_state().await,
+            PersistenceLoadOutcome::NoState
+        ));
+
+        cleanup_temp_dir(&temp_dir);
     }
 
-    #[test]
-    fn test_idle_restore_normalizes_pending_stop_state_to_none() {
+    #[tokio::test]
+    async fn test_load_invalid_v4_duration_data_returns_no_state() {
+        let temp_dir = create_temp_dir("invalid-v4-duration");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
-        let fixed_clock = create_fixed_clock_for_utc_datetime(saved_at_utc);
+        let clock = fixed_clock(saved_at_utc);
+        let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
 
-        let persisted = PersistedState {
-            schema_version: PERSISTED_STATE_SCHEMA_VERSION_V3,
-            status: TimerStatus::Idle,
-            remaining_seconds: 1500,
-            session_type: SessionType::Work,
-            current_cycle: 0,
-            completed_pomodoros: 0,
-            post_break_decision_pending: false,
-            settings: TimerSettings::default(),
-            saved_at: saved_at_utc,
-            auto_run_feature_enabled: true,
-            weekly_auto_run_config: WeeklyAutoRunConfig::default(),
-            timer_start_source: Some(TimerStartSource::ManualInsideWindow),
-            scheduled_stop_state: ScheduledStopState::Pending,
-        };
+        let mut persisted_json =
+            base_persisted_state_json(PERSISTED_STATE_SCHEMA_VERSION_V4, saved_at_utc);
+        persisted_json["settings"]["work_duration_secs"] = json!(0);
 
-        let restored_state = persisted.into_timer_state(fixed_clock.as_ref());
-        assert!(restored_state.timer_start_source.is_none());
-        assert_eq!(
-            restored_state.scheduled_stop_state,
-            ScheduledStopState::None
-        );
+        fs::write(
+            temp_dir.join("timer_state.json"),
+            serde_json::to_string_pretty(&persisted_json).expect("json should serialize"),
+        )
+        .expect("json should be writable");
+
+        assert!(matches!(
+            persistence.load_state().await,
+            PersistenceLoadOutcome::NoState
+        ));
+
+        cleanup_temp_dir(&temp_dir);
     }
 
-    #[test]
-    fn test_persisted_state_conversion_adjusts_elapsed_time() {
-        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
-        let fixed_clock =
-            create_fixed_clock_for_utc_datetime(saved_at_utc + chrono::Duration::seconds(30));
+    #[tokio::test]
+    async fn test_new_with_none_disables_persistence_deterministically() {
+        let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
+        let persistence = PersistenceManager::new(clock, None);
 
-        let persisted = PersistedState {
-            schema_version: PERSISTED_STATE_SCHEMA_VERSION_V3,
-            status: TimerStatus::Working,
-            remaining_seconds: 100,
-            session_type: SessionType::Work,
-            current_cycle: 1,
-            completed_pomodoros: 0,
-            post_break_decision_pending: false,
-            settings: TimerSettings::default(),
-            saved_at: saved_at_utc,
-            auto_run_feature_enabled: false,
-            weekly_auto_run_config: WeeklyAutoRunConfig::default(),
-            timer_start_source: Some(TimerStartSource::ManualOutsideWindow),
-            scheduled_stop_state: ScheduledStopState::None,
-        };
-
-        let timer_state = persisted.into_timer_state(fixed_clock.as_ref());
-        assert_eq!(timer_state.remaining_seconds, 70);
-    }
-
-    #[test]
-    fn test_post_break_pending_restore_forces_idle_work_preview_without_elapsed_subtraction() {
-        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
-        let fixed_clock =
-            create_fixed_clock_for_utc_datetime(saved_at_utc + chrono::Duration::seconds(45));
-
-        let persisted = PersistedState {
-            schema_version: PERSISTED_STATE_SCHEMA_VERSION_V3,
-            status: TimerStatus::Working,
-            remaining_seconds: 12,
-            session_type: SessionType::ShortBreak,
-            current_cycle: 2,
-            completed_pomodoros: 1,
-            post_break_decision_pending: true,
-            settings: TimerSettings {
-                work_duration_secs: 1500,
-                ..TimerSettings::default()
-            },
-            saved_at: saved_at_utc,
-            auto_run_feature_enabled: true,
-            weekly_auto_run_config: WeeklyAutoRunConfig::default(),
-            timer_start_source: Some(TimerStartSource::ManualInsideWindow),
-            scheduled_stop_state: ScheduledStopState::Pending,
-        };
-
-        let restored_state = persisted.into_timer_state(fixed_clock.as_ref());
-        assert_eq!(restored_state.status, TimerStatus::Idle);
-        assert_eq!(restored_state.session_type, SessionType::Work);
-        assert_eq!(restored_state.remaining_seconds, 1500);
-        assert!(restored_state.post_break_decision_pending);
-        assert!(restored_state.timer_start_source.is_none());
-        assert_eq!(
-            restored_state.scheduled_stop_state,
-            ScheduledStopState::None
-        );
-    }
-
-    #[test]
-    fn test_on_break_restore_rewinds_to_idle_work_preview_and_reverts_completed_count() {
-        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
-        let fixed_clock =
-            create_fixed_clock_for_utc_datetime(saved_at_utc + chrono::Duration::seconds(45));
-
-        let persisted = PersistedState {
-            schema_version: PERSISTED_STATE_SCHEMA_VERSION_V3,
-            status: TimerStatus::OnBreak,
-            remaining_seconds: 120,
-            session_type: SessionType::LongBreak,
-            current_cycle: 4,
-            completed_pomodoros: 4,
-            post_break_decision_pending: false,
-            settings: TimerSettings {
-                work_duration_secs: 1500,
-                ..TimerSettings::default()
-            },
-            saved_at: saved_at_utc,
-            auto_run_feature_enabled: true,
-            weekly_auto_run_config: WeeklyAutoRunConfig::default(),
-            timer_start_source: Some(TimerStartSource::ManualInsideWindow),
-            scheduled_stop_state: ScheduledStopState::Pending,
-        };
-
-        let restored_state = persisted.into_timer_state(fixed_clock.as_ref());
-        assert_eq!(restored_state.status, TimerStatus::Idle);
-        assert_eq!(restored_state.session_type, SessionType::Work);
-        assert_eq!(restored_state.remaining_seconds, 1500);
-        assert_eq!(restored_state.current_cycle, 4);
-        assert_eq!(restored_state.completed_pomodoros, 3);
-        assert!(!restored_state.post_break_decision_pending);
-        assert!(restored_state.timer_start_source.is_none());
-        assert_eq!(
-            restored_state.scheduled_stop_state,
-            ScheduledStopState::None
-        );
-    }
-
-    #[test]
-    fn test_load_state_with_corrupted_file_returns_none() {
-        let path = create_test_state_file_path("corrupted");
-        let fixed_clock =
-            create_fixed_clock_for_utc_datetime(create_utc_datetime(2025, 2, 1, 9, 0, 0));
-        fs::write(&path, b"not valid json {{{").expect("corrupted fixture should be writable");
-
-        let loaded_state = PersistenceManager::load_state_from_path(fixed_clock.as_ref(), &path);
-        assert!(
-            loaded_state.is_none(),
-            "corrupted state file should return None"
-        );
-
-        remove_test_state_file(&path);
+        persistence.save_state(TimerState::default()).await;
+        assert!(matches!(
+            persistence.load_state().await,
+            PersistenceLoadOutcome::NoState
+        ));
     }
 }

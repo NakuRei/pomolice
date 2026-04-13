@@ -5,13 +5,6 @@ use crate::state;
 use crate::tray;
 use crate::types;
 
-struct SessionCompletionTransition {
-    completed_payload: types::SessionCompletedPayload,
-    transition_outcome: types::SessionTransitionOutcome,
-    requires_enter_break_mode: bool,
-    requires_exit_break_mode: bool,
-}
-
 struct FinalizedSessionCompletionState {
     tick_payload: types::TimerTickPayload,
     post_break_transition_policy: types::PostBreakTransitionPolicy,
@@ -21,26 +14,55 @@ struct FinalizedSessionCompletionState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SessionCompletionEmitEvent {
+pub(crate) enum PipelineEmitEvent {
     SessionCompleted,
     AutoRunStopped,
     TimerTick,
 }
 
-const SESSION_COMPLETION_EMIT_ORDER_DEFAULT: [SessionCompletionEmitEvent; 2] = [
-    SessionCompletionEmitEvent::SessionCompleted,
-    SessionCompletionEmitEvent::TimerTick,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BreakModeChange {
+    None,
+    Enter,
+    Exit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PersistenceRequirement {
+    Skip,
+    Persist,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TimerTaskRestart {
+    NoRestart,
+    Restart,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PipelineEffectPlan {
+    pub emit_order: &'static [PipelineEmitEvent],
+    pub break_mode_change: BreakModeChange,
+    pub persistence_requirement: PersistenceRequirement,
+    pub timer_task_restart: TimerTaskRestart,
+}
+
+const TIMER_TICK_ONLY_EMIT_ORDER: [PipelineEmitEvent; 1] = [PipelineEmitEvent::TimerTick];
+
+const SESSION_COMPLETION_EMIT_ORDER_DEFAULT: [PipelineEmitEvent; 2] = [
+    PipelineEmitEvent::SessionCompleted,
+    PipelineEmitEvent::TimerTick,
 ];
 
-const SESSION_COMPLETION_EMIT_ORDER_SCHEDULED_STOP: [SessionCompletionEmitEvent; 3] = [
-    SessionCompletionEmitEvent::SessionCompleted,
-    SessionCompletionEmitEvent::AutoRunStopped,
-    SessionCompletionEmitEvent::TimerTick,
+const SESSION_COMPLETION_EMIT_ORDER_SCHEDULED_STOP: [PipelineEmitEvent; 3] = [
+    PipelineEmitEvent::SessionCompleted,
+    PipelineEmitEvent::AutoRunStopped,
+    PipelineEmitEvent::TimerTick,
 ];
 
 fn session_completion_emit_order(
     transition_reason: types::SessionTransitionReason,
-) -> &'static [SessionCompletionEmitEvent] {
+) -> &'static [PipelineEmitEvent] {
     match transition_reason {
         types::SessionTransitionReason::ScheduledStopExecuted => {
             &SESSION_COMPLETION_EMIT_ORDER_SCHEDULED_STOP
@@ -72,18 +94,6 @@ pub async fn lib_handle_timer_tick(app: AppHandle) {
     }
 }
 
-fn build_transition_outcome(
-    completed_payload: &types::SessionCompletedPayload,
-) -> types::SessionTransitionOutcome {
-    types::SessionTransitionOutcome {
-        transition_reason: completed_payload.transition_reason,
-        completed_session_type: completed_payload.completed_session_type,
-        next_status: completed_payload.next_status,
-        next_session_type: completed_payload.next_session_type,
-        requires_manual_continue_decision: completed_payload.requires_manual_continue_decision,
-    }
-}
-
 fn transition_requires_task_cancellation(
     transition_reason: types::SessionTransitionReason,
 ) -> bool {
@@ -105,7 +115,41 @@ fn break_mode_requirements(transition_outcome: &types::SessionTransitionOutcome)
     (requires_enter_break_mode, requires_exit_break_mode)
 }
 
-async fn complete_session_transition(app: &AppHandle) -> SessionCompletionTransition {
+pub(crate) fn build_startup_resume_effect_plan() -> PipelineEffectPlan {
+    PipelineEffectPlan {
+        emit_order: &TIMER_TICK_ONLY_EMIT_ORDER,
+        break_mode_change: BreakModeChange::None,
+        persistence_requirement: PersistenceRequirement::Skip,
+        timer_task_restart: TimerTaskRestart::Restart,
+    }
+}
+
+pub(crate) fn build_session_completion_effect_plan(
+    transition_outcome: &types::SessionTransitionOutcome,
+    restart_timer_task: bool,
+) -> PipelineEffectPlan {
+    let (requires_enter_break_mode, requires_exit_break_mode) =
+        break_mode_requirements(transition_outcome);
+
+    PipelineEffectPlan {
+        emit_order: session_completion_emit_order(transition_outcome.transition_reason),
+        break_mode_change: if requires_enter_break_mode {
+            BreakModeChange::Enter
+        } else if requires_exit_break_mode {
+            BreakModeChange::Exit
+        } else {
+            BreakModeChange::None
+        },
+        persistence_requirement: PersistenceRequirement::Persist,
+        timer_task_restart: if restart_timer_task {
+            TimerTaskRestart::Restart
+        } else {
+            TimerTaskRestart::NoRestart
+        },
+    }
+}
+
+async fn complete_session_transition(app: &AppHandle) -> types::SessionTransitionOutcome {
     let state_handle = app.state::<state::AppState>();
     let mut timer = state_handle.timer_manager.lock().await;
     let completed_payload = match timer.get_state().session_type {
@@ -114,33 +158,21 @@ async fn complete_session_transition(app: &AppHandle) -> SessionCompletionTransi
             timer.complete_break_session_transition()
         }
     };
-    let transition_outcome = build_transition_outcome(&completed_payload);
+    let transition_outcome =
+        types::SessionTransitionOutcome::from_completed_payload(&completed_payload);
 
     if transition_requires_task_cancellation(transition_outcome.transition_reason) {
         let _ = timer.cancel_and_take_task();
     }
 
-    let (requires_enter_break_mode, requires_exit_break_mode) =
-        break_mode_requirements(&transition_outcome);
-
-    SessionCompletionTransition {
-        completed_payload,
-        transition_outcome,
-        requires_enter_break_mode,
-        requires_exit_break_mode,
-    }
+    transition_outcome
 }
 
-async fn apply_break_mode_transition(app: &AppHandle, transition: &SessionCompletionTransition) {
-    debug_assert!(
-        !(transition.requires_enter_break_mode && transition.requires_exit_break_mode),
-        "session transition cannot enter and exit fullscreen break mode at the same time"
-    );
-
-    if transition.requires_enter_break_mode {
-        enter_break_mode(app.clone()).await;
-    } else if transition.requires_exit_break_mode {
-        exit_break_mode(app.clone()).await;
+async fn apply_break_mode_transition(app: &AppHandle, effect_plan: &PipelineEffectPlan) {
+    match effect_plan.break_mode_change {
+        BreakModeChange::None => {}
+        BreakModeChange::Enter => enter_break_mode(app.clone()).await,
+        BreakModeChange::Exit => exit_break_mode(app.clone()).await,
     }
 }
 
@@ -187,23 +219,32 @@ fn log_session_completion_finalized(
     );
 }
 
-fn emit_session_completion_events(
+fn emit_pipeline_events(
     app: &AppHandle,
-    transition: &SessionCompletionTransition,
-    finalized_state: &FinalizedSessionCompletionState,
+    emit_order: &[PipelineEmitEvent],
+    transition_outcome: Option<&types::SessionTransitionOutcome>,
+    tick_payload: &types::TimerTickPayload,
 ) {
-    for emit_event in session_completion_emit_order(transition.transition_outcome.transition_reason)
-    {
+    for emit_event in emit_order {
         match emit_event {
-            SessionCompletionEmitEvent::SessionCompleted => {
-                let _ = app.emit("session_completed", &transition.completed_payload);
+            PipelineEmitEvent::SessionCompleted => {
+                let Some(transition_outcome) = transition_outcome else {
+                    debug_assert!(
+                        false,
+                        "session_completed emission requires a transition outcome"
+                    );
+                    continue;
+                };
+                let completed_payload =
+                    types::SessionCompletedPayload::from_transition_outcome(transition_outcome);
+                let _ = app.emit("session_completed", &completed_payload);
             }
-            SessionCompletionEmitEvent::AutoRunStopped => {
+            PipelineEmitEvent::AutoRunStopped => {
                 let _ = app.emit("auto_run_stopped", serde_json::json!({}));
             }
-            SessionCompletionEmitEvent::TimerTick => {
-                let _ = app.emit("timer_tick", &finalized_state.tick_payload);
-                tray::update_tray_icon(app, &finalized_state.tick_payload);
+            PipelineEmitEvent::TimerTick => {
+                let _ = app.emit("timer_tick", tick_payload);
+                tray::update_tray_icon(app, tick_payload);
             }
         }
     }
@@ -211,18 +252,81 @@ fn emit_session_completion_events(
 
 async fn persist_timer_state(app: &AppHandle) {
     let state_handle = app.state::<state::AppState>();
-    let timer = state_handle.timer_manager.lock().await;
-    state_handle.persistence.save_state(timer.get_state());
+    state_handle.persist_current_state().await;
+}
+
+async fn restart_timer_task(app: &AppHandle) {
+    let state_handle = app.state::<state::AppState>();
+    let mut timer = state_handle.timer_manager.lock().await;
+    timer.spawn_timer_task(app.clone());
+}
+
+async fn execute_session_completion_effect_plan(
+    app: &AppHandle,
+    transition_outcome: &types::SessionTransitionOutcome,
+    restart_timer_task_after_effects: bool,
+) {
+    let effect_plan =
+        build_session_completion_effect_plan(transition_outcome, restart_timer_task_after_effects);
+    apply_break_mode_transition(app, &effect_plan).await;
+    let finalized_state = finalized_session_completion_state(app).await;
+
+    log_session_completion_finalized(transition_outcome, &finalized_state);
+    emit_pipeline_events(
+        app,
+        effect_plan.emit_order,
+        Some(transition_outcome),
+        &finalized_state.tick_payload,
+    );
+
+    if effect_plan.persistence_requirement == PersistenceRequirement::Persist {
+        persist_timer_state(app).await;
+    }
+
+    if effect_plan.timer_task_restart == TimerTaskRestart::Restart {
+        restart_timer_task(app).await;
+    }
 }
 
 pub async fn lib_handle_session_complete(app: AppHandle) {
-    let transition = complete_session_transition(&app).await;
-    apply_break_mode_transition(&app, &transition).await;
-    let finalized_state = finalized_session_completion_state(&app).await;
+    let transition_outcome = complete_session_transition(&app).await;
+    execute_session_completion_effect_plan(&app, &transition_outcome, false).await;
+}
 
-    log_session_completion_finalized(&transition.transition_outcome, &finalized_state);
-    emit_session_completion_events(&app, &transition, &finalized_state);
-    persist_timer_state(&app).await;
+pub(crate) async fn lib_handle_startup_restore(
+    app: AppHandle,
+    initialization_outcome: state::AppInitializationOutcome,
+) {
+    let state::AppInitializationOutcome {
+        initial_tick_payload,
+        restore_status: _,
+        startup_action,
+    } = initialization_outcome;
+
+    match startup_action {
+        state::StartupRestoreAction::None => {}
+        state::StartupRestoreAction::RestartRestoredTimerTask => {
+            let Some(tick_payload) = initial_tick_payload else {
+                debug_assert!(
+                    false,
+                    "running startup restore must provide an initial tick payload"
+                );
+                return;
+            };
+
+            let effect_plan = build_startup_resume_effect_plan();
+            emit_pipeline_events(&app, effect_plan.emit_order, None, &tick_payload);
+
+            if effect_plan.timer_task_restart == TimerTaskRestart::Restart {
+                restart_timer_task(&app).await;
+            }
+        }
+        state::StartupRestoreAction::FinalizeExpiredRestoredWork(transition_outcome) => {
+            let restart_timer_task = transition_outcome.next_status != types::TimerStatus::Idle;
+            execute_session_completion_effect_plan(&app, &transition_outcome, restart_timer_task)
+                .await;
+        }
+    }
 }
 
 async fn enter_break_mode(app: AppHandle) {
@@ -295,12 +399,11 @@ pub async fn lib_handle_input_detected(app: AppHandle) {
 
     let tick_payload = {
         let mut timer = state_handle.timer_manager.lock().await;
-        let payload = timer.apply_input_penalty();
-        state_handle.persistence.save_state(timer.get_state());
-        payload
+        timer.apply_input_penalty()
     };
 
     if let Some(ref payload) = tick_payload {
+        state_handle.persist_current_state().await;
         let _ = app.emit("timer_tick", payload);
         tray::update_tray_icon(&app, payload);
     }
@@ -323,8 +426,8 @@ pub async fn lib_handle_escape_combo(app: AppHandle) {
 #[cfg(test)]
 mod emit_order_tests {
     use super::{
-        session_completion_emit_order, SessionCompletionEmitEvent,
-        SESSION_COMPLETION_EMIT_ORDER_DEFAULT, SESSION_COMPLETION_EMIT_ORDER_SCHEDULED_STOP,
+        session_completion_emit_order, PipelineEmitEvent, SESSION_COMPLETION_EMIT_ORDER_DEFAULT,
+        SESSION_COMPLETION_EMIT_ORDER_SCHEDULED_STOP,
     };
     use crate::types::SessionTransitionReason;
 
@@ -335,8 +438,8 @@ mod emit_order_tests {
         assert_eq!(
             emit_order,
             &[
-                SessionCompletionEmitEvent::SessionCompleted,
-                SessionCompletionEmitEvent::TimerTick,
+                PipelineEmitEvent::SessionCompleted,
+                PipelineEmitEvent::TimerTick,
             ]
         );
     }
@@ -349,9 +452,9 @@ mod emit_order_tests {
         assert_eq!(
             emit_order,
             &[
-                SessionCompletionEmitEvent::SessionCompleted,
-                SessionCompletionEmitEvent::AutoRunStopped,
-                SessionCompletionEmitEvent::TimerTick,
+                PipelineEmitEvent::SessionCompleted,
+                PipelineEmitEvent::AutoRunStopped,
+                PipelineEmitEvent::TimerTick,
             ]
         );
     }

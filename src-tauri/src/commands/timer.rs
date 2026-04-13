@@ -7,13 +7,13 @@ use tauri::{Emitter, Manager, State, WebviewWindow};
 
 use crate::error::{PomoliceError, Result};
 use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
-use crate::managers::weekly_schedule::{
-    find_first_overlapping_weekday_pair, is_now_inside_schedule_window, ActiveWindow,
-};
+use crate::managers::weekly_schedule::{is_now_inside_schedule_window, ActiveWindow};
 use crate::state::AppState;
 use crate::types::{
-    ActiveWindowSummaryPayload, BootPromptRuntimeState, FullStatePayload, PostBreakDecisionAction,
-    PostBreakTransitionPolicy, TimerSettings, TimerStartSource, TimerStatus, WeeklyAutoRunConfig,
+    ActiveWindowSummaryPayload, BootPromptRuntimeState, FullStatePayload, LongBreakDurationSecs,
+    LongBreakIntervalCount, PostBreakDecisionAction, PostBreakTransitionPolicy,
+    ShortBreakDurationSecs, TimerSettings, TimerStartSource, TimerStatus, WeeklyAutoRunConfig,
+    WorkDurationSecs,
 };
 
 /// Start a work session with settings
@@ -21,10 +21,10 @@ use crate::types::{
 pub(crate) async fn start_work(
     window: WebviewWindow,
     state: State<'_, AppState>,
-    work_duration_secs: u64,
-    short_break_duration_secs: u64,
-    long_break_duration_secs: u64,
-    long_break_interval: u32,
+    work_duration_secs: WorkDurationSecs,
+    short_break_duration_secs: ShortBreakDurationSecs,
+    long_break_duration_secs: LongBreakDurationSecs,
+    long_break_interval: LongBreakIntervalCount,
     post_break_transition_policy: PostBreakTransitionPolicy,
 ) -> Result<()> {
     log_info_event(
@@ -36,13 +36,13 @@ pub(crate) async fn start_work(
     );
     authorize_main_window(&window, "start_work")?;
 
-    let settings = TimerSettings {
+    let settings = TimerSettings::new(
         work_duration_secs,
         short_break_duration_secs,
         long_break_duration_secs,
         long_break_interval,
         post_break_transition_policy,
-    };
+    );
     let now_local = state.clock.now_local();
 
     let (auto_run_feature_enabled, weekly_auto_run_config) = {
@@ -88,11 +88,7 @@ pub(crate) async fn start_work(
         timer.spawn_timer_task(app.clone());
     }
 
-    // Save state to persistence
-    {
-        let timer = state.timer_manager.lock().await;
-        state.persistence.save_state(timer.get_state());
-    }
+    state.persist_current_state().await;
 
     Ok(())
 }
@@ -140,11 +136,7 @@ pub(crate) async fn resolve_post_break_decision(
         timer.spawn_timer_task(app.clone());
     }
 
-    // Save state
-    {
-        let timer = state.timer_manager.lock().await;
-        state.persistence.save_state(timer.get_state());
-    }
+    state.persist_current_state().await;
 
     Ok(())
 }
@@ -191,11 +183,7 @@ pub(crate) async fn emergency_stop(
         });
     }
 
-    // Save state
-    {
-        let timer = state.timer_manager.lock().await;
-        state.persistence.save_state(timer.get_state());
-    }
+    state.persist_current_state().await;
 
     Ok(())
 }
@@ -205,10 +193,10 @@ pub(crate) async fn emergency_stop(
 pub(crate) async fn sync_timer_duration_settings(
     window: WebviewWindow,
     state: State<'_, AppState>,
-    work_duration_secs: u64,
-    short_break_duration_secs: u64,
-    long_break_duration_secs: u64,
-    long_break_interval: u32,
+    work_duration_secs: WorkDurationSecs,
+    short_break_duration_secs: ShortBreakDurationSecs,
+    long_break_duration_secs: LongBreakDurationSecs,
+    long_break_interval: LongBreakIntervalCount,
 ) -> Result<()> {
     authorize_main_window(&window, "sync_timer_duration_settings")?;
 
@@ -225,11 +213,7 @@ pub(crate) async fn sync_timer_duration_settings(
     let _ = window.app_handle().emit("timer_tick", &tick_payload);
     crate::tray::update_tray_icon(window.app_handle(), &tick_payload);
 
-    // Save state
-    {
-        let timer = state.timer_manager.lock().await;
-        state.persistence.save_state(timer.get_state());
-    }
+    state.persist_current_state().await;
 
     Ok(())
 }
@@ -244,8 +228,6 @@ pub(crate) async fn sync_automation_policies(
     post_break_transition_policy: PostBreakTransitionPolicy,
 ) -> Result<()> {
     authorize_main_window(&window, "sync_automation_policies")?;
-
-    validate_weekly_auto_run_config_for_sync(&weekly_auto_run_config)?;
 
     let (tick_payload, should_bump_config_revision) = {
         let mut timer = state.timer_manager.lock().await;
@@ -274,10 +256,7 @@ pub(crate) async fn sync_automation_policies(
     let _ = window.app_handle().emit("timer_tick", &tick_payload);
     crate::tray::update_tray_icon(window.app_handle(), &tick_payload);
 
-    {
-        let timer = state.timer_manager.lock().await;
-        state.persistence.save_state(timer.get_state());
-    }
+    state.persist_current_state().await;
 
     Ok(())
 }
@@ -351,22 +330,6 @@ fn validate_post_break_decision_command_state(
         action: "resolve post-break decision".to_string(),
         current_state: timer_status,
     })
-}
-
-fn validate_weekly_auto_run_config_for_sync(
-    weekly_auto_run_config: &WeeklyAutoRunConfig,
-) -> Result<()> {
-    if let Some((primary_weekday, secondary_weekday)) =
-        find_first_overlapping_weekday_pair(weekly_auto_run_config)
-    {
-        return Err(PomoliceError::InvalidAutoRunSchedule {
-            reason: format!(
-                "overlapping schedule windows between {primary_weekday} and {secondary_weekday}"
-            ),
-        });
-    }
-
-    Ok(())
 }
 
 fn evaluate_initial_boot_prompt_decision(
@@ -526,10 +489,7 @@ pub(crate) async fn resolve_boot_auto_start_prompt(
             timer_manager.spawn_timer_task(app.clone());
         }
 
-        {
-            let timer_manager = state.timer_manager.lock().await;
-            state.persistence.save_state(timer_manager.get_state());
-        }
+        state.persist_current_state().await;
 
         if let Ok(mut runtime_state) = state.boot_prompt_runtime_state.lock() {
             *runtime_state = BootPromptRuntimeState::ResolvedStart;
@@ -553,14 +513,34 @@ pub(crate) async fn resolve_boot_auto_start_prompt(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::{DayAutoRunSlot, HhMm};
     use chrono::TimeZone;
+    use serde_json::json;
+
+    fn enabled_slot(start_time: &str, end_time: &str) -> DayAutoRunSlot {
+        DayAutoRunSlot::try_new(
+            true,
+            HhMm::try_from(start_time.to_string()).expect("start time should be valid"),
+            HhMm::try_from(end_time.to_string()).expect("end time should be valid"),
+        )
+        .expect("slot should be valid")
+    }
+
+    fn monday_config(start_time: &str, end_time: &str) -> WeeklyAutoRunConfig {
+        WeeklyAutoRunConfig::try_new(
+            enabled_slot(start_time, end_time),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+        )
+        .expect("weekly config should be valid")
+    }
 
     fn make_enabled_daytime_monday_config() -> WeeklyAutoRunConfig {
-        let mut weekly_auto_run_config = WeeklyAutoRunConfig::default();
-        weekly_auto_run_config.mon.enabled = true;
-        weekly_auto_run_config.mon.start_time = "09:00".to_string();
-        weekly_auto_run_config.mon.end_time = "18:00".to_string();
-        weekly_auto_run_config
+        monday_config("09:00", "18:00")
     }
 
     #[test]
@@ -674,34 +654,53 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_weekly_auto_run_config_for_sync_rejects_overlapping_windows() {
-        let mut weekly_auto_run_config = WeeklyAutoRunConfig::default();
-        weekly_auto_run_config.mon.enabled = true;
-        weekly_auto_run_config.mon.start_time = "22:00".to_string();
-        weekly_auto_run_config.mon.end_time = "02:00".to_string();
-        weekly_auto_run_config.tue.enabled = true;
-        weekly_auto_run_config.tue.start_time = "01:00".to_string();
-        weekly_auto_run_config.tue.end_time = "05:00".to_string();
-
-        let validation_result = validate_weekly_auto_run_config_for_sync(&weekly_auto_run_config);
-        assert!(matches!(
-            validation_result,
-            Err(PomoliceError::InvalidAutoRunSchedule { .. })
-        ));
+    fn test_work_duration_secs_boundary_deserialize_rejects_zero() {
+        let result = serde_json::from_value::<WorkDurationSecs>(json!(0));
+        assert!(result.is_err());
     }
 
     #[test]
-    fn test_validate_weekly_auto_run_config_for_sync_accepts_non_overlapping_windows() {
-        let mut weekly_auto_run_config = WeeklyAutoRunConfig::default();
-        weekly_auto_run_config.mon.enabled = true;
-        weekly_auto_run_config.mon.start_time = "09:00".to_string();
-        weekly_auto_run_config.mon.end_time = "12:00".to_string();
-        weekly_auto_run_config.tue.enabled = true;
-        weekly_auto_run_config.tue.start_time = "13:00".to_string();
-        weekly_auto_run_config.tue.end_time = "18:00".to_string();
+    fn test_long_break_interval_boundary_deserialize_rejects_zero() {
+        let result = serde_json::from_value::<LongBreakIntervalCount>(json!(0));
+        assert!(result.is_err());
+    }
 
-        let validation_result = validate_weekly_auto_run_config_for_sync(&weekly_auto_run_config);
-        assert!(validation_result.is_ok());
+    #[test]
+    fn test_day_auto_run_slot_boundary_deserialize_rejects_equal_start_and_end() {
+        let result = serde_json::from_value::<DayAutoRunSlot>(json!({
+            "enabled": true,
+            "startTime": "09:00",
+            "endTime": "09:00"
+        }));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_weekly_auto_run_config_boundary_deserialize_rejects_overlap() {
+        let result = serde_json::from_value::<WeeklyAutoRunConfig>(json!({
+            "mon": {"enabled": true, "startTime": "22:00", "endTime": "02:00"},
+            "tue": {"enabled": true, "startTime": "01:00", "endTime": "05:00"},
+            "wed": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
+            "thu": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
+            "fri": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
+            "sat": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
+            "sun": {"enabled": false, "startTime": "09:00", "endTime": "18:00"}
+        }));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_weekly_auto_run_config_boundary_deserialize_rejects_invalid_start_time() {
+        let result = serde_json::from_value::<WeeklyAutoRunConfig>(json!({
+            "mon": {"enabled": true, "startTime": "24:00", "endTime": "02:00"},
+            "tue": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
+            "wed": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
+            "thu": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
+            "fri": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
+            "sat": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
+            "sun": {"enabled": false, "startTime": "09:00", "endTime": "18:00"}
+        }));
+        assert!(result.is_err());
     }
 
     #[test]
@@ -751,8 +750,7 @@ mod tests {
     #[test]
     fn test_did_scheduler_topology_change_returns_true_when_weekly_auto_run_config_changes() {
         let previous_config = make_enabled_daytime_monday_config();
-        let mut next_config = previous_config.clone();
-        next_config.mon.start_time = "10:00".to_string();
+        let next_config = monday_config("10:00", "18:00");
 
         let changed = did_scheduler_topology_change(true, &previous_config, true, &next_config);
 

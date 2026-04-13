@@ -22,9 +22,6 @@ pub(crate) enum PomoliceError {
 
     #[error("Window control error: {0}")]
     WindowControl(String),
-
-    #[error("Invalid auto-run schedule: {reason}")]
-    InvalidAutoRunSchedule { reason: String },
 }
 
 /// Result type alias for Pomolice operations
@@ -90,16 +87,5 @@ mod tests {
             Ok(value) => assert_eq!(value, 42),
             Err(error) => panic!("expected Ok(42), got error: {error}"),
         }
-    }
-
-    #[test]
-    fn test_invalid_auto_run_schedule_error() {
-        let err = PomoliceError::InvalidAutoRunSchedule {
-            reason: "overlapping schedule windows between mon and tue".to_string(),
-        };
-        assert_eq!(
-            err.to_string(),
-            "Invalid auto-run schedule: overlapping schedule windows between mon and tue"
-        );
     }
 }

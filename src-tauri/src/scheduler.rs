@@ -58,7 +58,7 @@ pub async fn lib_start_scheduler_task(app: AppHandle) {
     ) {
         start_boundaries_blocked_until_idle = true;
         initial_previous_local = state_handle
-            .restored_running_saved_at_local
+            .restored_running_saved_at_local()
             .unwrap_or(now_local - ChronoDuration::days(7));
     }
 
@@ -340,12 +340,7 @@ async fn mark_scheduled_stop_pending_for_current_session(app: AppHandle) -> bool
 
     if should_persist {
         let _ = app.emit("auto_run_stop_pending", serde_json::json!({}));
-        {
-            let timer_manager = state_handle.timer_manager.lock().await;
-            state_handle
-                .persistence
-                .save_state(timer_manager.get_state());
-        }
+        state_handle.persist_current_state().await;
     }
 
     should_persist
@@ -398,12 +393,7 @@ async fn start_work_from_scheduler_when_idle(
         timer_manager.spawn_timer_task(app.clone());
     }
 
-    {
-        let timer_manager = state_handle.timer_manager.lock().await;
-        state_handle
-            .persistence
-            .save_state(timer_manager.get_state());
-    }
+    state_handle.persist_current_state().await;
 
     true
 }

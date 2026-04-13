@@ -10,8 +10,6 @@ use crate::types::{BoundaryOccurrenceId, DayAutoRunSlot, WeeklyAutoRunConfig};
 const MAX_BOUNDARY_LOOKBACK_DAYS: i64 = 7;
 const MAX_BOUNDARY_OCCURRENCES_PER_TICK: usize = 128;
 const MAX_NONEXISTENT_TIME_SEARCH_MINUTES: i64 = 360;
-const MINUTES_PER_DAY: u32 = 24 * 60;
-
 /// Active schedule window data for the current local time.
 ///
 /// Usage example:
@@ -34,23 +32,10 @@ pub(crate) struct ActiveWindow {
 }
 
 #[derive(Clone, Copy)]
-struct ParsedSlotTimeRange {
-    start_minutes: u32,
-    end_minutes: u32,
-    crosses_midnight: bool,
-}
-
-#[derive(Clone, Copy)]
-struct WeekMinuteRange {
-    start_minute_of_week: u32,
-    end_minute_of_week: u32,
-}
-
-#[derive(Clone, Copy)]
-struct SlotDescriptor<'a> {
+struct SlotDescriptor {
     slot_key: &'static str,
     weekday: Weekday,
-    slot: &'a DayAutoRunSlot,
+    slot: DayAutoRunSlot,
 }
 
 #[derive(Clone, Copy)]
@@ -83,28 +68,24 @@ pub(crate) fn is_now_inside_schedule_window(
     let mut active_windows: Vec<(NaiveDateTime, ActiveWindow)> = Vec::new();
 
     for descriptor in build_slot_descriptors(config) {
-        if !descriptor.slot.enabled {
+        if !descriptor.slot.enabled() {
             continue;
         }
 
-        let Some(parsed_time_range) = parse_slot_time_range(descriptor.slot) else {
-            continue;
-        };
+        let (start_minutes, end_minutes, crosses_midnight) = descriptor.slot.parsed_time_range();
 
         let anchor_local_date =
             most_recent_weekday_on_or_before(now_local_date, descriptor.weekday);
-        let Some(start_local_naive) =
-            create_local_naive_datetime(anchor_local_date, parsed_time_range.start_minutes)
+        let Some(start_local_naive) = create_local_naive_datetime(anchor_local_date, start_minutes)
         else {
             continue;
         };
-        let end_boundary_date = if parsed_time_range.crosses_midnight {
+        let end_boundary_date = if crosses_midnight {
             anchor_local_date + Duration::days(1)
         } else {
             anchor_local_date
         };
-        let Some(end_local_naive) =
-            create_local_naive_datetime(end_boundary_date, parsed_time_range.end_minutes)
+        let Some(end_local_naive) = create_local_naive_datetime(end_boundary_date, end_minutes)
         else {
             continue;
         };
@@ -115,9 +96,9 @@ pub(crate) fn is_now_inside_schedule_window(
                 ActiveWindow {
                     slot_key: descriptor.slot_key.to_string(),
                     anchor_local_date,
-                    start_time: descriptor.slot.start_time.clone(),
-                    end_time: descriptor.slot.end_time.clone(),
-                    crosses_midnight: parsed_time_range.crosses_midnight,
+                    start_time: descriptor.slot.start_time().to_string(),
+                    end_time: descriptor.slot.end_time().to_string(),
+                    crosses_midnight,
                 },
             ));
         }
@@ -155,51 +136,6 @@ pub(crate) fn collect_crossed_end_boundaries(
     collect_crossed_boundaries(previous_local, now_local, config, BoundaryType::End)
 }
 
-/// Returns the first weekday pair whose enabled windows overlap.
-///
-/// The overlap check uses half-open intervals (`[start, end)`) and supports
-/// overnight slots by splitting them into two ranges on the week timeline.
-pub(crate) fn find_first_overlapping_weekday_pair(
-    config: &WeeklyAutoRunConfig,
-) -> Option<(&'static str, &'static str)> {
-    let mut weekday_ranges: Vec<(&'static str, Vec<WeekMinuteRange>)> = Vec::new();
-
-    for descriptor in build_slot_descriptors(config) {
-        if !descriptor.slot.enabled {
-            continue;
-        }
-
-        let Some(parsed_time_range) = parse_slot_time_range(descriptor.slot) else {
-            continue;
-        };
-
-        let ranges =
-            build_week_minute_ranges(descriptor.weekday.num_days_from_monday(), parsed_time_range);
-        if ranges.is_empty() {
-            continue;
-        }
-
-        weekday_ranges.push((descriptor.slot_key, ranges));
-    }
-
-    for primary_index in 0..weekday_ranges.len() {
-        for secondary_index in (primary_index + 1)..weekday_ranges.len() {
-            let (primary_weekday, primary_ranges) = &weekday_ranges[primary_index];
-            let (secondary_weekday, secondary_ranges) = &weekday_ranges[secondary_index];
-
-            for primary_range in primary_ranges {
-                for secondary_range in secondary_ranges {
-                    if week_minute_ranges_overlap(*primary_range, *secondary_range) {
-                        return Some((primary_weekday, secondary_weekday));
-                    }
-                }
-            }
-        }
-    }
-
-    None
-}
-
 fn collect_crossed_boundaries(
     previous_local: DateTime<Local>,
     now_local: DateTime<Local>,
@@ -225,13 +161,11 @@ fn collect_crossed_boundaries(
     let mut crossed_boundaries: Vec<(i64, BoundaryOccurrenceId)> = Vec::new();
 
     for descriptor in build_slot_descriptors(config) {
-        if !descriptor.slot.enabled {
+        if !descriptor.slot.enabled() {
             continue;
         }
 
-        let Some(parsed_time_range) = parse_slot_time_range(descriptor.slot) else {
-            continue;
-        };
+        let (start_minutes, end_minutes, crosses_midnight) = descriptor.slot.parsed_time_range();
 
         let mut anchor_local_date =
             first_weekday_on_or_after(anchor_range_start, descriptor.weekday);
@@ -239,15 +173,15 @@ fn collect_crossed_boundaries(
         while anchor_local_date <= anchor_range_end {
             let boundary_local_naive = match boundary_type {
                 BoundaryType::Start => {
-                    create_local_naive_datetime(anchor_local_date, parsed_time_range.start_minutes)
+                    create_local_naive_datetime(anchor_local_date, start_minutes)
                 }
                 BoundaryType::End => {
-                    let end_boundary_date = if parsed_time_range.crosses_midnight {
+                    let end_boundary_date = if crosses_midnight {
                         anchor_local_date + Duration::days(1)
                     } else {
                         anchor_local_date
                     };
-                    create_local_naive_datetime(end_boundary_date, parsed_time_range.end_minutes)
+                    create_local_naive_datetime(end_boundary_date, end_minutes)
                 }
             };
 
@@ -300,120 +234,42 @@ fn build_boundary_occurrence_id(
     ))
 }
 
-fn parse_slot_time_range(slot: &DayAutoRunSlot) -> Option<ParsedSlotTimeRange> {
-    let start_minutes = parse_hh_mm_minutes(&slot.start_time)?;
-    let end_minutes = parse_hh_mm_minutes(&slot.end_time)?;
-
-    if start_minutes == end_minutes {
-        return None;
-    }
-
-    Some(ParsedSlotTimeRange {
-        start_minutes,
-        end_minutes,
-        crosses_midnight: start_minutes > end_minutes,
-    })
-}
-
-fn build_week_minute_ranges(
-    weekday_index: u32,
-    parsed_time_range: ParsedSlotTimeRange,
-) -> Vec<WeekMinuteRange> {
-    let day_start_minute_of_week = weekday_index * MINUTES_PER_DAY;
-    let start_minute_of_week = day_start_minute_of_week + parsed_time_range.start_minutes;
-    let end_minute_of_week = day_start_minute_of_week + parsed_time_range.end_minutes;
-
-    if !parsed_time_range.crosses_midnight {
-        return vec![WeekMinuteRange {
-            start_minute_of_week,
-            end_minute_of_week,
-        }];
-    }
-
-    let next_weekday_index = (weekday_index + 1) % 7;
-    vec![
-        WeekMinuteRange {
-            start_minute_of_week,
-            end_minute_of_week: day_start_minute_of_week + MINUTES_PER_DAY,
-        },
-        WeekMinuteRange {
-            start_minute_of_week: next_weekday_index * MINUTES_PER_DAY,
-            end_minute_of_week: next_weekday_index * MINUTES_PER_DAY
-                + parsed_time_range.end_minutes,
-        },
-    ]
-}
-
-fn week_minute_ranges_overlap(left: WeekMinuteRange, right: WeekMinuteRange) -> bool {
-    left.start_minute_of_week < right.end_minute_of_week
-        && right.start_minute_of_week < left.end_minute_of_week
-}
-
-fn parse_hh_mm_minutes(value: &str) -> Option<u32> {
-    let bytes = value.as_bytes();
-    if bytes.len() != 5 || bytes[2] != b':' {
-        return None;
-    }
-
-    let hour_tens = bytes[0];
-    let hour_ones = bytes[1];
-    let minute_tens = bytes[3];
-    let minute_ones = bytes[4];
-
-    if !hour_tens.is_ascii_digit()
-        || !hour_ones.is_ascii_digit()
-        || !minute_tens.is_ascii_digit()
-        || !minute_ones.is_ascii_digit()
-    {
-        return None;
-    }
-
-    let hour = u32::from(hour_tens - b'0') * 10 + u32::from(hour_ones - b'0');
-    let minute = u32::from(minute_tens - b'0') * 10 + u32::from(minute_ones - b'0');
-
-    if hour >= 24 || minute >= 60 {
-        return None;
-    }
-
-    Some(hour * 60 + minute)
-}
-
-fn build_slot_descriptors(config: &WeeklyAutoRunConfig) -> [SlotDescriptor<'_>; 7] {
+fn build_slot_descriptors(config: &WeeklyAutoRunConfig) -> [SlotDescriptor; 7] {
     [
         SlotDescriptor {
             slot_key: "mon",
             weekday: Weekday::Mon,
-            slot: &config.mon,
+            slot: config.mon(),
         },
         SlotDescriptor {
             slot_key: "tue",
             weekday: Weekday::Tue,
-            slot: &config.tue,
+            slot: config.tue(),
         },
         SlotDescriptor {
             slot_key: "wed",
             weekday: Weekday::Wed,
-            slot: &config.wed,
+            slot: config.wed(),
         },
         SlotDescriptor {
             slot_key: "thu",
             weekday: Weekday::Thu,
-            slot: &config.thu,
+            slot: config.thu(),
         },
         SlotDescriptor {
             slot_key: "fri",
             weekday: Weekday::Fri,
-            slot: &config.fri,
+            slot: config.fri(),
         },
         SlotDescriptor {
             slot_key: "sat",
             weekday: Weekday::Sat,
-            slot: &config.sat,
+            slot: config.sat(),
         },
         SlotDescriptor {
             slot_key: "sun",
             weekday: Weekday::Sun,
-            slot: &config.sun,
+            slot: config.sun(),
         },
     ]
 }
@@ -493,6 +349,7 @@ fn find_latest_epoch_on_or_before(reference_local_naive: NaiveDateTime) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::HhMm;
     use chrono::{NaiveDate, Timelike};
 
     fn local_datetime(
@@ -517,20 +374,80 @@ mod tests {
         start_time: &str,
         end_time: &str,
     ) {
-        let slot = match weekday_key {
-            "mon" => &mut config.mon,
-            "tue" => &mut config.tue,
-            "wed" => &mut config.wed,
-            "thu" => &mut config.thu,
-            "fri" => &mut config.fri,
-            "sat" => &mut config.sat,
-            "sun" => &mut config.sun,
-            other => panic!("unsupported weekday key: {other}"),
-        };
+        let slot = DayAutoRunSlot::try_new(
+            enabled,
+            HhMm::try_from(start_time.to_string()).expect("start time should be valid"),
+            HhMm::try_from(end_time.to_string()).expect("end time should be valid"),
+        )
+        .expect("slot should be valid");
 
-        slot.enabled = enabled;
-        slot.start_time = start_time.to_string();
-        slot.end_time = end_time.to_string();
+        *config = match weekday_key {
+            "mon" => WeeklyAutoRunConfig::try_new(
+                slot,
+                config.tue(),
+                config.wed(),
+                config.thu(),
+                config.fri(),
+                config.sat(),
+                config.sun(),
+            ),
+            "tue" => WeeklyAutoRunConfig::try_new(
+                config.mon(),
+                slot,
+                config.wed(),
+                config.thu(),
+                config.fri(),
+                config.sat(),
+                config.sun(),
+            ),
+            "wed" => WeeklyAutoRunConfig::try_new(
+                config.mon(),
+                config.tue(),
+                slot,
+                config.thu(),
+                config.fri(),
+                config.sat(),
+                config.sun(),
+            ),
+            "thu" => WeeklyAutoRunConfig::try_new(
+                config.mon(),
+                config.tue(),
+                config.wed(),
+                slot,
+                config.fri(),
+                config.sat(),
+                config.sun(),
+            ),
+            "fri" => WeeklyAutoRunConfig::try_new(
+                config.mon(),
+                config.tue(),
+                config.wed(),
+                config.thu(),
+                slot,
+                config.sat(),
+                config.sun(),
+            ),
+            "sat" => WeeklyAutoRunConfig::try_new(
+                config.mon(),
+                config.tue(),
+                config.wed(),
+                config.thu(),
+                config.fri(),
+                slot,
+                config.sun(),
+            ),
+            "sun" => WeeklyAutoRunConfig::try_new(
+                config.mon(),
+                config.tue(),
+                config.wed(),
+                config.thu(),
+                config.fri(),
+                config.sat(),
+                slot,
+            ),
+            other => panic!("unsupported weekday key: {other}"),
+        }
+        .expect("updated weekly config should be valid");
     }
 
     fn parse_epoch_seconds_from_boundary_id(boundary_id: &BoundaryOccurrenceId) -> i64 {
@@ -888,13 +805,28 @@ mod tests {
     }
 
     #[test]
-    fn test_find_first_overlapping_weekday_pair_detects_adjacent_overlap() {
-        let mut config = WeeklyAutoRunConfig::default();
-        update_weekday_slot(&mut config, "mon", true, "22:00", "02:00");
-        update_weekday_slot(&mut config, "tue", true, "01:00", "05:00");
+    fn test_weekly_auto_run_config_try_new_rejects_adjacent_overlap() {
+        let result = WeeklyAutoRunConfig::try_new(
+            DayAutoRunSlot::try_new(
+                true,
+                HhMm::try_from("22:00".to_string()).expect("start time should be valid"),
+                HhMm::try_from("02:00".to_string()).expect("end time should be valid"),
+            )
+            .expect("slot should be valid"),
+            DayAutoRunSlot::try_new(
+                true,
+                HhMm::try_from("01:00".to_string()).expect("start time should be valid"),
+                HhMm::try_from("05:00".to_string()).expect("end time should be valid"),
+            )
+            .expect("slot should be valid"),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+        );
 
-        let overlap_pair = find_first_overlapping_weekday_pair(&config);
-        assert_eq!(overlap_pair, Some(("mon", "tue")));
+        assert!(result.is_err());
     }
 
     #[test]
@@ -903,7 +835,7 @@ mod tests {
         update_weekday_slot(&mut config, "mon", true, "09:00", "12:00");
         update_weekday_slot(&mut config, "tue", true, "13:00", "18:00");
 
-        let overlap_pair = find_first_overlapping_weekday_pair(&config);
+        let overlap_pair = config.find_first_overlapping_weekday_pair();
         assert!(overlap_pair.is_none());
     }
 }
