@@ -78,7 +78,7 @@ export function DurationInput({
   disabled = false,
   allowDecimal = true,
 }: DurationInputProps): React.ReactElement {
-  const generatedInputId = useId();
+  const generatedElementId = useId();
   const [inputValue, setInputValue] = useState(toDisplayValue(value));
 
   useEffect(() => {
@@ -95,7 +95,10 @@ export function DurationInput({
   const inputStateClassName = getInputStateClassName(isValid);
   const inputTestId = createElementTestId(testId, "input");
   const errorTestId = createElementTestId(testId, "error");
-  const inputId = inputTestId ?? generatedInputId;
+  const inputId = `${generatedElementId}-input`;
+  const rangeHintId = `${generatedElementId}-hint`;
+  const errorId = `${generatedElementId}-error`;
+  const describedBy = isValid ? rangeHintId : `${rangeHintId} ${errorId}`;
 
   return (
     <div className="flex flex-col gap-2" data-testid={testId}>
@@ -112,18 +115,24 @@ export function DurationInput({
           max={max}
           step={getStepValue(allowDecimal)}
           disabled={disabled}
+          aria-invalid={isValid ? undefined : true}
+          aria-describedby={describedBy}
           className={`flex-1 rounded-lg border bg-surface-raised px-3 py-2 text-on-surface focus:ring-2 focus:outline-none disabled:cursor-not-allowed disabled:border-disabled-border disabled:bg-disabled-bg disabled:text-disabled-text ${inputStateClassName}`}
           data-testid={inputTestId}
         />
         <span className="text-sm text-text-muted">{unit}</span>
       </div>
       {!isValid && (
-        <p className="text-xs text-danger-300" data-testid={errorTestId}>
+        <p
+          id={errorId}
+          className="text-xs text-danger-300"
+          data-testid={errorTestId}
+        >
           {min}〜{max}
           {unit}の範囲で入力してください
         </p>
       )}
-      <p className="text-xs text-text-muted">
+      <p id={rangeHintId} className="text-xs text-text-muted">
         範囲: {min}〜{max}
         {unit}
       </p>

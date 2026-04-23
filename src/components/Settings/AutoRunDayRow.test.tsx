@@ -3,6 +3,35 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AutoRunDayRow } from "./AutoRunDayRow";
 import type { DayScheduleValidationError } from "@/types/weeklyAutoRun";
+import { getAriaDescribedByIds } from "@/test/ariaDescription";
+
+function getStartTimeInput(): HTMLElement {
+  return screen.getByLabelText("月曜日の開始時刻");
+}
+
+function getEndTimeInput(): HTMLElement {
+  return screen.getByLabelText("月曜日の終了時刻");
+}
+
+function renderEnabledMondayRow(
+  dayValidationError?: DayScheduleValidationError,
+): void {
+  render(
+    <AutoRunDayRow
+      weekday="mon"
+      autoRunFeatureEnabled={true}
+      daySlot={{
+        enabled: true,
+        startTime: "09:00",
+        endTime: "18:00",
+      }}
+      dayValidationError={dayValidationError}
+      onEnabledChange={() => undefined}
+      onStartTimeChange={() => undefined}
+      onEndTimeChange={() => undefined}
+    />,
+  );
+}
 
 describe("AutoRunDayRow", () => {
   it("renders weekday controls with accessible names", () => {
@@ -169,5 +198,78 @@ describe("AutoRunDayRow", () => {
     );
 
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("does not set aria-invalid or aria-describedby on time inputs without a day error", () => {
+    renderEnabledMondayRow();
+
+    const startTimeInput = getStartTimeInput();
+    const endTimeInput = getEndTimeInput();
+
+    expect(startTimeInput).not.toHaveAttribute("aria-invalid", "true");
+    expect(endTimeInput).not.toHaveAttribute("aria-invalid", "true");
+    expect(startTimeInput).not.toHaveAttribute("aria-describedby");
+    expect(endTimeInput).not.toHaveAttribute("aria-describedby");
+  });
+
+  it("marks only the start time input invalid for start time format errors", () => {
+    const dayValidationError: DayScheduleValidationError = {
+      code: "start_time_format_invalid",
+      weekday: "mon",
+      invalidStartTimeText: "invalid-time",
+      message: "Start time for mon must use HH:MM (24-hour).",
+    };
+
+    renderEnabledMondayRow(dayValidationError);
+
+    const startTimeInput = getStartTimeInput();
+    const endTimeInput = getEndTimeInput();
+    const rowError = screen.getByRole("alert");
+
+    expect(startTimeInput).toHaveAttribute("aria-invalid", "true");
+    expect(endTimeInput).not.toHaveAttribute("aria-invalid", "true");
+    expect(getAriaDescribedByIds(startTimeInput)).toContain(rowError.id);
+    expect(getAriaDescribedByIds(endTimeInput)).not.toContain(rowError.id);
+  });
+
+  it("marks only the end time input invalid for end time format errors", () => {
+    const dayValidationError: DayScheduleValidationError = {
+      code: "end_time_format_invalid",
+      weekday: "mon",
+      invalidEndTimeText: "invalid-time",
+      message: "End time for mon must use HH:MM (24-hour).",
+    };
+
+    renderEnabledMondayRow(dayValidationError);
+
+    const startTimeInput = getStartTimeInput();
+    const endTimeInput = getEndTimeInput();
+    const rowError = screen.getByRole("alert");
+
+    expect(startTimeInput).not.toHaveAttribute("aria-invalid", "true");
+    expect(endTimeInput).toHaveAttribute("aria-invalid", "true");
+    expect(getAriaDescribedByIds(startTimeInput)).not.toContain(rowError.id);
+    expect(getAriaDescribedByIds(endTimeInput)).toContain(rowError.id);
+  });
+
+  it("marks both time inputs invalid when start and end times match", () => {
+    const dayValidationError: DayScheduleValidationError = {
+      code: "start_time_equals_end_time",
+      weekday: "mon",
+      startTime: "09:00",
+      endTime: "09:00",
+      message: "Start and end time cannot be identical for mon.",
+    };
+
+    renderEnabledMondayRow(dayValidationError);
+
+    const startTimeInput = getStartTimeInput();
+    const endTimeInput = getEndTimeInput();
+    const rowError = screen.getByRole("alert");
+
+    expect(startTimeInput).toHaveAttribute("aria-invalid", "true");
+    expect(endTimeInput).toHaveAttribute("aria-invalid", "true");
+    expect(getAriaDescribedByIds(startTimeInput)).toContain(rowError.id);
+    expect(getAriaDescribedByIds(endTimeInput)).toContain(rowError.id);
   });
 });
