@@ -153,9 +153,10 @@ mod scheduler_concurrency_tests {
         let pending_task = tokio::spawn(async move {
             pending_barrier.wait().await;
             for _ in 0..100 {
-                let mut timer = pending_timer_manager.lock().await;
-                let _ = timer.mark_scheduled_stop_pending_if_session_is_eligible();
-                drop(timer);
+                {
+                    let mut timer = pending_timer_manager.lock().await;
+                    let _ = timer.mark_scheduled_stop_pending_if_session_is_eligible();
+                }
                 tokio::task::yield_now().await;
             }
         });
@@ -165,14 +166,15 @@ mod scheduler_concurrency_tests {
         let completion_task = tokio::spawn(async move {
             completion_barrier.wait().await;
             for _ in 0..100 {
-                let mut timer = completion_timer_manager.lock().await;
-                if timer.status() == TimerStatus::Working
-                    && timer.get_state().scheduled_stop_state
-                        == crate::types::ScheduledStopState::Pending
                 {
-                    let _ = timer.transition_to_idle_due_to_scheduled_stop(SessionType::Work);
+                    let mut timer = completion_timer_manager.lock().await;
+                    if timer.status() == TimerStatus::Working
+                        && timer.get_state().scheduled_stop_state
+                            == crate::types::ScheduledStopState::Pending
+                    {
+                        let _ = timer.transition_to_idle_due_to_scheduled_stop(SessionType::Work);
+                    }
                 }
-                drop(timer);
                 tokio::task::yield_now().await;
             }
         });

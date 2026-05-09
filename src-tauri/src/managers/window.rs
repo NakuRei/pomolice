@@ -11,7 +11,7 @@ use tauri::{
 use crate::error::{PomoliceError, Result};
 
 #[derive(Clone)]
-struct WindowState {
+pub(crate) struct WindowState {
     position: PhysicalPosition<i32>,
     size: PhysicalSize<u32>,
 }
@@ -27,14 +27,17 @@ impl WindowStateManager {
         Self { saved_state: None }
     }
 
-    /// Enter fullscreen mode on all monitors
-    pub(crate) async fn enter_fullscreen_all_monitors<R: Runtime>(
-        &mut self,
-        app: AppHandle<R>,
-    ) -> Result<()> {
+    /// Capture the previous main-window state before fullscreen break entry mutates layout.
+    pub(crate) async fn capture_main_window_state_for_break<R: Runtime>(
+        app: &AppHandle<R>,
+    ) -> Result<Option<WindowState>> {
+        let main_window = Self::main_window(app)?;
+        Self::restore_and_capture_main_window_state(&main_window).await
+    }
+
+    /// Complete fullscreen break entry after the previous main-window state has been captured.
+    pub(crate) async fn enter_fullscreen_all_monitors<R: Runtime>(app: AppHandle<R>) -> Result<()> {
         let main_window = Self::main_window(&app)?;
-        self.restore_and_capture_main_window_state(&main_window)
-            .await?;
 
         let main_monitor = Self::configure_main_window_for_break(&main_window).await?;
         Self::create_overlay_windows_for_other_monitors(&app, &main_window, main_monitor.as_ref())?;
@@ -48,28 +51,26 @@ impl WindowStateManager {
     }
 
     async fn restore_and_capture_main_window_state<R: Runtime>(
-        &mut self,
         main_window: &WebviewWindow<R>,
-    ) -> Result<()> {
+    ) -> Result<Option<WindowState>> {
         main_window
             .unminimize()
             .map_err(|e| PomoliceError::WindowControl(format!("Failed to unminimize: {e}")))?;
 
         tokio::time::sleep(Duration::from_millis(100)).await;
-        self.capture_main_window_state(main_window)?;
+        let saved_state = Self::capture_main_window_state(main_window)?;
 
         main_window
             .hide()
             .map_err(|e| PomoliceError::WindowControl(format!("Failed to hide: {e}")))?;
 
         tokio::time::sleep(Duration::from_millis(50)).await;
-        Ok(())
+        Ok(saved_state)
     }
 
     fn capture_main_window_state<R: Runtime>(
-        &mut self,
         main_window: &WebviewWindow<R>,
-    ) -> Result<()> {
+    ) -> Result<Option<WindowState>> {
         let current_position = main_window
             .outer_position()
             .map_err(|e| PomoliceError::WindowControl(format!("Failed to get position: {e}")))?;
@@ -78,13 +79,17 @@ impl WindowStateManager {
             .map_err(|e| PomoliceError::WindowControl(format!("Failed to get size: {e}")))?;
 
         if current_position.x > -30000 && current_size.width > 0 {
-            self.saved_state = Some(WindowState {
+            return Ok(Some(WindowState {
                 position: current_position,
                 size: current_size,
-            });
+            }));
         }
 
-        Ok(())
+        Ok(None)
+    }
+
+    pub(crate) fn set_saved_state(&mut self, saved_state: Option<WindowState>) {
+        self.saved_state = saved_state;
     }
 
     async fn configure_main_window_for_break<R: Runtime>(
@@ -304,6 +309,20 @@ impl WindowStateManager {
                 .map_err(|e| PomoliceError::WindowControl(format!("Failed to center: {e}")))?;
         }
 
+        Self::restore_main_window_visibility(
+            || main_window.show().map_err(|e| e.to_string()),
+            || main_window.set_focus().map_err(|e| e.to_string()),
+        )?;
+
+        Ok(())
+    }
+
+    fn restore_main_window_visibility(
+        show: impl FnOnce() -> std::result::Result<(), String>,
+        focus: impl FnOnce() -> std::result::Result<(), String>,
+    ) -> Result<()> {
+        show().map_err(|error| PomoliceError::WindowControl(format!("Failed to show: {error}")))?;
+        let _ = focus();
         Ok(())
     }
 }
@@ -328,6 +347,47 @@ mod tests {
     fn test_window_state_manager_default() {
         let manager = WindowStateManager::default();
         assert!(manager.saved_state.is_none());
+    }
+
+    #[test]
+    fn test_restore_main_window_visibility_calls_show_and_tolerates_focus_failure() {
+        let mut show_called = false;
+        let mut focus_called = false;
+
+        WindowStateManager::restore_main_window_visibility(
+            || {
+                show_called = true;
+                Ok(())
+            },
+            || {
+                focus_called = true;
+                Err("focus failed".to_string())
+            },
+        )
+        .expect("show success should keep rollback restore successful");
+
+        assert!(show_called);
+        assert!(focus_called);
+    }
+
+    #[test]
+    fn test_restore_main_window_visibility_propagates_show_failure() {
+        let mut focus_called = false;
+
+        let error = WindowStateManager::restore_main_window_visibility(
+            || Err("show failed".to_string()),
+            || {
+                focus_called = true;
+                Ok(())
+            },
+        )
+        .expect_err("show failure should fail the rollback restore");
+
+        assert!(matches!(
+            error,
+            PomoliceError::WindowControl(message) if message == "Failed to show: show failed"
+        ));
+        assert!(!focus_called);
     }
 
     // Note: enter_fullscreen_all_monitors and exit_fullscreen_all_monitors

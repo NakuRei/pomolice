@@ -2,6 +2,14 @@ use log::Level;
 
 use crate::log_redaction::{redact_exception_message, RedactionClass};
 
+pub(crate) const PERSISTENCE_WRITE_TRIGGER_RUN_EVENT_EXIT: &str = "run_event_exit";
+pub(crate) const PERSISTENCE_WRITE_TRIGGER_SCHEDULER_STOP_PENDING: &str =
+    "scheduler_stop_pending_persist";
+pub(crate) const PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START: &str =
+    "scheduler_auto_start_persist";
+pub(crate) const PERSISTENCE_WRITE_TRIGGER_SESSION_COMPLETION: &str = "session_completion_persist";
+pub(crate) const PERSISTENCE_WRITE_TRIGGER_INPUT_PENALTY: &str = "input_penalty_persist";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackendLogEvent {
     AppStartupCompleted,
@@ -155,6 +163,26 @@ pub fn log_error_event(
 ) {
     debug_assert_eq!(event.severity(), Level::Error);
     log::error!("{}", render_event_message(event, fields, error));
+}
+
+pub(crate) fn log_persistence_write_failure(trigger: &'static str, error: &dyn std::error::Error) {
+    log_error_event(
+        BackendLogEvent::StoragePersistenceWriteFailed,
+        &[("trigger", trigger.to_string())],
+        Some(error),
+    );
+}
+
+#[cfg(test)]
+pub(crate) fn render_persistence_write_failure_message(
+    trigger: &'static str,
+    error: &dyn std::error::Error,
+) -> String {
+    render_event_message(
+        BackendLogEvent::StoragePersistenceWriteFailed,
+        &[("trigger", trigger.to_string())],
+        Some(error),
+    )
 }
 
 pub(crate) fn render_event_message(

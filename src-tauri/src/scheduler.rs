@@ -6,7 +6,11 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 
-use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
+use crate::logging_event::{
+    log_info_event, log_persistence_write_failure, log_warn_event, BackendLogEvent,
+    PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START,
+    PERSISTENCE_WRITE_TRIGGER_SCHEDULER_STOP_PENDING,
+};
 use crate::managers::weekly_schedule::{
     collect_crossed_end_boundaries, collect_crossed_start_boundaries,
 };
@@ -37,6 +41,14 @@ struct SchedulerTimerSnapshot {
 struct SchedulerTickPlan {
     end_boundary_previous_local: DateTime<Local>,
     should_evaluate_start_boundaries: bool,
+}
+
+async fn persist_current_state_with_trigger(app: &AppHandle, trigger: &'static str) {
+    let state_handle = app.state::<state::AppState>();
+
+    if let Err(error) = state_handle.persist_current_state_async().await {
+        log_persistence_write_failure(trigger, &error);
+    }
 }
 
 pub async fn lib_start_scheduler_task(app: AppHandle) {
@@ -340,7 +352,8 @@ async fn mark_scheduled_stop_pending_for_current_session(app: AppHandle) -> bool
 
     if should_persist {
         let _ = app.emit("auto_run_stop_pending", serde_json::json!({}));
-        state_handle.persist_current_state().await;
+        persist_current_state_with_trigger(&app, PERSISTENCE_WRITE_TRIGGER_SCHEDULER_STOP_PENDING)
+            .await;
     }
 
     should_persist
@@ -393,7 +406,7 @@ async fn start_work_from_scheduler_when_idle(
         timer_manager.spawn_timer_task(app.clone());
     }
 
-    state_handle.persist_current_state().await;
+    persist_current_state_with_trigger(&app, PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START).await;
 
     true
 }

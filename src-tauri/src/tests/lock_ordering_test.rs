@@ -10,9 +10,9 @@
 
 #[cfg(test)]
 mod lock_ordering_tests {
-    use std::sync::Arc;
+    use std::sync::{mpsc, Arc, Barrier, Mutex};
+    use std::thread;
     use std::time::Duration;
-    use tokio::sync::{Barrier, Mutex};
 
     /// Dummy state types that mirror the real managers but have no Tauri dependency.
     struct FakeInputMonitor;
@@ -38,17 +38,23 @@ mod lock_ordering_tests {
         }
     }
 
+    fn lock_or_recover<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+        mutex
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     /// Simulates the lock acquisition pattern of `lib_handle_escape_combo`:
     ///   1. `input_monitor`
     ///   2. `window_manager`
-    async fn escape_combo_pattern(locks: &FakeLocks) {
+    fn escape_combo_pattern(locks: &FakeLocks) {
         {
-            let _input = locks.input_monitor.lock().await;
-            tokio::time::sleep(Duration::from_millis(1)).await;
+            let _input = lock_or_recover(&locks.input_monitor);
+            thread::sleep(Duration::from_millis(1));
         }
         {
-            let _window = locks.window_manager.lock().await;
-            tokio::time::sleep(Duration::from_millis(1)).await;
+            let _window = lock_or_recover(&locks.window_manager);
+            thread::sleep(Duration::from_millis(1));
         }
     }
 
@@ -56,18 +62,18 @@ mod lock_ordering_tests {
     ///   1. `input_monitor`
     ///   2. `window_manager`
     ///   3. `timer_manager`
-    async fn exit_break_mode_pattern(locks: &FakeLocks) {
+    fn exit_break_mode_pattern(locks: &FakeLocks) {
         {
-            let _input = locks.input_monitor.lock().await;
-            tokio::time::sleep(Duration::from_millis(1)).await;
+            let _input = lock_or_recover(&locks.input_monitor);
+            thread::sleep(Duration::from_millis(1));
         }
         {
-            let _window = locks.window_manager.lock().await;
-            tokio::time::sleep(Duration::from_millis(1)).await;
+            let _window = lock_or_recover(&locks.window_manager);
+            thread::sleep(Duration::from_millis(1));
         }
         {
-            let _timer = locks.timer_manager.lock().await;
-            tokio::time::sleep(Duration::from_millis(1)).await;
+            let _timer = lock_or_recover(&locks.timer_manager);
+            thread::sleep(Duration::from_millis(1));
         }
     }
 
@@ -75,53 +81,53 @@ mod lock_ordering_tests {
     ///   1. `input_monitor`
     ///   2. `window_manager`
     ///   3. `timer_manager`
-    async fn enter_break_mode_pattern(locks: &FakeLocks) {
+    fn enter_break_mode_pattern(locks: &FakeLocks) {
         {
-            let _input = locks.input_monitor.lock().await;
-            tokio::time::sleep(Duration::from_millis(1)).await;
+            let _input = lock_or_recover(&locks.input_monitor);
+            thread::sleep(Duration::from_millis(1));
         }
         {
-            let _window = locks.window_manager.lock().await;
-            tokio::time::sleep(Duration::from_millis(1)).await;
+            let _window = lock_or_recover(&locks.window_manager);
+            thread::sleep(Duration::from_millis(1));
         }
         {
-            let _timer = locks.timer_manager.lock().await;
-            tokio::time::sleep(Duration::from_millis(1)).await;
+            let _timer = lock_or_recover(&locks.timer_manager);
+            thread::sleep(Duration::from_millis(1));
         }
     }
 
     /// Simulates the lock acquisition pattern of `lib_handle_input_detected`:
     ///   1. `timer_manager` (only)
-    async fn input_detected_pattern(locks: &FakeLocks) {
-        let _timer = locks.timer_manager.lock().await;
-        tokio::time::sleep(Duration::from_millis(1)).await;
+    fn input_detected_pattern(locks: &FakeLocks) {
+        let _timer = lock_or_recover(&locks.timer_manager);
+        thread::sleep(Duration::from_millis(1));
     }
 
     /// Simulates `scheduler_task_state` start/stop management.
     /// This lock must never be held together with other manager locks.
-    async fn scheduler_task_state_pattern(locks: &FakeLocks) {
-        let _scheduler = locks.scheduler_task_state.lock().await;
-        tokio::time::sleep(Duration::from_millis(1)).await;
+    fn scheduler_task_state_pattern(locks: &FakeLocks) {
+        let _scheduler = lock_or_recover(&locks.scheduler_task_state);
+        thread::sleep(Duration::from_millis(1));
     }
 
     /// Intentionally wrong order used only to verify timeout-based deadlock detection.
-    async fn inverted_timer_then_window_pattern(
-        locks: Arc<FakeLocks>,
-        first_lock_barrier: Arc<Barrier>,
+    fn inverted_timer_then_window_pattern(
+        locks: &Arc<FakeLocks>,
+        first_lock_barrier: &Arc<Barrier>,
     ) {
-        let _timer = locks.timer_manager.lock().await;
-        first_lock_barrier.wait().await;
-        let _window = locks.window_manager.lock().await;
+        let _timer = lock_or_recover(&locks.timer_manager);
+        first_lock_barrier.wait();
+        let _window = lock_or_recover(&locks.window_manager);
     }
 
     /// Intentionally wrong order used only to verify timeout-based deadlock detection.
-    async fn inverted_window_then_timer_pattern(
-        locks: Arc<FakeLocks>,
-        first_lock_barrier: Arc<Barrier>,
+    fn inverted_window_then_timer_pattern(
+        locks: &Arc<FakeLocks>,
+        first_lock_barrier: &Arc<Barrier>,
     ) {
-        let _window = locks.window_manager.lock().await;
-        first_lock_barrier.wait().await;
-        let _timer = locks.timer_manager.lock().await;
+        let _window = lock_or_recover(&locks.window_manager);
+        first_lock_barrier.wait();
+        let _timer = lock_or_recover(&locks.timer_manager);
     }
 
     // -------------------------------------------------------------------------
@@ -136,10 +142,9 @@ mod lock_ordering_tests {
         let locks_b = Arc::clone(&locks);
 
         let result = tokio::time::timeout(Duration::from_secs(5), async move {
-            tokio::join!(
-                escape_combo_pattern(&locks),
-                exit_break_mode_pattern(&locks_b),
-            )
+            let task_a = tokio::task::spawn_blocking(move || escape_combo_pattern(&locks));
+            let task_b = tokio::task::spawn_blocking(move || exit_break_mode_pattern(&locks_b));
+            let _ = tokio::join!(task_a, task_b);
         })
         .await;
 
@@ -157,10 +162,9 @@ mod lock_ordering_tests {
         let locks_b = Arc::clone(&locks);
 
         let result = tokio::time::timeout(Duration::from_secs(5), async move {
-            tokio::join!(
-                escape_combo_pattern(&locks),
-                enter_break_mode_pattern(&locks_b),
-            )
+            let task_a = tokio::task::spawn_blocking(move || escape_combo_pattern(&locks));
+            let task_b = tokio::task::spawn_blocking(move || enter_break_mode_pattern(&locks_b));
+            let _ = tokio::join!(task_a, task_b);
         })
         .await;
 
@@ -178,10 +182,9 @@ mod lock_ordering_tests {
         let locks_b = Arc::clone(&locks);
 
         let result = tokio::time::timeout(Duration::from_secs(5), async move {
-            tokio::join!(
-                exit_break_mode_pattern(&locks),
-                enter_break_mode_pattern(&locks_b),
-            )
+            let task_a = tokio::task::spawn_blocking(move || exit_break_mode_pattern(&locks));
+            let task_b = tokio::task::spawn_blocking(move || enter_break_mode_pattern(&locks_b));
+            let _ = tokio::join!(task_a, task_b);
         })
         .await;
 
@@ -199,10 +202,9 @@ mod lock_ordering_tests {
         let locks_b = Arc::clone(&locks);
 
         let result = tokio::time::timeout(Duration::from_secs(5), async move {
-            tokio::join!(
-                input_detected_pattern(&locks),
-                exit_break_mode_pattern(&locks_b),
-            )
+            let task_a = tokio::task::spawn_blocking(move || input_detected_pattern(&locks));
+            let task_b = tokio::task::spawn_blocking(move || exit_break_mode_pattern(&locks_b));
+            let _ = tokio::join!(task_a, task_b);
         })
         .await;
 
@@ -222,13 +224,13 @@ mod lock_ordering_tests {
         let locks_e = Arc::clone(&locks);
 
         let result = tokio::time::timeout(Duration::from_secs(5), async move {
-            tokio::join!(
-                escape_combo_pattern(&locks),
-                exit_break_mode_pattern(&locks_b),
-                enter_break_mode_pattern(&locks_c),
-                input_detected_pattern(&locks_d),
-                scheduler_task_state_pattern(&locks_e),
-            )
+            let task_a = tokio::task::spawn_blocking(move || escape_combo_pattern(&locks));
+            let task_b = tokio::task::spawn_blocking(move || exit_break_mode_pattern(&locks_b));
+            let task_c = tokio::task::spawn_blocking(move || enter_break_mode_pattern(&locks_c));
+            let task_d = tokio::task::spawn_blocking(move || input_detected_pattern(&locks_d));
+            let task_e =
+                tokio::task::spawn_blocking(move || scheduler_task_state_pattern(&locks_e));
+            let _ = tokio::join!(task_a, task_b, task_c, task_d, task_e);
         })
         .await;
 
@@ -246,10 +248,9 @@ mod lock_ordering_tests {
         let locks_b = Arc::clone(&locks);
 
         let result = tokio::time::timeout(Duration::from_secs(5), async move {
-            tokio::join!(
-                scheduler_task_state_pattern(&locks),
-                input_detected_pattern(&locks_b),
-            )
+            let task_a = tokio::task::spawn_blocking(move || scheduler_task_state_pattern(&locks));
+            let task_b = tokio::task::spawn_blocking(move || input_detected_pattern(&locks_b));
+            let _ = tokio::join!(task_a, task_b);
         })
         .await;
 
@@ -264,30 +265,31 @@ mod lock_ordering_tests {
     async fn test_lock_order_inversion_is_detected_by_timeout_guard() {
         let locks = Arc::new(FakeLocks::new());
         let first_lock_barrier = Arc::new(Barrier::new(2));
+        let (done_tx, done_rx) = mpsc::channel();
 
-        let mut task_a = tokio::spawn(inverted_timer_then_window_pattern(
-            Arc::clone(&locks),
-            Arc::clone(&first_lock_barrier),
-        ));
-        let mut task_b = tokio::spawn(inverted_window_then_timer_pattern(
-            Arc::clone(&locks),
-            Arc::clone(&first_lock_barrier),
-        ));
+        let locks_a = Arc::clone(&locks);
+        let barrier_a = Arc::clone(&first_lock_barrier);
+        let done_tx_a = done_tx.clone();
+        let _task_a = thread::spawn(move || {
+            inverted_timer_then_window_pattern(&locks_a, &barrier_a);
+            let _ = done_tx_a.send(());
+        });
 
-        let completion = tokio::time::timeout(Duration::from_millis(200), async {
-            let _ = (&mut task_a).await;
-            let _ = (&mut task_b).await;
-        })
-        .await;
+        let locks_b = Arc::clone(&locks);
+        let barrier_b = Arc::clone(&first_lock_barrier);
+        let _task_b = thread::spawn(move || {
+            inverted_window_then_timer_pattern(&locks_b, &barrier_b);
+            let _ = done_tx.send(());
+        });
+
+        let completion =
+            tokio::task::spawn_blocking(move || done_rx.recv_timeout(Duration::from_millis(200)))
+                .await
+                .expect("blocking timeout wait should not panic");
 
         assert!(
             completion.is_err(),
             "inverted lock order should be detected as a timeout"
         );
-
-        task_a.abort();
-        task_b.abort();
-        let _ = task_a.await;
-        let _ = task_b.await;
     }
 }

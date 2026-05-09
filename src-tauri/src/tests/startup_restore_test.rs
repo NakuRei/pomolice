@@ -13,9 +13,11 @@ mod startup_restore_tests {
     }
 
     #[test]
-    fn test_startup_resume_action_requests_post_manage_initial_emit_and_timer_restart() {
+    fn test_startup_resume_action_keeps_post_manage_work_to_emit_and_restart_only() {
         let effect_plan = build_startup_resume_effect_plan();
 
+        // The timer state is already restored before `app.manage(app_state)`.
+        // Startup handling should only emit the first tick and restart the task.
         assert_eq!(effect_plan.emit_order, &[PipelineEmitEvent::TimerTick]);
         assert_eq!(effect_plan.break_mode_change, BreakModeChange::None);
         assert_eq!(

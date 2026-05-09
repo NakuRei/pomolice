@@ -1,6 +1,8 @@
 use std::io;
 
-use crate::logging_event::{render_event_message, BackendLogEvent};
+use crate::logging_event::{
+    render_event_message, BackendLogEvent, PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START,
+};
 
 #[test]
 fn test_render_event_message_uses_canonical_prefix_and_deterministic_field_order() {
@@ -32,6 +34,42 @@ fn test_render_event_message_redacts_error_message_and_masks_high_risk_tokens() 
     assert_eq!(
         rendered,
         "event_id=session.fullscreen_break.enter_failed error_message=password\\=[REDACTED]\\ token\\=[REDACTED]"
+    );
+}
+
+#[test]
+fn test_render_event_message_includes_persistence_trigger_context() {
+    let error = io::Error::other("disk full");
+    let rendered = render_event_message(
+        BackendLogEvent::StoragePersistenceWriteFailed,
+        &[(
+            "trigger",
+            PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START.to_string(),
+        )],
+        Some(&error),
+    );
+
+    assert_eq!(
+        rendered,
+        "event_id=storage.persistence.write_failed trigger=scheduler_auto_start_persist error_message=disk\\ full"
+    );
+}
+
+#[test]
+fn test_render_event_message_includes_break_step_context() {
+    let error = io::Error::other("window exit failed");
+    let rendered = render_event_message(
+        BackendLogEvent::SessionFullscreenBreakExitFailed,
+        &[(
+            "step",
+            "external_break_exit_fullscreen_all_monitors".to_string(),
+        )],
+        Some(&error),
+    );
+
+    assert_eq!(
+        rendered,
+        "event_id=session.fullscreen_break.exit_failed step=external_break_exit_fullscreen_all_monitors error_message=window\\ exit\\ failed"
     );
 }
 

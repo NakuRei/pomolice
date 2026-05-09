@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use thiserror::Error;
 
 use crate::logging_event::{log_error_event, log_info_event, log_warn_event, BackendLogEvent};
 use crate::managers::clock::{Clock, SystemClock};
@@ -15,6 +16,12 @@ use crate::types::{
     ScheduledStopState, SessionType, TimerSettings, TimerStartSource, TimerState, TimerStatus,
     WeeklyAutoRunConfig, PERSISTED_STATE_SCHEMA_VERSION_V4,
 };
+
+#[cfg(test)]
+type BeforeSaveHook = Arc<dyn Fn() + Send + Sync>;
+
+#[cfg(test)]
+type InjectedSaveErrorHook = Arc<dyn Fn() -> Option<SaveError> + Send + Sync>;
 
 #[derive(Debug, Clone, Copy, Deserialize)]
 struct PersistedSchemaEnvelope {
@@ -50,6 +57,43 @@ pub(crate) enum PersistenceLoadOutcome {
         saved_at_utc: DateTime<Utc>,
     },
     UnsupportedSchemaFallback,
+}
+
+#[derive(Debug, Error)]
+pub(crate) enum SaveError {
+    #[error("failed to create persistence directory for {path}: {source}")]
+    CreateDir {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("failed to serialize persisted timer state: {source}")]
+    Serialize {
+        #[source]
+        source: serde_json::Error,
+    },
+
+    #[error("failed to open persistence file {path}: {source}")]
+    Open {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("failed to write persistence file {path}: {source}")]
+    Write {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("failed to commit persistence file {path}: {source}")]
+    Commit {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 struct RestoredSessionState {
@@ -242,9 +286,15 @@ fn normalize_recovered_session_stop_behavior(
 }
 
 /// Manager for state persistence.
+#[derive(Clone)]
 pub(crate) struct PersistenceManager {
     clock: Arc<dyn Clock + Send + Sync>,
     state_file_path: Option<PathBuf>,
+    save_lock: Arc<Mutex<()>>,
+    #[cfg(test)]
+    before_save_hook: Option<BeforeSaveHook>,
+    #[cfg(test)]
+    injected_save_error_hook: Option<InjectedSaveErrorHook>,
 }
 
 impl PersistenceManager {
@@ -253,86 +303,120 @@ impl PersistenceManager {
         Self {
             clock,
             state_file_path,
+            save_lock: Arc::new(Mutex::new(())),
+            #[cfg(test)]
+            before_save_hook: None,
+            #[cfg(test)]
+            injected_save_error_hook: None,
         }
     }
 
-    pub(crate) async fn save_state(&self, timer_state: TimerState) {
-        let Some(path) = self.state_file_path.clone() else {
+    pub(crate) fn has_state_path(&self) -> bool {
+        self.state_file_path.is_some()
+    }
+
+    pub(crate) fn save_state_sync(&self, timer_state: TimerState) -> Result<(), SaveError> {
+        Self::save_state_sync_with_context(
+            self.clock.as_ref(),
+            self.state_file_path.as_deref(),
+            self.save_lock.as_ref(),
+            #[cfg(test)]
+            self.before_save_hook.as_ref(),
+            #[cfg(test)]
+            self.injected_save_error_hook.as_ref(),
+            timer_state,
+        )
+    }
+
+    pub(crate) fn load_state_sync(&self) -> PersistenceLoadOutcome {
+        Self::load_state_sync_with_context(self.clock.as_ref(), self.state_file_path.as_deref())
+    }
+
+    fn save_state_sync_with_context(
+        clock: &dyn Clock,
+        state_file_path: Option<&Path>,
+        save_lock: &Mutex<()>,
+        #[cfg(test)] before_save_hook: Option<&BeforeSaveHook>,
+        #[cfg(test)] injected_save_error_hook: Option<&InjectedSaveErrorHook>,
+        timer_state: TimerState,
+    ) -> Result<(), SaveError> {
+        let Some(path) = state_file_path else {
             log_warn_event(BackendLogEvent::StoragePersistencePathUnavailable, &[]);
-            return;
+            return Ok(());
         };
 
-        let clock = Arc::clone(&self.clock);
         log_info_event(
             BackendLogEvent::StoragePersistenceWriteStarted,
             &[("path", path.display().to_string())],
         );
 
-        let path_for_task = path.clone();
-        match tokio::task::spawn_blocking(move || {
-            Self::save_state_to_path(clock.as_ref(), timer_state, &path_for_task)
-        })
-        .await
-        {
-            Ok(Ok(())) => {
+        #[cfg(test)]
+        if let Some(hook) = before_save_hook {
+            hook();
+        }
+
+        #[cfg(test)]
+        if let Some(hook) = injected_save_error_hook {
+            if let Some(error) = hook() {
+                log_error_event(
+                    BackendLogEvent::StoragePersistenceWriteFailed,
+                    &[
+                        ("path", path.display().to_string()),
+                        ("error_message", error.to_string()),
+                    ],
+                    None,
+                );
+                return Err(error);
+            }
+        }
+
+        // Production saves are already serialized by AppState's ordered-save lane. This inner lock
+        // stays as a safety net for direct sync callers (mostly tests) so persistence itself never
+        // overlaps atomic file commits, but it is intentionally not the public FIFO contract.
+        let _save_guard = save_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let save_result = Self::save_state_to_path(clock, timer_state, path);
+
+        match save_result {
+            Ok(()) => {
                 log_info_event(
                     BackendLogEvent::StoragePersistenceWriteCompleted,
                     &[("path", path.display().to_string())],
                 );
+                Ok(())
             }
-            Ok(Err(write_error)) => {
+            Err(error) => {
                 log_error_event(
                     BackendLogEvent::StoragePersistenceWriteFailed,
                     &[
                         ("path", path.display().to_string()),
-                        ("error_message", write_error),
+                        ("error_message", error.to_string()),
                     ],
                     None,
                 );
-            }
-            Err(join_error) => {
-                log_error_event(
-                    BackendLogEvent::StoragePersistenceWriteFailed,
-                    &[
-                        ("path", path.display().to_string()),
-                        ("error_message", join_error.to_string()),
-                    ],
-                    None,
-                );
+                Err(error)
             }
         }
     }
 
-    pub(crate) async fn load_state(&self) -> PersistenceLoadOutcome {
-        let Some(path) = self.state_file_path.clone() else {
+    fn load_state_sync_with_context(
+        clock: &dyn Clock,
+        state_file_path: Option<&Path>,
+    ) -> PersistenceLoadOutcome {
+        let Some(path) = state_file_path else {
             log_warn_event(BackendLogEvent::StoragePersistencePathUnavailable, &[]);
             return PersistenceLoadOutcome::NoState;
         };
 
-        let clock = Arc::clone(&self.clock);
-        let path_for_task = path.clone();
-        match tokio::task::spawn_blocking(move || {
-            Self::load_state_from_path(clock.as_ref(), &path_for_task)
-        })
-        .await
-        {
-            Ok(outcome) => outcome,
-            Err(join_error) => {
-                log_error_event(
-                    BackendLogEvent::StoragePersistenceReadFailed,
-                    &[("path", path.display().to_string())],
-                    Some(&join_error),
-                );
-                PersistenceLoadOutcome::NoState
-            }
-        }
+        Self::load_state_from_path(clock, path)
     }
 
     fn save_state_to_path(
         clock: &dyn Clock,
         timer_state: TimerState,
         path: &Path,
-    ) -> std::result::Result<(), String> {
+    ) -> Result<(), SaveError> {
         let persisted_state = PersistedState::from_timer_state(timer_state, clock);
         Self::save_persisted_state_to_path(&persisted_state, path)
     }
@@ -340,25 +424,36 @@ impl PersistenceManager {
     fn save_persisted_state_to_path(
         persisted_state: &PersistedState,
         path: &Path,
-    ) -> std::result::Result<(), String> {
+    ) -> Result<(), SaveError> {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|create_dir_error| create_dir_error.to_string())?;
+            fs::create_dir_all(parent).map_err(|source| SaveError::CreateDir {
+                path: parent.to_path_buf(),
+                source,
+            })?;
         }
 
         let serialized_json = serde_json::to_string_pretty(persisted_state)
-            .map_err(|serialize_error| serialize_error.to_string())?;
+            .map_err(|source| SaveError::Serialize { source })?;
 
-        let mut temp_file = AtomicWriteFile::options()
-            .open(path)
-            .map_err(|open_error| open_error.to_string())?;
+        let mut temp_file =
+            AtomicWriteFile::options()
+                .open(path)
+                .map_err(|source| SaveError::Open {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
 
         temp_file
             .write_all(serialized_json.as_bytes())
-            .map_err(|write_error| write_error.to_string())?;
+            .map_err(|source| SaveError::Write {
+                path: path.to_path_buf(),
+                source,
+            })?;
 
-        temp_file
-            .commit()
-            .map_err(|commit_error| commit_error.to_string())?;
+        temp_file.commit().map_err(|source| SaveError::Commit {
+            path: path.to_path_buf(),
+            source,
+        })?;
 
         Ok(())
     }
@@ -438,6 +533,18 @@ impl PersistenceManager {
             saved_at_utc,
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn with_before_save_hook(mut self, hook: BeforeSaveHook) -> Self {
+        self.before_save_hook = Some(hook);
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_injected_save_error_hook(mut self, hook: InjectedSaveErrorHook) -> Self {
+        self.injected_save_error_hook = Some(hook);
+        self
+    }
 }
 
 impl Default for PersistenceManager {
@@ -453,6 +560,8 @@ mod tests {
     use crate::types::{PERSISTED_STATE_SCHEMA_VERSION_V3, PERSISTED_STATE_SCHEMA_VERSION_V4};
     use chrono::{Local, TimeZone};
     use serde_json::json;
+    use std::sync::{Arc, Barrier};
+    use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn create_temp_dir(test_name: &str) -> PathBuf {
@@ -531,20 +640,28 @@ mod tests {
         })
     }
 
-    #[tokio::test]
-    async fn test_save_state_writes_schema_version_four() {
+    fn working_timer_state(remaining_seconds: u64, current_cycle: u32) -> TimerState {
+        TimerState {
+            status: TimerStatus::Working,
+            remaining_seconds,
+            current_cycle,
+            timer_start_source: Some(TimerStartSource::ManualInsideWindow),
+            scheduled_stop_state: ScheduledStopState::Pending,
+            ..TimerState::default()
+        }
+    }
+
+    #[test]
+    fn test_save_state_sync_writes_schema_version_four() {
         let temp_dir = create_temp_dir("save-schema-v4");
         let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
         let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
 
-        let state = TimerState {
-            status: TimerStatus::Working,
-            timer_start_source: Some(TimerStartSource::ManualInsideWindow),
-            scheduled_stop_state: ScheduledStopState::Pending,
-            ..TimerState::default()
-        };
+        let state = working_timer_state(1500, 0);
 
-        persistence.save_state(state).await;
+        persistence
+            .save_state_sync(state)
+            .expect("sync save should succeed");
 
         let raw_json = fs::read_to_string(temp_dir.join("timer_state.json"))
             .expect("saved json should be readable");
@@ -559,20 +676,18 @@ mod tests {
         cleanup_temp_dir(&temp_dir);
     }
 
-    #[tokio::test]
-    async fn test_new_with_app_data_dir_saves_to_injected_path_and_loads_back() {
+    #[test]
+    fn test_load_state_sync_restores_saved_state() {
         let temp_dir = create_temp_dir("save-load-injected-path");
         let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
         let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
 
-        let state = TimerState {
-            status: TimerStatus::Working,
-            remaining_seconds: 777,
-            ..TimerState::default()
-        };
+        let state = working_timer_state(777, 0);
 
-        persistence.save_state(state).await;
-        let outcome = persistence.load_state().await;
+        persistence
+            .save_state_sync(state)
+            .expect("sync save should succeed");
+        let outcome = persistence.load_state_sync();
 
         match outcome {
             PersistenceLoadOutcome::Restored { timer_state, .. } => {
@@ -588,8 +703,57 @@ mod tests {
         cleanup_temp_dir(&temp_dir);
     }
 
-    #[tokio::test]
-    async fn test_load_v3_file_returns_unsupported_schema_fallback() {
+    #[test]
+    fn test_save_state_sync_serializes_concurrent_writes_without_corrupting_timer_state_file() {
+        let temp_dir = create_temp_dir("save-sync-concurrent");
+        let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
+        let persistence = Arc::new(PersistenceManager::new(clock, Some(temp_dir.clone())));
+        let start_barrier = Arc::new(Barrier::new(3));
+        let expected_states = [(301_u64, 1_u32), (907_u64, 2_u32)];
+
+        let handles: Vec<_> = expected_states
+            .into_iter()
+            .map(|(remaining_seconds, current_cycle)| {
+                let persistence = Arc::clone(&persistence);
+                let start_barrier = Arc::clone(&start_barrier);
+
+                thread::spawn(move || {
+                    start_barrier.wait();
+                    persistence
+                        .save_state_sync(working_timer_state(remaining_seconds, current_cycle))
+                })
+            })
+            .collect();
+
+        start_barrier.wait();
+
+        for handle in handles {
+            handle
+                .join()
+                .expect("save thread should not panic")
+                .expect("concurrent sync save should succeed");
+        }
+
+        let raw_json = fs::read_to_string(temp_dir.join("timer_state.json"))
+            .expect("saved json should be readable");
+        let persisted_state: PersistedState =
+            serde_json::from_str(&raw_json).expect("saved json should stay valid");
+
+        assert!(
+            matches!(
+                (persisted_state.remaining_seconds, persisted_state.current_cycle),
+                (301, 1) | (907, 2)
+            ),
+            "expected one complete state to win the race, got remaining_seconds={} current_cycle={}",
+            persisted_state.remaining_seconds,
+            persisted_state.current_cycle
+        );
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_load_v3_file_returns_unsupported_schema_fallback() {
         let temp_dir = create_temp_dir("load-v3");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
         let clock = fixed_clock(saved_at_utc);
@@ -606,15 +770,15 @@ mod tests {
         .expect("legacy json should be writable");
 
         assert!(matches!(
-            persistence.load_state().await,
+            persistence.load_state_sync(),
             PersistenceLoadOutcome::UnsupportedSchemaFallback
         ));
 
         cleanup_temp_dir(&temp_dir);
     }
 
-    #[tokio::test]
-    async fn test_load_invalid_v4_schedule_data_returns_no_state() {
+    #[test]
+    fn test_load_invalid_v4_schedule_data_returns_no_state() {
         let temp_dir = create_temp_dir("invalid-v4-schedule");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
         let clock = fixed_clock(saved_at_utc);
@@ -631,15 +795,15 @@ mod tests {
         .expect("json should be writable");
 
         assert!(matches!(
-            persistence.load_state().await,
+            persistence.load_state_sync(),
             PersistenceLoadOutcome::NoState
         ));
 
         cleanup_temp_dir(&temp_dir);
     }
 
-    #[tokio::test]
-    async fn test_load_invalid_v4_duration_data_returns_no_state() {
+    #[test]
+    fn test_load_invalid_v4_duration_data_returns_no_state() {
         let temp_dir = create_temp_dir("invalid-v4-duration");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
         let clock = fixed_clock(saved_at_utc);
@@ -656,21 +820,23 @@ mod tests {
         .expect("json should be writable");
 
         assert!(matches!(
-            persistence.load_state().await,
+            persistence.load_state_sync(),
             PersistenceLoadOutcome::NoState
         ));
 
         cleanup_temp_dir(&temp_dir);
     }
 
-    #[tokio::test]
-    async fn test_new_with_none_disables_persistence_deterministically() {
+    #[test]
+    fn test_new_with_none_disables_persistence_deterministically() {
         let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
         let persistence = PersistenceManager::new(clock, None);
 
-        persistence.save_state(TimerState::default()).await;
+        persistence
+            .save_state_sync(TimerState::default())
+            .expect("sync save without a path should be a no-op success");
         assert!(matches!(
-            persistence.load_state().await,
+            persistence.load_state_sync(),
             PersistenceLoadOutcome::NoState
         ));
     }

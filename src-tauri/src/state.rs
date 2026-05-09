@@ -2,17 +2,20 @@
 // Central hub for all state, managed via Tauri's State mechanism
 
 use chrono::{DateTime, Duration as ChronoDuration, Local, Utc};
-use std::sync::atomic::{AtomicBool, AtomicU64};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::collections::BTreeSet;
+use std::future::Future;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex as StdMutex};
 use tauri::async_runtime::JoinHandle;
 use tauri::{AppHandle, Manager};
-use tokio::sync::{Mutex, OnceCell};
+use tokio::sync::{Mutex, Notify, Semaphore};
 use tokio_util::sync::CancellationToken;
 
-use crate::logging_event::{log_info_event, BackendLogEvent};
+use crate::error::{PomoliceError, Result as AppResult};
+use crate::logging_event::{log_error_event, log_info_event, BackendLogEvent};
 use crate::managers::clock::{Clock, SystemClock};
 use crate::managers::input_monitor::InputMonitorManager;
-use crate::managers::persistence::{PersistenceLoadOutcome, PersistenceManager};
+use crate::managers::persistence::{PersistenceLoadOutcome, PersistenceManager, SaveError};
 use crate::managers::timer::TimerStateManager;
 use crate::managers::window::WindowStateManager;
 use crate::types::{
@@ -47,11 +50,180 @@ pub(crate) enum StartupRestoreAction {
     FinalizeExpiredRestoredWork(SessionTransitionOutcome),
 }
 
-/// Central application state
-///
-/// With one exception, never hold multiple locks at the same time.
-/// `persist_current_state()` intentionally acquires `persistence_save_lock`
-/// and then `timer_manager` to serialize save requests while cloning fresh state.
+struct StartupPreparation {
+    initial_timer_state: TimerState,
+    restored_running_saved_at_local: Option<DateTime<Local>>,
+    initialization_outcome: AppInitializationOutcome,
+}
+
+#[derive(Default)]
+struct OrderedSaveLaneState {
+    next_to_run: u64,
+    cancelled_tickets: BTreeSet<u64>,
+}
+
+struct OrderedSaveLaneInner {
+    next_ticket: AtomicU64,
+    state: StdMutex<OrderedSaveLaneState>,
+    // Blocking exit flush and async runtime saves wait on the same lane, so we need both a
+    // Condvar for sync callers and a Notify for async callers to observe head advancement.
+    condvar: Condvar,
+    notify: Notify,
+}
+
+impl Default for OrderedSaveLaneInner {
+    fn default() -> Self {
+        Self {
+            next_ticket: AtomicU64::new(0),
+            state: StdMutex::new(OrderedSaveLaneState::default()),
+            condvar: Condvar::new(),
+            notify: Notify::new(),
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+struct OrderedSaveLane {
+    inner: Arc<OrderedSaveLaneInner>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OrderedSaveTicketState {
+    Pending,
+    Executing,
+}
+
+struct OrderedSaveTicket {
+    lane: OrderedSaveLane,
+    ticket: u64,
+    state: OrderedSaveTicketState,
+}
+
+impl OrderedSaveLane {
+    fn issue_ticket(&self) -> OrderedSaveTicket {
+        OrderedSaveTicket {
+            lane: self.clone(),
+            ticket: self.inner.next_ticket.fetch_add(1, Ordering::AcqRel),
+            state: OrderedSaveTicketState::Pending,
+        }
+    }
+
+    async fn wait_turn_async(&self, ticket: u64) {
+        loop {
+            let notified = self.inner.notify.notified();
+
+            if self.is_turn(ticket) {
+                return;
+            }
+
+            notified.await;
+        }
+    }
+
+    fn wait_turn_blocking(&self, ticket: u64) {
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        while state.next_to_run != ticket {
+            state = self
+                .inner
+                .condvar
+                .wait(state)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+    }
+
+    fn is_turn(&self, ticket: u64) -> bool {
+        self.inner
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .next_to_run
+            == ticket
+    }
+
+    fn cancel_ticket(&self, ticket: u64) {
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        if ticket < state.next_to_run {
+            return;
+        }
+
+        let previous_head = state.next_to_run;
+        state.cancelled_tickets.insert(ticket);
+        Self::advance_past_cancelled_tickets(&mut state);
+
+        let should_notify = state.next_to_run != previous_head;
+        drop(state);
+
+        if should_notify {
+            self.notify_waiters();
+        }
+    }
+
+    fn advance_past_cancelled_tickets(state: &mut OrderedSaveLaneState) {
+        while state.cancelled_tickets.remove(&state.next_to_run) {
+            state.next_to_run = state.next_to_run.saturating_add(1);
+        }
+    }
+
+    fn advance(&self) {
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.next_to_run = state.next_to_run.saturating_add(1);
+        Self::advance_past_cancelled_tickets(&mut state);
+        drop(state);
+
+        self.notify_waiters();
+    }
+
+    fn notify_waiters(&self) {
+        self.inner.condvar.notify_all();
+        self.inner.notify.notify_waiters();
+    }
+
+    #[cfg(test)]
+    fn issued_ticket_count(&self) -> u64 {
+        self.inner.next_ticket.load(Ordering::Acquire)
+    }
+}
+
+impl OrderedSaveTicket {
+    async fn wait_turn_async(&self) {
+        self.lane.wait_turn_async(self.ticket).await;
+    }
+
+    fn wait_turn_blocking(&self) {
+        self.lane.wait_turn_blocking(self.ticket);
+    }
+
+    fn mark_executing(&mut self) {
+        self.state = OrderedSaveTicketState::Executing;
+    }
+}
+
+impl Drop for OrderedSaveTicket {
+    // Pending tickets release the lane by marking themselves cancelled so a later head advance can
+    // skip them. Executing tickets release the lane immediately on completion or unwind.
+    fn drop(&mut self) {
+        match self.state {
+            OrderedSaveTicketState::Pending => self.lane.cancel_ticket(self.ticket),
+            OrderedSaveTicketState::Executing => self.lane.advance(),
+        }
+    }
+}
+
+/// Central application state.
 pub(crate) struct AppState {
     pub timer_manager: Mutex<TimerStateManager>,
     pub input_monitor: Mutex<InputMonitorManager>,
@@ -64,26 +236,27 @@ pub(crate) struct AppState {
     pub auto_start_boundary_enabled: AtomicBool,
     restored_running_saved_at_local: StdMutex<Option<DateTime<Local>>>,
     pub config_revision: AtomicU64,
-    persistence_save_lock: Mutex<()>,
-    initialization: OnceCell<AppInitializationOutcome>,
+    ordered_save_lane: OrderedSaveLane,
+    break_mode_transition_permit: Arc<Semaphore>,
 }
 
 impl AppState {
-    /// Create a new `AppState` instance.
-    pub(crate) fn new(app_handle: &AppHandle) -> Self {
-        Self::new_with_clock(app_handle, Arc::new(SystemClock))
+    /// Create a new `AppState` instance plus startup restore outcome.
+    pub(crate) async fn build_startup_state(
+        app_handle: &AppHandle,
+    ) -> (Self, AppInitializationOutcome) {
+        Self::build_startup_state_with_clock(app_handle, Arc::new(SystemClock)).await
     }
 
-    /// Create a new `AppState` instance with an injected clock implementation.
-    pub(crate) fn new_with_clock(
+    async fn build_startup_state_with_clock(
         app_handle: &AppHandle,
         clock: Arc<dyn Clock + Send + Sync>,
-    ) -> Self {
+    ) -> (Self, AppInitializationOutcome) {
         let app_data_dir = app_handle.path().app_data_dir().ok();
         let persistence = PersistenceManager::new(Arc::clone(&clock), app_data_dir);
         let app_for_escape = app_handle.clone();
         let app_for_input = app_handle.clone();
-        Self::build_state(
+        Self::build_startup_state_with_handlers(
             clock,
             persistence,
             move || {
@@ -99,26 +272,47 @@ impl AppState {
                 });
             },
         )
+        .await
     }
 
     #[cfg(test)]
-    pub(crate) fn new_for_tests(
+    pub(crate) async fn build_startup_state_for_tests(
         clock: Arc<dyn Clock + Send + Sync>,
         persistence: PersistenceManager,
-    ) -> Self {
-        Self::build_state(clock, persistence, || {}, || {})
+    ) -> (Self, AppInitializationOutcome) {
+        Self::build_startup_state_with_handlers(clock, persistence, || {}, || {}).await
+    }
+
+    async fn build_startup_state_with_handlers(
+        clock: Arc<dyn Clock + Send + Sync>,
+        persistence: PersistenceManager,
+        on_escape_combo: impl Fn() + Send + Sync + 'static,
+        on_input_detected: impl Fn() + Send + Sync + 'static,
+    ) -> (Self, AppInitializationOutcome) {
+        let preparation = Self::prepare_startup(clock.as_ref(), &persistence).await;
+        let app_state = Self::build_state(
+            clock,
+            persistence,
+            preparation.initial_timer_state,
+            preparation.restored_running_saved_at_local,
+            on_escape_combo,
+            on_input_detected,
+        );
+        (app_state, preparation.initialization_outcome)
     }
 
     fn build_state(
         clock: Arc<dyn Clock + Send + Sync>,
         persistence: PersistenceManager,
+        initial_timer_state: TimerState,
+        restored_running_saved_at_local: Option<DateTime<Local>>,
         on_escape_combo: impl Fn() + Send + Sync + 'static,
         on_input_detected: impl Fn() + Send + Sync + 'static,
     ) -> Self {
         log_info_event(BackendLogEvent::AppStateCreated, &[]);
 
         Self {
-            timer_manager: Mutex::new(TimerStateManager::new(None)),
+            timer_manager: Mutex::new(TimerStateManager::new(Some(initial_timer_state))),
             input_monitor: Mutex::new(InputMonitorManager::new(on_escape_combo, on_input_detected)),
             window_manager: Mutex::new(WindowStateManager::new()),
             persistence,
@@ -127,10 +321,10 @@ impl AppState {
             boot_prompt_runtime_state: StdMutex::new(BootPromptRuntimeState::NotApplicable),
             boot_prompt_check_pending: AtomicBool::new(true),
             auto_start_boundary_enabled: AtomicBool::new(false),
-            restored_running_saved_at_local: StdMutex::new(None),
+            restored_running_saved_at_local: StdMutex::new(restored_running_saved_at_local),
             config_revision: AtomicU64::new(0),
-            persistence_save_lock: Mutex::new(()),
-            initialization: OnceCell::new(),
+            ordered_save_lane: OrderedSaveLane::default(),
+            break_mode_transition_permit: Arc::new(Semaphore::new(1)),
         }
     }
 
@@ -147,22 +341,79 @@ impl AppState {
         }
     }
 
-    /// Persist the latest timer state without holding `timer_manager` across `.await`.
-    pub(crate) async fn persist_current_state(&self) {
-        let _save_order_guard = self.persistence_save_lock.lock().await;
-        let timer_state = {
-            let timer_manager = self.timer_manager.lock().await;
-            timer_manager.get_state().clone()
-        };
-        self.persistence.save_state(timer_state).await;
+    pub(crate) async fn persist_current_state_async(&self) -> AppResult<()> {
+        if !self.persistence.has_state_path() {
+            let timer_state = self.snapshot_timer_state().await;
+            return self
+                .persistence
+                .save_state_sync(timer_state)
+                .map_err(PomoliceError::from);
+        }
+
+        let ticket = self.ordered_save_lane.issue_ticket();
+        let timer_state = self.snapshot_timer_state().await;
+        let persistence = self.persistence.clone();
+
+        ticket.wait_turn_async().await;
+
+        let save_result = tokio::task::spawn_blocking(move || {
+            let mut ticket = ticket;
+            ticket.mark_executing();
+            persistence.save_state_sync(timer_state)
+        })
+        .await;
+
+        match save_result {
+            Ok(save_result) => save_result.map_err(PomoliceError::from),
+            Err(join_error) => {
+                log_error_event(
+                    BackendLogEvent::StoragePersistenceWriteFailed,
+                    &[],
+                    Some(&join_error),
+                );
+                Err(PomoliceError::PersistenceTaskJoin { source: join_error })
+            }
+        }
     }
 
-    /// Initialize the application state once, restoring persisted state before startup continues.
-    pub(crate) async fn initialize(&self) -> AppInitializationOutcome {
-        self.initialization
-            .get_or_init(|| async { self.run_initialize().await })
+    /// Synchronously persists the current timer state during `RunEvent::Exit`.
+    ///
+    /// This helper is intentionally confined to the synchronous Tauri exit hook.
+    /// Calling `blocking_lock()` from async commands or runtime tasks can panic.
+    pub(crate) fn flush_sync_on_exit(&self) -> Result<(), SaveError> {
+        if !self.persistence.has_state_path() {
+            let timer_state = {
+                let timer_manager = self.timer_manager.blocking_lock();
+                timer_manager.get_state().clone()
+            };
+
+            return self.persistence.save_state_sync(timer_state);
+        }
+
+        let mut ticket = self.ordered_save_lane.issue_ticket();
+        let timer_state = {
+            let timer_manager = self.timer_manager.blocking_lock();
+            timer_manager.get_state().clone()
+        };
+
+        ticket.wait_turn_blocking();
+        ticket.mark_executing();
+
+        self.persistence.save_state_sync(timer_state)
+    }
+
+    pub(crate) async fn run_break_mode_transition<T, Fut>(&self, transition: Fut) -> T
+    where
+        Fut: Future<Output = T>,
+    {
+        let Ok(_permit) = Arc::clone(&self.break_mode_transition_permit)
+            .acquire_owned()
             .await
-            .clone()
+        else {
+            panic!("break-mode transition permit should remain open");
+        };
+
+        transition.await
     }
 
     pub(crate) fn restored_running_saved_at_local(&self) -> Option<DateTime<Local>> {
@@ -172,31 +423,20 @@ impl AppState {
         }
     }
 
-    async fn run_initialize(&self) -> AppInitializationOutcome {
+    async fn prepare_startup(
+        clock: &dyn Clock,
+        persistence: &PersistenceManager,
+    ) -> StartupPreparation {
         log_info_event(BackendLogEvent::AppStateInitializationStarted, &[]);
 
-        let outcome = match self.persistence.load_state().await {
+        let preparation = match load_persisted_state_async(persistence).await {
             PersistenceLoadOutcome::NoState => {
-                self.set_restored_running_saved_at_local(None);
                 log_info_event(BackendLogEvent::AppStateUsingDefaults, &[]);
-                AppInitializationOutcome {
-                    initial_tick_payload: None,
-                    restore_status: AppRestoreStatus::NoState,
-                    startup_action: StartupRestoreAction::None,
-                }
+                StartupPreparation::idle(AppRestoreStatus::NoState)
             }
             PersistenceLoadOutcome::UnsupportedSchemaFallback => {
-                self.set_restored_running_saved_at_local(None);
-                let initial_tick_payload = {
-                    let mut timer_manager = self.timer_manager.lock().await;
-                    timer_manager.apply_persisted_state(TimerState::default())
-                };
                 log_info_event(BackendLogEvent::AppStateUsingDefaults, &[]);
-                AppInitializationOutcome {
-                    initial_tick_payload,
-                    restore_status: AppRestoreStatus::UnsupportedSchemaFallback,
-                    startup_action: StartupRestoreAction::None,
-                }
+                StartupPreparation::idle(AppRestoreStatus::UnsupportedSchemaFallback)
             }
             PersistenceLoadOutcome::Restored {
                 timer_state,
@@ -209,89 +449,101 @@ impl AppState {
                         ("saved_at", saved_at_utc.to_rfc3339()),
                     ],
                 );
-                self.restore_persisted_state(timer_state, saved_at_utc)
-                    .await
+                Self::prepare_restored_state(clock, timer_state, saved_at_utc)
             }
         };
 
-        let is_running = {
-            let timer_manager = self.timer_manager.lock().await;
-            timer_manager.status() != TimerStatus::Idle
-        };
+        let is_running = preparation.initial_timer_state.status != TimerStatus::Idle;
 
         log_info_event(
             BackendLogEvent::AppStateInitializationCompleted,
             &[
-                ("restore_status", format!("{:?}", outcome.restore_status)),
+                (
+                    "restore_status",
+                    format!("{:?}", preparation.initialization_outcome.restore_status),
+                ),
                 ("is_running", is_running.to_string()),
             ],
         );
 
-        outcome
+        preparation
     }
 
-    fn set_restored_running_saved_at_local(&self, saved_at_local: Option<DateTime<Local>>) {
-        if let Ok(mut restored_saved_at_local) = self.restored_running_saved_at_local.lock() {
-            *restored_saved_at_local = saved_at_local;
-        }
-    }
-
-    async fn restore_persisted_state(
-        &self,
+    fn prepare_restored_state(
+        clock: &dyn Clock,
         timer_state: TimerState,
         saved_at_utc: DateTime<Utc>,
-    ) -> AppInitializationOutcome {
+    ) -> StartupPreparation {
         if timer_state.status == TimerStatus::Working && timer_state.remaining_seconds == 0 {
-            return self
-                .restore_expired_work_session(timer_state, saved_at_utc)
-                .await;
+            return Self::prepare_expired_work_restore(clock, timer_state, saved_at_utc);
         }
 
+        let mut timer_manager = TimerStateManager::new(None);
+        let initial_tick_payload = timer_manager.apply_persisted_state(timer_state);
+        let restored_timer_state = timer_manager.get_state().clone();
         let restored_running_saved_at_local =
-            restored_running_saved_at_local(&*self.clock, &timer_state, saved_at_utc);
-        let initial_tick_payload = {
-            let mut timer_manager = self.timer_manager.lock().await;
-            timer_manager.apply_persisted_state(timer_state)
+            restored_running_saved_at_local(clock, &restored_timer_state, saved_at_utc);
+        let startup_action = if initial_tick_payload.is_some() {
+            StartupRestoreAction::RestartRestoredTimerTask
+        } else {
+            StartupRestoreAction::None
         };
 
-        self.set_restored_running_saved_at_local(restored_running_saved_at_local);
-        AppInitializationOutcome {
-            initial_tick_payload: initial_tick_payload.clone(),
-            restore_status: AppRestoreStatus::Restored,
-            startup_action: match initial_tick_payload {
-                Some(_) => StartupRestoreAction::RestartRestoredTimerTask,
-                None => StartupRestoreAction::None,
+        StartupPreparation {
+            initial_timer_state: restored_timer_state,
+            restored_running_saved_at_local,
+            initialization_outcome: AppInitializationOutcome {
+                initial_tick_payload,
+                restore_status: AppRestoreStatus::Restored,
+                startup_action,
             },
         }
     }
 
-    async fn restore_expired_work_session(
-        &self,
+    fn prepare_expired_work_restore(
+        clock: &dyn Clock,
         timer_state: TimerState,
         saved_at_utc: DateTime<Utc>,
-    ) -> AppInitializationOutcome {
-        let transition_outcome = {
-            let mut timer_manager = self.timer_manager.lock().await;
-            let _ = timer_manager.apply_persisted_state(timer_state);
-            let completed_payload = timer_manager.complete_work_session_transition();
-            SessionTransitionOutcome::from_completed_payload(&completed_payload)
-        };
+    ) -> StartupPreparation {
+        let mut timer_manager = TimerStateManager::new(Some(timer_state));
+        let completed_payload = timer_manager.complete_work_session_transition();
+        let transition_outcome =
+            SessionTransitionOutcome::from_completed_payload(&completed_payload);
+        let finalized_timer_state = timer_manager.get_state().clone();
 
-        let finalized_timer_state = {
-            let timer_manager = self.timer_manager.lock().await;
-            timer_manager.get_state().clone()
-        };
+        StartupPreparation {
+            initial_timer_state: finalized_timer_state.clone(),
+            restored_running_saved_at_local: restored_running_saved_at_local(
+                clock,
+                &finalized_timer_state,
+                saved_at_utc,
+            ),
+            initialization_outcome: AppInitializationOutcome {
+                initial_tick_payload: None,
+                restore_status: AppRestoreStatus::Restored,
+                startup_action: StartupRestoreAction::FinalizeExpiredRestoredWork(
+                    transition_outcome,
+                ),
+            },
+        }
+    }
 
-        self.set_restored_running_saved_at_local(restored_running_saved_at_local(
-            &*self.clock,
-            &finalized_timer_state,
-            saved_at_utc,
-        ));
+    async fn snapshot_timer_state(&self) -> TimerState {
+        let timer_manager = self.timer_manager.lock().await;
+        timer_manager.get_state().clone()
+    }
+}
 
-        AppInitializationOutcome {
-            initial_tick_payload: None,
-            restore_status: AppRestoreStatus::Restored,
-            startup_action: StartupRestoreAction::FinalizeExpiredRestoredWork(transition_outcome),
+impl StartupPreparation {
+    fn idle(restore_status: AppRestoreStatus) -> Self {
+        Self {
+            initial_timer_state: TimerState::default(),
+            restored_running_saved_at_local: None,
+            initialization_outcome: AppInitializationOutcome {
+                initial_tick_payload: None,
+                restore_status,
+                startup_action: StartupRestoreAction::None,
+            },
         }
     }
 }
@@ -311,6 +563,22 @@ fn restored_running_saved_at_local(
     let saved_at_local = saved_at_utc.with_timezone(&Local);
     let lookback_floor_local = clock.now_local() - ChronoDuration::days(7);
     Some(saved_at_local.max(lookback_floor_local))
+}
+
+async fn load_persisted_state_async(persistence: &PersistenceManager) -> PersistenceLoadOutcome {
+    let persistence = persistence.clone();
+
+    match tokio::task::spawn_blocking(move || persistence.load_state_sync()).await {
+        Ok(outcome) => outcome,
+        Err(join_error) => {
+            log_error_event(
+                BackendLogEvent::StoragePersistenceReadFailed,
+                &[],
+                Some(&join_error),
+            );
+            PersistenceLoadOutcome::NoState
+        }
+    }
 }
 
 impl Drop for AppState {
@@ -337,7 +605,11 @@ mod tests {
     use chrono::TimeZone;
     use serde_json::json;
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicBool as StdAtomicBool, AtomicUsize};
     use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{io, time::Duration as StdDuration};
+
+    type SaveReleaseGate = Arc<(StdMutex<bool>, Condvar)>;
 
     fn create_temp_dir(test_name: &str) -> PathBuf {
         let timestamp_nanos = SystemTime::now()
@@ -377,18 +649,157 @@ mod tests {
     }
 
     fn as_clock_trait(clock: &Arc<FixedClock>) -> Arc<dyn Clock + Send + Sync> {
-        let clock_trait: Arc<dyn Clock + Send + Sync> = <Arc<FixedClock>>::clone(clock);
-        clock_trait
+        Arc::<FixedClock>::clone(clock) as Arc<dyn Clock + Send + Sync>
     }
 
-    async fn save_state_to_dir(clock: Arc<FixedClock>, dir: &Path, timer_state: TimerState) {
+    fn save_state_to_dir(clock: Arc<FixedClock>, dir: &Path, timer_state: TimerState) {
         let persistence = PersistenceManager::new(clock, Some(dir.to_path_buf()));
-        persistence.save_state(timer_state).await;
+        persistence
+            .save_state_sync(timer_state)
+            .expect("sync save should succeed");
+    }
+
+    fn build_blocked_first_save_hook() -> (
+        Arc<dyn Fn() + Send + Sync>,
+        Arc<StdAtomicBool>,
+        SaveReleaseGate,
+    ) {
+        let first_save_blocked = Arc::new(StdAtomicBool::new(false));
+        let release_first_save = Arc::new((StdMutex::new(false), Condvar::new()));
+        let save_call_count = Arc::new(AtomicUsize::new(0));
+        let before_save_hook = {
+            let first_save_blocked = Arc::clone(&first_save_blocked);
+            let release_first_save = Arc::clone(&release_first_save);
+            let save_call_count = Arc::clone(&save_call_count);
+
+            Arc::new(move || {
+                let call_index = save_call_count.fetch_add(1, Ordering::AcqRel);
+                if call_index != 0 {
+                    return;
+                }
+
+                first_save_blocked.store(true, Ordering::Release);
+                let (lock, condvar) = &*release_first_save;
+                let mut released = lock
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                while !*released {
+                    released = condvar
+                        .wait(released)
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                }
+            }) as Arc<dyn Fn() + Send + Sync>
+        };
+
+        (before_save_hook, first_save_blocked, release_first_save)
+    }
+
+    async fn build_app_state_with_blocked_first_save(
+        test_name: &str,
+    ) -> (Arc<AppState>, PathBuf, Arc<StdAtomicBool>, SaveReleaseGate) {
+        let temp_dir = create_temp_dir(test_name);
+        let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
+        let (before_save_hook, first_save_blocked, release_first_save) =
+            build_blocked_first_save_hook();
+        let persistence = PersistenceManager::new(as_clock_trait(&clock), Some(temp_dir.clone()))
+            .with_before_save_hook(before_save_hook);
+        let (app_state, _) =
+            build_startup_state_for_tests_with_persistence(Arc::clone(&clock), persistence).await;
+
+        (
+            Arc::new(app_state),
+            temp_dir,
+            first_save_blocked,
+            release_first_save,
+        )
+    }
+
+    async fn apply_working_timer_state(app_state: &AppState, remaining_seconds: u64) {
+        let mut timer_manager = app_state.timer_manager.lock().await;
+        let mut state = timer_manager.get_state().clone();
+        state.status = TimerStatus::Working;
+        state.remaining_seconds = remaining_seconds;
+        let _ = timer_manager.apply_persisted_state(state);
+    }
+
+    fn release_blocked_save(release_first_save: &SaveReleaseGate) {
+        let (lock, condvar) = &**release_first_save;
+        let mut released = lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *released = true;
+        condvar.notify_all();
+    }
+
+    fn assert_persisted_remaining_seconds(persistence: &PersistenceManager, expected: u64) {
+        match persistence.load_state_sync() {
+            PersistenceLoadOutcome::Restored { timer_state, .. } => {
+                assert_eq!(timer_state.remaining_seconds, expected);
+            }
+            PersistenceLoadOutcome::NoState => panic!("expected restored state"),
+            PersistenceLoadOutcome::UnsupportedSchemaFallback => {
+                panic!("expected restored state")
+            }
+        }
+    }
+
+    async fn build_startup_state_for_tests(
+        clock: Arc<FixedClock>,
+        dir: &Path,
+    ) -> (AppState, AppInitializationOutcome) {
+        build_startup_state_for_tests_with_persistence(
+            Arc::clone(&clock),
+            PersistenceManager::new(as_clock_trait(&clock), Some(dir.to_path_buf())),
+        )
+        .await
+    }
+
+    async fn build_startup_state_for_tests_with_persistence(
+        clock: Arc<FixedClock>,
+        persistence: PersistenceManager,
+    ) -> (AppState, AppInitializationOutcome) {
+        AppState::build_startup_state_for_tests(as_clock_trait(&clock), persistence).await
+    }
+
+    fn build_startup_state_for_tests_sync(
+        clock: Arc<FixedClock>,
+        dir: &Path,
+    ) -> (AppState, AppInitializationOutcome) {
+        let runtime = tokio::runtime::Runtime::new().expect("test runtime should be created");
+        let outcome = runtime.block_on(build_startup_state_for_tests(clock, dir));
+        drop(runtime);
+        outcome
+    }
+
+    async fn wait_until_flag_is_set(flag: &StdAtomicBool, context: &str) {
+        for _ in 0..100 {
+            if flag.load(Ordering::Acquire) {
+                return;
+            }
+            tokio::time::sleep(StdDuration::from_millis(10)).await;
+        }
+
+        panic!("timed out waiting for {context}");
+    }
+
+    async fn wait_until_ticket_count_reaches(
+        lane: &OrderedSaveLane,
+        expected_count: u64,
+        context: &str,
+    ) {
+        for _ in 0..100 {
+            if lane.issued_ticket_count() >= expected_count {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+
+        panic!("timed out waiting for {context}");
     }
 
     #[tokio::test]
-    async fn test_initialize_restores_running_state_before_returning_initial_tick_payload() {
-        let temp_dir = create_temp_dir("initialize-restores-running");
+    async fn test_build_startup_state_restores_running_state_before_manage() {
+        let temp_dir = create_temp_dir("build-startup-state-restores-running");
         let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
         let running_state = TimerState {
             status: TimerStatus::Working,
@@ -396,13 +807,10 @@ mod tests {
             ..TimerState::default()
         };
 
-        save_state_to_dir(Arc::clone(&clock), &temp_dir, running_state).await;
+        save_state_to_dir(Arc::clone(&clock), &temp_dir, running_state);
 
-        let app_state = AppState::new_for_tests(
-            as_clock_trait(&clock),
-            PersistenceManager::new(as_clock_trait(&clock), Some(temp_dir.clone())),
-        );
-        let outcome = app_state.initialize().await;
+        let (app_state, outcome) =
+            build_startup_state_for_tests(Arc::clone(&clock), &temp_dir).await;
 
         assert_eq!(outcome.restore_status, AppRestoreStatus::Restored);
         assert_eq!(
@@ -422,8 +830,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_initialize_restored_running_work_with_remaining_time_marks_startup_resume() {
-        let temp_dir = create_temp_dir("initialize-restored-running-startup-resume");
+    async fn test_build_startup_state_restored_running_work_marks_startup_resume() {
+        let temp_dir = create_temp_dir("build-startup-state-running-startup-resume");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
         let restore_at_utc = create_utc_datetime(2025, 2, 1, 9, 2, 0);
         let save_clock = fixed_clock(saved_at_utc);
@@ -438,14 +846,10 @@ mod tests {
                 timer_start_source: Some(TimerStartSource::ManualInsideWindow),
                 ..TimerState::default()
             },
-        )
-        .await;
-
-        let app_state = AppState::new_for_tests(
-            as_clock_trait(&restore_clock),
-            PersistenceManager::new(as_clock_trait(&restore_clock), Some(temp_dir.clone())),
         );
-        let outcome = app_state.initialize().await;
+
+        let (app_state, outcome) =
+            build_startup_state_for_tests(Arc::clone(&restore_clock), &temp_dir).await;
 
         assert_eq!(outcome.restore_status, AppRestoreStatus::Restored);
         assert!(matches!(
@@ -471,8 +875,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_initialize_expired_restored_work_transitions_to_break_before_first_emit() {
-        let temp_dir = create_temp_dir("initialize-expired-restored-work-to-break");
+    async fn test_build_startup_state_finalizes_expired_work_before_manage() {
+        let temp_dir = create_temp_dir("build-startup-state-expired-work-to-break");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
         let restore_at_utc = create_utc_datetime(2025, 2, 1, 9, 2, 0);
         let save_clock = fixed_clock(saved_at_utc);
@@ -488,14 +892,10 @@ mod tests {
                 timer_start_source: Some(TimerStartSource::ManualInsideWindow),
                 ..TimerState::default()
             },
-        )
-        .await;
-
-        let app_state = AppState::new_for_tests(
-            as_clock_trait(&restore_clock),
-            PersistenceManager::new(as_clock_trait(&restore_clock), Some(temp_dir.clone())),
         );
-        let outcome = app_state.initialize().await;
+
+        let (app_state, outcome) =
+            build_startup_state_for_tests(Arc::clone(&restore_clock), &temp_dir).await;
 
         assert_eq!(outcome.restore_status, AppRestoreStatus::Restored);
         assert!(outcome.initial_tick_payload.is_none());
@@ -524,8 +924,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_initialize_expired_restored_work_preserves_scheduled_stop_priority() {
-        let temp_dir = create_temp_dir("initialize-expired-restored-work-scheduled-stop");
+    async fn test_build_startup_state_expired_work_preserves_scheduled_stop_priority() {
+        let temp_dir = create_temp_dir("build-startup-state-expired-work-scheduled-stop");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
         let restore_at_utc = create_utc_datetime(2025, 2, 1, 9, 2, 0);
         let save_clock = fixed_clock(saved_at_utc);
@@ -542,14 +942,10 @@ mod tests {
                 timer_start_source: Some(TimerStartSource::ManualInsideWindow),
                 ..TimerState::default()
             },
-        )
-        .await;
-
-        let app_state = AppState::new_for_tests(
-            as_clock_trait(&restore_clock),
-            PersistenceManager::new(as_clock_trait(&restore_clock), Some(temp_dir.clone())),
         );
-        let outcome = app_state.initialize().await;
+
+        let (app_state, outcome) =
+            build_startup_state_for_tests(Arc::clone(&restore_clock), &temp_dir).await;
 
         assert_eq!(outcome.restore_status, AppRestoreStatus::Restored);
         assert!(outcome.initial_tick_payload.is_none());
@@ -574,16 +970,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_initialize_sets_restored_running_timestamp_only_for_running_sessions() {
-        let temp_dir = create_temp_dir("initialize-idle-restored");
+    async fn test_build_startup_state_sets_restored_running_timestamp_only_for_running_sessions() {
+        let temp_dir = create_temp_dir("build-startup-state-idle-restored");
         let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
-        save_state_to_dir(Arc::clone(&clock), &temp_dir, TimerState::default()).await;
+        save_state_to_dir(Arc::clone(&clock), &temp_dir, TimerState::default());
 
-        let app_state = AppState::new_for_tests(
-            as_clock_trait(&clock),
-            PersistenceManager::new(as_clock_trait(&clock), Some(temp_dir.clone())),
-        );
-        let outcome = app_state.initialize().await;
+        let (app_state, outcome) =
+            build_startup_state_for_tests(Arc::clone(&clock), &temp_dir).await;
 
         assert_eq!(outcome.restore_status, AppRestoreStatus::Restored);
         assert!(outcome.initial_tick_payload.is_none());
@@ -593,108 +986,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_initialize_returns_cached_outcome_without_rereading_persistence() {
-        let temp_dir = create_temp_dir("initialize-cached");
-        let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
-        save_state_to_dir(
-            Arc::clone(&clock),
-            &temp_dir,
-            TimerState {
-                status: TimerStatus::Working,
-                remaining_seconds: 900,
-                ..TimerState::default()
-            },
-        )
-        .await;
-
-        let app_state = AppState::new_for_tests(
-            as_clock_trait(&clock),
-            PersistenceManager::new(as_clock_trait(&clock), Some(temp_dir.clone())),
-        );
-        let first = app_state.initialize().await;
-
-        save_state_to_dir(
-            Arc::clone(&clock),
-            &temp_dir,
-            TimerState {
-                status: TimerStatus::Working,
-                remaining_seconds: 100,
-                ..TimerState::default()
-            },
-        )
-        .await;
-
-        let second = app_state.initialize().await;
-
-        assert_eq!(first.restore_status, AppRestoreStatus::Restored);
-        assert_eq!(second.restore_status, AppRestoreStatus::Restored);
-        assert_eq!(
-            first
-                .initial_tick_payload
-                .as_ref()
-                .expect("first payload should exist")
-                .remaining_seconds,
-            900
-        );
-        assert_eq!(
-            second
-                .initial_tick_payload
-                .as_ref()
-                .expect("second payload should exist")
-                .remaining_seconds,
-            900
-        );
-
-        cleanup_temp_dir(&temp_dir);
-    }
-
-    #[tokio::test]
-    async fn test_concurrent_initialize_calls_share_one_shot_result() {
-        let temp_dir = create_temp_dir("initialize-concurrent");
-        let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
-        save_state_to_dir(
-            Arc::clone(&clock),
-            &temp_dir,
-            TimerState {
-                status: TimerStatus::Working,
-                remaining_seconds: 321,
-                ..TimerState::default()
-            },
-        )
-        .await;
-
-        let app_state = AppState::new_for_tests(
-            as_clock_trait(&clock),
-            PersistenceManager::new(as_clock_trait(&clock), Some(temp_dir.clone())),
-        );
-
-        let (left, right) = tokio::join!(app_state.initialize(), app_state.initialize());
-
-        assert_eq!(left.restore_status, AppRestoreStatus::Restored);
-        assert_eq!(right.restore_status, AppRestoreStatus::Restored);
-        assert_eq!(
-            left.initial_tick_payload
-                .as_ref()
-                .expect("left payload should exist")
-                .remaining_seconds,
-            321
-        );
-        assert_eq!(
-            right
-                .initial_tick_payload
-                .as_ref()
-                .expect("right payload should exist")
-                .remaining_seconds,
-            321
-        );
-
-        cleanup_temp_dir(&temp_dir);
-    }
-
-    #[tokio::test]
-    async fn test_initialize_unsupported_schema_fallback_does_not_report_restored_running_session()
-    {
-        let temp_dir = create_temp_dir("initialize-v3-fallback");
+    async fn test_build_startup_state_unsupported_schema_uses_default_state() {
+        let temp_dir = create_temp_dir("build-startup-state-v3-fallback");
         let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
 
@@ -733,11 +1026,8 @@ mod tests {
         )
         .expect("legacy json should be writable");
 
-        let app_state = AppState::new_for_tests(
-            as_clock_trait(&clock),
-            PersistenceManager::new(as_clock_trait(&clock), Some(temp_dir.clone())),
-        );
-        let outcome = app_state.initialize().await;
+        let (app_state, outcome) =
+            build_startup_state_for_tests(Arc::clone(&clock), &temp_dir).await;
 
         assert_eq!(
             outcome.restore_status,
@@ -754,15 +1044,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_persist_current_state_serializes_latest_completed_save() {
-        let temp_dir = create_temp_dir("persist-latest");
+    async fn test_persist_current_state_async_persists_current_timer_state() {
+        let temp_dir = create_temp_dir("persist-current-state");
         let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
-        let app_state = AppState::new_for_tests(
-            as_clock_trait(&clock),
-            PersistenceManager::new(as_clock_trait(&clock), Some(temp_dir.clone())),
-        );
+        let (app_state, _) = build_startup_state_for_tests(Arc::clone(&clock), &temp_dir).await;
 
-        let save_lock = app_state.persistence_save_lock.lock().await;
         {
             let mut timer_manager = app_state.timer_manager.lock().await;
             let mut state = timer_manager.get_state().clone();
@@ -770,9 +1056,44 @@ mod tests {
             state.remaining_seconds = 111;
             let _ = timer_manager.apply_persisted_state(state);
         }
-        let first_save = app_state.persist_current_state();
-        tokio::pin!(first_save);
-        tokio::task::yield_now().await;
+
+        app_state
+            .persist_current_state_async()
+            .await
+            .expect("runtime save should succeed");
+
+        match app_state.persistence.load_state_sync() {
+            PersistenceLoadOutcome::Restored { timer_state, .. } => {
+                assert_eq!(timer_state.status, TimerStatus::Working);
+                assert_eq!(timer_state.remaining_seconds, 111);
+            }
+            PersistenceLoadOutcome::NoState => panic!("expected restored state"),
+            PersistenceLoadOutcome::UnsupportedSchemaFallback => {
+                panic!("expected restored state")
+            }
+        }
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_persist_current_state_async_preserves_latest_completed_disk_state() {
+        let temp_dir = create_temp_dir("persist-latest-completed-state");
+        let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
+        let (app_state, _) = build_startup_state_for_tests(Arc::clone(&clock), &temp_dir).await;
+
+        {
+            let mut timer_manager = app_state.timer_manager.lock().await;
+            let mut state = timer_manager.get_state().clone();
+            state.status = TimerStatus::Working;
+            state.remaining_seconds = 111;
+            let _ = timer_manager.apply_persisted_state(state);
+        }
+
+        app_state
+            .persist_current_state_async()
+            .await
+            .expect("first runtime save should succeed");
 
         {
             let mut timer_manager = app_state.timer_manager.lock().await;
@@ -780,15 +1101,26 @@ mod tests {
             state.remaining_seconds = 222;
             let _ = timer_manager.apply_persisted_state(state);
         }
-        let second_save = app_state.persist_current_state();
-        tokio::pin!(second_save);
-        tokio::task::yield_now().await;
 
-        drop(save_lock);
-        first_save.await;
-        second_save.await;
+        app_state
+            .persist_current_state_async()
+            .await
+            .expect("second runtime save should succeed");
 
-        match app_state.persistence.load_state().await {
+        {
+            let mut timer_manager = app_state.timer_manager.lock().await;
+            let mut state = timer_manager.get_state().clone();
+            state.remaining_seconds = 333;
+            let _ = timer_manager.apply_persisted_state(state);
+        }
+
+        assert_eq!(
+            app_state.timer_manager.lock().await.get_state().remaining_seconds,
+            333,
+            "mutating in-memory state without another save must not rewrite the last committed snapshot"
+        );
+
+        match app_state.persistence.load_state_sync() {
             PersistenceLoadOutcome::Restored { timer_state, .. } => {
                 assert_eq!(timer_state.remaining_seconds, 222);
             }
@@ -802,15 +1134,128 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_queued_persist_current_state_clones_after_acquiring_save_lock() {
-        let temp_dir = create_temp_dir("persist-after-lock");
-        let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
-        let app_state = AppState::new_for_tests(
-            as_clock_trait(&clock),
-            PersistenceManager::new(as_clock_trait(&clock), Some(temp_dir.clone())),
+    async fn test_persist_current_state_async_serializes_overlapping_runtime_saves_in_request_order(
+    ) {
+        let (app_state, temp_dir, first_save_blocked, release_first_save) =
+            build_app_state_with_blocked_first_save("persist-runtime-save-request-order").await;
+        apply_working_timer_state(&app_state, 111).await;
+
+        let first_save = {
+            let app_state = Arc::clone(&app_state);
+            tokio::spawn(async move { app_state.persist_current_state_async().await })
+        };
+
+        wait_until_flag_is_set(&first_save_blocked, "the first runtime save to block").await;
+        apply_working_timer_state(&app_state, 222).await;
+
+        let second_save = {
+            let app_state = Arc::clone(&app_state);
+            tokio::spawn(async move { app_state.persist_current_state_async().await })
+        };
+
+        release_blocked_save(&release_first_save);
+
+        first_save
+            .await
+            .expect("first runtime save task should complete")
+            .expect("first runtime save should succeed");
+        second_save
+            .await
+            .expect("second runtime save task should complete")
+            .expect("second runtime save should succeed");
+
+        assert_persisted_remaining_seconds(&app_state.persistence, 222);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_cancelled_runtime_save_before_save_execution_does_not_commit_and_releases_ordered_lane(
+    ) {
+        let (app_state, temp_dir, first_save_blocked, release_first_save) =
+            build_app_state_with_blocked_first_save("cancelled-runtime-save-before-execution")
+                .await;
+        apply_working_timer_state(&app_state, 111).await;
+
+        let first_save = {
+            let app_state = Arc::clone(&app_state);
+            tokio::spawn(async move { app_state.persist_current_state_async().await })
+        };
+
+        wait_until_flag_is_set(&first_save_blocked, "the first runtime save to block").await;
+        apply_working_timer_state(&app_state, 222).await;
+
+        let cancelled_save = {
+            let app_state = Arc::clone(&app_state);
+            tokio::spawn(async move { app_state.persist_current_state_async().await })
+        };
+
+        wait_until_ticket_count_reaches(
+            &app_state.ordered_save_lane,
+            2,
+            "the cancelled runtime save to issue its ticket",
+        )
+        .await;
+        cancelled_save.abort();
+        let cancelled_join_error = cancelled_save
+            .await
+            .expect_err("the second runtime save task should be cancelled");
+        assert!(
+            cancelled_join_error.is_cancelled(),
+            "the second runtime save task should report cancellation"
         );
 
-        let save_lock = app_state.persistence_save_lock.lock().await;
+        apply_working_timer_state(&app_state, 333).await;
+
+        let third_save = {
+            let app_state = Arc::clone(&app_state);
+            tokio::spawn(async move { app_state.persist_current_state_async().await })
+        };
+
+        release_blocked_save(&release_first_save);
+
+        first_save
+            .await
+            .expect("first runtime save task should complete")
+            .expect("first runtime save should succeed");
+        tokio::time::timeout(StdDuration::from_secs(1), third_save)
+            .await
+            .expect("a cancelled pre-dispatch save must release the ordered lane")
+            .expect("third runtime save task should complete")
+            .expect("third runtime save should succeed");
+
+        assert_persisted_remaining_seconds(&app_state.persistence, 333);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_ordered_save_lane_advances_after_failed_runtime_save() {
+        let temp_dir = create_temp_dir("persist-runtime-save-failure-advance");
+        let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
+        let error_call_count = Arc::new(AtomicUsize::new(0));
+        let failing_path = temp_dir.join("timer_state.json");
+        let injected_save_error_hook = {
+            let error_call_count = Arc::clone(&error_call_count);
+            let failing_path = failing_path.clone();
+
+            Arc::new(move || {
+                let call_index = error_call_count.fetch_add(1, Ordering::AcqRel);
+                if call_index == 0 {
+                    Some(SaveError::Write {
+                        path: failing_path.clone(),
+                        source: io::Error::other("injected ordered-save failure"),
+                    })
+                } else {
+                    None
+                }
+            }) as Arc<dyn Fn() -> Option<SaveError> + Send + Sync>
+        };
+        let persistence = PersistenceManager::new(as_clock_trait(&clock), Some(temp_dir.clone()))
+            .with_injected_save_error_hook(injected_save_error_hook);
+        let (app_state, _) =
+            build_startup_state_for_tests_with_persistence(Arc::clone(&clock), persistence).await;
+
         {
             let mut timer_manager = app_state.timer_manager.lock().await;
             let mut state = timer_manager.get_state().clone();
@@ -819,23 +1264,214 @@ mod tests {
             let _ = timer_manager.apply_persisted_state(state);
         }
 
-        let pending_save = app_state.persist_current_state();
-        tokio::pin!(pending_save);
-        tokio::task::yield_now().await;
+        let first_result = app_state.persist_current_state_async().await;
+        assert!(matches!(
+            first_result,
+            Err(PomoliceError::PersistenceSave(SaveError::Write { .. }))
+        ));
 
         {
             let mut timer_manager = app_state.timer_manager.lock().await;
             let mut state = timer_manager.get_state().clone();
-            state.remaining_seconds = 333;
+            state.remaining_seconds = 222;
             let _ = timer_manager.apply_persisted_state(state);
         }
 
-        drop(save_lock);
-        pending_save.await;
+        tokio::time::timeout(
+            StdDuration::from_secs(1),
+            app_state.persist_current_state_async(),
+        )
+        .await
+        .expect("failed runtime save must not stall the ordered save lane")
+        .expect("second runtime save should succeed");
 
-        match app_state.persistence.load_state().await {
+        match app_state.persistence.load_state_sync() {
             PersistenceLoadOutcome::Restored { timer_state, .. } => {
-                assert_eq!(timer_state.remaining_seconds, 333);
+                assert_eq!(timer_state.remaining_seconds, 222);
+            }
+            PersistenceLoadOutcome::NoState => panic!("expected restored state"),
+            PersistenceLoadOutcome::UnsupportedSchemaFallback => {
+                panic!("expected restored state")
+            }
+        }
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_ordered_save_lane_advances_after_panic_in_save_execution() {
+        let temp_dir = create_temp_dir("persist-runtime-save-panic-advance");
+        let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
+        let panic_call_count = Arc::new(AtomicUsize::new(0));
+        let before_save_hook = {
+            let panic_call_count = Arc::clone(&panic_call_count);
+
+            Arc::new(move || {
+                let call_index = panic_call_count.fetch_add(1, Ordering::AcqRel);
+                assert_ne!(call_index, 0, "injected ordered-save panic");
+            }) as Arc<dyn Fn() + Send + Sync>
+        };
+        let persistence = PersistenceManager::new(as_clock_trait(&clock), Some(temp_dir.clone()))
+            .with_before_save_hook(before_save_hook);
+        let (app_state, _) =
+            build_startup_state_for_tests_with_persistence(Arc::clone(&clock), persistence).await;
+
+        apply_working_timer_state(&app_state, 111).await;
+
+        let first_result = app_state.persist_current_state_async().await;
+        assert!(matches!(
+            first_result,
+            Err(PomoliceError::PersistenceTaskJoin { .. })
+        ));
+
+        apply_working_timer_state(&app_state, 222).await;
+
+        tokio::time::timeout(
+            StdDuration::from_secs(1),
+            app_state.persist_current_state_async(),
+        )
+        .await
+        .expect("panic during save execution must not stall the ordered save lane")
+        .expect("second runtime save should succeed");
+
+        assert_persisted_remaining_seconds(&app_state.persistence, 222);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_persist_current_state_async_preserves_path_unavailable_noop_success() {
+        let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
+        let persistence = PersistenceManager::new(as_clock_trait(&clock), None);
+        let (app_state, _) =
+            build_startup_state_for_tests_with_persistence(Arc::clone(&clock), persistence).await;
+
+        {
+            let mut timer_manager = app_state.timer_manager.lock().await;
+            let mut state = timer_manager.get_state().clone();
+            state.status = TimerStatus::Working;
+            state.remaining_seconds = 555;
+            let _ = timer_manager.apply_persisted_state(state);
+        }
+
+        app_state
+            .persist_current_state_async()
+            .await
+            .expect("path-unavailable runtime save should remain a no-op success");
+
+        assert!(matches!(
+            app_state.persistence.load_state_sync(),
+            PersistenceLoadOutcome::NoState
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_flush_sync_on_exit_commits_after_older_in_flight_runtime_save() {
+        let (app_state, temp_dir, first_save_blocked, release_first_save) =
+            build_app_state_with_blocked_first_save("flush-sync-after-in-flight-runtime-save")
+                .await;
+        apply_working_timer_state(&app_state, 111).await;
+
+        let runtime_save = {
+            let app_state = Arc::clone(&app_state);
+            tokio::spawn(async move { app_state.persist_current_state_async().await })
+        };
+
+        wait_until_flag_is_set(&first_save_blocked, "the in-flight runtime save to block").await;
+        apply_working_timer_state(&app_state, 222).await;
+
+        let exit_flush = {
+            let app_state = Arc::clone(&app_state);
+            std::thread::spawn(move || app_state.flush_sync_on_exit())
+        };
+
+        release_blocked_save(&release_first_save);
+
+        runtime_save
+            .await
+            .expect("runtime save task should complete")
+            .expect("runtime save should succeed");
+        exit_flush
+            .join()
+            .expect("exit flush thread should not panic")
+            .expect("exit flush should succeed");
+
+        assert_persisted_remaining_seconds(&app_state.persistence, 222);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_cancelled_runtime_save_after_save_execution_starts_does_not_block_flush_sync_on_exit(
+    ) {
+        let (app_state, temp_dir, first_save_blocked, release_first_save) =
+            build_app_state_with_blocked_first_save(
+                "cancelled-runtime-save-after-execution-starts",
+            )
+            .await;
+        apply_working_timer_state(&app_state, 111).await;
+
+        let runtime_save = {
+            let app_state = Arc::clone(&app_state);
+            tokio::spawn(async move { app_state.persist_current_state_async().await })
+        };
+
+        wait_until_flag_is_set(
+            &first_save_blocked,
+            "the first runtime save to begin save execution",
+        )
+        .await;
+
+        runtime_save.abort();
+        let cancelled_join_error = runtime_save
+            .await
+            .expect_err("the runtime save task should be cancelled after dispatch");
+        assert!(
+            cancelled_join_error.is_cancelled(),
+            "the runtime save task should report cancellation"
+        );
+
+        apply_working_timer_state(&app_state, 222).await;
+
+        let exit_flush = {
+            let app_state = Arc::clone(&app_state);
+            std::thread::spawn(move || app_state.flush_sync_on_exit())
+        };
+
+        release_blocked_save(&release_first_save);
+
+        exit_flush
+            .join()
+            .expect("exit flush thread should not panic")
+            .expect("exit flush should succeed after the cancelled dispatched save finishes");
+
+        assert_persisted_remaining_seconds(&app_state.persistence, 222);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_flush_sync_on_exit_persists_current_timer_state() {
+        let temp_dir = create_temp_dir("flush-sync-on-exit");
+        let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
+        let (app_state, _) = build_startup_state_for_tests_sync(Arc::clone(&clock), &temp_dir);
+
+        {
+            let mut timer_manager = app_state.timer_manager.blocking_lock();
+            let mut state = timer_manager.get_state().clone();
+            state.status = TimerStatus::Working;
+            state.remaining_seconds = 444;
+            let _ = timer_manager.apply_persisted_state(state);
+        }
+
+        app_state
+            .flush_sync_on_exit()
+            .expect("exit flush should succeed");
+
+        match app_state.persistence.load_state_sync() {
+            PersistenceLoadOutcome::Restored { timer_state, .. } => {
+                assert_eq!(timer_state.status, TimerStatus::Working);
+                assert_eq!(timer_state.remaining_seconds, 444);
             }
             PersistenceLoadOutcome::NoState => panic!("expected restored state"),
             PersistenceLoadOutcome::UnsupportedSchemaFallback => {

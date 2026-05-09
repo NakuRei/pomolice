@@ -1,7 +1,8 @@
+use std::error::Error;
+
 use tauri_build::{AppManifest, Attributes};
 
-#[expect(clippy::expect_used, reason = "build script should panic on failure")]
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
     tauri_build::try_build(
         Attributes::new().app_manifest(AppManifest::new().commands(&[
             "start_work",
@@ -12,6 +13,7 @@ fn main() {
             "get_full_state",
             "resolve_boot_auto_start_prompt",
         ])),
-    )
-    .expect("failed to run tauri build script");
+    )?;
+
+    Ok(())
 }

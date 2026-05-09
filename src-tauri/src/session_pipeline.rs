@@ -1,6 +1,9 @@
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::logging_event::{log_error_event, log_info_event, BackendLogEvent};
+use crate::logging_event::{
+    log_error_event, log_info_event, log_persistence_write_failure, BackendLogEvent,
+    PERSISTENCE_WRITE_TRIGGER_INPUT_PENALTY, PERSISTENCE_WRITE_TRIGGER_SESSION_COMPLETION,
+};
 use crate::state;
 use crate::tray;
 use crate::types;
@@ -251,8 +254,47 @@ fn emit_pipeline_events(
 }
 
 async fn persist_timer_state(app: &AppHandle) {
+    persist_timer_state_with_trigger(app, PERSISTENCE_WRITE_TRIGGER_SESSION_COMPLETION).await;
+}
+
+async fn persist_timer_state_with_trigger(app: &AppHandle, trigger: &'static str) {
     let state_handle = app.state::<state::AppState>();
-    state_handle.persist_current_state().await;
+    if let Err(error) = state_handle.persist_current_state_async().await {
+        log_persistence_write_failure(trigger, &error);
+    }
+}
+
+fn log_break_mode_failure(
+    event: BackendLogEvent,
+    step: &'static str,
+    error: &crate::error::PomoliceError,
+) {
+    log_error_event(event, &[("step", step.to_string())], Some(error));
+}
+
+async fn start_input_monitor_for_break(
+    state_handle: &state::AppState,
+) -> crate::managers::input_monitor::InputMonitorManager {
+    let mut input_monitor = state_handle.input_monitor.lock().await;
+    input_monitor.start();
+    input_monitor.clone()
+}
+
+async fn rollback_break_enter_failure(
+    state_handle: &state::AppState,
+    app: &AppHandle,
+    input_monitor: &crate::managers::input_monitor::InputMonitorManager,
+) {
+    input_monitor.rollback_break_enter_failure();
+
+    let mut window_manager = state_handle.window_manager.lock().await;
+    if let Err(error) = window_manager.exit_fullscreen_all_monitors(app) {
+        log_break_mode_failure(
+            BackendLogEvent::SessionFullscreenBreakEnterFailed,
+            "rollback_exit_fullscreen_all_monitors",
+            &error,
+        );
+    }
 }
 
 async fn restart_timer_task(app: &AppHandle) {
@@ -333,65 +375,94 @@ async fn enter_break_mode(app: AppHandle) {
     log_info_event(BackendLogEvent::SessionFullscreenBreakEnterStarted, &[]);
     let state_handle = app.state::<state::AppState>();
 
-    {
-        let mut input_monitor = state_handle.input_monitor.lock().await;
-        input_monitor.start();
-        log_info_event(BackendLogEvent::InputMonitoringStarted, &[]);
-    }
+    let enter_result = state_handle
+        .run_break_mode_transition(async {
+            let input_monitor = start_input_monitor_for_break(&state_handle).await;
 
-    {
-        let mut window_manager = state_handle.window_manager.lock().await;
-        if let Err(e) = window_manager
-            .enter_fullscreen_all_monitors(app.clone())
-            .await
-        {
-            log_error_event(
-                BackendLogEvent::SessionFullscreenBreakEnterFailed,
-                &[("error_message", e.to_string())],
-                None,
-            );
-            return;
-        }
-        log_info_event(BackendLogEvent::SessionFullscreenBreakEntered, &[]);
-    }
+            let saved_state =
+                crate::managers::window::WindowStateManager::capture_main_window_state_for_break(
+                    &app,
+                )
+                .await
+                .map_err(|error| {
+                    input_monitor.rollback_break_enter_failure();
+                    ("capture_main_window_state_for_break", error)
+                })?;
 
-    {
-        let mut timer = state_handle.timer_manager.lock().await;
-        timer.set_fullscreen_break(true);
-    }
+            {
+                let mut window_manager = state_handle.window_manager.lock().await;
+                window_manager.set_saved_state(saved_state);
+            }
 
-    let _ = app.emit("break_started", serde_json::json!({}));
+            if let Err(error) =
+                crate::managers::window::WindowStateManager::enter_fullscreen_all_monitors(
+                    app.clone(),
+                )
+                .await
+            {
+                rollback_break_enter_failure(&state_handle, &app, &input_monitor).await;
+                return Err(("enter_fullscreen_all_monitors", error));
+            }
+
+            {
+                log_info_event(BackendLogEvent::SessionFullscreenBreakEntered, &[]);
+            }
+
+            {
+                let mut timer = state_handle.timer_manager.lock().await;
+                timer.set_fullscreen_break(true);
+            }
+
+            let _ = app.emit("break_started", serde_json::json!({}));
+            Ok::<(), (&'static str, crate::error::PomoliceError)>(())
+        })
+        .await;
+
+    if let Err((step, error)) = enter_result {
+        log_break_mode_failure(
+            BackendLogEvent::SessionFullscreenBreakEnterFailed,
+            step,
+            &error,
+        );
+    }
 }
 
 async fn exit_break_mode(app: AppHandle) {
     log_info_event(BackendLogEvent::SessionFullscreenBreakExitStarted, &[]);
     let state_handle = app.state::<state::AppState>();
 
-    {
-        let mut input_monitor = state_handle.input_monitor.lock().await;
-        input_monitor.stop();
-        log_info_event(BackendLogEvent::InputMonitoringStopping, &[]);
-    }
+    let exit_result = state_handle
+        .run_break_mode_transition(async {
+            {
+                let mut input_monitor = state_handle.input_monitor.lock().await;
+                input_monitor.stop();
+            }
 
-    {
-        let mut window_manager = state_handle.window_manager.lock().await;
-        if let Err(e) = window_manager.exit_fullscreen_all_monitors(&app) {
-            log_error_event(
-                BackendLogEvent::SessionFullscreenBreakExitFailed,
-                &[("error_message", e.to_string())],
-                None,
-            );
-            return;
-        }
-        log_info_event(BackendLogEvent::SessionFullscreenBreakExited, &[]);
-    }
+            {
+                let mut window_manager = state_handle.window_manager.lock().await;
+                window_manager
+                    .exit_fullscreen_all_monitors(&app)
+                    .map_err(|error| ("exit_fullscreen_all_monitors", error))?;
+                log_info_event(BackendLogEvent::SessionFullscreenBreakExited, &[]);
+            }
 
-    {
-        let mut timer = state_handle.timer_manager.lock().await;
-        timer.set_fullscreen_break(false);
-    }
+            {
+                let mut timer = state_handle.timer_manager.lock().await;
+                timer.set_fullscreen_break(false);
+            }
 
-    let _ = app.emit("break_completed", serde_json::json!({}));
+            let _ = app.emit("break_completed", serde_json::json!({}));
+            Ok::<(), (&'static str, crate::error::PomoliceError)>(())
+        })
+        .await;
+
+    if let Err((step, error)) = exit_result {
+        log_break_mode_failure(
+            BackendLogEvent::SessionFullscreenBreakExitFailed,
+            step,
+            &error,
+        );
+    }
 }
 
 pub async fn lib_handle_input_detected(app: AppHandle) {
@@ -403,7 +474,7 @@ pub async fn lib_handle_input_detected(app: AppHandle) {
     };
 
     if let Some(ref payload) = tick_payload {
-        state_handle.persist_current_state().await;
+        persist_timer_state_with_trigger(&app, PERSISTENCE_WRITE_TRIGGER_INPUT_PENALTY).await;
         let _ = app.emit("timer_tick", payload);
         tray::update_tray_icon(&app, payload);
     }
@@ -412,24 +483,156 @@ pub async fn lib_handle_input_detected(app: AppHandle) {
 pub async fn lib_handle_escape_combo(app: AppHandle) {
     let state_handle = app.state::<state::AppState>();
 
-    {
-        let mut input_monitor = state_handle.input_monitor.lock().await;
-        input_monitor.stop();
-    }
+    state_handle
+        .run_break_mode_transition(async {
+            {
+                let mut input_monitor = state_handle.input_monitor.lock().await;
+                input_monitor.stop();
+            }
 
-    {
-        let mut window_manager = state_handle.window_manager.lock().await;
-        let _ = window_manager.exit_fullscreen_all_monitors(&app);
-    }
+            {
+                let mut window_manager = state_handle.window_manager.lock().await;
+                if let Err(error) = window_manager.exit_fullscreen_all_monitors(&app) {
+                    log_break_mode_failure(
+                        BackendLogEvent::SessionFullscreenBreakExitFailed,
+                        "escape_combo_exit_fullscreen_all_monitors",
+                        &error,
+                    );
+                }
+            }
+        })
+        .await;
+}
+
+pub(crate) async fn lib_handle_external_break_exit(app: AppHandle) {
+    let state_handle = app.state::<state::AppState>();
+
+    state_handle
+        .run_break_mode_transition(async {
+            {
+                let mut input_monitor = state_handle.input_monitor.lock().await;
+                input_monitor.stop();
+            }
+
+            {
+                let mut window_manager = state_handle.window_manager.lock().await;
+                if let Err(error) = window_manager.exit_fullscreen_all_monitors(&app) {
+                    log_break_mode_failure(
+                        BackendLogEvent::SessionFullscreenBreakExitFailed,
+                        "external_break_exit_fullscreen_all_monitors",
+                        &error,
+                    );
+                }
+            }
+        })
+        .await;
 }
 
 #[cfg(test)]
 mod emit_order_tests {
     use super::{
-        session_completion_emit_order, PipelineEmitEvent, SESSION_COMPLETION_EMIT_ORDER_DEFAULT,
-        SESSION_COMPLETION_EMIT_ORDER_SCHEDULED_STOP,
+        session_completion_emit_order, start_input_monitor_for_break, PipelineEmitEvent,
+        SESSION_COMPLETION_EMIT_ORDER_DEFAULT, SESSION_COMPLETION_EMIT_ORDER_SCHEDULED_STOP,
     };
+    use crate::error::PomoliceError;
+    use crate::managers::clock::testing::FixedClock;
+    use crate::managers::clock::Clock;
+    use crate::managers::persistence::PersistenceManager;
+    use crate::state::AppState;
     use crate::types::SessionTransitionReason;
+    use chrono::{Local, TimeZone, Utc};
+    use std::sync::atomic::AtomicBool as StdAtomicBool;
+    use std::sync::{Arc, Mutex as StdMutex};
+    use std::time::Duration as StdDuration;
+
+    fn create_utc_datetime(
+        year: i32,
+        month: u32,
+        day: u32,
+        hour: u32,
+        minute: u32,
+        second: u32,
+    ) -> chrono::DateTime<Utc> {
+        Utc.with_ymd_and_hms(year, month, day, hour, minute, second)
+            .single()
+            .expect("valid UTC datetime")
+    }
+
+    fn fixed_clock(now_utc: chrono::DateTime<Utc>) -> Arc<FixedClock> {
+        Arc::new(FixedClock::new(now_utc.with_timezone(&Local)))
+    }
+
+    fn as_clock_trait(clock: &Arc<FixedClock>) -> Arc<dyn Clock + Send + Sync> {
+        Arc::<FixedClock>::clone(clock) as Arc<dyn Clock + Send + Sync>
+    }
+
+    async fn build_test_state_without_persistence_path() -> AppState {
+        let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
+        let persistence = PersistenceManager::new(as_clock_trait(&clock), None);
+        let (app_state, _) =
+            AppState::build_startup_state_for_tests(as_clock_trait(&clock), persistence).await;
+        app_state
+    }
+
+    async fn wait_for_transition_event_count(
+        events: &StdMutex<Vec<&'static str>>,
+        expected_count: usize,
+        context: &str,
+    ) {
+        for _ in 0..100 {
+            let current_count = events
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .len();
+            if current_count >= expected_count {
+                return;
+            }
+            tokio::time::sleep(StdDuration::from_millis(10)).await;
+        }
+
+        panic!("timed out waiting for {context}");
+    }
+
+    async fn run_escape_combo_exit_with_transition_for_tests(
+        state: Arc<AppState>,
+        events: Arc<StdMutex<Vec<&'static str>>>,
+        started_label: &'static str,
+        completed_label: &'static str,
+        release: Arc<StdAtomicBool>,
+    ) {
+        state
+            .run_break_mode_transition(async move {
+                {
+                    let mut events = events
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    events.push(started_label);
+                }
+
+                while !release.load(std::sync::atomic::Ordering::Acquire) {
+                    tokio::time::sleep(StdDuration::from_millis(10)).await;
+                }
+
+                let mut events = events
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                events.push(completed_label);
+            })
+            .await;
+    }
+
+    async fn run_enter_break_mode_failure_for_tests(
+        state: &AppState,
+    ) -> Result<(), (&'static str, PomoliceError)> {
+        let input_monitor = start_input_monitor_for_break(state).await;
+        Err::<(), _>(PomoliceError::WindowControl(
+            "simulated enter failure".to_string(),
+        ))
+        .map_err(|error| {
+            input_monitor.rollback_break_enter_failure();
+            ("enter_fullscreen_all_monitors", error)
+        })
+    }
 
     #[test]
     fn test_session_completion_emit_order_for_non_scheduled_stop() {
@@ -456,6 +659,91 @@ mod emit_order_tests {
                 PipelineEmitEvent::AutoRunStopped,
                 PipelineEmitEvent::TimerTick,
             ]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_break_mode_transition_coordinator_serializes_escape_combo_exit() {
+        let state = Arc::new(build_test_state_without_persistence_path().await);
+        let events = Arc::new(StdMutex::new(Vec::new()));
+        let release_first = Arc::new(StdAtomicBool::new(false));
+
+        let first_transition = {
+            let state = Arc::clone(&state);
+            let events = Arc::clone(&events);
+            let release_first = Arc::clone(&release_first);
+            tokio::spawn(async move {
+                run_escape_combo_exit_with_transition_for_tests(
+                    state,
+                    events,
+                    "first-start",
+                    "first-end",
+                    release_first,
+                )
+                .await;
+            })
+        };
+
+        wait_for_transition_event_count(&events, 1, "the first escape-combo exit transition").await;
+
+        let second_transition = {
+            let state = Arc::clone(&state);
+            let events = Arc::clone(&events);
+            tokio::spawn(async move {
+                run_escape_combo_exit_with_transition_for_tests(
+                    state,
+                    events,
+                    "second-start",
+                    "second-end",
+                    Arc::new(StdAtomicBool::new(true)),
+                )
+                .await;
+            })
+        };
+
+        tokio::time::sleep(StdDuration::from_millis(50)).await;
+        assert_eq!(
+            events
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_slice(),
+            ["first-start"]
+        );
+
+        release_first.store(true, std::sync::atomic::Ordering::Release);
+
+        first_transition
+            .await
+            .expect("first escape-combo transition should complete");
+        second_transition
+            .await
+            .expect("second escape-combo transition should complete");
+
+        assert_eq!(
+            events
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_slice(),
+            ["first-start", "first-end", "second-start", "second-end"]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_enter_break_mode_failure_stops_input_monitor_before_returning() {
+        let state = build_test_state_without_persistence_path().await;
+
+        let result = run_enter_break_mode_failure_for_tests(&state).await;
+
+        assert!(matches!(
+            result,
+            Err(("enter_fullscreen_all_monitors", PomoliceError::WindowControl(message)))
+                if message == "simulated enter failure"
+        ));
+
+        let input_monitor = state.input_monitor.lock().await;
+        assert!(
+            !input_monitor.is_enabled_for_tests(),
+            "enter-break fullscreen failure must roll input monitoring back before returning"
         );
     }
 }

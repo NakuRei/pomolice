@@ -51,4 +51,17 @@ describe("classifyBackendError", () => {
       severity: "recoverable",
     });
   });
+
+  it("classifies sanitized persistence errors by prefix contract", () => {
+    expect(
+      classifyBackendError(
+        "Persistence error: failed to save timer state",
+        "start_work",
+      ),
+    ).toEqual({
+      userMessage: "データの保存に失敗しました",
+      isTransient: false,
+      severity: "recoverable",
+    });
+  });
 });

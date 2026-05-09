@@ -38,6 +38,7 @@ impl ModifierState {
 /// Callbacks are injected at construction time to decouple this manager
 /// from Tauri's `AppHandle`. The caller (e.g. `AppState::new`) is responsible
 /// for capturing any `AppHandle` clones inside the closures.
+#[derive(Clone)]
 pub(crate) struct InputMonitorManager {
     /// Whether callbacks should fire. Set to true by `start()`, false by `stop()`.
     enabled: Arc<AtomicBool>,
@@ -146,8 +147,16 @@ impl InputMonitorManager {
         });
     }
 
+    pub(crate) fn rollback_break_enter_failure(&self) {
+        self.stop_internal();
+    }
+
     /// Stop global input monitoring
     pub(crate) fn stop(&mut self) {
+        self.stop_internal();
+    }
+
+    fn stop_internal(&self) {
         if !self.enabled.swap(false, Ordering::SeqCst) {
             log_info_event(BackendLogEvent::InputMonitoringAlreadyStopped, &[]);
             return; // Already stopped, not an error
@@ -161,6 +170,11 @@ impl InputMonitorManager {
         // Reset modifier state so no stale key flags remain for the next session.
         let mut mods = self.modifier_state.lock();
         *mods = ModifierState::default();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_enabled_for_tests(&self) -> bool {
+        self.enabled.load(Ordering::SeqCst)
     }
 }
 

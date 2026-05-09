@@ -215,6 +215,7 @@ macro_rules! backend_log_event_spec_match {
                 Error,
                 "Persistence write failed",
                 [
+                    "trigger" => Public,
                     "path" => Public,
                     "error_message" => Sensitive,
                 ]
@@ -433,6 +434,7 @@ macro_rules! backend_log_event_spec_match {
                 Error,
                 "Fullscreen break mode entry failed",
                 [
+                    "step" => Public,
                     "error_message" => Sensitive,
                 ]
             ),
@@ -453,6 +455,7 @@ macro_rules! backend_log_event_spec_match {
                 Error,
                 "Fullscreen break mode exit failed",
                 [
+                    "step" => Public,
                     "error_message" => Sensitive,
                 ]
             ),
