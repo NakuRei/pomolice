@@ -10,6 +10,7 @@ import { SettingsTimerPage } from "./components/Settings/SettingsTimerPage";
 import { FullscreenBreak } from "./components/BreakScreen/FullscreenBreak";
 import { HomeScreen } from "./components/Home/HomeScreen";
 import { useTimerSync } from "./hooks/useTimerSync";
+import { getFailureMessage } from "./logging/createRootErrorCallbacks";
 import { FRONTEND_LOG_EVENT_IDS } from "./logging/logEvents";
 import { createLogger } from "./logging/logger";
 import { useSettingsStore } from "./store/settingsStore";
@@ -173,7 +174,7 @@ function App(): React.ReactElement {
             {
               boundary_scope: "fullscreen_break",
               component_stack: errorInfo.componentStack ?? undefined,
-              failure_message: error.message,
+              failure_message: getFailureMessage(error),
             },
           );
         }}
@@ -207,7 +208,7 @@ function App(): React.ReactElement {
               boundary_scope: "settings",
               component_stack: errorInfo.componentStack ?? undefined,
               current_screen: currentScreen,
-              failure_message: error.message,
+              failure_message: getFailureMessage(error),
             },
           );
         }}

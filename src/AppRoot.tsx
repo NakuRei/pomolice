@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { ErrorBoundary } from "react-error-boundary";
 import App from "./App";
 import { AppErrorFallback } from "./components/ErrorBoundary/AppErrorFallback";
+import { getFailureMessage } from "./logging/createRootErrorCallbacks";
 import { FRONTEND_LOG_EVENT_IDS } from "./logging/logEvents";
 import { createLogger } from "./logging/logger";
 
@@ -20,7 +21,7 @@ export function AppRoot(): React.ReactElement {
           {
             boundary_scope: "app",
             component_stack: errorInfo.componentStack ?? undefined,
-            failure_message: error.message,
+            failure_message: getFailureMessage(error),
           },
         );
       }}
