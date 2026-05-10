@@ -99,7 +99,7 @@ describe("createLogger()", () => {
       new Error("boom"),
       {
         failure_message: "caller detail",
-      } as never,
+      },
     );
 
     expect(errorLog).toHaveBeenCalledTimes(1);
