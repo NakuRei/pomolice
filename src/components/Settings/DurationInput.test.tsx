@@ -51,7 +51,7 @@ function getElementById(id: string): HTMLElement {
 
 function getDescribedTextContents(element: HTMLElement): string[] {
   return getAriaDescribedByIds(element).map(
-    (descriptionId) => getElementById(descriptionId).textContent ?? "",
+    (descriptionId) => getElementById(descriptionId).textContent,
   );
 }
 

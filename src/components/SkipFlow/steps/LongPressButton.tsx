@@ -45,10 +45,10 @@ export default function LongPressButton({
   // Cleanup on unmount
   useEffect(() => {
     return (): void => {
-      if (intervalRef.current) {
+      if (intervalRef.current !== null) {
         clearInterval(intervalRef.current);
       }
-      if (releaseResetTimeoutRef.current) {
+      if (releaseResetTimeoutRef.current !== null) {
         clearTimeout(releaseResetTimeoutRef.current);
       }
     };
@@ -57,7 +57,7 @@ export default function LongPressButton({
   const endPress = (completed = false): void => {
     setIsPressing(false);
 
-    if (intervalRef.current) {
+    if (intervalRef.current !== null) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
