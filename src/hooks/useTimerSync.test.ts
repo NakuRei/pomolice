@@ -211,6 +211,30 @@ describe("useTimerSync", () => {
     });
   });
 
+  it("should clean up listeners from a failed setup attempt before retrying", async () => {
+    const unlistenTick = vi.fn();
+
+    mockListen.mockImplementation((event: string) => {
+      if (event === "timer_tick") {
+        return Promise.resolve(unlistenTick);
+      }
+
+      if (event === "session_completed") {
+        return Promise.reject(new Error("session listener failed"));
+      }
+
+      return Promise.resolve(noopUnlisten);
+    });
+
+    renderHook(() => {
+      useTimerSync();
+    });
+
+    await waitFor(() => {
+      expect(unlistenTick).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("should call get_full_state on mount", async () => {
     renderHook(() => {
       useTimerSync();

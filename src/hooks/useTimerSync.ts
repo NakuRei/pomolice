@@ -56,69 +56,131 @@ export function useTimerSync(): void {
   useEffect(() => {
     const listeners: UnlistenFn[] = [];
     let mounted = true;
+    let retryTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
-    const setup = async (retryAttempt = 0): Promise<void> => {
-      try {
-        // Listen for timer tick events
-        const unlistenTick = await listen<TimerTickPayload>(
-          "timer_tick",
-          (event) => {
-            if (mounted) {
-              handleTimerTick(event.payload);
-            }
-          },
-        );
-        listeners.push(unlistenTick);
+    function clearRetryTimeout(): void {
+      if (retryTimeoutId !== null) {
+        clearTimeout(retryTimeoutId);
+        retryTimeoutId = null;
+      }
+    }
 
-        // Listen for session completed events
-        const unlistenSessionCompleted = await listen<SessionCompletedPayload>(
-          "session_completed",
-          (event) => {
-            if (mounted) {
-              handleSessionCompleted(event.payload);
+    function clearListenersFrom(startIndex: number): void {
+      const listenersToClear = listeners.splice(startIndex);
+      listenersToClear.forEach((unlisten) => {
+        unlisten();
+      });
+    }
 
-              // Notification routing is decided only by transition_reason.
-              const { transition_reason, next_session_type } = event.payload;
-              if (transition_reason === "work_to_break") {
-                void notifyWorkComplete(next_session_type);
-              } else if (transition_reason === "break_waiting_decision") {
-                void notifyBreakComplete();
-              } else if (transition_reason === "break_auto_started") {
-                void notifyBreakAutoStarted();
-              }
-            }
-          },
-        );
-        listeners.push(unlistenSessionCompleted);
+    function registerActiveListener(unlisten: UnlistenFn): boolean {
+      if (!mounted) {
+        unlisten();
+        return false;
+      }
 
-        const unlistenAutoRunStopPending = await listen(
-          "auto_run_stop_pending",
-          () => {
-            if (mounted) {
-              showAutoRunStopPendingInfo();
-            }
-          },
-        );
-        listeners.push(unlistenAutoRunStopPending);
+      listeners.push(unlisten);
+      return true;
+    }
 
-        const unlistenAutoRunStopped = await listen("auto_run_stopped", () => {
+    async function registerBackendListeners(): Promise<boolean> {
+      // Listen for timer tick events
+      const unlistenTick = await listen<TimerTickPayload>(
+        "timer_tick",
+        (event) => {
           if (mounted) {
-            showAutoRunStoppedInfo();
+            handleTimerTick(event.payload);
           }
-        });
-        listeners.push(unlistenAutoRunStopped);
+        },
+      );
+      if (!registerActiveListener(unlistenTick)) {
+        return false;
+      }
 
-        // Listen for break started events (for UI updates)
-        const unlistenBreakStarted = await listen("break_started", () => {
-          // State is already updated via timer_tick
-        });
-        listeners.push(unlistenBreakStarted);
+      // Listen for session completed events
+      const unlistenSessionCompleted = await listen<SessionCompletedPayload>(
+        "session_completed",
+        (event) => {
+          if (mounted) {
+            handleSessionCompleted(event.payload);
 
-        // Listen for break completed events (for UI updates)
-        const unlistenBreakCompleted = await listen("break_completed", () => {
-          // State is already updated via timer_tick
-        });
-        listeners.push(unlistenBreakCompleted);
+            // Notification routing is decided only by transition_reason.
+            const { transition_reason, next_session_type } = event.payload;
+            if (transition_reason === "work_to_break") {
+              void notifyWorkComplete(next_session_type);
+            } else if (transition_reason === "break_waiting_decision") {
+              void notifyBreakComplete();
+            } else if (transition_reason === "break_auto_started") {
+              void notifyBreakAutoStarted();
+            }
+          }
+        },
+      );
+      if (!registerActiveListener(unlistenSessionCompleted)) {
+        return false;
+      }
+
+      const unlistenAutoRunStopPending = await listen(
+        "auto_run_stop_pending",
+        () => {
+          if (mounted) {
+            showAutoRunStopPendingInfo();
+          }
+        },
+      );
+      if (!registerActiveListener(unlistenAutoRunStopPending)) {
+        return false;
+      }
+
+      const unlistenAutoRunStopped = await listen("auto_run_stopped", () => {
+        if (mounted) {
+          showAutoRunStoppedInfo();
+        }
+      });
+      if (!registerActiveListener(unlistenAutoRunStopped)) {
+        return false;
+      }
+
+      // Listen for break started events (for UI updates)
+      const unlistenBreakStarted = await listen("break_started", () => {
+        // State is already updated via timer_tick
+      });
+      if (!registerActiveListener(unlistenBreakStarted)) {
+        return false;
+      }
+
+      // Listen for break completed events (for UI updates)
+      const unlistenBreakCompleted = await listen("break_completed", () => {
+        // State is already updated via timer_tick
+      });
+      if (!registerActiveListener(unlistenBreakCompleted)) {
+        return false;
+      }
+
+      return true;
+    }
+
+    function scheduleRetry(
+      currentRetryAttempt: number,
+      delay: number,
+      startNextAttempt: (nextRetryAttempt: number) => void,
+    ): void {
+      clearRetryTimeout();
+      retryTimeoutId = setTimeout(() => {
+        retryTimeoutId = null;
+        if (mounted) {
+          startNextAttempt(currentRetryAttempt + 1);
+        }
+      }, delay);
+    }
+
+    async function setup(retryAttempt = 0): Promise<void> {
+      const listenerStartIndex = listeners.length;
+
+      try {
+        const listenersRegistered = await registerBackendListeners();
+        if (!listenersRegistered) {
+          return;
+        }
 
         // Get initial state from backend
         const fullState = await invoke<FullStatePayload>("get_full_state");
@@ -141,6 +203,8 @@ export function useTimerSync(): void {
           failure_message: String(error),
         });
 
+        clearListenersFrom(listenerStartIndex);
+
         if (!mounted) {
           return;
         }
@@ -148,11 +212,9 @@ export function useTimerSync(): void {
         if (retryAttempt < MAX_CONNECTION_RETRIES) {
           // Schedule the next retry with exponential backoff
           const delay = retryDelayMs(retryAttempt);
-          setTimeout(() => {
-            if (mounted) {
-              void setup(retryAttempt + 1);
-            }
-          }, delay);
+          scheduleRetry(retryAttempt, delay, (nextRetryAttempt) => {
+            void setup(nextRetryAttempt);
+          });
         } else {
           // All retries exhausted — surface the error to the user
           setConnected(false);
@@ -171,15 +233,14 @@ export function useTimerSync(): void {
           });
         }
       }
-    };
+    }
 
     void setup();
 
     return (): void => {
       mounted = false;
-      listeners.forEach((unlisten) => {
-        unlisten();
-      });
+      clearRetryTimeout();
+      clearListenersFrom(0);
     };
   }, [
     handleTimerTick,
