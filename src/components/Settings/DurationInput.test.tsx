@@ -2,11 +2,15 @@ import type { ComponentProps } from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { DurationInput } from "./DurationInput";
+import {
+  formatDurationInputText,
+  parseDurationInputText,
+} from "./durationInputValue";
 import { getAriaDescribedByIds } from "@/test/ariaDescription";
 
 const defaultProps = {
   label: "作業時間",
-  value: 25,
+  value: "25",
   onChange: vi.fn(),
   min: 1,
   max: 120,
@@ -61,6 +65,16 @@ describe("DurationInput", () => {
       expect(screen.getByText("範囲: 1〜120分")).toBeInTheDocument();
     });
 
+    it("reflects updates to the controlled value prop", () => {
+      const { rerender } = render(<DurationInput {...defaultProps} />);
+
+      expect(getDurationInput()).toHaveValue(25);
+
+      rerender(<DurationInput {...defaultProps} value="40" />);
+
+      expect(getDurationInput()).toHaveValue(40);
+    });
+
     it("renders a custom unit", () => {
       renderDurationInput({ unit: "回" });
 
@@ -69,25 +83,8 @@ describe("DurationInput", () => {
   });
 
   describe("Value Changes", () => {
-    it.each([
-      { rawValue: "30", expectedValue: 30 },
-      { rawValue: "25.5", expectedValue: 25.5 },
-    ])(
-      "emits the parsed value for valid input $rawValue",
-      ({ rawValue, expectedValue }) => {
-        const onChange = vi.fn();
-        renderDurationInput({ onChange });
-
-        fireEvent.change(getDurationInput(), {
-          target: { value: rawValue },
-        });
-
-        expect(onChange).toHaveBeenCalledWith(expectedValue);
-      },
-    );
-
-    it.each(["abc", "Infinity", "1e309"])(
-      "emits null for invalid input %s",
+    it.each(["30", "25.5", "999", ""])(
+      "emits the raw input text %s",
       (rawValue) => {
         const onChange = vi.fn();
         renderDurationInput({ onChange });
@@ -96,52 +93,67 @@ describe("DurationInput", () => {
           target: { value: rawValue },
         });
 
-        expect(onChange).toHaveBeenCalledWith(null);
+        expect(onChange).toHaveBeenCalledWith(rawValue);
       },
     );
 
-    it("emits null and leaves the field blank when cleared", () => {
-      const onChange = vi.fn();
-      renderDurationInput({ onChange });
+    it("leaves out-of-range input visible", () => {
+      renderDurationInput({ max: 60, value: "999" });
 
       const input = getDurationInput();
-      fireEvent.change(input, { target: { value: "" } });
 
-      expect(onChange).toHaveBeenCalledWith(null);
-      expect(input.value).toBe("");
-    });
-
-    it("emits null when the next value is out of range", () => {
-      const onChange = vi.fn();
-      renderDurationInput({ onChange, max: 60 });
-
-      const input = getDurationInput();
-      fireEvent.change(input, { target: { value: "999" } });
-
-      expect(onChange).toHaveBeenCalledWith(null);
       expect(input.value).toBe("999");
     });
 
-    it("rejects decimal values when configured for whole numbers only", () => {
-      const onChange = vi.fn();
+    it("leaves decimal input visible when configured for whole numbers only", () => {
       renderDurationInput({
-        onChange,
+        value: "2.5",
         allowDecimal: false,
         testId: "interval",
       });
 
       const input = getDurationInput();
-      fireEvent.change(input, { target: { value: "2.5" } });
 
-      expect(onChange).toHaveBeenCalledWith(null);
       expect(input.value).toBe("2.5");
+    });
+  });
+
+  describe("Parsing", () => {
+    it.each([
+      { rawValue: "30", expectedValue: 30 },
+      { rawValue: "25.5", expectedValue: 25.5 },
+    ])("parses valid input $rawValue", ({ rawValue, expectedValue }) => {
+      expect(parseDurationInputText(rawValue, 1, 120, true)).toBe(
+        expectedValue,
+      );
+    });
+
+    it.each(["", "abc", "Infinity", "1e309", "0", "150"])(
+      "returns null for invalid input %s",
+      (rawValue) => {
+        expect(parseDurationInputText(rawValue, 1, 120, true)).toBeNull();
+      },
+    );
+
+    it("rejects decimal values when whole numbers are required", () => {
+      expect(parseDurationInputText("2.5", 1, 120, false)).toBeNull();
+    });
+  });
+
+  describe("Formatting", () => {
+    it.each([
+      { value: 25, expectedText: "25" },
+      { value: null, expectedText: "" },
+      { value: Number.POSITIVE_INFINITY, expectedText: "" },
+    ])("formats $value as '$expectedText'", ({ value, expectedText }) => {
+      expect(formatDurationInputText(value)).toBe(expectedText);
     });
   });
 
   describe("Validation", () => {
     it.each([
-      { value: 0, expectedMessage: "1〜120分の範囲で入力してください" },
-      { value: 150, expectedMessage: "1〜120分の範囲で入力してください" },
+      { value: "0", expectedMessage: "1〜120分の範囲で入力してください" },
+      { value: "150", expectedMessage: "1〜120分の範囲で入力してください" },
     ])(
       "shows an error when the initial value is outside the range: $value",
       ({ value, expectedMessage }) => {
@@ -154,7 +166,7 @@ describe("DurationInput", () => {
     it.each([1, 120])(
       "does not show an error at the configured boundary %s",
       (value) => {
-        renderDurationInput({ value });
+        renderDurationInput({ value: String(value) });
 
         expect(
           screen.queryByText("1〜120分の範囲で入力してください"),
@@ -163,7 +175,7 @@ describe("DurationInput", () => {
     );
 
     it("supports zero when zero is allowed", () => {
-      renderDurationInput({ value: 0, min: 0, max: 120 });
+      renderDurationInput({ value: "0", min: 0, max: 120 });
 
       expect(getDurationInput()).toHaveValue(0);
       expect(
@@ -173,7 +185,7 @@ describe("DurationInput", () => {
 
     it("validates against a custom range", () => {
       renderDurationInput({
-        value: 1,
+        value: "1",
         min: 5,
         max: 60,
         testId: "break",
@@ -185,7 +197,7 @@ describe("DurationInput", () => {
     });
 
     it("associates invalid input with the range hint and error message", () => {
-      renderDurationInput({ value: 0 });
+      renderDurationInput({ value: "0" });
 
       const input = getDurationInput();
       const describedByIds = getAriaDescribedByIds(input);
@@ -201,7 +213,7 @@ describe("DurationInput", () => {
     });
 
     it("associates valid input only with the static range hint", () => {
-      renderDurationInput({ value: 25 });
+      renderDurationInput({ value: "25" });
 
       const input = getDurationInput();
       const describedByIds = getAriaDescribedByIds(input);
@@ -219,14 +231,14 @@ describe("DurationInput", () => {
         <>
           <DurationInput
             label="作業時間"
-            value={0}
+            value="0"
             onChange={() => undefined}
             min={1}
             max={120}
           />
           <DurationInput
             label="作業時間"
-            value={0}
+            value="0"
             onChange={() => undefined}
             min={1}
             max={120}

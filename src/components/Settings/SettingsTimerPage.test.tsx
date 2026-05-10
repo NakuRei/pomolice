@@ -89,6 +89,19 @@ describe("SettingsTimerPage", () => {
     expect(openSettingsTopScreen).not.toHaveBeenCalled();
   });
 
+  it("keeps out-of-range timer draft visible while blocking save", async () => {
+    const user = userEvent.setup();
+
+    render(<SettingsTimerPage openSettingsTopScreen={() => undefined} />);
+
+    const workInput = screen.getByRole("spinbutton", { name: "作業時間" });
+    await user.clear(workInput);
+    await user.type(workInput, "999");
+
+    expect(workInput).toHaveValue(999);
+    expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
+  });
+
   it("disables timer duration inputs and keeps existing warning when timer is running", () => {
     useTimerStore.setState({ status: TimerStatus.WORKING });
 

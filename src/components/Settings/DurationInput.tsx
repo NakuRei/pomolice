@@ -1,26 +1,9 @@
-import { useEffect, useId, useState, type ChangeEvent } from "react";
+import { useId, type ChangeEvent } from "react";
+import { parseDurationInputText } from "./durationInputValue";
 /**
  * DurationInput Component
  * Reusable input component for duration settings with validation
  */
-
-function toDisplayValue(value: number | null): string {
-  return value !== null && Number.isFinite(value) ? String(value) : "";
-}
-
-function parseInputValue(
-  raw: string,
-  min: number,
-  max: number,
-  allowDecimal: boolean,
-): number | null {
-  if (raw.trim() === "") return null;
-  const parsedValue = Number(raw);
-  if (!Number.isFinite(parsedValue)) return null;
-  if (!allowDecimal && !Number.isInteger(parsedValue)) return null;
-  if (parsedValue < min || parsedValue > max) return null;
-  return parsedValue;
-}
 
 function isInputValid(
   inputValue: string,
@@ -28,14 +11,7 @@ function isInputValid(
   max: number,
   allowDecimal: boolean,
 ): boolean {
-  const parsedInput = Number(inputValue);
-  return (
-    inputValue.trim() !== "" &&
-    Number.isFinite(parsedInput) &&
-    (allowDecimal || Number.isInteger(parsedInput)) &&
-    parsedInput >= min &&
-    parsedInput <= max
-  );
+  return parseDurationInputText(inputValue, min, max, allowDecimal) !== null;
 }
 
 function createElementTestId(
@@ -57,8 +33,8 @@ function getInputStateClassName(isValid: boolean): string {
 
 interface DurationInputProps {
   label: string;
-  value: number | null;
-  onChange: (value: number | null) => void;
+  value: string;
+  onChange: (value: string) => void;
   min: number;
   max: number;
   unit?: string;
@@ -79,19 +55,12 @@ export function DurationInput({
   allowDecimal = true,
 }: DurationInputProps): React.ReactElement {
   const generatedElementId = useId();
-  const [inputValue, setInputValue] = useState(toDisplayValue(value));
-
-  useEffect(() => {
-    setInputValue(toDisplayValue(value));
-  }, [value]);
 
   const handleChange = (e: ChangeEvent<HTMLInputElement>): void => {
-    const { value: raw } = e.target;
-    setInputValue(raw);
-    onChange(parseInputValue(raw, min, max, allowDecimal));
+    onChange(e.target.value);
   };
 
-  const isValid = isInputValid(inputValue, min, max, allowDecimal);
+  const isValid = isInputValid(value, min, max, allowDecimal);
   const inputStateClassName = getInputStateClassName(isValid);
   const inputTestId = createElementTestId(testId, "input");
   const errorTestId = createElementTestId(testId, "error");
@@ -109,7 +78,7 @@ export function DurationInput({
         <input
           id={inputId}
           type="number"
-          value={inputValue}
+          value={value}
           onChange={handleChange}
           min={min}
           max={max}

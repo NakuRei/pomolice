@@ -3,6 +3,10 @@ import { useFocusHeadingOnMount } from "@/hooks/useFocusHeadingOnMount";
 import { useSettingsStore, VALIDATION_RULES } from "@/store/settingsStore";
 import { TimerStatus, useTimerStore } from "@/store/timerStore";
 import { DurationInput } from "./DurationInput";
+import {
+  formatDurationInputText,
+  parseDurationInputText,
+} from "./durationInputValue";
 import { SettingsPageHeader } from "./SettingsPageHeader";
 import { SettingsSaveCancelFooter } from "./SettingsSaveCancelFooter";
 
@@ -10,28 +14,11 @@ interface SettingsTimerPageProps {
   openSettingsTopScreen: () => void;
 }
 
-const isFiniteNumberValue = (value: number | null): value is number =>
-  typeof value === "number" && Number.isFinite(value);
-
-const isNumberWithinRange = (
-  value: number | null,
-  min: number,
-  max: number,
-): value is number =>
-  isFiniteNumberValue(value) && value >= min && value <= max;
-
-const isWholeNumberWithinRange = (
-  value: number | null,
-  min: number,
-  max: number,
-): value is number =>
-  isNumberWithinRange(value, min, max) && Number.isInteger(value);
-
 interface TimerSettingDraftValues {
-  workDuration: number | null;
-  shortBreakDuration: number | null;
-  longBreakDuration: number | null;
-  longBreakInterval: number | null;
+  workDuration: string;
+  shortBreakDuration: string;
+  longBreakDuration: string;
+  longBreakInterval: string;
 }
 
 interface ValidTimerSettingValues {
@@ -44,49 +31,36 @@ interface ValidTimerSettingValues {
 function getValidTimerSettingValues(
   draftValues: TimerSettingDraftValues,
 ): ValidTimerSettingValues | null {
-  const {
-    workDuration,
-    shortBreakDuration,
-    longBreakDuration,
-    longBreakInterval,
-  } = draftValues;
+  const workDuration = parseDurationInputText(
+    draftValues.workDuration,
+    VALIDATION_RULES.workDuration.min,
+    VALIDATION_RULES.workDuration.max,
+    true,
+  );
+  const shortBreakDuration = parseDurationInputText(
+    draftValues.shortBreakDuration,
+    VALIDATION_RULES.shortBreakDuration.min,
+    VALIDATION_RULES.shortBreakDuration.max,
+    true,
+  );
+  const longBreakDuration = parseDurationInputText(
+    draftValues.longBreakDuration,
+    VALIDATION_RULES.longBreakDuration.min,
+    VALIDATION_RULES.longBreakDuration.max,
+    true,
+  );
+  const longBreakInterval = parseDurationInputText(
+    draftValues.longBreakInterval,
+    VALIDATION_RULES.longBreakInterval.min,
+    VALIDATION_RULES.longBreakInterval.max,
+    false,
+  );
 
   if (
-    !isNumberWithinRange(
-      workDuration,
-      VALIDATION_RULES.workDuration.min,
-      VALIDATION_RULES.workDuration.max,
-    )
-  ) {
-    return null;
-  }
-
-  if (
-    !isNumberWithinRange(
-      shortBreakDuration,
-      VALIDATION_RULES.shortBreakDuration.min,
-      VALIDATION_RULES.shortBreakDuration.max,
-    )
-  ) {
-    return null;
-  }
-
-  if (
-    !isNumberWithinRange(
-      longBreakDuration,
-      VALIDATION_RULES.longBreakDuration.min,
-      VALIDATION_RULES.longBreakDuration.max,
-    )
-  ) {
-    return null;
-  }
-
-  if (
-    !isWholeNumberWithinRange(
-      longBreakInterval,
-      VALIDATION_RULES.longBreakInterval.min,
-      VALIDATION_RULES.longBreakInterval.max,
-    )
+    workDuration === null ||
+    shortBreakDuration === null ||
+    longBreakDuration === null ||
+    longBreakInterval === null
   ) {
     return null;
   }
@@ -117,18 +91,17 @@ export function SettingsTimerPage({
   const updateSettings = useSettingsStore((state) => state.updateSettings);
   const timerStatus = useTimerStore((state) => state.status);
 
-  const [workDurationDraft, setWorkDurationDraft] = useState<number | null>(
-    workDurationFromStore,
+  const [workDurationDraft, setWorkDurationDraft] = useState<string>(
+    formatDurationInputText(workDurationFromStore),
   );
-  const [shortBreakDurationDraft, setShortBreakDurationDraft] = useState<
-    number | null
-  >(shortBreakDurationFromStore);
-  const [longBreakDurationDraft, setLongBreakDurationDraft] = useState<
-    number | null
-  >(longBreakDurationFromStore);
-  const [longBreakIntervalDraft, setLongBreakIntervalDraft] = useState<
-    number | null
-  >(longBreakIntervalFromStore);
+  const [shortBreakDurationDraft, setShortBreakDurationDraft] =
+    useState<string>(formatDurationInputText(shortBreakDurationFromStore));
+  const [longBreakDurationDraft, setLongBreakDurationDraft] = useState<string>(
+    formatDurationInputText(longBreakDurationFromStore),
+  );
+  const [longBreakIntervalDraft, setLongBreakIntervalDraft] = useState<string>(
+    formatDurationInputText(longBreakIntervalFromStore),
+  );
 
   const validTimerSettingValues = getValidTimerSettingValues({
     workDuration: workDurationDraft,
