@@ -59,12 +59,10 @@ impl StartRuntimeEffectShell for AppHandleRuntimeEffectShell<'_> {
 
     fn spawn_timer_task<'a>(
         &'a mut self,
-        state: &'a AppState,
+        _state: &'a AppState,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        let app = self.app.clone();
         Box::pin(async move {
-            let mut timer = state.timer_manager.lock().await;
-            timer.spawn_timer_task(app);
+            crate::session_pipeline::spawn_timer_task(self.app).await;
         })
     }
 }
@@ -151,9 +149,8 @@ pub(crate) async fn resolve_post_break_decision(
     }
 
     if should_spawn_timer_task {
-        let mut timer = state.timer_manager.lock().await;
         // Continue action always starts a fresh timer task.
-        timer.spawn_timer_task(app.clone());
+        crate::session_pipeline::spawn_timer_task(app).await;
     }
 
     state.persist_current_state_async().await?;

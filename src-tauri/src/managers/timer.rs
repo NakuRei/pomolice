@@ -2,7 +2,6 @@
 // Manages timer state and session lifecycle without global statics
 
 use std::time::{Duration, Instant};
-use tauri::AppHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::{PomoliceError, Result};
@@ -653,12 +652,13 @@ impl TimerStateManager {
 
     /// Spawn a new timer task.
     ///
-    /// `app_handle` is passed by value here (not stored as a field) so that
-    /// `TimerStateManager` remains free of `AppHandle` ownership.
-    ///
     /// Must be called **after** the old task has been awaited (outside the lock).
     /// See `cancel_and_take_task` for the required call sequence.
-    pub(crate) fn spawn_timer_task(&mut self, app_handle: AppHandle) {
+    pub(crate) fn spawn_timer_task<F, Fut>(&mut self, on_tick: F)
+    where
+        F: Fn() -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
         let token = CancellationToken::new();
         self.cancel_token = Some(token.clone());
 
@@ -674,7 +674,7 @@ impl TimerStateManager {
                         if token.is_cancelled() {
                             break;
                         }
-                        crate::lib_handle_timer_tick(app_handle.clone()).await;
+                        on_tick().await;
                     }
                 }
             }
@@ -753,6 +753,51 @@ mod tests {
             crate::types::HhMm::try_from(end_time.to_string()).expect("end time should be valid"),
         )
         .expect("slot should be valid")
+    }
+
+    #[tokio::test]
+    async fn test_spawn_timer_task_invokes_and_awaits_callback_before_cancelled_task_finishes() {
+        let mut mgr = make_manager();
+        let callback_started = std::sync::Arc::new(tokio::sync::Notify::new());
+        let callback_release = std::sync::Arc::new(tokio::sync::Notify::new());
+        let callback_finished = std::sync::Arc::new(tokio::sync::Notify::new());
+
+        {
+            let callback_started = std::sync::Arc::clone(&callback_started);
+            let callback_release = std::sync::Arc::clone(&callback_release);
+            let callback_finished = std::sync::Arc::clone(&callback_finished);
+            mgr.spawn_timer_task(move || {
+                let callback_started = std::sync::Arc::clone(&callback_started);
+                let callback_release = std::sync::Arc::clone(&callback_release);
+                let callback_finished = std::sync::Arc::clone(&callback_finished);
+                async move {
+                    callback_started.notify_one();
+                    callback_release.notified().await;
+                    callback_finished.notify_one();
+                }
+            });
+        }
+
+        tokio::time::timeout(Duration::from_millis(1500), callback_started.notified())
+            .await
+            .expect("callback should start after the first tick");
+
+        let mut handle = mgr
+            .cancel_and_take_task()
+            .expect("running timer task should return a handle");
+
+        tokio::time::timeout(Duration::from_millis(100), &mut handle)
+            .await
+            .expect_err("cancelled task should still await the pending callback");
+
+        callback_release.notify_one();
+        tokio::time::timeout(Duration::from_millis(100), callback_finished.notified())
+            .await
+            .expect("callback should finish after release");
+        tokio::time::timeout(Duration::from_millis(100), handle)
+            .await
+            .expect("task should finish after callback completion")
+            .expect("timer task should not panic");
     }
 
     #[test]

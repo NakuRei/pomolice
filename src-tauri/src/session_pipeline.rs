@@ -1,5 +1,7 @@
 use tauri::{AppHandle, Emitter, Manager};
 
+type TimerTickFuture = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
+
 use crate::logging_event::{
     log_error_event, log_info_event, log_persistence_write_failure, BackendLogEvent,
     PERSISTENCE_WRITE_TRIGGER_INPUT_PENALTY, PERSISTENCE_WRITE_TRIGGER_SESSION_COMPLETION,
@@ -75,26 +77,32 @@ fn session_completion_emit_order(
 }
 
 pub async fn lib_handle_timer_tick(app: AppHandle) {
-    let state_handle = app.state::<state::AppState>();
+    lib_handle_timer_tick_future(app).await;
+}
 
-    let (should_complete_session, tick_payload) = {
-        let mut timer = state_handle.timer_manager.lock().await;
+fn lib_handle_timer_tick_future(app: AppHandle) -> TimerTickFuture {
+    Box::pin(async move {
+        let state_handle = app.state::<state::AppState>();
 
-        if timer.status() == types::TimerStatus::Idle {
-            return;
+        let (should_complete_session, tick_payload) = {
+            let mut timer = state_handle.timer_manager.lock().await;
+
+            if timer.status() == types::TimerStatus::Idle {
+                return;
+            }
+
+            let (completed, payload) = timer.tick();
+
+            (completed, payload)
+        };
+
+        let _ = app.emit("timer_tick", &tick_payload);
+        tray::update_tray_icon(&app, &tick_payload);
+
+        if should_complete_session {
+            lib_handle_session_complete(app).await;
         }
-
-        let (completed, payload) = timer.tick();
-
-        (completed, payload)
-    };
-
-    let _ = app.emit("timer_tick", &tick_payload);
-    tray::update_tray_icon(&app, &tick_payload);
-
-    if should_complete_session {
-        lib_handle_session_complete(app).await;
-    }
+    })
 }
 
 fn transition_requires_task_cancellation(
@@ -298,9 +306,17 @@ async fn rollback_break_enter_failure(
 }
 
 async fn restart_timer_task(app: &AppHandle) {
+    spawn_timer_task(app).await;
+}
+
+pub(crate) async fn spawn_timer_task(app: &AppHandle) {
     let state_handle = app.state::<state::AppState>();
     let mut timer = state_handle.timer_manager.lock().await;
-    timer.spawn_timer_task(app.clone());
+    let app = app.clone();
+    timer.spawn_timer_task(move || {
+        let app = app.clone();
+        lib_handle_timer_tick_future(app)
+    });
 }
 
 async fn execute_session_completion_effect_plan(

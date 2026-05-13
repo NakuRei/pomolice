@@ -401,10 +401,7 @@ async fn start_work_from_scheduler_when_idle(
         let _ = join_handle.await;
     }
 
-    {
-        let mut timer_manager = state_handle.timer_manager.lock().await;
-        timer_manager.spawn_timer_task(app.clone());
-    }
+    crate::session_pipeline::spawn_timer_task(&app).await;
 
     persist_current_state_with_trigger(&app, PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START).await;
 
