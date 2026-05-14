@@ -64,6 +64,8 @@ struct OrderedSaveLaneState {
 
 struct OrderedSaveLaneInner {
     next_ticket: AtomicU64,
+    // Ticket bookkeeping is synchronous and never held across await; async and blocking callers
+    // only wait after releasing this guard.
     state: StdMutex<OrderedSaveLaneState>,
     // Blocking exit flush and async runtime saves wait on the same lane, so we need both a
     // Condvar for sync callers and a Notify for async callers to observe head advancement.
@@ -225,11 +227,14 @@ impl Drop for OrderedSaveTicket {
 
 /// Central application state.
 pub(crate) struct AppState {
+    // Async command/session paths mutate these managers from Tokio tasks. Clippy rejects held
+    // Tokio guards across await so manager critical sections stay locally scoped.
     pub timer_manager: Mutex<TimerStateManager>,
     pub input_monitor: Mutex<InputMonitorManager>,
     pub window_manager: Mutex<WindowStateManager>,
     pub persistence: PersistenceManager,
     pub clock: Arc<dyn Clock + Send + Sync>,
+    // These runtime fields are synchronous, short-lived bookkeeping and are not held with await.
     pub scheduler_task_state: StdMutex<SchedulerTaskState>,
     pub boot_prompt_runtime_state: StdMutex<BootPromptRuntimeState>,
     pub boot_prompt_check_pending: AtomicBool,

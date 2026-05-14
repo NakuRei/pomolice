@@ -1,5 +1,5 @@
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 await-holding-invalid-types = [
-  { path = "tokio::sync::MutexGuard", reason = "backend-2 persistence refactor keeps async save boundaries outside held guards" },
+  { path = "tokio::sync::MutexGuard", reason = "AppState manager guards must stay in scoped critical sections and never cross await points" },
 ]

@@ -49,6 +49,7 @@ pub(crate) struct InputMonitorManager {
     /// Set to true by `stop()` to tell the supervisor loop to exit cleanly instead of
     /// retrying. Reset to false by `start()` before each spawn.
     shutdown_requested: Arc<AtomicBool>,
+    /// Callback-only modifier tracking; keep the guard around state updates only.
     modifier_state: Arc<parking_lot::Mutex<ModifierState>>,
     /// Called when the escape combo (Ctrl+Alt+Shift+E) is detected.
     on_escape_combo: Arc<dyn Fn() + Send + Sync>,
@@ -208,11 +209,14 @@ fn build_event_callback(
         // Track modifier keys for escape combo detection.
         match event.event_type {
             EventType::KeyPress(key) => {
-                let mut mods = modifier_state.lock();
-                mods.update(key, true);
+                let is_escape_combo = {
+                    let mut mods = modifier_state.lock();
+                    mods.update(key, true);
+                    mods.is_escape_combo(key)
+                };
 
                 // Escape hatch: Ctrl+Alt+Shift+E exits break mode immediately.
-                if mods.is_escape_combo(key) {
+                if is_escape_combo {
                     enabled.store(false, Ordering::SeqCst);
                     (on_escape_combo)();
                     return;
@@ -366,6 +370,39 @@ mod tests {
 
         // Should still work
         assert!(mods.is_escape_combo(Key::KeyE));
+    }
+
+    #[test]
+    fn test_escape_combo_callback_runs_after_modifier_state_lock_is_released() {
+        let enabled = Arc::new(AtomicBool::new(true));
+        let modifier_state = Arc::new(parking_lot::Mutex::new(ModifierState::default()));
+        let callback_observed_unlocked_state = Arc::new(AtomicBool::new(false));
+
+        let modifier_state_for_callback = Arc::clone(&modifier_state);
+        let callback_observed_unlocked_state_for_callback =
+            Arc::clone(&callback_observed_unlocked_state);
+        let callback = build_event_callback(
+            Arc::clone(&enabled),
+            Arc::clone(&modifier_state),
+            Arc::new(move || {
+                callback_observed_unlocked_state_for_callback.store(
+                    modifier_state_for_callback.try_lock().is_some(),
+                    Ordering::SeqCst,
+                );
+            }),
+            Arc::new(|| {}),
+        );
+
+        for key in [Key::ControlLeft, Key::Alt, Key::ShiftLeft, Key::KeyE] {
+            callback(Event {
+                time: std::time::SystemTime::now(),
+                name: None,
+                event_type: EventType::KeyPress(key),
+            });
+        }
+
+        assert!(callback_observed_unlocked_state.load(Ordering::SeqCst));
+        assert!(!enabled.load(Ordering::SeqCst));
     }
 
     #[test]

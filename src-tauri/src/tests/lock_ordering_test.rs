@@ -7,6 +7,9 @@
 // Each test simulates two tasks that acquire the same locks in the correct
 // order concurrently. If either task were to acquire locks in reverse order,
 // the test would deadlock and time out.
+//
+// The fake std::Mutex locks are test-only synchronization for modeling ordering;
+// they are not production lock primitive guidance.
 
 #[cfg(test)]
 mod lock_ordering_tests {
