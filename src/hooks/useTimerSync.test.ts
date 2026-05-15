@@ -5,9 +5,10 @@
  * These tests verify that the hook correctly sets up event listeners.
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { useTimerStore, TimerStatus, SessionType } from "@/store/timerStore";
+import { useErrorStore } from "@/store/errorStore";
 import { FRONTEND_LOG_EVENT_IDS } from "@/logging/logEvents";
 import {
   notifyWorkComplete,
@@ -130,9 +131,15 @@ function expectVoidListener(
   return handler as () => void;
 }
 
+async function flushTimerSyncSetup(): Promise<void> {
+  await vi.advanceTimersByTimeAsync(0);
+}
+
 describe("useTimerSync", () => {
   beforeEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
+    useErrorStore.getState().clearAllErrors();
 
     // Reset store to initial state
     useTimerStore.setState({
@@ -172,6 +179,10 @@ describe("useTimerSync", () => {
         post_break_transition_policy: "require_manual_continue",
       },
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("should set up event listeners on mount", async () => {
@@ -233,6 +244,168 @@ describe("useTimerSync", () => {
     await waitFor(() => {
       expect(unlistenTick).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it("should retry setup failures with the configured backoff delays", async () => {
+    vi.useFakeTimers();
+    mockListen.mockRejectedValue(new Error("listen failed"));
+
+    renderHook(() => {
+      useTimerSync();
+    });
+
+    await flushTimerSyncSetup();
+
+    expect(mockTimerSyncLogger.error).toHaveBeenCalledWith(
+      FRONTEND_LOG_EVENT_IDS.timerSyncSetupFailed,
+      expect.any(Error),
+      expect.objectContaining({
+        retry_attempt: 0,
+        max_connection_retries: 3,
+        failure_message: "Error: listen failed",
+      }),
+    );
+
+    expect(mockTimerSyncLogger.error).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(mockTimerSyncLogger.error).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(mockTimerSyncLogger.error).toHaveBeenCalledWith(
+      FRONTEND_LOG_EVENT_IDS.timerSyncSetupFailed,
+      expect.any(Error),
+      expect.objectContaining({
+        retry_attempt: 1,
+        max_connection_retries: 3,
+        failure_message: "Error: listen failed",
+      }),
+    );
+
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(mockTimerSyncLogger.error).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(mockTimerSyncLogger.error).toHaveBeenCalledWith(
+      FRONTEND_LOG_EVENT_IDS.timerSyncSetupFailed,
+      expect.any(Error),
+      expect.objectContaining({
+        retry_attempt: 2,
+        max_connection_retries: 3,
+        failure_message: "Error: listen failed",
+      }),
+    );
+
+    await vi.advanceTimersByTimeAsync(3999);
+    expect(mockTimerSyncLogger.error).toHaveBeenCalledTimes(3);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(mockTimerSyncLogger.error).toHaveBeenCalledWith(
+      FRONTEND_LOG_EVENT_IDS.timerSyncSetupFailed,
+      expect.any(Error),
+      expect.objectContaining({
+        retry_attempt: 3,
+        max_connection_retries: 3,
+        failure_message: "Error: listen failed",
+      }),
+    );
+
+    expect(mockTimerSyncLogger.error).toHaveBeenCalledTimes(4);
+  });
+
+  it("should report a retryable connection error after retry exhaustion", async () => {
+    vi.useFakeTimers();
+    mockListen.mockRejectedValue(new Error("listen failed"));
+
+    renderHook(() => {
+      useTimerSync();
+    });
+
+    await flushTimerSyncSetup();
+    expect(mockTimerSyncLogger.error).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(4000);
+
+    const connectionError = useErrorStore.getState().errors.connection;
+    expect(connectionError).toMatchObject({
+      id: "connection",
+      message: "バックエンドに接続できません",
+      technicalDetail: "Error: listen failed",
+      severity: "critical",
+      origin: "backend_connection",
+      canRetry: true,
+    });
+    expect(connectionError?.retryFn).toEqual(expect.any(Function));
+    expect(useTimerStore.getState().isConnected).toBe(false);
+  });
+
+  it("should clear the connection error and restart setup from attempt 0 on manual retry", async () => {
+    vi.useFakeTimers();
+    mockListen.mockRejectedValue(new Error("listen failed"));
+
+    renderHook(() => {
+      useTimerSync();
+    });
+
+    await flushTimerSyncSetup();
+    expect(mockTimerSyncLogger.error).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(4000);
+
+    expect(useErrorStore.getState().errors.connection?.retryFn).toEqual(
+      expect.any(Function),
+    );
+
+    const retryFn = useErrorStore.getState().errors.connection?.retryFn;
+    if (!retryFn) {
+      throw new Error("Expected connection retry function");
+    }
+
+    mockTimerSyncLogger.error.mockClear();
+    await retryFn();
+
+    expect(useErrorStore.getState().errors.connection).toBeUndefined();
+    expect(mockTimerSyncLogger.error).toHaveBeenCalledWith(
+      FRONTEND_LOG_EVENT_IDS.timerSyncSetupFailed,
+      expect.any(Error),
+      expect.objectContaining({
+        retry_attempt: 0,
+        max_connection_retries: 3,
+        failure_message: "Error: listen failed",
+      }),
+    );
+  });
+
+  it("should reconnect successfully when manual retry setup succeeds", async () => {
+    vi.useFakeTimers();
+    mockListen.mockRejectedValue(new Error("listen failed"));
+
+    renderHook(() => {
+      useTimerSync();
+    });
+
+    await flushTimerSyncSetup();
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(4000);
+
+    const retryFn = useErrorStore.getState().errors.connection?.retryFn;
+    if (!retryFn) {
+      throw new Error("Expected connection retry function");
+    }
+
+    mockTimerSyncLogger.error.mockClear();
+    mockListen.mockResolvedValue(noopUnlisten);
+    await retryFn();
+
+    expect(useErrorStore.getState().errors.connection).toBeUndefined();
+    expect(useTimerStore.getState().isConnected).toBe(true);
+    expect(mockInvoke.mock.calls).toContainEqual(["get_full_state", undefined]);
+    expect(mockTimerSyncLogger.error).not.toHaveBeenCalled();
   });
 
   it("should call get_full_state on mount", async () => {
