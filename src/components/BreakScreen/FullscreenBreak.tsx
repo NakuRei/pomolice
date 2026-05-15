@@ -24,7 +24,9 @@ import SkipFlowModal from "../SkipFlow/SkipFlowModal";
 export function FullscreenBreak(): React.ReactElement {
   const remainingSeconds = useTimerStore((state) => state.remainingSeconds);
   const sessionType = useTimerStore((state) => state.sessionType);
-  const { isActive, startSkipFlow, resetSkipFlow } = useSkipFlowStore();
+  const isActive = useSkipFlowStore((state) => state.isActive);
+  const startSkipFlow = useSkipFlowStore((state) => state.startSkipFlow);
+  const resetSkipFlow = useSkipFlowStore((state) => state.resetSkipFlow);
   const emergencyStop = useTimerStore((state) => state.emergencyStop);
 
   const formattedTime = formatTime(remainingSeconds);

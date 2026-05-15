@@ -42,13 +42,11 @@ export default function SkipFlowModal({
 }: SkipFlowModalProps): React.ReactElement {
   const titleId = useId();
   const descriptionId = useId();
-  const {
-    currentStep,
-    nextStep,
-    cancelSkipFlow,
-    completeSkipFlow,
-    updateTimeSpent,
-  } = useSkipFlowStore();
+  const currentStep = useSkipFlowStore((state) => state.currentStep);
+  const nextStep = useSkipFlowStore((state) => state.nextStep);
+  const cancelSkipFlow = useSkipFlowStore((state) => state.cancelSkipFlow);
+  const completeSkipFlow = useSkipFlowStore((state) => state.completeSkipFlow);
+  const updateTimeSpent = useSkipFlowStore((state) => state.updateTimeSpent);
 
   // Update time spent every second
   useEffect(() => {

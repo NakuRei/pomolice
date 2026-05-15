@@ -1,6 +1,6 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SkipFlowModal from "./SkipFlowModal";
 import { SKIP_FLOW_STEPS, useSkipFlowStore } from "@/store/skipFlowStore";
 
@@ -55,6 +55,10 @@ function getSkipFlowDialog(): HTMLElement {
 beforeEach(() => {
   document.body.innerHTML = "";
   useSkipFlowStore.getState().resetSkipFlow();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("SkipFlowModal", () => {
@@ -120,6 +124,51 @@ describe("SkipFlowModal", () => {
         screen.getByRole("button", { name: "No, Take Break" }),
       ).toHaveFocus();
     });
+  });
+
+  it("updates time spent once per second while the skip flow is active", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+
+    renderSkipFlowModal(SKIP_FLOW_STEPS.CONFIRMATION_1);
+
+    expect(useSkipFlowStore.getState().totalTimeSpent).toBe(0);
+
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+
+    expect(useSkipFlowStore.getState().totalTimeSpent).toBe(1);
+  });
+
+  it("cancels the skip flow before notifying the caller", async () => {
+    const user = userEvent.setup();
+    const { onCancel } = renderSkipFlowModal(SKIP_FLOW_STEPS.CONFIRMATION_1);
+
+    onCancel.mockImplementation(() => {
+      expect(useSkipFlowStore.getState().isActive).toBe(false);
+    });
+
+    await user.click(screen.getByRole("button", { name: "No, Take Break" }));
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("completes the skip flow before notifying the caller", async () => {
+    const user = userEvent.setup();
+    const { onComplete } = renderSkipFlowModal(SKIP_FLOW_STEPS.FINAL_WARNING);
+
+    onComplete.mockImplementation(() => {
+      const state = useSkipFlowStore.getState();
+      expect(state.isActive).toBe(false);
+      expect(state.stepsCompleted[SKIP_FLOW_STEPS.FINAL_WARNING - 1]).toBe(
+        true,
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "Yes, Skip Anyway" }));
+
+    expect(onComplete).toHaveBeenCalledTimes(1);
   });
 
   it("focuses the No Take the Break button when the final warning step is shown", async () => {

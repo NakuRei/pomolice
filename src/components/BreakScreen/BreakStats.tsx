@@ -8,7 +8,8 @@ import { useTimerStore } from "@/store/timerStore";
  * - Current cycle number
  */
 export function BreakStats(): React.ReactElement {
-  const { completedPomodoros, currentCycle } = useTimerStore();
+  const completedPomodoros = useTimerStore((state) => state.completedPomodoros);
+  const currentCycle = useTimerStore((state) => state.currentCycle);
 
   return (
     <div className="space-y-3 text-center">
