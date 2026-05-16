@@ -56,7 +56,7 @@
     "@testing-library/user-event": "^14.6.1",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
-    "@vitejs/plugin-react": "^4.6.0",
+    "@vitejs/plugin-react": "^6.0.2",
     "@vitest/coverage-v8": "^4.0.16",
     "@vitest/ui": "^4.0.16",
     "eslint": "^9.39.4",
@@ -72,7 +72,7 @@
     "prettier-plugin-tailwindcss": "^0.8.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.57.1",
-    "vite": "^7.0.4",
+    "vite": "^8.0.13",
     "vitest": "^4.0.16"
   }
 }
