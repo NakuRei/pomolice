@@ -28,6 +28,7 @@ pub enum BackendLogEvent {
     AppTrayIdleAppIconMissing,
     TimerCommandInvoked,
     TimerCommandUnauthorized,
+    TimerCommandInputRejected,
     ToolingTrayIconFixtureExported,
     ToolingTrayIconFixtureExportCompleted,
     TimerStartRejected,

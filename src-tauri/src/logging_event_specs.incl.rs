@@ -115,6 +115,17 @@ macro_rules! backend_log_event_spec_match {
                     "authorization_token" => Secret,
                 ]
             ),
+            BackendLogEvent::TimerCommandInputRejected => spec!(
+                "timer.command.input_rejected",
+                Warn,
+                "Timer command input rejected",
+                [
+                    "command_name" => Public,
+                    "window_label" => Public,
+                    "argument_name" => Public,
+                    "error_message" => Sensitive,
+                ]
+            ),
             BackendLogEvent::ToolingTrayIconFixtureExported => spec!(
                 "tooling.tray_icon.fixture_exported",
                 Info,

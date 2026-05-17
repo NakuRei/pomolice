@@ -1,5 +1,7 @@
 use std::io;
 
+use log::Level;
+
 use crate::logging_event::{
     render_event_message, BackendLogEvent, PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START,
 };
@@ -19,6 +21,25 @@ fn test_render_event_message_uses_canonical_prefix_and_deterministic_field_order
     assert_eq!(
         rendered,
         "event_id=timer.command.unauthorized command_name=sync\\=settings window_label=main\\r\\nwindow authorization_token=[REDACTED]"
+    );
+}
+
+#[test]
+fn test_render_event_message_redacts_timer_command_input_rejected_error() {
+    let rendered = render_event_message(
+        BackendLogEvent::TimerCommandInputRejected,
+        &[
+            ("error_message", "invalid args token=abc".to_string()),
+            ("argument_name", "workDurationSecs".to_string()),
+            ("window_label", "main".to_string()),
+            ("command_name", "sync_timer_duration_settings".to_string()),
+        ],
+        None,
+    );
+
+    assert_eq!(
+        rendered,
+        "event_id=timer.command.input_rejected command_name=sync_timer_duration_settings window_label=main argument_name=workDurationSecs error_message=invalid\\ args\\ token\\=[REDACTED]"
     );
 }
 
@@ -83,4 +104,29 @@ fn test_backend_event_catalog_metadata_matches_contract() {
         .allowed_fields()
         .iter()
         .any(|field| field.name == "authorization_token"));
+}
+
+#[test]
+fn test_timer_command_input_rejected_event_catalog_metadata_matches_contract() {
+    let event = BackendLogEvent::TimerCommandInputRejected;
+
+    assert_eq!(event.event_id(), "timer.command.input_rejected");
+    assert_eq!(event.message_template(), "Timer command input rejected");
+    assert_eq!(event.severity(), Level::Warn);
+    assert!(event
+        .allowed_fields()
+        .iter()
+        .any(|field| field.name == "command_name"));
+    assert!(event
+        .allowed_fields()
+        .iter()
+        .any(|field| field.name == "window_label"));
+    assert!(event
+        .allowed_fields()
+        .iter()
+        .any(|field| field.name == "argument_name"));
+    assert!(event
+        .allowed_fields()
+        .iter()
+        .any(|field| field.name == "error_message"));
 }

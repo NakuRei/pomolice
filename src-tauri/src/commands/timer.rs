@@ -7,6 +7,7 @@ use std::sync::atomic::Ordering;
 use chrono::{DateTime, Local};
 use tauri::{Emitter, Manager, State, WebviewWindow};
 
+use crate::commands::input_rejection::ObservedCommandArg;
 use crate::error::{PomoliceError, Result};
 use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
 use crate::managers::weekly_schedule::{is_now_inside_schedule_window, ActiveWindow};
@@ -72,11 +73,11 @@ impl StartRuntimeEffectShell for AppHandleRuntimeEffectShell<'_> {
 pub(crate) async fn start_work(
     window: WebviewWindow,
     state: State<'_, AppState>,
-    work_duration_secs: WorkDurationSecs,
-    short_break_duration_secs: ShortBreakDurationSecs,
-    long_break_duration_secs: LongBreakDurationSecs,
-    long_break_interval: LongBreakIntervalCount,
-    post_break_transition_policy: PostBreakTransitionPolicy,
+    work_duration_secs: ObservedCommandArg<WorkDurationSecs>,
+    short_break_duration_secs: ObservedCommandArg<ShortBreakDurationSecs>,
+    long_break_duration_secs: ObservedCommandArg<LongBreakDurationSecs>,
+    long_break_interval: ObservedCommandArg<LongBreakIntervalCount>,
+    post_break_transition_policy: ObservedCommandArg<PostBreakTransitionPolicy>,
 ) -> Result<()> {
     log_info_event(
         BackendLogEvent::TimerCommandInvoked,
@@ -86,6 +87,11 @@ pub(crate) async fn start_work(
         ],
     );
     authorize_main_window(&window, "start_work")?;
+    let work_duration_secs = work_duration_secs.into_inner();
+    let short_break_duration_secs = short_break_duration_secs.into_inner();
+    let long_break_duration_secs = long_break_duration_secs.into_inner();
+    let long_break_interval = long_break_interval.into_inner();
+    let post_break_transition_policy = post_break_transition_policy.into_inner();
 
     let settings = TimerSettings::new(
         work_duration_secs,
@@ -118,9 +124,10 @@ pub(crate) async fn start_work(
 pub(crate) async fn resolve_post_break_decision(
     window: WebviewWindow,
     state: State<'_, AppState>,
-    action: PostBreakDecisionAction,
+    action: ObservedCommandArg<PostBreakDecisionAction>,
 ) -> Result<()> {
     authorize_main_window(&window, "resolve_post_break_decision")?;
+    let action = action.into_inner();
 
     let (old_task, tick_payload, should_spawn_timer_task) = {
         let mut timer = state.timer_manager.lock().await;
@@ -208,12 +215,16 @@ pub(crate) async fn emergency_stop(
 pub(crate) async fn sync_timer_duration_settings(
     window: WebviewWindow,
     state: State<'_, AppState>,
-    work_duration_secs: WorkDurationSecs,
-    short_break_duration_secs: ShortBreakDurationSecs,
-    long_break_duration_secs: LongBreakDurationSecs,
-    long_break_interval: LongBreakIntervalCount,
+    work_duration_secs: ObservedCommandArg<WorkDurationSecs>,
+    short_break_duration_secs: ObservedCommandArg<ShortBreakDurationSecs>,
+    long_break_duration_secs: ObservedCommandArg<LongBreakDurationSecs>,
+    long_break_interval: ObservedCommandArg<LongBreakIntervalCount>,
 ) -> Result<()> {
     authorize_main_window(&window, "sync_timer_duration_settings")?;
+    let work_duration_secs = work_duration_secs.into_inner();
+    let short_break_duration_secs = short_break_duration_secs.into_inner();
+    let long_break_duration_secs = long_break_duration_secs.into_inner();
+    let long_break_interval = long_break_interval.into_inner();
 
     let tick_payload = {
         let mut timer = state.timer_manager.lock().await;
@@ -238,11 +249,14 @@ pub(crate) async fn sync_timer_duration_settings(
 pub(crate) async fn sync_automation_policies(
     window: WebviewWindow,
     state: State<'_, AppState>,
-    auto_run_feature_enabled: bool,
-    weekly_auto_run_config: WeeklyAutoRunConfig,
-    post_break_transition_policy: PostBreakTransitionPolicy,
+    auto_run_feature_enabled: ObservedCommandArg<bool>,
+    weekly_auto_run_config: ObservedCommandArg<WeeklyAutoRunConfig>,
+    post_break_transition_policy: ObservedCommandArg<PostBreakTransitionPolicy>,
 ) -> Result<()> {
     authorize_main_window(&window, "sync_automation_policies")?;
+    let auto_run_feature_enabled = auto_run_feature_enabled.into_inner();
+    let weekly_auto_run_config = weekly_auto_run_config.into_inner();
+    let post_break_transition_policy = post_break_transition_policy.into_inner();
 
     let (tick_payload, should_bump_config_revision) = {
         let mut timer = state.timer_manager.lock().await;
@@ -595,9 +609,10 @@ pub(crate) async fn get_full_state(
 pub(crate) async fn resolve_boot_auto_start_prompt(
     window: WebviewWindow,
     state: State<'_, AppState>,
-    start_now: bool,
+    start_now: ObservedCommandArg<bool>,
 ) -> Result<BootPromptRuntimeState> {
     authorize_main_window(&window, "resolve_boot_auto_start_prompt")?;
+    let start_now = start_now.into_inner();
 
     let current_runtime_state = match state.boot_prompt_runtime_state.lock() {
         Ok(runtime_state) => *runtime_state,

@@ -4,6 +4,9 @@
 // Phase 5: Lock ordering regression tests
 
 #[cfg(test)]
+mod command_input_rejection_test;
+
+#[cfg(test)]
 mod input_monitor_test;
 
 #[cfg(test)]
