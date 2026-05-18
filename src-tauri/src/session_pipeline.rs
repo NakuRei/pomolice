@@ -76,10 +76,6 @@ fn session_completion_emit_order(
     }
 }
 
-pub async fn lib_handle_timer_tick(app: AppHandle) {
-    lib_handle_timer_tick_future(app).await;
-}
-
 fn lib_handle_timer_tick_future(app: AppHandle) -> TimerTickFuture {
     Box::pin(async move {
         let state_handle = app.state::<state::AppState>();
@@ -346,7 +342,7 @@ async fn execute_session_completion_effect_plan(
     }
 }
 
-pub async fn lib_handle_session_complete(app: AppHandle) {
+pub(crate) async fn lib_handle_session_complete(app: AppHandle) {
     let transition_outcome = complete_session_transition(&app).await;
     execute_session_completion_effect_plan(&app, &transition_outcome, false).await;
 }
@@ -481,7 +477,7 @@ async fn exit_break_mode(app: AppHandle) {
     }
 }
 
-pub async fn lib_handle_input_detected(app: AppHandle) {
+pub(crate) async fn lib_handle_input_detected(app: AppHandle) {
     let state_handle = app.state::<state::AppState>();
 
     let tick_payload = {
@@ -496,7 +492,7 @@ pub async fn lib_handle_input_detected(app: AppHandle) {
     }
 }
 
-pub async fn lib_handle_escape_combo(app: AppHandle) {
+pub(crate) async fn lib_handle_escape_combo(app: AppHandle) {
     let state_handle = app.state::<state::AppState>();
 
     state_handle

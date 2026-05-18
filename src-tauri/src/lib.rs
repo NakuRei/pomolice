@@ -1,4 +1,5 @@
-use tauri::Manager;
+use std::sync::Arc;
+use tauri::{async_runtime, Manager};
 use tauri_plugin_notification::NotificationExt;
 
 type RunResult = std::result::Result<(), Box<dyn std::error::Error>>;
@@ -23,10 +24,28 @@ use crate::logging_event::{
 pub use scheduler::lib_start_scheduler_task;
 #[cfg(test)]
 pub(crate) use scheduler::{extract_boundary_epoch_seconds, trim_old_processed_boundaries};
-pub use session_pipeline::{
-    lib_handle_escape_combo, lib_handle_input_detected, lib_handle_session_complete,
-    lib_handle_timer_tick,
-};
+fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
+    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        if window.label() == "main" {
+            api.prevent_close();
+            let _ = window.hide();
+
+            if tray::should_show_tray_notification() {
+                log_info_event(
+                    BackendLogEvent::AppWindowHiddenToTray,
+                    &[("first_notification", "true".to_string())],
+                );
+                let _ = window
+                    .app_handle()
+                    .notification()
+                    .builder()
+                    .title("Pomolice")
+                    .body("Pomolice is still running in the system tray.")
+                    .show();
+            }
+        }
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Start the Tauri application and register all runtime state, handlers, and background tasks.
@@ -42,8 +61,32 @@ pub fn run() -> RunResult {
         .plugin(logging::build_log_plugin())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
+            let app_for_escape = app.handle().clone();
+            let app_for_input = app.handle().clone();
+            let on_escape_combo = move || {
+                let app = app_for_escape.clone();
+                async_runtime::spawn(async move {
+                    session_pipeline::lib_handle_escape_combo(app).await;
+                });
+            };
+            let on_input_detected = move || {
+                let app = app_for_input.clone();
+                async_runtime::spawn(async move {
+                    session_pipeline::lib_handle_input_detected(app).await;
+                });
+            };
+            let clock: Arc<dyn managers::clock::Clock + Send + Sync> =
+                Arc::new(managers::clock::SystemClock);
+            let app_data_dir = app.handle().path().app_data_dir().ok();
+            let persistence =
+                managers::persistence::PersistenceManager::new(Arc::clone(&clock), app_data_dir);
             let (app_state, initialization_outcome) =
-                tauri::async_runtime::block_on(state::AppState::build_startup_state(app.handle()));
+                async_runtime::block_on(state::AppState::build_startup_state_with_handlers(
+                    clock,
+                    persistence,
+                    on_escape_combo,
+                    on_input_detected,
+                ));
             let has_persisted_state =
                 initialization_outcome.restore_status == state::AppRestoreStatus::Restored;
 
@@ -57,7 +100,7 @@ pub fn run() -> RunResult {
                 );
             }
 
-            tauri::async_runtime::block_on(async {
+            async_runtime::block_on(async {
                 session_pipeline::lib_handle_startup_restore(
                     app.handle().clone(),
                     initialization_outcome.clone(),
@@ -66,7 +109,7 @@ pub fn run() -> RunResult {
             });
 
             let scheduler_app_handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
+            async_runtime::spawn(async move {
                 lib_start_scheduler_task(scheduler_app_handle).await;
             });
 
@@ -84,28 +127,7 @@ pub fn run() -> RunResult {
 
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
-                    api.prevent_close();
-                    let _ = window.hide();
-
-                    if tray::should_show_tray_notification() {
-                        log_info_event(
-                            BackendLogEvent::AppWindowHiddenToTray,
-                            &[("first_notification", "true".to_string())],
-                        );
-                        let _ = window
-                            .app_handle()
-                            .notification()
-                            .builder()
-                            .title("Pomolice")
-                            .body("Pomolice is still running in the system tray.")
-                            .show();
-                    }
-                }
-            }
-        })
+        .on_window_event(handle_window_event)
         .invoke_handler(tauri::generate_handler![
             commands::timer::start_work,
             commands::timer::resolve_post_break_decision,

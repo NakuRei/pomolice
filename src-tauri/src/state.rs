@@ -7,13 +7,12 @@ use std::future::Future;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex as StdMutex};
 use tauri::async_runtime::JoinHandle;
-use tauri::{AppHandle, Manager};
 use tokio::sync::{Mutex, Notify, Semaphore};
 use tokio_util::sync::CancellationToken;
 
 use crate::error::{PomoliceError, Result as AppResult};
 use crate::logging_event::{log_error_event, log_info_event, BackendLogEvent};
-use crate::managers::clock::{Clock, SystemClock};
+use crate::managers::clock::Clock;
 use crate::managers::input_monitor::InputMonitorManager;
 use crate::managers::persistence::{PersistenceLoadOutcome, PersistenceManager, SaveError};
 use crate::managers::timer::TimerStateManager;
@@ -246,40 +245,6 @@ pub(crate) struct AppState {
 }
 
 impl AppState {
-    /// Create a new `AppState` instance plus startup restore outcome.
-    pub(crate) async fn build_startup_state(
-        app_handle: &AppHandle,
-    ) -> (Self, AppInitializationOutcome) {
-        Self::build_startup_state_with_clock(app_handle, Arc::new(SystemClock)).await
-    }
-
-    async fn build_startup_state_with_clock(
-        app_handle: &AppHandle,
-        clock: Arc<dyn Clock + Send + Sync>,
-    ) -> (Self, AppInitializationOutcome) {
-        let app_data_dir = app_handle.path().app_data_dir().ok();
-        let persistence = PersistenceManager::new(Arc::clone(&clock), app_data_dir);
-        let app_for_escape = app_handle.clone();
-        let app_for_input = app_handle.clone();
-        Self::build_startup_state_with_handlers(
-            clock,
-            persistence,
-            move || {
-                let app = app_for_escape.clone();
-                tauri::async_runtime::spawn(async move {
-                    crate::lib_handle_escape_combo(app).await;
-                });
-            },
-            move || {
-                let app = app_for_input.clone();
-                tauri::async_runtime::spawn(async move {
-                    crate::lib_handle_input_detected(app).await;
-                });
-            },
-        )
-        .await
-    }
-
     #[cfg(test)]
     pub(crate) async fn build_startup_state_for_tests(
         clock: Arc<dyn Clock + Send + Sync>,
@@ -288,7 +253,7 @@ impl AppState {
         Self::build_startup_state_with_handlers(clock, persistence, || {}, || {}).await
     }
 
-    async fn build_startup_state_with_handlers(
+    pub(crate) async fn build_startup_state_with_handlers(
         clock: Arc<dyn Clock + Send + Sync>,
         persistence: PersistenceManager,
         on_escape_combo: impl Fn() + Send + Sync + 'static,
