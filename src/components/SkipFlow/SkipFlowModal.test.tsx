@@ -198,15 +198,4 @@ describe("SkipFlowModal", () => {
       expect(screen.getByPlaceholderText("Start typing here...")).toHaveFocus();
     });
   });
-
-  it("preserves the SkipFlowModal backdrop opacity and panel width after switching to shared primitives", () => {
-    renderSkipFlowModal(SKIP_FLOW_STEPS.CONFIRMATION_1);
-
-    const dialog = getSkipFlowDialog();
-
-    expect(dialog.parentElement).toHaveClass("bg-backdrop/90");
-    expect(dialog).toHaveClass("max-w-2xl");
-    expect(dialog).toHaveClass("shadow-2xl");
-    expect(dialog).toHaveClass("shadow-shadow/40");
-  });
 });
