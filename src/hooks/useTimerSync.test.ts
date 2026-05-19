@@ -107,30 +107,6 @@ function getRequiredTimerEventHandler(
   return handler;
 }
 
-function getRequiredVoidListener(
-  listener: (() => void) | undefined,
-  description: string,
-): () => void {
-  if (!listener) {
-    throw new Error(`Expected ${description} to be defined`);
-  }
-
-  return listener;
-}
-
-function expectVoidListener(
-  handler: TimerEventHandler | (() => void),
-  eventName: string,
-): () => void {
-  if (handler.length !== 0) {
-    throw new Error(
-      `Expected "${eventName}" to register a no-argument listener`,
-    );
-  }
-
-  return handler as () => void;
-}
-
 async function flushTimerSyncSetup(): Promise<void> {
   await vi.advanceTimersByTimeAsync(0);
 }
@@ -697,15 +673,12 @@ describe("useTimerSync", () => {
   });
 
   it("should show stop-pending info on auto_run_stop_pending events", async () => {
-    let stopPendingListener: (() => void) | undefined = undefined;
+    let stopPendingListener: TimerEventHandler | undefined = undefined;
 
     mockListen.mockImplementation(
       (event: string, handler: TimerEventHandler | (() => void)) => {
         if (event === "auto_run_stop_pending") {
-          stopPendingListener = expectVoidListener(
-            handler,
-            "auto_run_stop_pending",
-          );
+          stopPendingListener = handler;
         }
         return Promise.resolve(noopUnlisten);
       },
@@ -719,11 +692,11 @@ describe("useTimerSync", () => {
       expect(stopPendingListener).toBeDefined();
     });
 
-    const definedStopPendingListener = getRequiredVoidListener(
+    const definedStopPendingListener = getRequiredTimerEventHandler(
       stopPendingListener,
       "auto_run_stop_pending listener",
     );
-    definedStopPendingListener();
+    definedStopPendingListener({ payload: {} });
 
     expect(useTimerStore.getState().infoMessage?.id).toBe(
       "auto_run_stop_pending",
@@ -731,12 +704,12 @@ describe("useTimerSync", () => {
   });
 
   it("should show stopped info on auto_run_stopped events", async () => {
-    let stoppedListener: (() => void) | undefined = undefined;
+    let stoppedListener: TimerEventHandler | undefined = undefined;
 
     mockListen.mockImplementation(
       (event: string, handler: TimerEventHandler | (() => void)) => {
         if (event === "auto_run_stopped") {
-          stoppedListener = expectVoidListener(handler, "auto_run_stopped");
+          stoppedListener = handler;
         }
         return Promise.resolve(noopUnlisten);
       },
@@ -750,11 +723,11 @@ describe("useTimerSync", () => {
       expect(stoppedListener).toBeDefined();
     });
 
-    const definedStoppedListener = getRequiredVoidListener(
+    const definedStoppedListener = getRequiredTimerEventHandler(
       stoppedListener,
       "auto_run_stopped listener",
     );
-    definedStoppedListener();
+    definedStoppedListener({ payload: {} });
 
     expect(useTimerStore.getState().infoMessage?.id).toBe("auto_run_stopped");
   });
