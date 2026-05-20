@@ -10,11 +10,11 @@ import {
 import userEvent from "@testing-library/user-event";
 import { ContinueDialog } from "./ContinueDialog";
 import { useTimerStore, TimerStatus, SessionType } from "@/store/timerStore";
+import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 
-// Mock Tauri invoke
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn().mockResolvedValue(undefined),
-}));
+type ResolvePostBreakDecision = ReturnType<
+  typeof useTimerStore.getState
+>["resolvePostBreakDecision"];
 
 function showContinueDialog(completedPomodoros = 3): void {
   useTimerStore.setState({
@@ -27,9 +27,17 @@ function getContinueDialog(): HTMLElement {
   return screen.getByRole("dialog", { name: "1サイクル完了しました！" });
 }
 
+function replacePostBreakDecisionActionForTest(): ResolvePostBreakDecision {
+  const resolvePostBreakDecision = vi
+    .fn<ResolvePostBreakDecision>()
+    .mockResolvedValue(undefined);
+  useTimerStore.setState({ resolvePostBreakDecision });
+  return resolvePostBreakDecision;
+}
+
 describe("ContinueDialog", () => {
   beforeEach(() => {
-    // Reset store to initial state
+    resetTimerStoreForTest();
     useTimerStore.setState({
       status: TimerStatus.IDLE,
       remainingSeconds: 25 * 60,
@@ -59,10 +67,7 @@ describe("ContinueDialog", () => {
       const dialog = getContinueDialog();
 
       expect(dialog).toHaveAttribute("aria-modal", "true");
-      expect(dialog).toHaveAttribute(
-        "aria-labelledby",
-        "continue-dialog-title",
-      );
+      expect(dialog).toHaveAccessibleName("1サイクル完了しました！");
     });
   });
 
@@ -102,32 +107,26 @@ describe("ContinueDialog", () => {
       });
     });
 
-    it("should call resolvePostBreakDecision with continue when continue button is clicked", async () => {
-      const { invoke } = await import("@tauri-apps/api/core");
+    it("should let the user continue after the break", async () => {
+      const resolvePostBreakDecision = replacePostBreakDecisionActionForTest();
       const user = userEvent.setup();
       render(<ContinueDialog />);
 
       const continueButton = screen.getByRole("button", { name: "続ける" });
       await user.click(continueButton);
 
-      // Backend receives the unified manual decision command.
-      expect(invoke).toHaveBeenCalledWith("resolve_post_break_decision", {
-        action: "continue",
-      });
+      expect(resolvePostBreakDecision).toHaveBeenCalledWith("continue");
     });
 
-    it("should call resolvePostBreakDecision with stop_cycle when end button is clicked", async () => {
-      const { invoke } = await import("@tauri-apps/api/core");
+    it("should let the user end the cycle after the break", async () => {
+      const resolvePostBreakDecision = replacePostBreakDecisionActionForTest();
       const user = userEvent.setup();
       render(<ContinueDialog />);
 
       const endButton = screen.getByRole("button", { name: "終了" });
       await user.click(endButton);
 
-      // Backend receives the unified manual decision command.
-      expect(invoke).toHaveBeenCalledWith("resolve_post_break_decision", {
-        action: "stop_cycle",
-      });
+      expect(resolvePostBreakDecision).toHaveBeenCalledWith("stop_cycle");
     });
 
     it("should focus the continue button when the dialog opens", async () => {
@@ -141,17 +140,15 @@ describe("ContinueDialog", () => {
       });
     });
 
-    it("should treat Escape as choosing stop_cycle", async () => {
-      const { invoke } = await import("@tauri-apps/api/core");
+    it("should treat Escape as choosing to end the cycle", async () => {
+      const resolvePostBreakDecision = replacePostBreakDecisionActionForTest();
       showContinueDialog();
       render(<ContinueDialog />);
 
       fireEvent.keyDown(window, { key: "Escape" });
 
       await waitFor(() => {
-        expect(invoke).toHaveBeenCalledWith("resolve_post_break_decision", {
-          action: "stop_cycle",
-        });
+        expect(resolvePostBreakDecision).toHaveBeenCalledWith("stop_cycle");
       });
     });
   });
@@ -159,30 +156,26 @@ describe("ContinueDialog", () => {
   describe("Dynamic Updates", () => {
     it("should update pomodoro count display", () => {
       showContinueDialog(5);
-      const { rerender } = render(<ContinueDialog />);
+      render(<ContinueDialog />);
 
       expect(getContinueDialog()).toHaveTextContent("完了したポモドーロ: 5");
 
-      // Update count
       act(() => {
         useTimerStore.setState({ completedPomodoros: 10 });
       });
-      rerender(<ContinueDialog />);
 
       expect(getContinueDialog()).toHaveTextContent("完了したポモドーロ: 10");
     });
 
     it("should hide when requiresManualContinueDecision becomes false", () => {
       showContinueDialog();
-      const { rerender } = render(<ContinueDialog />);
+      render(<ContinueDialog />);
 
       expect(getContinueDialog()).toBeInTheDocument();
 
-      // Hide dialog
       act(() => {
         useTimerStore.setState({ requiresManualContinueDecision: false });
       });
-      rerender(<ContinueDialog />);
 
       expect(
         screen.queryByRole("dialog", { name: "1サイクル完了しました！" }),
