@@ -1,6 +1,9 @@
+use std::future::Future;
+use std::pin::Pin;
+
 use tauri::{AppHandle, Emitter, Manager};
 
-type TimerTickFuture = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
+type TimerTickFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
 use crate::logging_event::{
     log_error_event, log_info_event, log_persistence_write_failure, BackendLogEvent,
@@ -99,6 +102,49 @@ fn lib_handle_timer_tick_future(app: AppHandle) -> TimerTickFuture {
             lib_handle_session_complete(app).await;
         }
     })
+}
+
+trait InputPenaltyRuntimeEffects {
+    fn persist_input_penalty<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+    fn emit_timer_tick(&mut self, tick_payload: &types::TimerTickPayload);
+    fn update_tray(&mut self, tick_payload: &types::TimerTickPayload);
+}
+
+struct AppHandleInputPenaltyRuntimeEffects<'a> {
+    app: &'a AppHandle,
+}
+
+impl InputPenaltyRuntimeEffects for AppHandleInputPenaltyRuntimeEffects<'_> {
+    fn persist_input_penalty<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            persist_timer_state_with_trigger(self.app, PERSISTENCE_WRITE_TRIGGER_INPUT_PENALTY)
+                .await;
+        })
+    }
+
+    fn emit_timer_tick(&mut self, tick_payload: &types::TimerTickPayload) {
+        let _ = self.app.emit("timer_tick", tick_payload);
+    }
+
+    fn update_tray(&mut self, tick_payload: &types::TimerTickPayload) {
+        tray::update_tray_icon(self.app, tick_payload);
+    }
+}
+
+async fn apply_input_penalty_with_effects(
+    state_handle: &state::AppState,
+    effects: &mut (impl InputPenaltyRuntimeEffects + Send),
+) {
+    let tick_payload = {
+        let mut timer = state_handle.timer_manager.lock().await;
+        timer.apply_input_penalty()
+    };
+
+    if let Some(ref payload) = tick_payload {
+        effects.persist_input_penalty().await;
+        effects.emit_timer_tick(payload);
+        effects.update_tray(payload);
+    }
 }
 
 fn transition_requires_task_cancellation(
@@ -479,17 +525,8 @@ async fn exit_break_mode(app: AppHandle) {
 
 pub(crate) async fn lib_handle_input_detected(app: AppHandle) {
     let state_handle = app.state::<state::AppState>();
-
-    let tick_payload = {
-        let mut timer = state_handle.timer_manager.lock().await;
-        timer.apply_input_penalty()
-    };
-
-    if let Some(ref payload) = tick_payload {
-        persist_timer_state_with_trigger(&app, PERSISTENCE_WRITE_TRIGGER_INPUT_PENALTY).await;
-        let _ = app.emit("timer_tick", payload);
-        tray::update_tray_icon(&app, payload);
-    }
+    let mut effects = AppHandleInputPenaltyRuntimeEffects { app: &app };
+    apply_input_penalty_with_effects(&state_handle, &mut effects).await;
 }
 
 pub(crate) async fn lib_handle_escape_combo(app: AppHandle) {
@@ -756,6 +793,119 @@ mod emit_order_tests {
         assert!(
             !input_monitor.is_enabled_for_tests(),
             "enter-break fullscreen failure must roll input monitoring back before returning"
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{apply_input_penalty_with_effects, InputPenaltyRuntimeEffects};
+    use crate::logging_event::PERSISTENCE_WRITE_TRIGGER_INPUT_PENALTY;
+    use crate::managers::clock::testing::FixedClock;
+    use crate::managers::clock::Clock;
+    use crate::managers::persistence::PersistenceManager;
+    use crate::state::AppState;
+    use crate::types::{SessionType, TimerState, TimerStatus, TimerTickPayload};
+    use chrono::{Local, TimeZone, Utc};
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::sync::Arc;
+
+    #[derive(Debug, Default, PartialEq, Eq)]
+    struct InputPenaltyEffectArtifact {
+        persistence_triggers: Vec<&'static str>,
+        timer_tick_emit_count: usize,
+        tray_update_count: usize,
+    }
+
+    #[derive(Default)]
+    struct RecordingInputPenaltyRuntimeEffects {
+        artifact: InputPenaltyEffectArtifact,
+    }
+
+    impl RecordingInputPenaltyRuntimeEffects {
+        fn artifact(&self) -> &InputPenaltyEffectArtifact {
+            &self.artifact
+        }
+    }
+
+    impl InputPenaltyRuntimeEffects for RecordingInputPenaltyRuntimeEffects {
+        fn persist_input_penalty<'a>(
+            &'a mut self,
+        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+            Box::pin(async move {
+                self.artifact
+                    .persistence_triggers
+                    .push(PERSISTENCE_WRITE_TRIGGER_INPUT_PENALTY);
+            })
+        }
+
+        fn emit_timer_tick(&mut self, _tick_payload: &TimerTickPayload) {
+            self.artifact.timer_tick_emit_count += 1;
+        }
+
+        fn update_tray(&mut self, _tick_payload: &TimerTickPayload) {
+            self.artifact.tray_update_count += 1;
+        }
+    }
+
+    fn fixed_clock() -> Arc<FixedClock> {
+        let now_utc = Utc
+            .with_ymd_and_hms(2025, 2, 1, 9, 0, 0)
+            .single()
+            .expect("valid UTC datetime");
+        Arc::new(FixedClock::new(now_utc.with_timezone(&Local)))
+    }
+
+    fn as_clock_trait(clock: &Arc<FixedClock>) -> Arc<dyn Clock + Send + Sync> {
+        Arc::<FixedClock>::clone(clock) as Arc<dyn Clock + Send + Sync>
+    }
+
+    async fn build_test_state_without_persistence_path() -> AppState {
+        let clock = fixed_clock();
+        let persistence = PersistenceManager::new(as_clock_trait(&clock), None);
+        let (app_state, _) =
+            AppState::build_startup_state_for_tests(as_clock_trait(&clock), persistence).await;
+        app_state
+    }
+
+    async fn replace_timer_state(app_state: &AppState, timer_state: TimerState) {
+        let mut timer = app_state.timer_manager.lock().await;
+        let _ = timer.apply_persisted_state(timer_state);
+    }
+
+    #[tokio::test]
+    async fn test_input_penalty_side_effects() {
+        let app_state = build_test_state_without_persistence_path().await;
+        replace_timer_state(
+            &app_state,
+            TimerState {
+                status: TimerStatus::OnBreak,
+                session_type: SessionType::ShortBreak,
+                remaining_seconds: 1,
+                ..TimerState::default()
+            },
+        )
+        .await;
+
+        let mut effects = RecordingInputPenaltyRuntimeEffects::default();
+        apply_input_penalty_with_effects(&app_state, &mut effects).await;
+
+        assert_eq!(
+            effects.artifact().persistence_triggers,
+            [PERSISTENCE_WRITE_TRIGGER_INPUT_PENALTY]
+        );
+        assert_eq!(effects.artifact().timer_tick_emit_count, 1);
+        assert_eq!(effects.artifact().tray_update_count, 1);
+
+        let skipped_app_state = build_test_state_without_persistence_path().await;
+        let mut skipped_effects = RecordingInputPenaltyRuntimeEffects::default();
+
+        apply_input_penalty_with_effects(&skipped_app_state, &mut skipped_effects).await;
+
+        assert_eq!(
+            skipped_effects.artifact(),
+            &InputPenaltyEffectArtifact::default()
         );
     }
 }

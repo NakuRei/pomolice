@@ -68,6 +68,47 @@ impl StartRuntimeEffectShell for AppHandleRuntimeEffectShell<'_> {
     }
 }
 
+trait TimerCommandRuntimeEffectShell {
+    fn emit_tick(&mut self, tick_payload: &TimerTickPayload);
+    fn update_tray(&mut self, tick_payload: &TimerTickPayload);
+    fn spawn_timer_task<'a>(
+        &'a mut self,
+        state: &'a AppState,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+    fn request_fullscreen_break_exit(&mut self);
+    fn before_persist(&mut self) {}
+}
+
+struct AppHandleTimerCommandRuntimeEffectShell<'a> {
+    app: &'a tauri::AppHandle,
+}
+
+impl TimerCommandRuntimeEffectShell for AppHandleTimerCommandRuntimeEffectShell<'_> {
+    fn emit_tick(&mut self, tick_payload: &TimerTickPayload) {
+        let _ = self.app.emit("timer_tick", tick_payload);
+    }
+
+    fn update_tray(&mut self, tick_payload: &TimerTickPayload) {
+        crate::tray::update_tray_icon(self.app, tick_payload);
+    }
+
+    fn spawn_timer_task<'a>(
+        &'a mut self,
+        _state: &'a AppState,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            crate::session_pipeline::spawn_timer_task(self.app).await;
+        })
+    }
+
+    fn request_fullscreen_break_exit(&mut self) {
+        let app_handle = self.app.clone();
+        tauri::async_runtime::spawn(async move {
+            crate::session_pipeline::lib_handle_external_break_exit(app_handle).await;
+        });
+    }
+}
+
 /// Start a work session with settings
 #[tauri::command]
 pub(crate) async fn start_work(
@@ -129,6 +170,20 @@ pub(crate) async fn resolve_post_break_decision(
     authorize_main_window(&window, "resolve_post_break_decision")?;
     let action = action.into_inner();
 
+    let app = window.app_handle();
+    let mut runtime_effect_shell = AppHandleTimerCommandRuntimeEffectShell { app };
+    resolve_post_break_decision_with_runtime_effects(&state, action, &mut runtime_effect_shell)
+        .await
+}
+
+async fn resolve_post_break_decision_with_runtime_effects<S>(
+    state: &AppState,
+    action: PostBreakDecisionAction,
+    runtime_effect_shell: &mut S,
+) -> Result<()>
+where
+    S: TimerCommandRuntimeEffectShell,
+{
     let (old_task, tick_payload, should_spawn_timer_task) = {
         let mut timer = state.timer_manager.lock().await;
         validate_post_break_decision_command_state(
@@ -146,9 +201,7 @@ pub(crate) async fn resolve_post_break_decision(
         (old_task, tick_payload, should_spawn_timer_task)
     };
 
-    let app = window.app_handle();
-    let _ = app.emit("timer_tick", &tick_payload);
-    crate::tray::update_tray_icon(app, &tick_payload);
+    emit_tick_and_update_tray(runtime_effect_shell, &tick_payload);
 
     if let Some(handle) = old_task {
         // Await outside the lock to avoid lock-held await deadlocks.
@@ -157,12 +210,10 @@ pub(crate) async fn resolve_post_break_decision(
 
     if should_spawn_timer_task {
         // Continue action always starts a fresh timer task.
-        crate::session_pipeline::spawn_timer_task(app).await;
+        runtime_effect_shell.spawn_timer_task(state).await;
     }
 
-    state.persist_current_state_async().await?;
-
-    Ok(())
+    persist_current_state_after_command_effects(state, runtime_effect_shell).await
 }
 
 /// Emergency stop - reset all state
@@ -180,6 +231,18 @@ pub(crate) async fn emergency_stop(
     );
     authorize_main_window(&window, "emergency_stop")?;
 
+    let app = window.app_handle();
+    let mut runtime_effect_shell = AppHandleTimerCommandRuntimeEffectShell { app };
+    emergency_stop_with_runtime_effects(&state, &mut runtime_effect_shell).await
+}
+
+async fn emergency_stop_with_runtime_effects<S>(
+    state: &AppState,
+    runtime_effect_shell: &mut S,
+) -> Result<()>
+where
+    S: TimerCommandRuntimeEffectShell,
+{
     let (was_fullscreen_break, tick_payload, old_task) = {
         let mut timer = state.timer_manager.lock().await;
         // Take/cancel under the lock, but never await under the lock.
@@ -188,8 +251,7 @@ pub(crate) async fn emergency_stop(
         (was_fullscreen, payload, old)
     };
 
-    let _ = window.app_handle().emit("timer_tick", &tick_payload);
-    crate::tray::update_tray_icon(window.app_handle(), &tick_payload);
+    emit_tick_and_update_tray(runtime_effect_shell, &tick_payload);
 
     if let Some(handle) = old_task {
         // Await outside the lock to avoid lock-held await deadlocks.
@@ -198,16 +260,10 @@ pub(crate) async fn emergency_stop(
 
     // Exit fullscreen if needed
     if was_fullscreen_break {
-        let app_handle = window.app_handle().clone();
-
-        tauri::async_runtime::spawn(async move {
-            crate::session_pipeline::lib_handle_external_break_exit(app_handle).await;
-        });
+        runtime_effect_shell.request_fullscreen_break_exit();
     }
 
-    state.persist_current_state_async().await?;
-
-    Ok(())
+    persist_current_state_after_command_effects(state, runtime_effect_shell).await
 }
 
 /// Sync timer duration settings from frontend (idle only)
@@ -226,6 +282,30 @@ pub(crate) async fn sync_timer_duration_settings(
     let long_break_duration_secs = long_break_duration_secs.into_inner();
     let long_break_interval = long_break_interval.into_inner();
 
+    let app = window.app_handle();
+    let mut runtime_effect_shell = AppHandleTimerCommandRuntimeEffectShell { app };
+    sync_timer_duration_settings_with_runtime_effects(
+        &state,
+        work_duration_secs,
+        short_break_duration_secs,
+        long_break_duration_secs,
+        long_break_interval,
+        &mut runtime_effect_shell,
+    )
+    .await
+}
+
+async fn sync_timer_duration_settings_with_runtime_effects<S>(
+    state: &AppState,
+    work_duration_secs: WorkDurationSecs,
+    short_break_duration_secs: ShortBreakDurationSecs,
+    long_break_duration_secs: LongBreakDurationSecs,
+    long_break_interval: LongBreakIntervalCount,
+    runtime_effect_shell: &mut S,
+) -> Result<()>
+where
+    S: TimerCommandRuntimeEffectShell,
+{
     let tick_payload = {
         let mut timer = state.timer_manager.lock().await;
         timer.sync_timer_duration_settings(
@@ -236,12 +316,8 @@ pub(crate) async fn sync_timer_duration_settings(
         )?
     };
 
-    let _ = window.app_handle().emit("timer_tick", &tick_payload);
-    crate::tray::update_tray_icon(window.app_handle(), &tick_payload);
-
-    state.persist_current_state_async().await?;
-
-    Ok(())
+    emit_tick_and_update_tray(runtime_effect_shell, &tick_payload);
+    persist_current_state_after_command_effects(state, runtime_effect_shell).await
 }
 
 /// Sync automation policies from frontend
@@ -258,6 +334,28 @@ pub(crate) async fn sync_automation_policies(
     let weekly_auto_run_config = weekly_auto_run_config.into_inner();
     let post_break_transition_policy = post_break_transition_policy.into_inner();
 
+    let app = window.app_handle();
+    let mut runtime_effect_shell = AppHandleTimerCommandRuntimeEffectShell { app };
+    sync_automation_policies_with_runtime_effects(
+        &state,
+        auto_run_feature_enabled,
+        weekly_auto_run_config,
+        post_break_transition_policy,
+        &mut runtime_effect_shell,
+    )
+    .await
+}
+
+async fn sync_automation_policies_with_runtime_effects<S>(
+    state: &AppState,
+    auto_run_feature_enabled: bool,
+    weekly_auto_run_config: WeeklyAutoRunConfig,
+    post_break_transition_policy: PostBreakTransitionPolicy,
+    runtime_effect_shell: &mut S,
+) -> Result<()>
+where
+    S: TimerCommandRuntimeEffectShell,
+{
     let (tick_payload, should_bump_config_revision) = {
         let mut timer = state.timer_manager.lock().await;
         let previous_auto_run_feature_enabled = timer.get_state().auto_run_feature_enabled;
@@ -282,11 +380,27 @@ pub(crate) async fn sync_automation_policies(
         state.config_revision.fetch_add(1, Ordering::AcqRel);
     }
 
-    let _ = window.app_handle().emit("timer_tick", &tick_payload);
-    crate::tray::update_tray_icon(window.app_handle(), &tick_payload);
+    emit_tick_and_update_tray(runtime_effect_shell, &tick_payload);
+    persist_current_state_after_command_effects(state, runtime_effect_shell).await
+}
 
+fn emit_tick_and_update_tray<S>(runtime_effect_shell: &mut S, tick_payload: &TimerTickPayload)
+where
+    S: TimerCommandRuntimeEffectShell,
+{
+    runtime_effect_shell.emit_tick(tick_payload);
+    runtime_effect_shell.update_tray(tick_payload);
+}
+
+async fn persist_current_state_after_command_effects<S>(
+    state: &AppState,
+    runtime_effect_shell: &mut S,
+) -> Result<()>
+where
+    S: TimerCommandRuntimeEffectShell,
+{
+    runtime_effect_shell.before_persist();
     state.persist_current_state_async().await?;
-
     Ok(())
 }
 
@@ -668,9 +782,10 @@ mod tests {
     use std::time::Duration as StdDuration;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use crate::types::{DayAutoRunSlot, HhMm};
+    use crate::types::{DayAutoRunSlot, HhMm, SessionType};
     use chrono::TimeZone;
     use serde_json::json;
+    use tokio_util::sync::CancellationToken;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum RuntimeEffectEvent {
@@ -678,7 +793,33 @@ mod tests {
         UpdateTray,
         EmitWorkStarted,
         SpawnTimerTask,
+        RequestFullscreenBreakExit,
         Persist,
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    struct TimerTickSnapshot {
+        status: TimerStatus,
+        remaining_seconds: u64,
+        session_type: SessionType,
+        current_cycle: u32,
+        completed_pomodoros: u32,
+        break_interaction_count: u32,
+        is_fullscreen_break: bool,
+    }
+
+    impl From<&TimerTickPayload> for TimerTickSnapshot {
+        fn from(payload: &TimerTickPayload) -> Self {
+            Self {
+                status: payload.status,
+                remaining_seconds: payload.remaining_seconds,
+                session_type: payload.session_type,
+                current_cycle: payload.current_cycle,
+                completed_pomodoros: payload.completed_pomodoros,
+                break_interaction_count: payload.break_interaction_count,
+                is_fullscreen_break: payload.is_fullscreen_break,
+            }
+        }
     }
 
     #[derive(Default)]
@@ -711,6 +852,50 @@ mod tests {
         ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
             self.events.push(RuntimeEffectEvent::SpawnTimerTask);
             Box::pin(async {})
+        }
+
+        fn before_persist(&mut self) {
+            self.events.push(RuntimeEffectEvent::Persist);
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingCommandRuntimeEffectShell {
+        events: Vec<RuntimeEffectEvent>,
+        emitted_tick_snapshots: Vec<TimerTickSnapshot>,
+        tray_tick_snapshots: Vec<TimerTickSnapshot>,
+    }
+
+    impl RecordingCommandRuntimeEffectShell {
+        fn events(&self) -> &[RuntimeEffectEvent] {
+            &self.events
+        }
+    }
+
+    impl TimerCommandRuntimeEffectShell for RecordingCommandRuntimeEffectShell {
+        fn emit_tick(&mut self, tick_payload: &TimerTickPayload) {
+            self.events.push(RuntimeEffectEvent::EmitTick);
+            self.emitted_tick_snapshots
+                .push(TimerTickSnapshot::from(tick_payload));
+        }
+
+        fn update_tray(&mut self, tick_payload: &TimerTickPayload) {
+            self.events.push(RuntimeEffectEvent::UpdateTray);
+            self.tray_tick_snapshots
+                .push(TimerTickSnapshot::from(tick_payload));
+        }
+
+        fn spawn_timer_task<'a>(
+            &'a mut self,
+            _state: &'a AppState,
+        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+            self.events.push(RuntimeEffectEvent::SpawnTimerTask);
+            Box::pin(async {})
+        }
+
+        fn request_fullscreen_break_exit(&mut self) {
+            self.events
+                .push(RuntimeEffectEvent::RequestFullscreenBreakExit);
         }
 
         fn before_persist(&mut self) {
@@ -773,6 +958,148 @@ mod tests {
         let (app_state, _) =
             AppState::build_startup_state_for_tests(as_clock_trait(&clock), persistence).await;
         app_state
+    }
+
+    async fn build_test_state_with_injected_persistence_error() -> AppState {
+        let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
+        let persistence = PersistenceManager::new(as_clock_trait(&clock), Some(PathBuf::from(".")))
+            .with_injected_save_error_hook(Arc::new(|| {
+                Some(crate::managers::persistence::SaveError::Serialize {
+                    source: serde_json::from_str::<serde_json::Value>("{")
+                        .expect_err("invalid JSON should fail to parse"),
+                })
+            }));
+        let (app_state, _) =
+            AppState::build_startup_state_for_tests(as_clock_trait(&clock), persistence).await;
+        app_state
+    }
+
+    fn timer_settings(
+        work_duration_secs: u64,
+        short_break_duration_secs: u64,
+        long_break_duration_secs: u64,
+        long_break_interval: u32,
+        post_break_transition_policy: PostBreakTransitionPolicy,
+    ) -> TimerSettings {
+        TimerSettings::new(
+            WorkDurationSecs::try_new(work_duration_secs).expect("work duration should be valid"),
+            ShortBreakDurationSecs::try_new(short_break_duration_secs)
+                .expect("short break duration should be valid"),
+            LongBreakDurationSecs::try_new(long_break_duration_secs)
+                .expect("long break duration should be valid"),
+            LongBreakIntervalCount::try_new(long_break_interval)
+                .expect("long break interval should be valid"),
+            post_break_transition_policy,
+        )
+    }
+
+    fn command_work_duration_secs() -> WorkDurationSecs {
+        WorkDurationSecs::try_new(1800).expect("work duration should be valid")
+    }
+
+    fn command_short_break_duration_secs() -> ShortBreakDurationSecs {
+        ShortBreakDurationSecs::try_new(360).expect("short break duration should be valid")
+    }
+
+    fn command_long_break_duration_secs() -> LongBreakDurationSecs {
+        LongBreakDurationSecs::try_new(1200).expect("long break duration should be valid")
+    }
+
+    fn command_long_break_interval() -> LongBreakIntervalCount {
+        LongBreakIntervalCount::try_new(5).expect("long break interval should be valid")
+    }
+
+    async fn prepare_post_break_decision_pending_state(state: &AppState) {
+        let mut timer = state.timer_manager.lock().await;
+        let settings = timer_settings(
+            1500,
+            300,
+            900,
+            4,
+            PostBreakTransitionPolicy::RequireManualContinue,
+        );
+        timer
+            .start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+            .expect("work session should start");
+        timer.transition_to_break();
+        timer.complete_break_session_transition();
+        assert_eq!(timer.status(), TimerStatus::Idle);
+        assert!(timer.get_state().post_break_decision_pending);
+    }
+
+    async fn prepare_fullscreen_break_state(state: &AppState) {
+        let mut timer = state.timer_manager.lock().await;
+        let settings = timer_settings(
+            1500,
+            300,
+            900,
+            4,
+            PostBreakTransitionPolicy::RequireManualContinue,
+        );
+        timer
+            .start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+            .expect("work session should start");
+        timer.transition_to_break();
+        timer.set_fullscreen_break(true);
+        assert_eq!(timer.status(), TimerStatus::OnBreak);
+        assert!(timer.get_state().is_fullscreen_break);
+    }
+
+    async fn install_cancellable_timer_task(state: &AppState) -> Arc<StdAtomicBool> {
+        let task_completed = Arc::new(StdAtomicBool::new(false));
+        let task_completed_for_task = Arc::clone(&task_completed);
+        let cancellation_token = CancellationToken::new();
+        let task_token = cancellation_token.clone();
+        let timer_task = tokio::spawn(async move {
+            task_token.cancelled().await;
+            task_completed_for_task.store(true, Ordering::Release);
+        });
+
+        state
+            .timer_manager
+            .lock()
+            .await
+            .set_task_handles_for_test(cancellation_token, timer_task);
+
+        task_completed
+    }
+
+    fn assert_tick_emit_and_tray_match(runtime_effect_shell: &RecordingCommandRuntimeEffectShell) {
+        assert_eq!(runtime_effect_shell.emitted_tick_snapshots.len(), 1);
+        assert_eq!(runtime_effect_shell.tray_tick_snapshots.len(), 1);
+        assert_eq!(
+            runtime_effect_shell.emitted_tick_snapshots,
+            runtime_effect_shell.tray_tick_snapshots
+        );
+    }
+
+    fn event_count(
+        runtime_effect_shell: &RecordingCommandRuntimeEffectShell,
+        event: RuntimeEffectEvent,
+    ) -> usize {
+        runtime_effect_shell
+            .events()
+            .iter()
+            .filter(|recorded| **recorded == event)
+            .count()
+    }
+
+    fn assert_event_once(
+        runtime_effect_shell: &RecordingCommandRuntimeEffectShell,
+        event: RuntimeEffectEvent,
+    ) {
+        assert_eq!(event_count(runtime_effect_shell, event), 1);
+    }
+
+    fn assert_event_absent(
+        runtime_effect_shell: &RecordingCommandRuntimeEffectShell,
+        event: RuntimeEffectEvent,
+    ) {
+        assert_eq!(event_count(runtime_effect_shell, event), 0);
+    }
+
+    fn assert_persistence_save_error(result: &Result<()>) {
+        assert!(matches!(result, Err(PomoliceError::PersistenceSave(_))));
     }
 
     async fn wait_for_transition_event_count(
@@ -1060,6 +1387,354 @@ mod tests {
         let changed = did_scheduler_topology_change(true, &previous_config, true, &next_config);
 
         assert!(changed);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_post_break_decision_continue_command_side_effects() {
+        let state = build_test_state_without_persistence_path().await;
+        prepare_post_break_decision_pending_state(&state).await;
+        let old_task_completed = install_cancellable_timer_task(&state).await;
+        let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+
+        resolve_post_break_decision_with_runtime_effects(
+            &state,
+            PostBreakDecisionAction::Continue,
+            &mut runtime_effect_shell,
+        )
+        .await
+        .expect("continue decision should succeed");
+
+        assert_tick_emit_and_tray_match(&runtime_effect_shell);
+        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::EmitTick);
+        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::UpdateTray);
+        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::SpawnTimerTask);
+        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::Persist);
+        assert_event_absent(
+            &runtime_effect_shell,
+            RuntimeEffectEvent::RequestFullscreenBreakExit,
+        );
+        assert!(old_task_completed.load(Ordering::Acquire));
+
+        let timer = state.timer_manager.lock().await;
+        assert_eq!(timer.status(), TimerStatus::Working);
+        assert!(!timer.get_state().post_break_decision_pending);
+        assert_eq!(
+            runtime_effect_shell.emitted_tick_snapshots[0].status,
+            TimerStatus::Working
+        );
+    }
+
+    #[tokio::test]
+    async fn test_resolve_post_break_decision_stop_command_side_effects() {
+        let state = build_test_state_without_persistence_path().await;
+        prepare_post_break_decision_pending_state(&state).await;
+        let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+
+        resolve_post_break_decision_with_runtime_effects(
+            &state,
+            PostBreakDecisionAction::StopCycle,
+            &mut runtime_effect_shell,
+        )
+        .await
+        .expect("stop decision should succeed");
+
+        assert_tick_emit_and_tray_match(&runtime_effect_shell);
+        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::EmitTick);
+        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::UpdateTray);
+        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::Persist);
+        assert_event_absent(&runtime_effect_shell, RuntimeEffectEvent::SpawnTimerTask);
+        assert_event_absent(
+            &runtime_effect_shell,
+            RuntimeEffectEvent::RequestFullscreenBreakExit,
+        );
+
+        let timer = state.timer_manager.lock().await;
+        assert_eq!(timer.status(), TimerStatus::Idle);
+        assert!(!timer.get_state().post_break_decision_pending);
+        assert_eq!(
+            runtime_effect_shell.emitted_tick_snapshots[0].status,
+            TimerStatus::Idle
+        );
+    }
+
+    #[tokio::test]
+    async fn test_emergency_stop_command_side_effects() {
+        let fullscreen_state = build_test_state_without_persistence_path().await;
+        prepare_fullscreen_break_state(&fullscreen_state).await;
+        let old_task_completed = install_cancellable_timer_task(&fullscreen_state).await;
+        let mut fullscreen_runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+
+        emergency_stop_with_runtime_effects(
+            &fullscreen_state,
+            &mut fullscreen_runtime_effect_shell,
+        )
+        .await
+        .expect("emergency stop should succeed");
+
+        assert_tick_emit_and_tray_match(&fullscreen_runtime_effect_shell);
+        assert_event_once(
+            &fullscreen_runtime_effect_shell,
+            RuntimeEffectEvent::EmitTick,
+        );
+        assert_event_once(
+            &fullscreen_runtime_effect_shell,
+            RuntimeEffectEvent::UpdateTray,
+        );
+        assert_event_once(
+            &fullscreen_runtime_effect_shell,
+            RuntimeEffectEvent::RequestFullscreenBreakExit,
+        );
+        assert_event_once(
+            &fullscreen_runtime_effect_shell,
+            RuntimeEffectEvent::Persist,
+        );
+        assert_event_absent(
+            &fullscreen_runtime_effect_shell,
+            RuntimeEffectEvent::SpawnTimerTask,
+        );
+        assert!(old_task_completed.load(Ordering::Acquire));
+
+        {
+            let fullscreen_timer = fullscreen_state.timer_manager.lock().await;
+            assert_eq!(fullscreen_timer.status(), TimerStatus::Idle);
+            assert!(!fullscreen_timer.get_state().is_fullscreen_break);
+        }
+        assert_eq!(
+            fullscreen_runtime_effect_shell.emitted_tick_snapshots[0].status,
+            TimerStatus::Idle
+        );
+        assert!(!fullscreen_runtime_effect_shell.emitted_tick_snapshots[0].is_fullscreen_break);
+
+        let non_fullscreen_state = build_test_state_without_persistence_path().await;
+        {
+            let mut timer = non_fullscreen_state.timer_manager.lock().await;
+            timer
+                .start_work_with_source(
+                    timer_settings(
+                        1500,
+                        300,
+                        900,
+                        4,
+                        PostBreakTransitionPolicy::RequireManualContinue,
+                    ),
+                    TimerStartSource::ManualOutsideWindow,
+                )
+                .expect("work session should start");
+        }
+        let mut non_fullscreen_runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+
+        emergency_stop_with_runtime_effects(
+            &non_fullscreen_state,
+            &mut non_fullscreen_runtime_effect_shell,
+        )
+        .await
+        .expect("emergency stop should succeed");
+
+        assert_tick_emit_and_tray_match(&non_fullscreen_runtime_effect_shell);
+        assert_event_once(
+            &non_fullscreen_runtime_effect_shell,
+            RuntimeEffectEvent::EmitTick,
+        );
+        assert_event_once(
+            &non_fullscreen_runtime_effect_shell,
+            RuntimeEffectEvent::UpdateTray,
+        );
+        assert_event_once(
+            &non_fullscreen_runtime_effect_shell,
+            RuntimeEffectEvent::Persist,
+        );
+        assert_event_absent(
+            &non_fullscreen_runtime_effect_shell,
+            RuntimeEffectEvent::RequestFullscreenBreakExit,
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sync_timer_duration_settings_command_side_effects() {
+        let state = build_test_state_without_persistence_path().await;
+        let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+
+        sync_timer_duration_settings_with_runtime_effects(
+            &state,
+            command_work_duration_secs(),
+            command_short_break_duration_secs(),
+            command_long_break_duration_secs(),
+            command_long_break_interval(),
+            &mut runtime_effect_shell,
+        )
+        .await
+        .expect("duration settings sync should succeed");
+
+        assert_tick_emit_and_tray_match(&runtime_effect_shell);
+        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::EmitTick);
+        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::UpdateTray);
+        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::Persist);
+        assert_event_absent(&runtime_effect_shell, RuntimeEffectEvent::SpawnTimerTask);
+        assert_event_absent(
+            &runtime_effect_shell,
+            RuntimeEffectEvent::RequestFullscreenBreakExit,
+        );
+
+        let timer = state.timer_manager.lock().await;
+        assert_eq!(timer.status(), TimerStatus::Idle);
+        assert_eq!(
+            timer.get_state().settings.work_duration_secs,
+            command_work_duration_secs()
+        );
+        assert_eq!(
+            runtime_effect_shell.emitted_tick_snapshots[0].remaining_seconds,
+            command_work_duration_secs().get()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sync_automation_policies_command_side_effects() {
+        let state = build_test_state_without_persistence_path().await;
+        let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+
+        sync_automation_policies_with_runtime_effects(
+            &state,
+            false,
+            WeeklyAutoRunConfig::default(),
+            PostBreakTransitionPolicy::StartNextWorkAutomatically,
+            &mut runtime_effect_shell,
+        )
+        .await
+        .expect("automation policy sync should succeed");
+
+        assert_tick_emit_and_tray_match(&runtime_effect_shell);
+        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::EmitTick);
+        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::UpdateTray);
+        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::Persist);
+        assert_event_absent(&runtime_effect_shell, RuntimeEffectEvent::SpawnTimerTask);
+        assert_event_absent(
+            &runtime_effect_shell,
+            RuntimeEffectEvent::RequestFullscreenBreakExit,
+        );
+
+        let timer = state.timer_manager.lock().await;
+        assert_eq!(
+            timer.get_state().settings.post_break_transition_policy,
+            PostBreakTransitionPolicy::StartNextWorkAutomatically
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sync_automation_policies_scheduler_revision_scope() {
+        let state = build_test_state_without_persistence_path().await;
+        let initial_revision = state.config_revision.load(Ordering::Acquire);
+        let mut policy_runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+
+        sync_automation_policies_with_runtime_effects(
+            &state,
+            false,
+            WeeklyAutoRunConfig::default(),
+            PostBreakTransitionPolicy::StartNextWorkAutomatically,
+            &mut policy_runtime_effect_shell,
+        )
+        .await
+        .expect("policy-only sync should succeed");
+
+        assert_eq!(
+            state.config_revision.load(Ordering::Acquire),
+            initial_revision
+        );
+        assert_tick_emit_and_tray_match(&policy_runtime_effect_shell);
+        assert_event_once(&policy_runtime_effect_shell, RuntimeEffectEvent::Persist);
+
+        let mut topology_runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+        sync_automation_policies_with_runtime_effects(
+            &state,
+            true,
+            make_enabled_daytime_monday_config(),
+            PostBreakTransitionPolicy::StartNextWorkAutomatically,
+            &mut topology_runtime_effect_shell,
+        )
+        .await
+        .expect("topology sync should succeed");
+
+        assert_eq!(
+            state.config_revision.load(Ordering::Acquire),
+            initial_revision + 1
+        );
+        assert_tick_emit_and_tray_match(&topology_runtime_effect_shell);
+        assert_event_once(&topology_runtime_effect_shell, RuntimeEffectEvent::Persist);
+    }
+
+    #[tokio::test]
+    async fn test_command_timer_side_effects_preserve_persistence_failure_policy() {
+        let continue_state = build_test_state_with_injected_persistence_error().await;
+        prepare_post_break_decision_pending_state(&continue_state).await;
+        let mut continue_runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+
+        let continue_result = resolve_post_break_decision_with_runtime_effects(
+            &continue_state,
+            PostBreakDecisionAction::Continue,
+            &mut continue_runtime_effect_shell,
+        )
+        .await;
+
+        assert_persistence_save_error(&continue_result);
+        assert_tick_emit_and_tray_match(&continue_runtime_effect_shell);
+        assert_event_once(
+            &continue_runtime_effect_shell,
+            RuntimeEffectEvent::SpawnTimerTask,
+        );
+        assert_event_once(&continue_runtime_effect_shell, RuntimeEffectEvent::Persist);
+
+        let emergency_state = build_test_state_with_injected_persistence_error().await;
+        prepare_fullscreen_break_state(&emergency_state).await;
+        let mut emergency_runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+
+        let emergency_result = emergency_stop_with_runtime_effects(
+            &emergency_state,
+            &mut emergency_runtime_effect_shell,
+        )
+        .await;
+
+        assert_persistence_save_error(&emergency_result);
+        assert_tick_emit_and_tray_match(&emergency_runtime_effect_shell);
+        assert_event_once(
+            &emergency_runtime_effect_shell,
+            RuntimeEffectEvent::RequestFullscreenBreakExit,
+        );
+        assert_event_once(&emergency_runtime_effect_shell, RuntimeEffectEvent::Persist);
+
+        let duration_state = build_test_state_with_injected_persistence_error().await;
+        let mut duration_runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+
+        let duration_result = sync_timer_duration_settings_with_runtime_effects(
+            &duration_state,
+            command_work_duration_secs(),
+            command_short_break_duration_secs(),
+            command_long_break_duration_secs(),
+            command_long_break_interval(),
+            &mut duration_runtime_effect_shell,
+        )
+        .await;
+
+        assert_persistence_save_error(&duration_result);
+        assert_tick_emit_and_tray_match(&duration_runtime_effect_shell);
+        assert_event_once(&duration_runtime_effect_shell, RuntimeEffectEvent::Persist);
+
+        let automation_state = build_test_state_with_injected_persistence_error().await;
+        let mut automation_runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+
+        let automation_result = sync_automation_policies_with_runtime_effects(
+            &automation_state,
+            false,
+            WeeklyAutoRunConfig::default(),
+            PostBreakTransitionPolicy::StartNextWorkAutomatically,
+            &mut automation_runtime_effect_shell,
+        )
+        .await;
+
+        assert_persistence_save_error(&automation_result);
+        assert_tick_emit_and_tray_match(&automation_runtime_effect_shell);
+        assert_event_once(
+            &automation_runtime_effect_shell,
+            RuntimeEffectEvent::Persist,
+        );
     }
 
     #[tokio::test]
