@@ -77,6 +77,94 @@ fn test_render_event_message_includes_persistence_trigger_context() {
 }
 
 #[test]
+fn test_render_persistence_write_failed_redacts_home_paths_from_path_and_error_message() {
+    let error = io::Error::other(
+        "failed to open /Users/alice/Library/Application Support/pomolice/timer_state.json and /home/alice/.config/pomolice/timer_state.json",
+    );
+    let rendered = render_event_message(
+        BackendLogEvent::StoragePersistenceWriteFailed,
+        &[
+            (
+                "trigger",
+                PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START.to_string(),
+            ),
+            (
+                "path",
+                r"C:\Users\Alice\AppData\Local\pomolice\timer_state.json".to_string(),
+            ),
+        ],
+        Some(&error),
+    );
+
+    assert!(rendered.contains("event_id=storage.persistence.write_failed"));
+    assert!(rendered.contains("trigger=scheduler_auto_start_persist"));
+    assert!(!rendered.contains("Alice"));
+    assert!(!rendered.contains("alice"));
+    assert!(!rendered.contains(r"C:\Users\Alice"));
+    assert!(!rendered.contains("/Users/alice"));
+    assert!(!rendered.contains("/home/alice"));
+}
+
+#[test]
+fn test_render_persistence_write_failed_redacts_home_paths_with_spaces() {
+    let error = io::Error::other(
+        "failed to open /Users/Jane Doe/Library/Application Support/pomolice/timer_state.json and /home/Jane Doe/.config/pomolice/timer_state.json",
+    );
+    let rendered = render_event_message(
+        BackendLogEvent::StoragePersistenceWriteFailed,
+        &[
+            (
+                "trigger",
+                PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START.to_string(),
+            ),
+            (
+                "path",
+                r"C:\Users\Jane Doe\AppData\Local\pomolice\timer_state.json".to_string(),
+            ),
+        ],
+        Some(&error),
+    );
+
+    assert!(rendered.contains("event_id=storage.persistence.write_failed"));
+    assert!(rendered.contains("trigger=scheduler_auto_start_persist"));
+    assert!(!rendered.contains("Jane"));
+    assert!(!rendered.contains("Doe"));
+    assert!(!rendered.contains("Jane Doe"));
+    assert!(!rendered.contains(r"C:\Users\Jane Doe"));
+    assert!(!rendered.contains("/Users/Jane Doe"));
+    assert!(!rendered.contains("/home/Jane Doe"));
+}
+
+#[test]
+fn test_render_persistence_write_failed_redacts_profile_path_suffix_username() {
+    let error = io::Error::other(
+        "failed to open /Users/alice/Documents/alice-notes.txt and /home/alice/docs/alice-notes.txt",
+    );
+    let rendered = render_event_message(
+        BackendLogEvent::StoragePersistenceWriteFailed,
+        &[
+            (
+                "trigger",
+                PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START.to_string(),
+            ),
+            (
+                "path",
+                r"C:\Users\Alice\Documents\Alice-notes.txt".to_string(),
+            ),
+        ],
+        Some(&error),
+    );
+
+    assert!(rendered.contains("event_id=storage.persistence.write_failed"));
+    assert!(rendered.contains("trigger=scheduler_auto_start_persist"));
+    assert!(!rendered.contains("Alice"));
+    assert!(!rendered.contains("alice"));
+    assert!(!rendered.contains(r"C:\Users\Alice"));
+    assert!(!rendered.contains("/Users/alice"));
+    assert!(!rendered.contains("/home/alice"));
+}
+
+#[test]
 fn test_render_event_message_includes_break_step_context() {
     let error = io::Error::other("window exit failed");
     let rendered = render_event_message(

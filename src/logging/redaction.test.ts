@@ -150,6 +150,292 @@ describe("buildSanitizedFrontendLogRecord()", () => {
     );
   });
 
+  it("redacts Windows profile paths in sensitive and exception messages", async () => {
+    const { buildSanitizedFrontendLogRecord } = await import("./redaction");
+    const windowsProfilePath =
+      "C:\\Users\\Alice\\AppData\\Local\\pomolice\\sound.wav";
+
+    const record = buildSanitizedFrontendLogRecord(
+      "timer.sync.setup_failed",
+      "timer_sync",
+      {
+        failure_message: `sound playback failed at ${windowsProfilePath}`,
+      },
+      new Error(`sound playback failed at ${windowsProfilePath}`),
+    );
+
+    expect(record.keyValues.failure_message).toBe(
+      "sound playback failed at [REDACTED]",
+    );
+    expect(record.keyValues.failure_message).not.toContain("Alice");
+    expect(record.keyValues.failure_message).not.toContain("C:\\Users\\Alice");
+    expect(record.keyValues["exception.message"]).toBe(
+      "sound playback failed at [REDACTED]",
+    );
+    expect(record.keyValues["exception.message"]).not.toContain("Alice");
+    expect(record.keyValues["exception.message"]).not.toContain(
+      "C:\\Users\\Alice",
+    );
+  });
+
+  it.each([
+    {
+      label: "forward slashes",
+      profilePath: "C:/Users/Alice/AppData/Local/pomolice/sound.wav",
+      profileRoot: "C:/Users/Alice",
+    },
+    {
+      label: "lowercase Users segment",
+      profilePath: "C:\\users\\Alice\\AppData\\Local\\pomolice\\sound.wav",
+      profileRoot: "C:\\users\\Alice",
+    },
+  ])(
+    "redacts Windows profile paths with $label in sensitive and exception messages",
+    async ({
+      profilePath,
+      profileRoot,
+    }: {
+      profilePath: string;
+      profileRoot: string;
+    }) => {
+      const { buildSanitizedFrontendLogRecord } = await import("./redaction");
+
+      const record = buildSanitizedFrontendLogRecord(
+        "timer.sync.setup_failed",
+        "timer_sync",
+        {
+          failure_message: `sound playback failed at ${profilePath}`,
+        },
+        new Error(`sound playback failed at ${profilePath}`),
+      );
+
+      expect(record.keyValues.failure_message).toContain("[REDACTED]");
+      expect(record.keyValues.failure_message).not.toContain("Alice");
+      expect(record.keyValues.failure_message).not.toContain(profileRoot);
+      expect(record.keyValues["exception.message"]).toContain("[REDACTED]");
+      expect(record.keyValues["exception.message"]).not.toContain("Alice");
+      expect(record.keyValues["exception.message"]).not.toContain(profileRoot);
+    },
+  );
+
+  it("preserves context after a redacted Windows profile root", async () => {
+    const { buildSanitizedFrontendLogRecord } = await import("./redaction");
+
+    const record = buildSanitizedFrontendLogRecord(
+      "timer.sync.setup_failed",
+      "timer_sync",
+      {
+        failure_message: "failed at C:\\Users\\Alice, retry later",
+      },
+      new Error('path="C:\\Users\\Alice" retry'),
+    );
+
+    expect(record.keyValues.failure_message).toBe(
+      "failed at [REDACTED], retry later",
+    );
+    expect(record.keyValues.failure_message).not.toContain("Alice");
+    expect(record.keyValues["exception.message"]).toBe(
+      'path="[REDACTED]" retry',
+    );
+    expect(record.keyValues["exception.message"]).not.toContain("Alice");
+  });
+
+  it("preserves context after a redacted Unix profile root", async () => {
+    const { buildSanitizedFrontendLogRecord } = await import("./redaction");
+
+    const record = buildSanitizedFrontendLogRecord(
+      "timer.sync.setup_failed",
+      "timer_sync",
+      {
+        failure_message: "failed at /Users/alice, retry later",
+      },
+      new Error('path="/home/alice" retry'),
+    );
+
+    expect(record.keyValues.failure_message).toBe(
+      "failed at [REDACTED], retry later",
+    );
+    expect(record.keyValues.failure_message).not.toContain("alice");
+    expect(record.keyValues["exception.message"]).toBe(
+      'path="[REDACTED]" retry',
+    );
+    expect(record.keyValues["exception.message"]).not.toContain("alice");
+  });
+
+  it("redacts colon-prefixed profile paths in sensitive and exception messages", async () => {
+    const { buildSanitizedFrontendLogRecord } = await import("./redaction");
+
+    const record = buildSanitizedFrontendLogRecord(
+      "timer.sync.setup_failed",
+      "timer_sync",
+      {
+        failure_message:
+          "path:C:\\Users\\Alice\\AppData\\Local\\pomolice\\sound.wav",
+      },
+      new Error("open:/Users/alice/Library/Caches/pomolice/sound.wav"),
+    );
+
+    expect(record.keyValues.failure_message).toBe("path:[REDACTED]");
+    expect(record.keyValues.failure_message).not.toContain("Alice");
+    expect(record.keyValues.failure_message).not.toContain("C:\\Users\\Alice");
+    expect(record.keyValues["exception.message"]).toBe("open:[REDACTED]");
+    expect(record.keyValues["exception.message"]).not.toContain("alice");
+    expect(record.keyValues["exception.message"]).not.toContain("/Users/alice");
+  });
+
+  it.each([
+    {
+      label: "macOS",
+      username: "alice",
+      profilePath: "/Users/alice/Library/Caches/pomolice/sound.wav",
+      profileRoot: "/Users/alice",
+    },
+    {
+      label: "Linux",
+      username: "alice",
+      profilePath: "/home/alice/.local/share/pomolice/sound.wav",
+      profileRoot: "/home/alice",
+    },
+  ])(
+    "redacts $label home paths in sensitive and exception messages",
+    async ({
+      profilePath,
+      profileRoot,
+      username,
+    }: {
+      profilePath: string;
+      profileRoot: string;
+      username: string;
+    }) => {
+      const { buildSanitizedFrontendLogRecord } = await import("./redaction");
+
+      const record = buildSanitizedFrontendLogRecord(
+        "timer.sync.setup_failed",
+        "timer_sync",
+        {
+          failure_message: `sound playback failed at ${profilePath}`,
+        },
+        new Error(`sound playback failed at ${profilePath}`),
+      );
+
+      expect(record.keyValues.failure_message).toBe(
+        "sound playback failed at [REDACTED]",
+      );
+      expect(record.keyValues.failure_message).not.toContain(username);
+      expect(record.keyValues.failure_message).not.toContain(profileRoot);
+      expect(record.keyValues["exception.message"]).toBe(
+        "sound playback failed at [REDACTED]",
+      );
+      expect(record.keyValues["exception.message"]).not.toContain(username);
+      expect(record.keyValues["exception.message"]).not.toContain(profileRoot);
+    },
+  );
+
+  it.each([
+    {
+      label: "Windows",
+      profilePath: "C:\\Users\\Jane Doe\\AppData\\Local\\pomolice\\sound.wav",
+      forbiddenFragments: ["Jane", "Doe", "Jane Doe", "C:\\Users\\Jane Doe"],
+    },
+    {
+      label: "macOS",
+      profilePath: "/Users/Jane Doe/Library/Caches/pomolice/sound.wav",
+      forbiddenFragments: ["Jane", "Doe", "Jane Doe", "/Users/Jane Doe"],
+    },
+    {
+      label: "Linux",
+      profilePath: "/home/Jane Doe/.local/share/pomolice/sound.wav",
+      forbiddenFragments: ["Jane", "Doe", "Jane Doe", "/home/Jane Doe"],
+    },
+  ])(
+    "redacts $label home paths with spaces in sensitive and exception messages",
+    async ({
+      forbiddenFragments,
+      profilePath,
+    }: {
+      forbiddenFragments: readonly string[];
+      profilePath: string;
+    }) => {
+      const { buildSanitizedFrontendLogRecord } = await import("./redaction");
+
+      const record = buildSanitizedFrontendLogRecord(
+        "timer.sync.setup_failed",
+        "timer_sync",
+        {
+          failure_message: `sound playback failed at ${profilePath}`,
+        },
+        new Error(`sound playback failed at ${profilePath}`),
+      );
+
+      const redactedMessages = [
+        record.keyValues.failure_message,
+        record.keyValues["exception.message"],
+      ];
+
+      for (const redactedMessage of redactedMessages) {
+        expect(redactedMessage).toContain("[REDACTED]");
+        for (const forbiddenFragment of forbiddenFragments) {
+          expect(redactedMessage).not.toContain(forbiddenFragment);
+        }
+      }
+    },
+  );
+
+  it("redacts profile paths inside high-risk assignment values before token masking", async () => {
+    const { buildSanitizedFrontendLogRecord } = await import("./redaction");
+    const windowsProfilePath =
+      "C:\\Users\\Jane Doe\\AppData\\Local\\pomolice\\sound.wav";
+
+    const record = buildSanitizedFrontendLogRecord(
+      "timer.sync.setup_failed",
+      "timer_sync",
+      {
+        failure_message: `api_key=${windowsProfilePath}`,
+      },
+      new Error(`api_key=${windowsProfilePath}`),
+    );
+
+    expect(record.keyValues.failure_message).toBe("[REDACTED]");
+    expect(record.keyValues.failure_message).not.toContain("Jane");
+    expect(record.keyValues.failure_message).not.toContain("Doe");
+    expect(record.keyValues.failure_message).not.toContain("Jane Doe");
+    expect(record.keyValues.failure_message).not.toContain(
+      "C:\\Users\\Jane Doe",
+    );
+    expect(record.keyValues["exception.message"]).toBe("[REDACTED]");
+    expect(record.keyValues["exception.message"]).not.toContain("Jane");
+    expect(record.keyValues["exception.message"]).not.toContain("Doe");
+    expect(record.keyValues["exception.message"]).not.toContain("Jane Doe");
+    expect(record.keyValues["exception.message"]).not.toContain(
+      "C:\\Users\\Jane Doe",
+    );
+  });
+
+  it("redacts JSON-stringified Windows profile paths from object errors", async () => {
+    const { buildSanitizedFrontendLogRecord } = await import("./redaction");
+
+    const record = buildSanitizedFrontendLogRecord(
+      "timer.sync.setup_failed",
+      "timer_sync",
+      undefined,
+      {
+        path: "C:\\Users\\Alice\\AppData\\Local\\pomolice\\sound.wav",
+        retryable: true,
+      },
+    );
+
+    expect(record.keyValues["exception.message"]).toBe(
+      JSON.stringify({
+        path: "[REDACTED]",
+        retryable: true,
+      }),
+    );
+    expect(record.keyValues["exception.message"]).not.toContain("Alice");
+    expect(record.keyValues["exception.message"]).not.toContain(
+      "C:\\\\Users\\\\Alice",
+    );
+  });
+
   it("truncates sensitive and exception fields after token masking", async () => {
     const { buildSanitizedFrontendLogRecord } = await import("./redaction");
     const longSensitiveValue = `${"x".repeat(320)} api_key=field-secret`;

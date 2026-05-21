@@ -161,6 +161,150 @@ describe("createLogger()", () => {
     );
   });
 
+  it("redacts username-bearing paths before calling plugin-log", async () => {
+    const { createLogger } = await import("./logger");
+    const windowsProfilePath =
+      "C:\\Users\\Alice\\AppData\\Local\\pomolice\\sound.wav";
+    const macosProfilePath = "/Users/alice/Library/Caches/pomolice/sound.wav";
+    const linuxProfilePath = "/home/alice/.local/share/pomolice/sound.wav";
+
+    createLogger("notifications").error(
+      "notification.session_complete_notification_failed",
+      new Error(
+        `sound playback failed at ${windowsProfilePath} and ${macosProfilePath}`,
+      ),
+      {
+        failure_message: `sound playback failed at ${windowsProfilePath} and ${linuxProfilePath}`,
+        notification_sound_type: "custom",
+        notification_title: "Session complete",
+      },
+    );
+
+    expect(errorLog).toHaveBeenCalledTimes(1);
+
+    const [, keyValues] = getFirstPluginWriteCall(errorLog);
+    const persistedMessages = [
+      String(keyValues.failure_message),
+      String(keyValues["exception.message"]),
+    ];
+
+    for (const persistedMessage of persistedMessages) {
+      expect(persistedMessage).not.toContain("Alice");
+      expect(persistedMessage).not.toContain("alice");
+      expect(persistedMessage).not.toContain("C:\\Users\\Alice");
+      expect(persistedMessage).not.toContain("/Users/alice");
+      expect(persistedMessage).not.toContain("/home/alice");
+    }
+
+    expect(keyValues.notification_sound_type).toBe("custom");
+    expect(keyValues.notification_title).toBe("Session complete");
+  });
+
+  it("redacts username-bearing paths with spaces before calling plugin-log", async () => {
+    const { createLogger } = await import("./logger");
+    const windowsProfilePath =
+      "C:\\Users\\Jane Doe\\AppData\\Local\\pomolice\\sound.wav";
+    const macosProfilePath =
+      "/Users/Jane Doe/Library/Caches/pomolice/sound.wav";
+    const linuxProfilePath = "/home/Jane Doe/.local/share/pomolice/sound.wav";
+
+    createLogger("notifications").error(
+      "notification.session_complete_notification_failed",
+      new Error(
+        `sound playback failed at ${windowsProfilePath} and ${macosProfilePath}`,
+      ),
+      {
+        failure_message: `sound playback failed at ${windowsProfilePath} and ${linuxProfilePath}`,
+        notification_sound_type: "custom",
+        notification_title: "Session complete",
+      },
+    );
+
+    expect(errorLog).toHaveBeenCalledTimes(1);
+
+    const [, keyValues] = getFirstPluginWriteCall(errorLog);
+    const persistedMessages = [
+      String(keyValues.failure_message),
+      String(keyValues["exception.message"]),
+    ];
+
+    for (const persistedMessage of persistedMessages) {
+      expect(persistedMessage).toContain("[REDACTED]");
+      expect(persistedMessage).not.toContain("Jane");
+      expect(persistedMessage).not.toContain("Doe");
+      expect(persistedMessage).not.toContain("Jane Doe");
+      expect(persistedMessage).not.toContain("C:\\Users\\Jane Doe");
+      expect(persistedMessage).not.toContain("/Users/Jane Doe");
+      expect(persistedMessage).not.toContain("/home/Jane Doe");
+    }
+
+    expect(keyValues.notification_sound_type).toBe("custom");
+    expect(keyValues.notification_title).toBe("Session complete");
+  });
+
+  it("redacts Windows path separator and casing variants before calling plugin-log", async () => {
+    const { createLogger } = await import("./logger");
+    const slashNormalizedPath =
+      "C:/Users/Alice/AppData/Local/pomolice/sound.wav";
+    const lowercaseUsersPath =
+      "C:\\users\\Alice\\AppData\\Local\\pomolice\\sound.wav";
+
+    createLogger("notifications").error(
+      "notification.session_complete_notification_failed",
+      new Error(`sound playback failed at ${slashNormalizedPath}`),
+      {
+        failure_message: `sound playback failed at ${lowercaseUsersPath}`,
+        notification_sound_type: "custom",
+        notification_title: "Session complete",
+      },
+    );
+
+    expect(errorLog).toHaveBeenCalledTimes(1);
+
+    const [, keyValues] = getFirstPluginWriteCall(errorLog);
+    const persistedMessages = [
+      String(keyValues.failure_message),
+      String(keyValues["exception.message"]),
+    ];
+
+    for (const persistedMessage of persistedMessages) {
+      expect(persistedMessage).toContain("[REDACTED]");
+      expect(persistedMessage).not.toContain("Alice");
+      expect(persistedMessage).not.toContain("C:/Users/Alice");
+      expect(persistedMessage).not.toContain("C:\\users\\Alice");
+    }
+
+    expect(keyValues.notification_sound_type).toBe("custom");
+    expect(keyValues.notification_title).toBe("Session complete");
+  });
+
+  it("redacts colon-prefixed paths before calling plugin-log", async () => {
+    const { createLogger } = await import("./logger");
+
+    createLogger("notifications").error(
+      "notification.session_complete_notification_failed",
+      new Error("open:/Users/alice/Library/Caches/pomolice/sound.wav"),
+      {
+        failure_message:
+          "path:C:\\Users\\Alice\\AppData\\Local\\pomolice\\sound.wav",
+        notification_sound_type: "custom",
+        notification_title: "Session complete",
+      },
+    );
+
+    expect(errorLog).toHaveBeenCalledTimes(1);
+
+    const [, keyValues] = getFirstPluginWriteCall(errorLog);
+    expect(keyValues.failure_message).toBe("path:[REDACTED]");
+    expect(keyValues.failure_message).not.toContain("Alice");
+    expect(keyValues.failure_message).not.toContain("C:\\Users\\Alice");
+    expect(keyValues["exception.message"]).toBe("open:[REDACTED]");
+    expect(keyValues["exception.message"]).not.toContain("alice");
+    expect(keyValues["exception.message"]).not.toContain("/Users/alice");
+    expect(keyValues.notification_sound_type).toBe("custom");
+    expect(keyValues.notification_title).toBe("Session complete");
+  });
+
   it.each([
     { label: "bigint", errorValue: 12n, expected: "12" },
     { label: "symbol", errorValue: Symbol("boom"), expected: "Symbol(boom)" },
@@ -225,6 +369,27 @@ describe("createLogger()", () => {
         reason: "boom",
         retryable: true,
       }),
+    );
+  });
+
+  it("redacts JSON-stringified Windows paths before calling plugin-log", async () => {
+    const { createLogger } = await import("./logger");
+
+    createLogger("timer_sync").error("timer.sync.setup_failed", {
+      path: "C:\\Users\\Alice\\AppData\\Local\\pomolice\\sound.wav",
+      retryable: true,
+    });
+
+    const [, keyValues] = getFirstPluginWriteCall(errorLog);
+    expect(keyValues["exception.message"]).toBe(
+      JSON.stringify({
+        path: "[REDACTED]",
+        retryable: true,
+      }),
+    );
+    expect(keyValues["exception.message"]).not.toContain("Alice");
+    expect(keyValues["exception.message"]).not.toContain(
+      "C:\\\\Users\\\\Alice",
     );
   });
 

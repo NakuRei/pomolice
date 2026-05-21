@@ -38,6 +38,37 @@ const STACK_LIKE_SENSITIVE_FIELD_NAME_SET = new Set<string>([
   EXCEPTION_STACKTRACE_FIELD,
   "component_stack",
 ]);
+const WINDOWS_USERS_SEGMENT = "Users";
+const UNIX_USER_PROFILE_PATH_PREFIXES = ["/Users/", "/home/"] as const;
+const USER_PROFILE_PATH_START_BOUNDARY_CHARACTER_SET = new Set<string>([
+  "(",
+  '"',
+  "'",
+  ":",
+  "=",
+  "[",
+]);
+const USER_PROFILE_PATH_TEXT_BOUNDARY_CHARACTER_SET = new Set<string>([
+  '"',
+  "'",
+  ",",
+  ";",
+  ":",
+  ")",
+  "]",
+  "}",
+  "<",
+  ">",
+  "|",
+  "*",
+  "?",
+  "=",
+]);
+
+interface UserProfilePathMatch {
+  end: number;
+  start: number;
+}
 
 let productionEnvironmentOverride: boolean | undefined = undefined;
 
@@ -194,6 +225,178 @@ function redactHighRiskTokens(value: string): string {
   return value.replace(createHighRiskTokenPattern(), REDACTED_VALUE);
 }
 
+function isAsciiLetter(character: string | undefined): boolean {
+  return character !== undefined && /^[A-Za-z]$/u.test(character);
+}
+
+function readPathSeparatorLength(value: string, start: number): number {
+  const character = value[start];
+  if (character === "/") {
+    return 1;
+  }
+
+  if (character !== "\\") {
+    return 0;
+  }
+
+  return value[start + 1] === "\\" ? 2 : 1;
+}
+
+function isWhitespace(character: string | undefined): boolean {
+  return character !== undefined && /\s/u.test(character);
+}
+
+function isLineOrTab(character: string | undefined): boolean {
+  return character === "\r" || character === "\n" || character === "\t";
+}
+
+function isUserProfilePathStartBoundary(value: string, start: number): boolean {
+  if (start === 0) {
+    return true;
+  }
+
+  const previousCharacter = value[start - 1];
+  return (
+    isWhitespace(previousCharacter) ||
+    (previousCharacter !== undefined &&
+      USER_PROFILE_PATH_START_BOUNDARY_CHARACTER_SET.has(previousCharacter))
+  );
+}
+
+function isUserProfilePathTextBoundary(character: string | undefined): boolean {
+  return (
+    character === undefined ||
+    isLineOrTab(character) ||
+    USER_PROFILE_PATH_TEXT_BOUNDARY_CHARACTER_SET.has(character)
+  );
+}
+
+function readPathSegmentEnd(value: string, start: number): number {
+  let index = start;
+  while (
+    index < value.length &&
+    readPathSeparatorLength(value, index) === 0 &&
+    !isUserProfilePathTextBoundary(value[index])
+  ) {
+    index += 1;
+  }
+
+  return index;
+}
+
+function readUserProfilePathEnd(
+  value: string,
+  start: number,
+  profileSegmentStart: number,
+): UserProfilePathMatch | undefined {
+  const profileSegmentEnd = readPathSegmentEnd(value, profileSegmentStart);
+  if (profileSegmentEnd === profileSegmentStart) {
+    return undefined;
+  }
+
+  let pathEnd = profileSegmentEnd;
+  let separatorLength = readPathSeparatorLength(value, pathEnd);
+  while (separatorLength > 0) {
+    const componentStart = pathEnd + separatorLength;
+    const componentEnd = readPathSegmentEnd(value, componentStart);
+    if (componentEnd === componentStart) {
+      break;
+    }
+
+    pathEnd = componentEnd;
+    separatorLength = readPathSeparatorLength(value, pathEnd);
+  }
+
+  return { end: pathEnd, start };
+}
+
+function readWindowsUserProfilePath(
+  value: string,
+  start: number,
+): UserProfilePathMatch | undefined {
+  const driveSeparatorLength = readPathSeparatorLength(value, start + 2);
+  const usersStart = start + 2 + driveSeparatorLength;
+  const usersEnd = usersStart + WINDOWS_USERS_SEGMENT.length;
+  const profileSeparatorLength = readPathSeparatorLength(value, usersEnd);
+  if (
+    !isAsciiLetter(value[start]) ||
+    value[start + 1] !== ":" ||
+    driveSeparatorLength === 0 ||
+    value.slice(usersStart, usersEnd).toLowerCase() !==
+      WINDOWS_USERS_SEGMENT.toLowerCase() ||
+    profileSeparatorLength === 0
+  ) {
+    return undefined;
+  }
+
+  return readUserProfilePathEnd(
+    value,
+    start,
+    usersEnd + profileSeparatorLength,
+  );
+}
+
+function readUnixUserProfilePath(
+  value: string,
+  start: number,
+): UserProfilePathMatch | undefined {
+  for (const prefix of UNIX_USER_PROFILE_PATH_PREFIXES) {
+    if (value.startsWith(prefix, start)) {
+      return readUserProfilePathEnd(value, start, start + prefix.length);
+    }
+  }
+
+  return undefined;
+}
+
+function findNextUserProfilePath(
+  value: string,
+  start: number,
+): UserProfilePathMatch | undefined {
+  for (let index = start; index < value.length; index += 1) {
+    if (!isUserProfilePathStartBoundary(value, index)) {
+      continue;
+    }
+
+    const windowsPath = readWindowsUserProfilePath(value, index);
+    if (windowsPath !== undefined) {
+      return windowsPath;
+    }
+
+    const unixPath = readUnixUserProfilePath(value, index);
+    if (unixPath !== undefined) {
+      return unixPath;
+    }
+  }
+
+  return undefined;
+}
+
+function redactUsernameBearingLocalPaths(value: string): string {
+  const redactedSegments: string[] = [];
+  let cursor = 0;
+  let foundPath = false;
+
+  while (cursor < value.length) {
+    const profilePath = findNextUserProfilePath(value, cursor);
+    if (profilePath === undefined) {
+      break;
+    }
+
+    redactedSegments.push(value.slice(cursor, profilePath.start));
+    redactedSegments.push(REDACTED_VALUE);
+    cursor = profilePath.end;
+    foundPath = true;
+  }
+
+  if (!foundPath) {
+    return value;
+  }
+
+  redactedSegments.push(value.slice(cursor));
+  return redactedSegments.join("");
+}
+
 function truncateSensitiveValue(value: string, maxLength: number): string {
   if (value.length <= maxLength) {
     return value;
@@ -203,7 +406,10 @@ function truncateSensitiveValue(value: string, maxLength: number): string {
 }
 
 function redactSensitiveValue(value: string, maxLength: number): string {
-  return truncateSensitiveValue(redactHighRiskTokens(value), maxLength);
+  const pathRedactedValue = redactUsernameBearingLocalPaths(value);
+  const tokenRedactedValue = redactHighRiskTokens(pathRedactedValue);
+
+  return truncateSensitiveValue(tokenRedactedValue, maxLength);
 }
 
 function isStackLikeSensitiveFieldName(fieldName: string): boolean {

@@ -50,3 +50,106 @@ fn test_exception_stacktrace_masks_high_risk_tokens_and_truncates() {
     assert!(redacted.ends_with("...[truncated]"));
     assert!(!redacted.contains("password=abc"));
 }
+
+#[test]
+fn test_public_field_value_redacts_windows_profile_path() {
+    let redacted = redact_field_value(
+        RedactionClass::Public,
+        r"C:\Users\Alice\AppData\Local\pomolice\timer_state.json",
+    );
+
+    assert_home_path_is_redacted(&redacted, &["Alice", r"C:\Users\Alice"]);
+}
+
+#[test]
+fn test_sensitive_field_value_redacts_windows_profile_path() {
+    let redacted = redact_field_value(
+        RedactionClass::Sensitive,
+        r"C:\Users\Alice\AppData\Local\pomolice\timer_state.json",
+    );
+
+    assert_home_path_is_redacted(&redacted, &["Alice", r"C:\Users\Alice"]);
+}
+
+#[test]
+fn test_exception_message_redacts_windows_profile_path() {
+    let redacted = redact_exception_message(
+        r"failed to open C:\Users\Alice\AppData\Local\pomolice\timer_state.json",
+    );
+
+    assert_home_path_is_redacted(&redacted, &["Alice", r"C:\Users\Alice"]);
+}
+
+#[test]
+fn test_field_values_redact_unix_home_paths() {
+    let macos_path = "/Users/alice/Library/Application Support/pomolice/timer_state.json";
+    let linux_path = "/home/alice/.config/pomolice/timer_state.json";
+
+    let macos_redacted = redact_field_value(RedactionClass::Public, macos_path);
+    let linux_redacted = redact_field_value(RedactionClass::Sensitive, linux_path);
+
+    assert_home_path_is_redacted(&macos_redacted, &["alice", "/Users/alice"]);
+    assert_home_path_is_redacted(&linux_redacted, &["alice", "/home/alice"]);
+}
+
+#[test]
+fn test_field_values_redact_profile_paths_with_spaces() {
+    let path_cases = [
+        (
+            r"C:\Users\Jane Doe\AppData\Local\pomolice\timer_state.json",
+            [r"C:\Users\Jane Doe", "Jane Doe", "Jane", "Doe"],
+        ),
+        (
+            "/Users/Jane Doe/Library/Application Support/pomolice/timer_state.json",
+            ["/Users/Jane Doe", "Jane Doe", "Jane", "Doe"],
+        ),
+        (
+            "/home/Jane Doe/.config/pomolice/timer_state.json",
+            ["/home/Jane Doe", "Jane Doe", "Jane", "Doe"],
+        ),
+    ];
+
+    for (path, forbidden_fragments) in path_cases {
+        let public_redacted = redact_field_value(RedactionClass::Public, path);
+        let sensitive_redacted = redact_field_value(RedactionClass::Sensitive, path);
+        let exception_redacted = redact_exception_message(&format!("failed to open {path}"));
+
+        assert_home_path_is_redacted(&public_redacted, &forbidden_fragments);
+        assert_home_path_is_redacted(&sensitive_redacted, &forbidden_fragments);
+        assert_home_path_is_redacted(&exception_redacted, &forbidden_fragments);
+    }
+}
+
+#[test]
+fn test_field_values_redact_full_profile_paths_when_suffix_repeats_username() {
+    let path_cases = [
+        (
+            r"C:\Users\Alice\Documents\Alice-notes.txt",
+            ["Alice", r"C:\Users\Alice"],
+        ),
+        (
+            "/Users/alice/Documents/alice-notes.txt",
+            ["alice", "/Users/alice"],
+        ),
+        ("/home/alice/docs/alice-notes.txt", ["alice", "/home/alice"]),
+    ];
+
+    for (path, forbidden_fragments) in path_cases {
+        let public_redacted = redact_field_value(RedactionClass::Public, path);
+        let sensitive_redacted = redact_field_value(RedactionClass::Sensitive, path);
+        let exception_redacted = redact_exception_message(&format!("failed to open {path}"));
+
+        assert_home_path_is_redacted(&public_redacted, &forbidden_fragments);
+        assert_home_path_is_redacted(&sensitive_redacted, &forbidden_fragments);
+        assert_home_path_is_redacted(&exception_redacted, &forbidden_fragments);
+    }
+}
+
+fn assert_home_path_is_redacted(redacted: &str, forbidden_fragments: &[&str]) {
+    for fragment in forbidden_fragments {
+        assert!(
+            !redacted.contains(fragment),
+            "redacted value should not contain {fragment:?}: {redacted}"
+        );
+    }
+}
