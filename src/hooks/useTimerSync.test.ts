@@ -198,6 +198,31 @@ describe("useTimerSync", () => {
     });
   });
 
+  it("should log structured setup failures with safe details", async () => {
+    const backendError = {
+      code: "window_control_error",
+      message: "failed to subscribe to timer events",
+    };
+    mockListen.mockRejectedValueOnce(backendError);
+
+    renderHook(() => {
+      useTimerSync();
+    });
+
+    await waitFor(() => {
+      expect(mockTimerSyncLogger.error).toHaveBeenCalledWith(
+        FRONTEND_LOG_EVENT_IDS.timerSyncSetupFailed,
+        backendError,
+        expect.objectContaining({
+          retry_attempt: 0,
+          max_connection_retries: 3,
+          failure_message:
+            "window_control_error: failed to subscribe to timer events",
+        }),
+      );
+    });
+  });
+
   it("should clean up listeners from a failed setup attempt before retrying", async () => {
     const unlistenTick = vi.fn();
 

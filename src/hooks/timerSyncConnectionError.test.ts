@@ -41,6 +41,38 @@ describe("timerSyncConnectionError", () => {
     );
   });
 
+  it("stores structured backend responses with safe technical detail", () => {
+    const retryFn = vi.fn(() => Promise.resolve());
+
+    reportTimerSyncConnectionError(
+      {
+        code: "window_control_error",
+        message: "failed to subscribe to window events",
+      },
+      retryFn,
+    );
+
+    expect(useErrorStore.getState().errors.connection?.technicalDetail).toBe(
+      "window_control_error: failed to subscribe to window events",
+    );
+  });
+
+  it("does not stringify unknown object technical details", () => {
+    const retryFn = vi.fn(() => Promise.resolve());
+
+    reportTimerSyncConnectionError(
+      {
+        code: "unknown_error",
+        message: "internal path C:\\secret",
+      },
+      retryFn,
+    );
+
+    expect(useErrorStore.getState().errors.connection?.technicalDetail).toBe(
+      "Unexpected backend error",
+    );
+  });
+
   it("clears the connection error", () => {
     const retryFn = vi.fn(() => Promise.resolve());
     reportTimerSyncConnectionError(new Error("setup failed"), retryFn);

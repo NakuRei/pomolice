@@ -247,7 +247,10 @@ describe("EmergencyStopButton", () => {
 
     it("should keep the dialog open and show an error when confirm fails", async () => {
       const { invoke } = await import("@tauri-apps/api/core");
-      vi.mocked(invoke).mockRejectedValueOnce("Failed to lock state: busy");
+      vi.mocked(invoke).mockRejectedValueOnce({
+        code: "rate_limited",
+        message: "please wait 300ms",
+      });
 
       const user = userEvent.setup();
       renderWorkingEmergencyStopButton();
@@ -266,7 +269,7 @@ describe("EmergencyStopButton", () => {
         within(
           screen.getByRole("dialog", { name: "緊急停止しますか？" }),
         ).getByRole("alert"),
-      ).toHaveTextContent("緊急停止に失敗しました。もう一度試してください");
+      ).toHaveTextContent("少々お待ちください");
     });
 
     it("marks #root inert while the dialog is open and removes inert after the dialog closes", async () => {

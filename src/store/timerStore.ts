@@ -4,7 +4,10 @@ import { immer } from "zustand/middleware/immer";
 import { invoke } from "@tauri-apps/api/core";
 import { useSettingsStore, VALIDATION_RULES } from "./settingsStore";
 import { useErrorStore } from "./errorStore";
-import { classifyBackendError } from "../errors/classifyBackendError";
+import {
+  classifyBackendError,
+  formatBackendErrorDetail,
+} from "../errors/classifyBackendError";
 import { createLogger } from "../logging/logger";
 import { FRONTEND_LOG_EVENT_IDS } from "../logging/logEvents";
 import type { WeekdayKey } from "../types/weeklyAutoRun";
@@ -287,11 +290,8 @@ export const useTimerStore = create<TimerStore>()(
           });
           useErrorStore.getState().clearError("start_work");
         } catch (error) {
-          const detail = String(error);
-          const { userMessage, severity } = classifyBackendError(
-            detail,
-            "start_work",
-          );
+          const detail = formatBackendErrorDetail(error);
+          const { userMessage, severity } = classifyBackendError(error);
           useErrorStore.getState().reportError({
             id: "start_work",
             message: userMessage,
@@ -316,11 +316,8 @@ export const useTimerStore = create<TimerStore>()(
           });
           useErrorStore.getState().clearError("resolve_post_break_decision");
         } catch (error) {
-          const detail = String(error);
-          const { userMessage, severity } = classifyBackendError(
-            detail,
-            "resolve_post_break_decision",
-          );
+          const detail = formatBackendErrorDetail(error);
+          const { userMessage, severity } = classifyBackendError(error);
           useErrorStore.getState().reportError({
             id: "resolve_post_break_decision",
             message: userMessage,
@@ -342,11 +339,8 @@ export const useTimerStore = create<TimerStore>()(
           await invoke("emergency_stop");
           useErrorStore.getState().clearError("emergency_stop");
         } catch (error) {
-          const detail = String(error);
-          const { userMessage } = classifyBackendError(
-            detail,
-            "emergency_stop",
-          );
+          const detail = formatBackendErrorDetail(error);
+          const { userMessage } = classifyBackendError(error);
           useErrorStore.getState().reportError({
             id: "emergency_stop",
             message: userMessage,
@@ -376,7 +370,7 @@ export const useTimerStore = create<TimerStore>()(
           await invoke("sync_automation_policies", automationPoliciesPayload);
         } catch (error) {
           logger.warn(FRONTEND_LOG_EVENT_IDS.settingsSyncFailed, {
-            failure_message: String(error),
+            failure_message: formatBackendErrorDetail(error),
             timer_status: timerStatus,
           });
         }
@@ -392,11 +386,8 @@ export const useTimerStore = create<TimerStore>()(
             state.shouldPromptStartOnBoot = false;
           });
         } catch (error) {
-          const detail = String(error);
-          const { userMessage, severity } = classifyBackendError(
-            detail,
-            "resolve_boot_auto_start_prompt",
-          );
+          const detail = formatBackendErrorDetail(error);
+          const { userMessage, severity } = classifyBackendError(error);
           useErrorStore.getState().reportError({
             id: "resolve_boot_auto_start_prompt",
             message: userMessage,

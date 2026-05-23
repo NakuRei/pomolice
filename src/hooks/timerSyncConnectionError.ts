@@ -1,4 +1,5 @@
 import { useErrorStore } from "@/store/errorStore";
+import { formatBackendErrorDetail } from "@/errors/classifyBackendError";
 
 export function reportTimerSyncConnectionError(
   error: unknown,
@@ -7,7 +8,7 @@ export function reportTimerSyncConnectionError(
   useErrorStore.getState().reportError({
     id: "connection",
     message: "バックエンドに接続できません",
-    technicalDetail: String(error),
+    technicalDetail: formatBackendErrorDetail(error),
     severity: "critical",
     origin: "backend_connection",
     canRetry: true,

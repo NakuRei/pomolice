@@ -236,4 +236,23 @@ describe("timerStore syncSettings command routing", () => {
       }),
     );
   });
+
+  it("should log structured backend sync errors with safe details", async () => {
+    useTimerStore.setState({ status: TimerStatus.IDLE, isConnected: true });
+    mockInvoke.mockRejectedValueOnce({
+      code: "persistence_error",
+      message: "failed to save timer settings",
+    });
+
+    await expect(
+      useTimerStore.getState().syncSettings(),
+    ).resolves.toBeUndefined();
+    expect(mockSettingsSyncLogger.warn).toHaveBeenCalledWith(
+      FRONTEND_LOG_EVENT_IDS.settingsSyncFailed,
+      expect.objectContaining({
+        failure_message: "persistence_error: failed to save timer settings",
+        timer_status: TimerStatus.IDLE,
+      }),
+    );
+  });
 });

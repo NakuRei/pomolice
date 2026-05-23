@@ -8,6 +8,7 @@ import { useEffect } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { createLogger } from "../logging/logger";
+import { formatBackendErrorDetail } from "../errors/classifyBackendError";
 import { FRONTEND_LOG_EVENT_IDS } from "../logging/logEvents";
 import {
   type TimerTickPayload,
@@ -197,7 +198,7 @@ export function useTimerSync(): void {
         logger.error(FRONTEND_LOG_EVENT_IDS.timerSyncSetupFailed, error, {
           retry_attempt: retryAttempt,
           max_connection_retries: TIMER_SYNC_MAX_CONNECTION_RETRIES,
-          failure_message: String(error),
+          failure_message: formatBackendErrorDetail(error),
         });
 
         clearListenersFrom(listenerStartIndex);

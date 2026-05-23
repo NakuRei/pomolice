@@ -1,17 +1,18 @@
 import type { ErrorSeverity } from "../store/errorStore";
 
-/**
- * The result of classifying a raw Rust backend error string.
- *
- * Example:
- * ```ts
- * classifyBackendError("Timer already running", "start_work")
- * // → { userMessage: "すでに実行中です", isTransient: false, severity: "recoverable" }
- *
- * classifyBackendError("Rate limited: please wait 300ms", "start_work")
- * // → { userMessage: "少々お待ちください", isTransient: true, severity: "recoverable" }
- * ```
- */
+export type BackendErrorCode =
+  | "unauthorized_window"
+  | "invalid_state_transition"
+  | "rate_limited"
+  | "window_control_error"
+  | "persistence_error";
+
+export interface BackendErrorResponse {
+  code: BackendErrorCode;
+  message: string;
+}
+
+/** The result of classifying a structured backend error response. */
 export interface BackendErrorClassification {
   /** Japanese message to display in the UI. */
   userMessage: string;
@@ -24,99 +25,35 @@ export interface BackendErrorClassification {
   severity: ErrorSeverity;
 }
 
-/**
- * The Tauri command that produced the error.
- * Used to adjust severity — e.g. the same "Failed to lock state" error
- * is "critical" for emergency_stop but only "recoverable" for start_work.
- */
-export type CommandContext =
-  | "start_work"
-  | "resolve_post_break_decision"
-  | "emergency_stop"
-  | "get_full_state"
-  | "resolve_boot_auto_start_prompt";
-
-const EXACT_MATCH_CLASSIFICATIONS: Readonly<
-  Partial<Record<string, BackendErrorClassification>>
+const CODE_CLASSIFICATIONS: Readonly<
+  Record<BackendErrorCode, BackendErrorClassification>
 > = {
-  "Timer already running": {
-    userMessage: "すでに実行中です",
+  unauthorized_window: {
+    userMessage: "権限エラーが発生しました",
     isTransient: false,
     severity: "recoverable",
   },
-  "Timer not running": {
-    userMessage: "タイマーが停止しています",
+  invalid_state_transition: {
+    userMessage: "現在の状態では実行できません",
+    isTransient: false,
+    severity: "recoverable",
+  },
+  rate_limited: {
+    userMessage: "少々お待ちください",
+    isTransient: true,
+    severity: "recoverable",
+  },
+  window_control_error: {
+    userMessage: "ウィンドウ操作に失敗しました",
+    isTransient: false,
+    severity: "recoverable",
+  },
+  persistence_error: {
+    userMessage: "データの保存に失敗しました",
     isTransient: false,
     severity: "recoverable",
   },
 };
-
-interface BackendErrorPrefixRule {
-  prefix: string;
-  classify: (context: CommandContext) => BackendErrorClassification;
-}
-
-const PREFIX_MATCH_CLASSIFICATIONS: readonly BackendErrorPrefixRule[] = [
-  {
-    prefix: "Invalid state transition:",
-    classify: () => ({
-      userMessage: "現在の状態では実行できません",
-      isTransient: false,
-      severity: "recoverable",
-    }),
-  },
-  {
-    prefix: "Rate limited:",
-    classify: () => ({
-      userMessage: "少々お待ちください",
-      isTransient: true,
-      severity: "recoverable",
-    }),
-  },
-  {
-    prefix: "Failed to lock state:",
-    classify: (context) => ({
-      userMessage:
-        context === "emergency_stop"
-          ? "緊急停止に失敗しました。もう一度試してください"
-          : "内部エラーが発生しました。もう一度試してください",
-      isTransient: true,
-      severity: context === "emergency_stop" ? "critical" : "recoverable",
-    }),
-  },
-  {
-    prefix: "Window control error:",
-    classify: () => ({
-      userMessage: "ウィンドウ操作に失敗しました",
-      isTransient: false,
-      severity: "recoverable",
-    }),
-  },
-  {
-    prefix: "Persistence error:",
-    classify: () => ({
-      userMessage: "データの保存に失敗しました",
-      isTransient: false,
-      severity: "recoverable",
-    }),
-  },
-  {
-    prefix: "Input monitoring error:",
-    classify: () => ({
-      userMessage: "入力モニタリングに失敗しました",
-      isTransient: false,
-      severity: "recoverable",
-    }),
-  },
-  {
-    prefix: "Unauthorized window:",
-    classify: () => ({
-      userMessage: "権限エラーが発生しました",
-      isTransient: false,
-      severity: "recoverable",
-    }),
-  },
-];
 
 const DEFAULT_BACKEND_ERROR_CLASSIFICATION: BackendErrorClassification = {
   userMessage: "予期しないエラーが発生しました",
@@ -124,36 +61,47 @@ const DEFAULT_BACKEND_ERROR_CLASSIFICATION: BackendErrorClassification = {
   severity: "recoverable",
 };
 
-/**
- * Parse the error string serialized by PomoliceError::serialize() in the Rust backend
- * and map it to a user-visible classification.
- *
- * The Rust backend serializes errors as plain strings via `self.to_string()`.
- * Known patterns (from src-tauri/src/error.rs):
- *   "Timer already running"
- *   "Timer not running"
- *   "Invalid state transition: cannot {action} from {state}"
- *   "Rate limited: please wait {N}ms"
- *   "Failed to lock state: {detail}"
- *   "Window control error: {detail}"
- *   "Persistence error: {detail}"
- *   "Input monitoring error: {detail}"
- *   "Unauthorized window: {detail}"
- */
-export function classifyBackendError(
-  errorString: string,
-  context: CommandContext,
-): BackendErrorClassification {
-  const exactMatchClassification = EXACT_MATCH_CLASSIFICATIONS[errorString];
-  if (exactMatchClassification) {
-    return exactMatchClassification;
+const BACKEND_ERROR_CODES: ReadonlySet<string> = new Set(
+  Object.keys(CODE_CLASSIFICATIONS),
+);
+
+function isBackendErrorCode(code: unknown): code is BackendErrorCode {
+  return typeof code === "string" && BACKEND_ERROR_CODES.has(code);
+}
+
+function isBackendErrorResponse(error: unknown): error is BackendErrorResponse {
+  if (typeof error !== "object" || error === null) {
+    return false;
   }
 
-  const prefixMatchRule = PREFIX_MATCH_CLASSIFICATIONS.find(({ prefix }) =>
-    errorString.startsWith(prefix),
+  const response = error as Record<string, unknown>;
+  return (
+    isBackendErrorCode(response.code) && typeof response.message === "string"
   );
-  if (prefixMatchRule) {
-    return prefixMatchRule.classify(context);
+}
+
+export function formatBackendErrorDetail(error: unknown): string {
+  if (isBackendErrorResponse(error)) {
+    return `${error.code}: ${error.message}`;
+  }
+
+  if (error instanceof Error) {
+    return String(error);
+  }
+
+  if (typeof error === "string") {
+    return error;
+  }
+
+  return "Unexpected backend error";
+}
+
+/** Map structured backend error responses to user-visible classifications. */
+export function classifyBackendError(
+  error: unknown,
+): BackendErrorClassification {
+  if (isBackendErrorResponse(error)) {
+    return CODE_CLASSIFICATIONS[error.code];
   }
 
   return DEFAULT_BACKEND_ERROR_CLASSIFICATION;
