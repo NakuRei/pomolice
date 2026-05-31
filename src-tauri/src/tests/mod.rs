@@ -33,12 +33,6 @@ mod log_rotation_test;
 #[cfg(test)]
 mod basic_tests {
     #[test]
-    fn test_basic_assertion() {
-        // Basic smoke test to verify test infrastructure works
-        assert_eq!(2 + 2, 4);
-    }
-
-    #[test]
     fn test_string_operations() {
         let app_name = "Pomolice";
         assert!(!app_name.is_empty());
