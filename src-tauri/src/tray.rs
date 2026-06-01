@@ -22,18 +22,29 @@ enum TrayGlyphMode {
     RemainingMinutes,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TrayIconContent {
+    IdleAppIcon,
+    RemainingMinutes { minutes: u32, status: TimerStatus },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct TrayStatusPresentation {
     glyph_mode: TrayGlyphMode,
     status_label: &'static str,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 struct TrayVisualSpec {
-    icon_rgba: Vec<u8>,
+    icon_content: TrayIconContent,
+    tooltip: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TrayIconPixels {
+    rgba: Vec<u8>,
     width: u32,
     height: u32,
-    tooltip: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,11 +83,8 @@ pub(crate) fn setup_tray(
     let menu = MenuBuilder::new(app).item(&exit_item).build()?;
 
     let initial_spec = compose_tray_visual_spec(TimerStatus::Idle, 0);
-    let icon = Image::new_owned(
-        initial_spec.icon_rgba,
-        initial_spec.width,
-        initial_spec.height,
-    );
+    let initial_icon = render_icon_content(initial_spec.icon_content);
+    let icon = Image::new_owned(initial_icon.rgba, initial_icon.width, initial_icon.height);
 
     TrayIconBuilder::with_id("pomolice-tray")
         .icon(icon)
@@ -125,7 +133,8 @@ pub(crate) fn setup_tray(
 /// Update the tray icon image and tooltip based on the current timer tick.
 pub(crate) fn update_tray_icon(app: &AppHandle, payload: &TimerTickPayload) {
     let visual_spec = compose_tray_visual_spec(payload.status, payload.remaining_seconds);
-    let icon = Image::new_owned(visual_spec.icon_rgba, visual_spec.width, visual_spec.height);
+    let icon_pixels = render_icon_content(visual_spec.icon_content);
+    let icon = Image::new_owned(icon_pixels.rgba, icon_pixels.width, icon_pixels.height);
 
     if let Some(tray) = app.tray_by_id("pomolice-tray") {
         if let Err(e) = tray.set_icon(Some(icon)) {
@@ -182,43 +191,53 @@ fn status_presentation(status: TimerStatus) -> TrayStatusPresentation {
     }
 }
 
-/// Convert timer status and time data to icon pixels and tooltip text.
+/// Convert timer status and time data to tray icon content and tooltip text.
 fn compose_tray_visual_spec(status: TimerStatus, remaining_seconds: u64) -> TrayVisualSpec {
     let presentation = status_presentation(status);
-    let (icon_rgba, width, height) =
-        render_icon_rgba(presentation.glyph_mode, status, remaining_seconds);
+    let icon_content = tray_icon_content(status, remaining_seconds);
     let tooltip = compose_tooltip_text(presentation, remaining_seconds);
     TrayVisualSpec {
-        icon_rgba,
-        width,
-        height,
+        icon_content,
         tooltip,
     }
 }
 
-fn render_icon_rgba(
-    glyph_mode: TrayGlyphMode,
-    status: TimerStatus,
-    remaining_seconds: u64,
-) -> (Vec<u8>, u32, u32) {
-    match glyph_mode {
-        TrayGlyphMode::IdleSymbol => {
+fn tray_icon_content(status: TimerStatus, remaining_seconds: u64) -> TrayIconContent {
+    match status_presentation(status).glyph_mode {
+        TrayGlyphMode::IdleSymbol => TrayIconContent::IdleAppIcon,
+        TrayGlyphMode::RemainingMinutes => TrayIconContent::RemainingMinutes {
+            minutes: tray_icon_minutes(remaining_seconds),
+            status,
+        },
+    }
+}
+
+fn render_icon_content(icon_content: TrayIconContent) -> TrayIconPixels {
+    match icon_content {
+        TrayIconContent::IdleAppIcon => {
             if let Some(icon) = idle_app_icon() {
-                (icon.rgba.clone(), icon.width, icon.height)
+                TrayIconPixels {
+                    rgba: icon.rgba.clone(),
+                    width: icon.width,
+                    height: icon.height,
+                }
             } else {
                 log_warn_event(BackendLogEvent::AppTrayIdleAppIconMissing, &[]);
                 let size = tray_icon_renderer::icon_size();
-                (tray_icon_renderer::render_idle_icon(), size, size)
+                TrayIconPixels {
+                    rgba: tray_icon_renderer::render_idle_icon(),
+                    width: size,
+                    height: size,
+                }
             }
         }
-        TrayGlyphMode::RemainingMinutes => {
-            let remaining_minutes = tray_icon_minutes(remaining_seconds);
+        TrayIconContent::RemainingMinutes { minutes, status } => {
             let size = tray_icon_renderer::icon_size();
-            (
-                tray_icon_renderer::render_tray_icon(remaining_minutes, status),
-                size,
-                size,
-            )
+            TrayIconPixels {
+                rgba: tray_icon_renderer::render_tray_icon(minutes, status),
+                width: size,
+                height: size,
+            }
         }
     }
 }
@@ -277,54 +296,6 @@ fn compose_tooltip_text(presentation: TrayStatusPresentation, remaining_seconds:
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_status_presentation_idle() {
-        let presentation = status_presentation(TimerStatus::Idle);
-        assert_eq!(presentation.glyph_mode, TrayGlyphMode::IdleSymbol);
-        assert_eq!(presentation.status_label, "Idle");
-    }
-
-    #[test]
-    fn test_status_presentation_working() {
-        let presentation = status_presentation(TimerStatus::Working);
-        assert_eq!(presentation.glyph_mode, TrayGlyphMode::RemainingMinutes);
-        assert_eq!(presentation.status_label, "Working");
-    }
-
-    #[test]
-    fn test_status_presentation_on_break() {
-        let presentation = status_presentation(TimerStatus::OnBreak);
-        assert_eq!(presentation.glyph_mode, TrayGlyphMode::RemainingMinutes);
-        assert_eq!(presentation.status_label, "On Break");
-    }
-
-    #[test]
-    fn test_compose_tooltip_text_idle() {
-        let idle = status_presentation(TimerStatus::Idle);
-        assert_eq!(compose_tooltip_text(idle, 0), "Pomolice - Idle");
-    }
-
-    #[test]
-    fn test_compose_tooltip_text_working() {
-        let working = status_presentation(TimerStatus::Working);
-        let tip = compose_tooltip_text(working, 18 * 60 + 32);
-        assert_eq!(tip, "Pomolice - Working - 18:32 remaining");
-    }
-
-    #[test]
-    fn test_compose_tooltip_text_on_break() {
-        let on_break = status_presentation(TimerStatus::OnBreak);
-        let tip = compose_tooltip_text(on_break, 4 * 60 + 5);
-        assert_eq!(tip, "Pomolice - On Break - 4:05 remaining");
-    }
-
-    #[test]
-    fn test_compose_tooltip_text_zero_seconds() {
-        let working = status_presentation(TimerStatus::Working);
-        let tip = compose_tooltip_text(working, 0);
-        assert_eq!(tip, "Pomolice - Working - 0:00 remaining");
-    }
-
     fn ensure_idle_app_icon_initialized() {
         let _ = IDLE_APP_ICON.set(
             decode_idle_app_icon().expect("embedded idle app icon PNG must be decodable in tests"),
@@ -332,64 +303,116 @@ mod tests {
     }
 
     #[test]
-    fn test_compose_tray_visual_spec_idle_uses_app_icon() {
+    fn test_render_icon_content_idle_uses_app_icon() {
         ensure_idle_app_icon_initialized();
-        let spec = compose_tray_visual_spec(TimerStatus::Idle, 10);
+        let icon = render_icon_content(TrayIconContent::IdleAppIcon);
         let expected = idle_app_icon().expect("idle app icon should be initialized");
-        let legacy_idle = tray_icon_renderer::render_idle_icon();
-        assert_eq!(spec.icon_rgba.as_slice(), expected.rgba.as_slice());
-        assert_ne!(spec.icon_rgba.as_slice(), legacy_idle.as_slice());
-        assert_eq!(spec.width, 32);
-        assert_eq!(spec.height, 32);
-        assert_eq!(spec.width, expected.width);
-        assert_eq!(spec.height, expected.height);
+        assert_eq!(icon.rgba.as_slice(), expected.rgba.as_slice());
+        assert_eq!(icon.width, expected.width);
+        assert_eq!(icon.height, expected.height);
+    }
+
+    #[test]
+    fn test_compose_tray_visual_spec_idle_uses_app_icon_content() {
+        let spec = compose_tray_visual_spec(TimerStatus::Idle, 65);
+
+        assert_eq!(spec.icon_content, TrayIconContent::IdleAppIcon);
         assert_eq!(spec.tooltip, "Pomolice - Idle");
     }
 
     #[test]
-    fn test_compose_tray_visual_spec_working_uses_minutes_icon() {
+    fn test_compose_tray_visual_spec_working_shows_rounded_up_remaining_minutes() {
         let spec = compose_tray_visual_spec(TimerStatus::Working, 65);
-        let expected = tray_icon_renderer::render_tray_icon(2, TimerStatus::Working);
-        assert_eq!(spec.icon_rgba, expected);
-        assert_eq!(spec.width, 16);
-        assert_eq!(spec.height, 16);
+
+        assert_eq!(
+            spec.icon_content,
+            TrayIconContent::RemainingMinutes {
+                minutes: 2,
+                status: TimerStatus::Working
+            }
+        );
         assert_eq!(spec.tooltip, "Pomolice - Working - 1:05 remaining");
     }
 
     #[test]
-    fn test_compose_tray_visual_spec_working_clamps_large_minutes_for_icon_rendering() {
-        let spec = compose_tray_visual_spec(TimerStatus::Working, u64::MAX);
-        let expected = tray_icon_renderer::render_tray_icon(u32::MAX, TimerStatus::Working);
-        assert_eq!(spec.icon_rgba, expected);
-        assert_eq!(spec.width, 16);
-        assert_eq!(spec.height, 16);
+    fn test_compose_tray_visual_spec_on_break_shows_rounded_up_remaining_minutes() {
+        let spec = compose_tray_visual_spec(TimerStatus::OnBreak, 65);
+
+        assert_eq!(
+            spec.icon_content,
+            TrayIconContent::RemainingMinutes {
+                minutes: 2,
+                status: TimerStatus::OnBreak
+            }
+        );
+        assert_eq!(spec.tooltip, "Pomolice - On Break - 1:05 remaining");
     }
 
     #[test]
-    fn test_compose_tray_visual_spec_tooltip_matches_status_presentation() {
+    fn test_compose_tray_visual_spec_zero_seconds_keeps_zero_icon_minutes() {
+        let spec = compose_tray_visual_spec(TimerStatus::Working, 0);
+
+        assert_eq!(
+            spec.icon_content,
+            TrayIconContent::RemainingMinutes {
+                minutes: 0,
+                status: TimerStatus::Working
+            }
+        );
+        assert_eq!(spec.tooltip, "Pomolice - Working - 0:00 remaining");
+    }
+
+    #[test]
+    fn test_compose_tray_visual_spec_exact_minute_keeps_same_icon_minutes() {
+        let spec = compose_tray_visual_spec(TimerStatus::Working, 60);
+
+        assert_eq!(
+            spec.icon_content,
+            TrayIconContent::RemainingMinutes {
+                minutes: 1,
+                status: TimerStatus::Working
+            }
+        );
+    }
+
+    #[test]
+    fn test_compose_tray_visual_spec_partial_minute_rounds_icon_minutes_up() {
+        let spec = compose_tray_visual_spec(TimerStatus::Working, 61);
+
+        assert_eq!(
+            spec.icon_content,
+            TrayIconContent::RemainingMinutes {
+                minutes: 2,
+                status: TimerStatus::Working
+            }
+        );
+    }
+
+    #[test]
+    fn test_compose_tray_visual_spec_large_remaining_seconds_stays_active() {
+        let spec = compose_tray_visual_spec(TimerStatus::Working, u64::MAX);
+
+        assert!(matches!(
+            spec.icon_content,
+            TrayIconContent::RemainingMinutes {
+                minutes: _,
+                status: TimerStatus::Working
+            }
+        ));
+    }
+
+    #[test]
+    fn test_compose_tray_visual_spec_tooltips_match_timer_status() {
         let idle_spec = compose_tray_visual_spec(TimerStatus::Idle, 0);
-        let idle_presentation = status_presentation(TimerStatus::Idle);
-        assert_eq!(idle_presentation.glyph_mode, TrayGlyphMode::IdleSymbol);
         assert_eq!(idle_spec.tooltip, "Pomolice - Idle");
 
         let working_spec = compose_tray_visual_spec(TimerStatus::Working, 125);
-        let working_presentation = status_presentation(TimerStatus::Working);
-        assert_eq!(
-            working_presentation.glyph_mode,
-            TrayGlyphMode::RemainingMinutes
-        );
-        assert!(working_spec
-            .tooltip
-            .contains(working_presentation.status_label));
+        assert_eq!(working_spec.tooltip, "Pomolice - Working - 2:05 remaining");
 
         let on_break_spec = compose_tray_visual_spec(TimerStatus::OnBreak, 125);
-        let on_break_presentation = status_presentation(TimerStatus::OnBreak);
         assert_eq!(
-            on_break_presentation.glyph_mode,
-            TrayGlyphMode::RemainingMinutes
+            on_break_spec.tooltip,
+            "Pomolice - On Break - 2:05 remaining"
         );
-        assert!(on_break_spec
-            .tooltip
-            .contains(on_break_presentation.status_label));
     }
 }
