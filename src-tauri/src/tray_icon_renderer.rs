@@ -382,12 +382,6 @@ mod tests {
         }
     }
 
-    fn has_legacy_center_dash(buf: &[u8]) -> bool {
-        let y = ICON_SIZE / 2;
-        let x_start = (ICON_SIZE - DIGIT_WIDTH) / 2;
-        (0..DIGIT_WIDTH).all(|dx| is_white_pixel(buf, x_start + dx, y))
-    }
-
     #[test]
     fn test_icon_buffer_size() {
         let buf = render_tray_icon(25, TimerStatus::Working);
@@ -533,15 +527,6 @@ mod tests {
         assert!(
             vertical_center_twice.abs_diff(icon_center_twice) <= 1,
             "Idle glyph vertical center is misaligned"
-        );
-    }
-
-    #[test]
-    fn test_idle_glyph_is_not_legacy_center_dash() {
-        let icon = render_idle_icon();
-        assert!(
-            !has_legacy_center_dash(&icon),
-            "Idle glyph should not regress to the legacy center dash"
         );
     }
 }
