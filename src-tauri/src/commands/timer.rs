@@ -1800,8 +1800,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_start_work_persistence_failure_records_production_runtime_effect_order() {
-        let temp_dir = create_temp_dir("start-work-ordering-save-fails");
+    async fn test_start_work_persistence_failure_does_not_roll_back_started_session() {
+        let temp_dir = create_temp_dir("start-work-save-fails-keeps-started-session");
         let invalid_app_data_path = temp_dir.join("app-data-file");
         std::fs::write(&invalid_app_data_path, "not a directory")
             .expect("invalid app data file should be created");
@@ -1824,17 +1824,16 @@ mod tests {
         )
         .await;
 
-        assert!(matches!(result, Err(PomoliceError::PersistenceSave(_))));
-        assert_eq!(
-            runtime_effect_shell.events(),
-            &[
-                RuntimeEffectEvent::EmitTick,
-                RuntimeEffectEvent::UpdateTray,
-                RuntimeEffectEvent::EmitWorkStarted,
-                RuntimeEffectEvent::SpawnTimerTask,
-                RuntimeEffectEvent::Persist,
-            ]
-        );
+        assert_persistence_save_error(&result);
+
+        let full_state = {
+            let timer_manager = state.timer_manager.lock().await;
+            timer_manager.get_full_state()
+        };
+
+        assert_eq!(full_state.status, TimerStatus::Working);
+        assert_eq!(full_state.session_type, SessionType::Work);
+        assert_eq!(full_state.remaining_seconds, 1500);
 
         cleanup_temp_dir(&temp_dir);
     }
