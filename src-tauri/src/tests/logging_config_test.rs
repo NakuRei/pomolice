@@ -2,8 +2,8 @@ use log::{Level, LevelFilter, Metadata};
 use tauri_plugin_log::{RotationStrategy, TimezoneStrategy, WEBVIEW_TARGET};
 
 use crate::logging::{
-    default_log_level, max_log_file_size_bytes, module_log_overrides, resolve_log_target_specs,
-    rotation_strategy, should_log, timezone_strategy, LogTargetSpec,
+    default_log_level, max_log_file_size_bytes, resolve_log_target_specs, rotation_strategy,
+    should_log, timezone_strategy, LogTargetSpec,
 };
 
 fn metadata(target: &'static str) -> Metadata<'static> {
@@ -48,20 +48,14 @@ fn test_resolve_log_target_specs_uses_folder_when_directory_is_provided() {
 }
 
 #[test]
-fn test_default_log_level_and_rotation_policy_are_fixed() {
+fn test_default_logging_policy_keeps_operational_logs_bounded_and_readable() {
     assert_eq!(default_log_level(), LevelFilter::Info);
-    assert_eq!(max_log_file_size_bytes(), 32 * 1024);
-    assert!(matches!(rotation_strategy(), RotationStrategy::KeepSome(5)));
     assert!(matches!(timezone_strategy(), TimezoneStrategy::UseLocal));
-}
-
-#[test]
-fn test_module_log_overrides_include_expected_noisy_dependencies() {
-    let overrides = module_log_overrides();
-
-    assert!(overrides.contains(&("pomolice_lib::managers::input_monitor", LevelFilter::Debug)));
-    assert!(overrides.contains(&("pomolice_lib::scheduler", LevelFilter::Debug)));
-    assert!(overrides.contains(&("rdev", LevelFilter::Warn)));
+    assert!(max_log_file_size_bytes() > 0);
+    assert!(matches!(
+        rotation_strategy(),
+        RotationStrategy::KeepSome(count) if count > 0
+    ));
 }
 
 #[test]

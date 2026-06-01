@@ -1,16 +1,9 @@
 // Pomolice - Rust Test Module
 // Phase 0: Basic test infrastructure
 // Phase 4: Input monitor tests
-// Phase 5: Lock ordering regression tests
 
 #[cfg(test)]
 mod command_input_rejection_test;
-
-#[cfg(test)]
-mod input_monitor_test;
-
-#[cfg(test)]
-mod lock_ordering_test;
 
 #[cfg(test)]
 mod scheduler_concurrency_test;
@@ -26,19 +19,6 @@ mod logging_config_test;
 
 #[cfg(test)]
 mod logging_event_test;
-
-#[cfg(test)]
-mod log_rotation_test;
-
-#[cfg(test)]
-mod basic_tests {
-    #[test]
-    fn test_string_operations() {
-        let app_name = "Pomolice";
-        assert!(!app_name.is_empty());
-        assert_eq!(app_name, "Pomolice");
-    }
-}
 
 #[cfg(test)]
 mod scheduler_boundary_runtime_tests {

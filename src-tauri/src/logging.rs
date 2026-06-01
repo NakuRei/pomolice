@@ -59,14 +59,6 @@ pub(crate) fn build_log_builder(
     builder
 }
 
-#[cfg(test)]
-pub(crate) fn build_log_builder_for_directory(
-    log_directory: &Path,
-    is_dev: bool,
-) -> tauri_plugin_log::Builder {
-    build_log_builder(is_dev, Some(log_directory))
-}
-
 pub(crate) fn resolve_log_target_specs(
     is_dev: bool,
     log_directory: Option<&Path>,

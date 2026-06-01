@@ -303,13 +303,4 @@ mod tests {
 
         assert!(!serialized.contains("simulated persistence worker panic"));
     }
-
-    #[test]
-    fn test_result_type_ok() {
-        let result = Ok::<i32, PomoliceError>(42);
-        match result {
-            Ok(value) => assert_eq!(value, 42),
-            Err(error) => panic!("expected Ok(42), got error: {error}"),
-        }
-    }
 }
