@@ -137,11 +137,6 @@ impl BackendLogEvent {
     }
 
     #[cfg(test)]
-    pub(crate) fn message_template(self) -> &'static str {
-        self.spec().message_template
-    }
-
-    #[cfg(test)]
     pub(crate) fn allowed_fields(self) -> &'static [BackendLogFieldSpec] {
         self.spec().allowed_fields
     }
