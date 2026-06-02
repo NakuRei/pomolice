@@ -3,7 +3,7 @@
  * Phase 5: Multi-step skip confirmation flow
  */
 
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import {
   generateEasyProblem,
   generateHardProblem,
@@ -25,7 +25,21 @@ function parseQuestionOperands(question: string): [number, number] | null {
   return [Number(firstOperand), Number(secondOperand)];
 }
 
+function getQuestionOperands(question: string): [number, number] {
+  const operands = parseQuestionOperands(question);
+  expect(operands).not.toBeNull();
+  if (operands === null) {
+    throw new Error(`Expected two operands in question: ${question}`);
+  }
+
+  return operands;
+}
+
 describe("mathGenerator", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   describe("generateEasyProblem", () => {
     it("should generate a problem with valid structure", () => {
       const problem = generateEasyProblem();
@@ -56,50 +70,24 @@ describe("mathGenerator", () => {
     });
 
     it("should generate addition problems", () => {
-      let foundAddition = false;
+      vi.spyOn(Math, "random").mockReturnValue(0.4);
 
-      // Generate multiple problems to find addition
-      for (let i = 0; i < 50; i++) {
-        const problem = generateEasyProblem();
-        if (problem.question.includes("+")) {
-          foundAddition = true;
+      const problem = generateEasyProblem();
 
-          // Verify addition is correct
-          const operands = parseQuestionOperands(problem.question);
-          expect(operands).not.toBeNull();
-          if (operands === null) break;
-          const [a, b] = operands;
-          expect(problem.answer).toBe(a + b);
-          break;
-        }
-      }
-
-      expect(foundAddition).toBe(true);
+      expect(problem.question).toContain("+");
+      const [a, b] = getQuestionOperands(problem.question);
+      expect(problem.answer).toBe(a + b);
     });
 
     it("should generate subtraction problems", () => {
-      let foundSubtraction = false;
+      vi.spyOn(Math, "random").mockReturnValue(0.6);
 
-      // Generate multiple problems to find subtraction
-      for (let i = 0; i < 50; i++) {
-        const problem = generateEasyProblem();
-        if (problem.question.includes("-")) {
-          foundSubtraction = true;
+      const problem = generateEasyProblem();
 
-          // Verify subtraction is correct
-          const operands = parseQuestionOperands(problem.question);
-          expect(operands).not.toBeNull();
-          if (operands === null) break;
-          const [a, b] = operands;
-          expect(problem.answer).toBe(a - b);
-
-          // Verify result is positive
-          expect(problem.answer).toBeGreaterThan(0);
-          break;
-        }
-      }
-
-      expect(foundSubtraction).toBe(true);
+      expect(problem.question).toContain("-");
+      const [a, b] = getQuestionOperands(problem.question);
+      expect(problem.answer).toBe(a - b);
+      expect(problem.answer).toBeGreaterThan(0);
     });
 
     it("should have correct answer for generated problems", () => {
@@ -130,59 +118,31 @@ describe("mathGenerator", () => {
     });
 
     it("should generate multiplication problems", () => {
-      let foundMultiplication = false;
+      vi.spyOn(Math, "random").mockReturnValue(0.4);
 
-      // Generate multiple problems to find multiplication
-      for (let i = 0; i < 50; i++) {
-        const problem = generateHardProblem();
-        if (problem.question.includes("×")) {
-          foundMultiplication = true;
+      const problem = generateHardProblem();
 
-          // Verify multiplication is correct
-          const operands = parseQuestionOperands(problem.question);
-          expect(operands).not.toBeNull();
-          if (operands === null) break;
-          const [a, b] = operands;
-          expect(problem.answer).toBe(a * b);
-
-          // Check multiplication range (2-12)
-          expect(a).toBeGreaterThanOrEqual(2);
-          expect(a).toBeLessThanOrEqual(12);
-          expect(b).toBeGreaterThanOrEqual(2);
-          expect(b).toBeLessThanOrEqual(12);
-          break;
-        }
-      }
-
-      expect(foundMultiplication).toBe(true);
+      expect(problem.question).toContain("×");
+      const [a, b] = getQuestionOperands(problem.question);
+      expect(problem.answer).toBe(a * b);
+      expect(a).toBeGreaterThanOrEqual(2);
+      expect(a).toBeLessThanOrEqual(12);
+      expect(b).toBeGreaterThanOrEqual(2);
+      expect(b).toBeLessThanOrEqual(12);
     });
 
     it("should generate large subtraction problems", () => {
-      let foundSubtraction = false;
+      vi.spyOn(Math, "random").mockReturnValue(0.6);
 
-      // Generate multiple problems to find subtraction
-      for (let i = 0; i < 50; i++) {
-        const problem = generateHardProblem();
-        if (problem.question.includes("-")) {
-          foundSubtraction = true;
+      const problem = generateHardProblem();
 
-          // Verify subtraction is correct
-          const operands = parseQuestionOperands(problem.question);
-          expect(operands).not.toBeNull();
-          if (operands === null) break;
-          const [a, b] = operands;
-          expect(problem.answer).toBe(a - b);
-
-          // Check subtraction range (100-200 minus 20-80)
-          expect(a).toBeGreaterThanOrEqual(100);
-          expect(a).toBeLessThanOrEqual(200);
-          expect(b).toBeGreaterThanOrEqual(20);
-          expect(b).toBeLessThanOrEqual(80);
-          break;
-        }
-      }
-
-      expect(foundSubtraction).toBe(true);
+      expect(problem.question).toContain("-");
+      const [a, b] = getQuestionOperands(problem.question);
+      expect(problem.answer).toBe(a - b);
+      expect(a).toBeGreaterThanOrEqual(100);
+      expect(a).toBeLessThanOrEqual(200);
+      expect(b).toBeGreaterThanOrEqual(20);
+      expect(b).toBeLessThanOrEqual(80);
     });
 
     it("should have correct answer for generated problems", () => {
