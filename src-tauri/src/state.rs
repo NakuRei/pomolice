@@ -55,6 +55,9 @@ struct StartupPreparation {
     initialization_outcome: AppInitializationOutcome,
 }
 
+#[cfg(test)]
+type RuntimeSaveSnapshotReadyHook = Arc<dyn Fn() + Send + Sync>;
+
 #[derive(Default)]
 struct OrderedSaveLaneState {
     next_to_run: u64,
@@ -192,11 +195,6 @@ impl OrderedSaveLane {
         self.inner.condvar.notify_all();
         self.inner.notify.notify_waiters();
     }
-
-    #[cfg(test)]
-    fn issued_ticket_count(&self) -> u64 {
-        self.inner.next_ticket.load(Ordering::Acquire)
-    }
 }
 
 impl OrderedSaveTicket {
@@ -241,6 +239,8 @@ pub(crate) struct AppState {
     restored_running_saved_at_local: StdMutex<Option<DateTime<Local>>>,
     pub config_revision: AtomicU64,
     ordered_save_lane: OrderedSaveLane,
+    #[cfg(test)]
+    runtime_save_snapshot_ready_hook: Option<RuntimeSaveSnapshotReadyHook>,
     break_mode_transition_permit: Arc<Semaphore>,
 }
 
@@ -294,8 +294,19 @@ impl AppState {
             restored_running_saved_at_local: StdMutex::new(restored_running_saved_at_local),
             config_revision: AtomicU64::new(0),
             ordered_save_lane: OrderedSaveLane::default(),
+            #[cfg(test)]
+            runtime_save_snapshot_ready_hook: None,
             break_mode_transition_permit: Arc::new(Semaphore::new(1)),
         }
+    }
+
+    #[cfg(test)]
+    fn with_runtime_save_snapshot_ready_hook_for_tests(
+        mut self,
+        hook: RuntimeSaveSnapshotReadyHook,
+    ) -> Self {
+        self.runtime_save_snapshot_ready_hook = Some(hook);
+        self
     }
 
     /// Stops the scheduler task by canceling the token and taking ownership
@@ -323,6 +334,11 @@ impl AppState {
         let ticket = self.ordered_save_lane.issue_ticket();
         let timer_state = self.snapshot_timer_state().await;
         let persistence = self.persistence.clone();
+
+        #[cfg(test)]
+        if let Some(hook) = &self.runtime_save_snapshot_ready_hook {
+            hook();
+        }
 
         ticket.wait_turn_async().await;
 
@@ -664,8 +680,42 @@ mod tests {
         (before_save_hook, first_save_blocked, release_first_save)
     }
 
+    fn build_second_runtime_save_snapshot_ready_hook(
+    ) -> (RuntimeSaveSnapshotReadyHook, Arc<StdAtomicBool>) {
+        let second_runtime_save_snapshot_ready = Arc::new(StdAtomicBool::new(false));
+        let runtime_save_snapshot_count = Arc::new(AtomicUsize::new(0));
+        let snapshot_ready_hook = {
+            let second_runtime_save_snapshot_ready =
+                Arc::clone(&second_runtime_save_snapshot_ready);
+            let runtime_save_snapshot_count = Arc::clone(&runtime_save_snapshot_count);
+
+            Arc::new(move || {
+                let call_index = runtime_save_snapshot_count.fetch_add(1, Ordering::AcqRel);
+                if call_index == 1 {
+                    second_runtime_save_snapshot_ready.store(true, Ordering::Release);
+                }
+            }) as RuntimeSaveSnapshotReadyHook
+        };
+
+        (snapshot_ready_hook, second_runtime_save_snapshot_ready)
+    }
+
     async fn build_app_state_with_blocked_first_save(
         test_name: &str,
+    ) -> (Arc<AppState>, PathBuf, Arc<StdAtomicBool>, SaveReleaseGate) {
+        build_blocked_first_save_app_state(test_name, None).await
+    }
+
+    async fn build_app_state_with_blocked_first_save_and_snapshot_ready_hook(
+        test_name: &str,
+        snapshot_ready_hook: RuntimeSaveSnapshotReadyHook,
+    ) -> (Arc<AppState>, PathBuf, Arc<StdAtomicBool>, SaveReleaseGate) {
+        build_blocked_first_save_app_state(test_name, Some(snapshot_ready_hook)).await
+    }
+
+    async fn build_blocked_first_save_app_state(
+        test_name: &str,
+        snapshot_ready_hook: Option<RuntimeSaveSnapshotReadyHook>,
     ) -> (Arc<AppState>, PathBuf, Arc<StdAtomicBool>, SaveReleaseGate) {
         let temp_dir = create_temp_dir(test_name);
         let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
@@ -673,8 +723,12 @@ mod tests {
             build_blocked_first_save_hook();
         let persistence = PersistenceManager::new(as_clock_trait(&clock), Some(temp_dir.clone()))
             .with_before_save_hook(before_save_hook);
-        let (app_state, _) =
+        let (mut app_state, _) =
             build_startup_state_for_tests_with_persistence(Arc::clone(&clock), persistence).await;
+        if let Some(snapshot_ready_hook) = snapshot_ready_hook {
+            app_state =
+                app_state.with_runtime_save_snapshot_ready_hook_for_tests(snapshot_ready_hook);
+        }
 
         (
             Arc::new(app_state),
@@ -747,21 +801,6 @@ mod tests {
                 return;
             }
             tokio::time::sleep(StdDuration::from_millis(10)).await;
-        }
-
-        panic!("timed out waiting for {context}");
-    }
-
-    async fn wait_until_ticket_count_reaches(
-        lane: &OrderedSaveLane,
-        expected_count: u64,
-        context: &str,
-    ) {
-        for _ in 0..100 {
-            if lane.issued_ticket_count() >= expected_count {
-                return;
-            }
-            tokio::task::yield_now().await;
         }
 
         panic!("timed out waiting for {context}");
@@ -1140,11 +1179,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_cancelled_runtime_save_before_save_execution_does_not_commit_and_releases_ordered_lane(
-    ) {
+    async fn test_cancelled_pre_execution_save_does_not_commit_or_block_later_save() {
+        let (snapshot_ready_hook, cancelled_save_snapshot_ready) =
+            build_second_runtime_save_snapshot_ready_hook();
         let (app_state, temp_dir, first_save_blocked, release_first_save) =
-            build_app_state_with_blocked_first_save("cancelled-runtime-save-before-execution")
-                .await;
+            build_app_state_with_blocked_first_save_and_snapshot_ready_hook(
+                "cancelled-runtime-save-before-execution",
+                snapshot_ready_hook,
+            )
+            .await;
         apply_working_timer_state(&app_state, 111).await;
 
         let first_save = {
@@ -1160,10 +1203,9 @@ mod tests {
             tokio::spawn(async move { app_state.persist_current_state_async().await })
         };
 
-        wait_until_ticket_count_reaches(
-            &app_state.ordered_save_lane,
-            2,
-            "the cancelled runtime save to issue its ticket",
+        wait_until_flag_is_set(
+            &cancelled_save_snapshot_ready,
+            "the cancelled runtime save to reach the pre-execution checkpoint",
         )
         .await;
         cancelled_save.abort();
@@ -1190,7 +1232,7 @@ mod tests {
             .expect("first runtime save should succeed");
         tokio::time::timeout(StdDuration::from_secs(1), third_save)
             .await
-            .expect("a cancelled pre-dispatch save must release the ordered lane")
+            .expect("a cancelled pre-execution save must not block later runtime saves")
             .expect("third runtime save task should complete")
             .expect("third runtime save should succeed");
 
