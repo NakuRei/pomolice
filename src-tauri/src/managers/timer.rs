@@ -1001,7 +1001,8 @@ mod tests {
     #[test]
     fn test_transition_to_idle_after_break_sets_work_preview_and_waiting_decision_contract() {
         let mut mgr = make_manager();
-        let settings = make_settings(1500, 300, 900, 4);
+        let expected_work_preview_secs = 1800;
+        let settings = make_settings(expected_work_preview_secs, 300, 900, 4);
         mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
             .unwrap();
         mgr.transition_to_break();
@@ -1020,10 +1021,7 @@ mod tests {
         assert!(payload.post_break_decision_pending);
         assert_eq!(mgr.state.status, TimerStatus::Idle);
         assert_eq!(mgr.state.session_type, SessionType::Work);
-        assert_eq!(
-            mgr.state.remaining_seconds,
-            mgr.state.settings.work_duration_secs.get()
-        );
+        assert_eq!(mgr.state.remaining_seconds, expected_work_preview_secs);
         assert!(mgr.state.post_break_decision_pending);
         assert!(!mgr.state.is_fullscreen_break);
     }
@@ -1056,9 +1054,11 @@ mod tests {
     #[test]
     fn test_complete_break_session_transition_waits_for_manual_decision_when_policy_requires() {
         let mut mgr = make_manager();
+        let expected_work_preview_secs = 1800;
         mgr.state.status = TimerStatus::OnBreak;
         mgr.state.session_type = SessionType::ShortBreak;
         mgr.state.current_cycle = 2;
+        mgr.state.settings = make_settings(expected_work_preview_secs, 300, 900, 4);
         mgr.state.settings.post_break_transition_policy =
             PostBreakTransitionPolicy::RequireManualContinue;
 
@@ -1073,20 +1073,19 @@ mod tests {
         assert!(payload.requires_manual_continue_decision);
         assert_eq!(mgr.state.status, TimerStatus::Idle);
         assert_eq!(mgr.state.session_type, SessionType::Work);
-        assert_eq!(
-            mgr.state.remaining_seconds,
-            mgr.state.settings.work_duration_secs.get()
-        );
+        assert_eq!(mgr.state.remaining_seconds, expected_work_preview_secs);
         assert!(mgr.state.post_break_decision_pending);
     }
 
     #[test]
     fn test_complete_break_session_transition_auto_starts_work_and_resets_long_break_cycle() {
         let mut mgr = make_manager();
+        let expected_work_preview_secs = 1800;
         mgr.state.status = TimerStatus::OnBreak;
         mgr.state.session_type = SessionType::LongBreak;
         mgr.state.current_cycle = 4;
         mgr.state.timer_start_source = Some(TimerStartSource::ManualInsideWindow);
+        mgr.state.settings = make_settings(expected_work_preview_secs, 300, 900, 4);
         mgr.state.settings.post_break_transition_policy =
             PostBreakTransitionPolicy::StartNextWorkAutomatically;
         mgr.state.post_break_decision_pending = true;
@@ -1104,10 +1103,7 @@ mod tests {
         assert!(!payload.requires_manual_continue_decision);
         assert_eq!(mgr.state.status, TimerStatus::Working);
         assert_eq!(mgr.state.session_type, SessionType::Work);
-        assert_eq!(
-            mgr.state.remaining_seconds,
-            mgr.state.settings.work_duration_secs.get()
-        );
+        assert_eq!(mgr.state.remaining_seconds, expected_work_preview_secs);
         assert_eq!(mgr.state.current_cycle, 1);
         assert!(!mgr.state.post_break_decision_pending);
         assert!(!mgr.state.is_fullscreen_break);
@@ -1219,9 +1215,11 @@ mod tests {
     #[test]
     fn test_resolve_post_break_decision_stop_cycle_returns_idle_preview() {
         let mut mgr = make_manager();
+        let expected_work_preview_secs = 1800;
         mgr.state.status = TimerStatus::Idle;
         mgr.state.post_break_decision_pending = true;
         mgr.state.current_cycle = 2;
+        mgr.state.settings = make_settings(expected_work_preview_secs, 300, 900, 4);
 
         let payload = mgr
             .resolve_post_break_decision(PostBreakDecisionAction::StopCycle)
@@ -1231,10 +1229,7 @@ mod tests {
         assert_eq!(mgr.state.status, TimerStatus::Idle);
         assert_eq!(mgr.state.session_type, SessionType::Work);
         assert_eq!(mgr.state.current_cycle, 2);
-        assert_eq!(
-            mgr.state.remaining_seconds,
-            mgr.state.settings.work_duration_secs.get()
-        );
+        assert_eq!(mgr.state.remaining_seconds, expected_work_preview_secs);
         assert!(!mgr.state.post_break_decision_pending);
     }
 
@@ -1479,6 +1474,7 @@ mod tests {
     #[test]
     fn test_transition_to_idle_due_to_scheduled_stop_from_work_cleans_up_and_skips_dialog() {
         let mut mgr = make_manager();
+        let expected_work_preview_secs = 1800;
         mgr.state.status = TimerStatus::Working;
         mgr.state.session_type = SessionType::Work;
         mgr.state.remaining_seconds = 0;
@@ -1487,6 +1483,7 @@ mod tests {
         mgr.state.post_break_decision_pending = false;
         mgr.state.timer_start_source = Some(TimerStartSource::ManualInsideWindow);
         mgr.state.scheduled_stop_state = ScheduledStopState::Pending;
+        mgr.state.settings = make_settings(expected_work_preview_secs, 300, 900, 4);
 
         let payload = mgr.transition_to_idle_due_to_scheduled_stop(SessionType::Work);
 
@@ -1501,10 +1498,7 @@ mod tests {
         assert!(!payload.post_break_decision_pending);
         assert_eq!(mgr.state.status, TimerStatus::Idle);
         assert_eq!(mgr.state.session_type, SessionType::Work);
-        assert_eq!(
-            mgr.state.remaining_seconds,
-            mgr.state.settings.work_duration_secs.get()
-        );
+        assert_eq!(mgr.state.remaining_seconds, expected_work_preview_secs);
         assert_eq!(mgr.state.completed_pomodoros, 4);
         assert!(!mgr.state.post_break_decision_pending);
         assert_eq!(mgr.state.timer_start_source, None);

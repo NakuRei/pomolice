@@ -1539,10 +1539,11 @@ mod tests {
     async fn test_sync_timer_duration_settings_command_side_effects() {
         let state = build_test_state_without_persistence_path().await;
         let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+        let expected_work_duration_secs = command_work_duration_secs();
 
         sync_timer_duration_settings_with_runtime_effects(
             &state,
-            command_work_duration_secs(),
+            expected_work_duration_secs,
             command_short_break_duration_secs(),
             command_long_break_duration_secs(),
             command_long_break_interval(),
@@ -1565,11 +1566,11 @@ mod tests {
         assert_eq!(timer.status(), TimerStatus::Idle);
         assert_eq!(
             timer.get_state().settings.work_duration_secs,
-            command_work_duration_secs()
+            expected_work_duration_secs
         );
         assert_eq!(
             runtime_effect_shell.emitted_tick_snapshots[0].remaining_seconds,
-            command_work_duration_secs().get()
+            expected_work_duration_secs.get()
         );
     }
 
