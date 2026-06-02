@@ -11,6 +11,25 @@ use crate::logging_event::{log_error_event, log_info_event, BackendLogEvent};
 
 const INPUT_MONITOR_MAX_BACKOFF: Duration = Duration::from_secs(30);
 
+type InputEventCallback = Box<dyn FnMut(Event) + Send + 'static>;
+
+trait InputMonitorRuntime: Send + Sync {
+    fn listen(&self, callback: InputEventCallback) -> Result<(), String>;
+    fn sleep(&self, duration: Duration);
+}
+
+struct RdevInputMonitorRuntime;
+
+impl InputMonitorRuntime for RdevInputMonitorRuntime {
+    fn listen(&self, callback: InputEventCallback) -> Result<(), String> {
+        listen(callback).map_err(|error| format!("{error:?}"))
+    }
+
+    fn sleep(&self, duration: Duration) {
+        thread::sleep(duration);
+    }
+}
+
 #[derive(Default, Clone)]
 struct ModifierState {
     ctrl: bool,
@@ -55,6 +74,7 @@ pub(crate) struct InputMonitorManager {
     on_escape_combo: Arc<dyn Fn() + Send + Sync>,
     /// Called when any input event (key, mouse, wheel) is detected during break.
     on_input_detected: Arc<dyn Fn() + Send + Sync>,
+    runtime: Arc<dyn InputMonitorRuntime>,
 }
 
 impl InputMonitorManager {
@@ -66,6 +86,18 @@ impl InputMonitorManager {
         on_escape_combo: impl Fn() + Send + Sync + 'static,
         on_input_detected: impl Fn() + Send + Sync + 'static,
     ) -> Self {
+        Self::new_with_runtime(
+            on_escape_combo,
+            on_input_detected,
+            Arc::new(RdevInputMonitorRuntime),
+        )
+    }
+
+    fn new_with_runtime(
+        on_escape_combo: impl Fn() + Send + Sync + 'static,
+        on_input_detected: impl Fn() + Send + Sync + 'static,
+        runtime: Arc<dyn InputMonitorRuntime>,
+    ) -> Self {
         Self {
             enabled: Arc::new(AtomicBool::new(false)),
             listener_alive: Arc::new(AtomicBool::new(false)),
@@ -73,6 +105,7 @@ impl InputMonitorManager {
             modifier_state: Arc::new(parking_lot::Mutex::new(ModifierState::default())),
             on_escape_combo: Arc::new(on_escape_combo),
             on_input_detected: Arc::new(on_input_detected),
+            runtime,
         }
     }
 
@@ -102,20 +135,21 @@ impl InputMonitorManager {
         let modifier_state = Arc::clone(&self.modifier_state);
         let on_escape_combo = Arc::clone(&self.on_escape_combo);
         let on_input_detected = Arc::clone(&self.on_input_detected);
+        let runtime = Arc::clone(&self.runtime);
 
         thread::spawn(move || {
             let mut backoff = Duration::from_secs(1);
 
             loop {
-                let callback = build_event_callback(
+                let callback: InputEventCallback = Box::new(build_event_callback(
                     Arc::clone(&enabled),
                     Arc::clone(&modifier_state),
                     Arc::clone(&on_escape_combo),
                     Arc::clone(&on_input_detected),
-                );
+                ));
 
                 log_info_event(BackendLogEvent::InputMonitoringListenerStarted, &[]);
-                match listen(callback) {
+                match runtime.listen(callback) {
                     Ok(()) => {
                         // rdev returned cleanly. Treat as a stop signal.
                         log_info_event(BackendLogEvent::InputMonitoringListenerStoppedCleanly, &[]);
@@ -131,13 +165,10 @@ impl InputMonitorManager {
                         }
                         log_error_event(
                             BackendLogEvent::InputMonitoringListenerFailed,
-                            &[
-                                ("backoff", format!("{backoff:?}")),
-                                ("error_message", format!("{e:?}")),
-                            ],
+                            &[("backoff", format!("{backoff:?}")), ("error_message", e)],
                             None,
                         );
-                        thread::sleep(backoff);
+                        runtime.sleep(backoff);
                         backoff = (backoff * 2).min(INPUT_MONITOR_MAX_BACKOFF);
                     }
                 }
@@ -249,9 +280,200 @@ fn build_event_callback(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::{Arc as StdArc, Mutex as StdMutex};
 
     fn make_manager() -> InputMonitorManager {
         InputMonitorManager::new(|| {}, || {})
+    }
+
+    fn make_manager_with_runtime(
+        runtime: RecordingInputMonitorRuntime,
+        on_input_detected: impl Fn() + Send + Sync + 'static,
+    ) -> InputMonitorManager {
+        InputMonitorManager::new_with_runtime(|| {}, on_input_detected, StdArc::new(runtime))
+    }
+
+    enum ListenStep {
+        BlockThenOk,
+        BlockThenErr(&'static str),
+        ReturnOk,
+    }
+
+    #[derive(Clone)]
+    struct RecordingInputMonitorRuntime {
+        inner: StdArc<StdMutex<RecordingInputMonitorRuntimeState>>,
+    }
+
+    #[derive(Default)]
+    struct RecordingInputMonitorRuntimeState {
+        listen_steps: VecDeque<ListenStep>,
+        listen_call_count: usize,
+        completed_listen_call_count: usize,
+        blocked_listen_call_count: usize,
+        released_blocking_listen_call_count: usize,
+        sleep_call_count: usize,
+        active_callback: Option<InputEventCallback>,
+    }
+
+    impl RecordingInputMonitorRuntime {
+        fn with_steps(steps: impl IntoIterator<Item = ListenStep>) -> Self {
+            Self {
+                inner: StdArc::new(StdMutex::new(RecordingInputMonitorRuntimeState {
+                    listen_steps: steps.into_iter().collect(),
+                    ..RecordingInputMonitorRuntimeState::default()
+                })),
+            }
+        }
+
+        fn listen_call_count(&self) -> usize {
+            self.inner
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .listen_call_count
+        }
+
+        fn sleep_call_count(&self) -> usize {
+            self.inner
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .sleep_call_count
+        }
+
+        fn wait_for_listen_call_count(&self, expected_count: usize, context: &str) {
+            for _ in 0..100 {
+                if self.listen_call_count() >= expected_count {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+
+            panic!("timed out waiting for {context}");
+        }
+
+        fn wait_for_completed_listen_call_count(&self, expected_count: usize, context: &str) {
+            for _ in 0..100 {
+                let completed_count = self
+                    .inner
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .completed_listen_call_count;
+                if completed_count >= expected_count {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+
+            panic!("timed out waiting for {context}");
+        }
+
+        fn release_next_listener(&self) {
+            let mut runtime_state = self
+                .inner
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            runtime_state.released_blocking_listen_call_count += 1;
+        }
+
+        fn dispatch_event(&self, event: Event) {
+            let mut runtime_state = self
+                .inner
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let Some(callback) = runtime_state.active_callback.as_mut() else {
+                panic!("listener callback should be active");
+            };
+            callback(event);
+        }
+
+        fn wait_until_released(&self, block_index: usize) {
+            loop {
+                let is_released = self
+                    .inner
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .released_blocking_listen_call_count
+                    >= block_index;
+                if is_released {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+
+        fn complete_listen_call(&self) {
+            let mut runtime_state = self
+                .inner
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            runtime_state.active_callback = None;
+            runtime_state.completed_listen_call_count += 1;
+        }
+    }
+
+    impl InputMonitorRuntime for RecordingInputMonitorRuntime {
+        fn listen(&self, callback: InputEventCallback) -> Result<(), String> {
+            let (block_index, step) = {
+                let mut runtime_state = self
+                    .inner
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let step = runtime_state
+                    .listen_steps
+                    .pop_front()
+                    .unwrap_or(ListenStep::ReturnOk);
+                runtime_state.listen_call_count += 1;
+                runtime_state.active_callback = Some(callback);
+                let block_index = match step {
+                    ListenStep::BlockThenOk | ListenStep::BlockThenErr(_) => {
+                        runtime_state.blocked_listen_call_count += 1;
+                        Some(runtime_state.blocked_listen_call_count)
+                    }
+                    ListenStep::ReturnOk => None,
+                };
+                (block_index, step)
+            };
+
+            match step {
+                ListenStep::BlockThenOk => {
+                    let Some(block_index) = block_index else {
+                        panic!("blocking listen should have index");
+                    };
+                    self.wait_until_released(block_index);
+                    self.complete_listen_call();
+                    Ok(())
+                }
+                ListenStep::BlockThenErr(error_message) => {
+                    let Some(block_index) = block_index else {
+                        panic!("blocking listen should have index");
+                    };
+                    self.wait_until_released(block_index);
+                    self.complete_listen_call();
+                    Err(error_message.to_string())
+                }
+                ListenStep::ReturnOk => {
+                    self.complete_listen_call();
+                    Ok(())
+                }
+            }
+        }
+
+        fn sleep(&self, _duration: Duration) {
+            let mut runtime_state = self
+                .inner
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            runtime_state.sleep_call_count += 1;
+        }
+    }
+
+    fn mouse_move_event() -> Event {
+        Event {
+            time: std::time::SystemTime::now(),
+            name: None,
+            event_type: EventType::MouseMove { x: 1.0, y: 1.0 },
+        }
     }
 
     #[test]
@@ -414,57 +636,119 @@ mod tests {
 
     #[test]
     fn test_start_is_idempotent() {
-        let mut mgr = make_manager();
+        let runtime = RecordingInputMonitorRuntime::with_steps([ListenStep::BlockThenOk]);
+        let mut mgr = make_manager_with_runtime(runtime.clone(), || {});
+
         mgr.start();
-        // listener_alive is true after the first start (thread was spawned)
-        assert!(mgr.listener_alive.load(Ordering::SeqCst));
-        // Second start must not spawn a second thread
+        runtime.wait_for_listen_call_count(1, "the first input listener start");
+
         mgr.start();
-        // Cleanup
+        std::thread::sleep(Duration::from_millis(50));
+
+        assert_eq!(
+            runtime.listen_call_count(),
+            1,
+            "repeated start must not spawn another listener while one is active"
+        );
+
         mgr.stop();
+        runtime.release_next_listener();
+        runtime.wait_for_completed_listen_call_count(1, "the active input listener to stop");
     }
 
     #[test]
-    fn test_stop_clears_enabled_flag_and_sets_shutdown_requested() {
-        let mut mgr = make_manager();
+    fn test_stop_disables_input_callbacks() {
+        let runtime = RecordingInputMonitorRuntime::with_steps([ListenStep::BlockThenOk]);
+        let input_event_count = StdArc::new(AtomicUsize::new(0));
+        let input_event_count_for_callback = StdArc::clone(&input_event_count);
+        let mut mgr = make_manager_with_runtime(runtime.clone(), move || {
+            input_event_count_for_callback.fetch_add(1, Ordering::SeqCst);
+        });
+
         mgr.start();
-        assert!(mgr.enabled.load(Ordering::SeqCst));
+        runtime.wait_for_listen_call_count(1, "the input listener callback to become active");
+        runtime.dispatch_event(mouse_move_event());
+        assert_eq!(input_event_count.load(Ordering::SeqCst), 1);
 
         mgr.stop();
-        assert!(!mgr.enabled.load(Ordering::SeqCst));
-        // stop() must signal the supervisor loop to exit.
-        assert!(mgr.shutdown_requested.load(Ordering::SeqCst));
+        runtime.dispatch_event(mouse_move_event());
+        assert_eq!(
+            input_event_count.load(Ordering::SeqCst),
+            1,
+            "stop must disable input callbacks while the listener is still alive"
+        );
+
+        runtime.release_next_listener();
+        runtime.wait_for_completed_listen_call_count(1, "the stopped input listener to return");
     }
 
     #[test]
-    fn test_stop_on_already_stopped_does_not_set_shutdown_requested() {
-        let mut mgr = make_manager();
-        // stop() on a never-started manager: enabled was already false, so the
-        // early-return guard fires and shutdown_requested must stay false.
+    fn test_stop_on_already_stopped_does_not_start_listener() {
+        let runtime = RecordingInputMonitorRuntime::with_steps([]);
+        let mut mgr = make_manager_with_runtime(runtime.clone(), || {});
+
         mgr.stop();
-        assert!(!mgr.shutdown_requested.load(Ordering::SeqCst));
+        mgr.stop();
+
+        assert_eq!(
+            runtime.listen_call_count(),
+            0,
+            "stopping an inactive manager must not start a listener"
+        );
     }
 
     #[test]
-    fn test_start_after_stop_resets_shutdown_requested() {
-        let mut mgr = make_manager();
-        // Simulate a start → stop cycle.
-        mgr.start();
-        mgr.stop();
-        assert!(mgr.shutdown_requested.load(Ordering::SeqCst));
-
-        // Manually clear listener_alive so start() treats the thread as dead
-        // (in production the thread sets this; here the rdev thread is blocked
-        // so we simulate thread exit to test the start() reset path).
-        mgr.listener_alive.store(false, Ordering::SeqCst);
+    fn test_stop_before_listener_error_prevents_retry() {
+        let runtime =
+            RecordingInputMonitorRuntime::with_steps([ListenStep::BlockThenErr("listen failed")]);
+        let mut mgr = make_manager_with_runtime(runtime.clone(), || {});
 
         mgr.start();
-        // start() must reset shutdown_requested before spawning.
-        assert!(!mgr.shutdown_requested.load(Ordering::SeqCst));
+        runtime.wait_for_listen_call_count(1, "the first input listener start");
         mgr.stop();
+        runtime.release_next_listener();
+        runtime.wait_for_completed_listen_call_count(1, "the failed input listener to return");
+        std::thread::sleep(Duration::from_millis(50));
+
+        assert_eq!(
+            runtime.sleep_call_count(),
+            0,
+            "stopped listener errors must not enter retry backoff"
+        );
+        assert_eq!(
+            runtime.listen_call_count(),
+            1,
+            "stopped listener errors must not retry listening"
+        );
     }
 
-    // Note: start() spawns a real OS thread via rdev::listen which blocks until
-    // process exit. Callback invocation is therefore not tested at unit level;
-    // it is covered by manual integration testing.
+    #[test]
+    fn test_start_after_listener_exit_starts_new_listener() {
+        let runtime = RecordingInputMonitorRuntime::with_steps([
+            ListenStep::ReturnOk,
+            ListenStep::BlockThenOk,
+        ]);
+        let mut mgr = make_manager_with_runtime(runtime.clone(), || {});
+
+        mgr.start();
+        runtime.wait_for_completed_listen_call_count(1, "the first input listener to exit");
+
+        for _ in 0..100 {
+            mgr.start();
+            if runtime.listen_call_count() >= 2 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        assert_eq!(
+            runtime.listen_call_count(),
+            2,
+            "start must launch a new listener after the previous listener exits"
+        );
+
+        mgr.stop();
+        runtime.release_next_listener();
+        runtime.wait_for_completed_listen_call_count(2, "the second input listener to stop");
+    }
 }
