@@ -15,6 +15,10 @@ import {
   notifyBreakAutoStarted,
   notifyBreakComplete,
 } from "@/services/notifications";
+import {
+  TIMER_SYNC_MAX_CONNECTION_RETRIES,
+  timerSyncRetryDelayMs,
+} from "./timerSyncConnectionRetryPolicy";
 
 // Mock Tauri APIs
 type TimerEventHandler = (event: { payload: unknown }) => void;
@@ -111,6 +115,23 @@ async function flushTimerSyncSetup(): Promise<void> {
   await vi.advanceTimersByTimeAsync(0);
 }
 
+function timerSyncConnectionRetryAttempts(): number[] {
+  return Array.from(
+    { length: TIMER_SYNC_MAX_CONNECTION_RETRIES },
+    (_unused, retryAttempt) => retryAttempt,
+  );
+}
+
+async function advanceThroughTimerSyncConnectionRetries(): Promise<void> {
+  await timerSyncConnectionRetryAttempts().reduce<Promise<void>>(
+    async (previousRetry, retryAttempt) => {
+      await previousRetry;
+      await vi.advanceTimersByTimeAsync(timerSyncRetryDelayMs(retryAttempt));
+    },
+    Promise.resolve(),
+  );
+}
+
 describe("useTimerSync", () => {
   beforeEach(() => {
     vi.useRealTimers();
@@ -191,7 +212,7 @@ describe("useTimerSync", () => {
         expect.any(Error),
         expect.objectContaining({
           retry_attempt: 0,
-          max_connection_retries: 3,
+          max_connection_retries: TIMER_SYNC_MAX_CONNECTION_RETRIES,
           failure_message: "Error: listen failed",
         }),
       );
@@ -215,7 +236,7 @@ describe("useTimerSync", () => {
         backendError,
         expect.objectContaining({
           retry_attempt: 0,
-          max_connection_retries: 3,
+          max_connection_retries: TIMER_SYNC_MAX_CONNECTION_RETRIES,
           failure_message:
             "window_control_error: failed to subscribe to timer events",
         }),
@@ -247,7 +268,7 @@ describe("useTimerSync", () => {
     });
   });
 
-  it("should retry setup failures with the configured backoff delays", async () => {
+  it("should retry setup failures according to the connection retry policy", async () => {
     vi.useFakeTimers();
     mockListen.mockRejectedValue(new Error("listen failed"));
 
@@ -262,56 +283,45 @@ describe("useTimerSync", () => {
       expect.any(Error),
       expect.objectContaining({
         retry_attempt: 0,
-        max_connection_retries: 3,
+        max_connection_retries: TIMER_SYNC_MAX_CONNECTION_RETRIES,
         failure_message: "Error: listen failed",
       }),
     );
 
     expect(mockTimerSyncLogger.error).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(999);
-    expect(mockTimerSyncLogger.error).toHaveBeenCalledTimes(1);
+    await timerSyncConnectionRetryAttempts().reduce<Promise<void>>(
+      async (previousRetry, retryAttempt) => {
+        await previousRetry;
+        const retryDelayMs = timerSyncRetryDelayMs(retryAttempt);
+        const errorCountBeforeRetry = retryAttempt + 1;
 
-    await vi.advanceTimersByTimeAsync(1);
-    expect(mockTimerSyncLogger.error).toHaveBeenCalledWith(
-      FRONTEND_LOG_EVENT_IDS.timerSyncSetupFailed,
-      expect.any(Error),
-      expect.objectContaining({
-        retry_attempt: 1,
-        max_connection_retries: 3,
-        failure_message: "Error: listen failed",
-      }),
+        await vi.advanceTimersByTimeAsync(retryDelayMs - 1);
+        expect(mockTimerSyncLogger.error).toHaveBeenCalledTimes(
+          errorCountBeforeRetry,
+        );
+
+        await vi.advanceTimersByTimeAsync(1);
+
+        expect(mockTimerSyncLogger.error).toHaveBeenCalledWith(
+          FRONTEND_LOG_EVENT_IDS.timerSyncSetupFailed,
+          expect.any(Error),
+          expect.objectContaining({
+            retry_attempt: retryAttempt + 1,
+            max_connection_retries: TIMER_SYNC_MAX_CONNECTION_RETRIES,
+            failure_message: "Error: listen failed",
+          }),
+        );
+        expect(mockTimerSyncLogger.error).toHaveBeenCalledTimes(
+          errorCountBeforeRetry + 1,
+        );
+      },
+      Promise.resolve(),
     );
 
-    await vi.advanceTimersByTimeAsync(1999);
-    expect(mockTimerSyncLogger.error).toHaveBeenCalledTimes(2);
-
-    await vi.advanceTimersByTimeAsync(1);
-    expect(mockTimerSyncLogger.error).toHaveBeenCalledWith(
-      FRONTEND_LOG_EVENT_IDS.timerSyncSetupFailed,
-      expect.any(Error),
-      expect.objectContaining({
-        retry_attempt: 2,
-        max_connection_retries: 3,
-        failure_message: "Error: listen failed",
-      }),
+    expect(mockTimerSyncLogger.error).toHaveBeenCalledTimes(
+      TIMER_SYNC_MAX_CONNECTION_RETRIES + 1,
     );
-
-    await vi.advanceTimersByTimeAsync(3999);
-    expect(mockTimerSyncLogger.error).toHaveBeenCalledTimes(3);
-
-    await vi.advanceTimersByTimeAsync(1);
-    expect(mockTimerSyncLogger.error).toHaveBeenCalledWith(
-      FRONTEND_LOG_EVENT_IDS.timerSyncSetupFailed,
-      expect.any(Error),
-      expect.objectContaining({
-        retry_attempt: 3,
-        max_connection_retries: 3,
-        failure_message: "Error: listen failed",
-      }),
-    );
-
-    expect(mockTimerSyncLogger.error).toHaveBeenCalledTimes(4);
   });
 
   it("should report a retryable connection error after retry exhaustion", async () => {
@@ -325,9 +335,7 @@ describe("useTimerSync", () => {
     await flushTimerSyncSetup();
     expect(mockTimerSyncLogger.error).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(1000);
-    await vi.advanceTimersByTimeAsync(2000);
-    await vi.advanceTimersByTimeAsync(4000);
+    await advanceThroughTimerSyncConnectionRetries();
 
     const connectionError = useErrorStore.getState().errors.connection;
     expect(connectionError).toMatchObject({
@@ -353,9 +361,7 @@ describe("useTimerSync", () => {
     await flushTimerSyncSetup();
     expect(mockTimerSyncLogger.error).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(1000);
-    await vi.advanceTimersByTimeAsync(2000);
-    await vi.advanceTimersByTimeAsync(4000);
+    await advanceThroughTimerSyncConnectionRetries();
 
     expect(useErrorStore.getState().errors.connection?.retryFn).toEqual(
       expect.any(Function),
@@ -375,7 +381,7 @@ describe("useTimerSync", () => {
       expect.any(Error),
       expect.objectContaining({
         retry_attempt: 0,
-        max_connection_retries: 3,
+        max_connection_retries: TIMER_SYNC_MAX_CONNECTION_RETRIES,
         failure_message: "Error: listen failed",
       }),
     );
@@ -390,9 +396,7 @@ describe("useTimerSync", () => {
     });
 
     await flushTimerSyncSetup();
-    await vi.advanceTimersByTimeAsync(1000);
-    await vi.advanceTimersByTimeAsync(2000);
-    await vi.advanceTimersByTimeAsync(4000);
+    await advanceThroughTimerSyncConnectionRetries();
 
     const retryFn = useErrorStore.getState().errors.connection?.retryFn;
     if (!retryFn) {
