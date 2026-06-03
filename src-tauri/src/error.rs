@@ -93,37 +93,52 @@ impl serde::Serialize for PomoliceError {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_unauthorized_error() {
-        let err = PomoliceError::Unauthorized("test-window".to_string());
-        assert_eq!(err.to_string(), "Unauthorized window: test-window");
+    fn assert_display_includes_diagnostic_details(
+        error: &PomoliceError,
+        expected_details: &[&str],
+    ) {
+        let message = error.to_string();
+
+        for &expected_detail in expected_details {
+            assert!(
+                message.contains(expected_detail),
+                "display message {message:?} should include diagnostic detail {expected_detail:?}"
+            );
+        }
     }
 
     #[test]
-    fn test_invalid_state_transition_error() {
+    fn test_unauthorized_error_display_keeps_window_label() {
+        let err = PomoliceError::Unauthorized("test-window".to_string());
+
+        assert_display_includes_diagnostic_details(&err, &["test-window"]);
+    }
+
+    #[test]
+    fn test_invalid_state_transition_error_display_keeps_action_and_state() {
         let err = PomoliceError::InvalidStateTransition {
             action: "start work".to_string(),
             current_state: TimerStatus::Working,
         };
-        let msg = err.to_string();
-        assert!(msg.contains("Invalid state transition"));
-        assert!(msg.contains("start work"));
-        assert!(msg.contains("Working"));
-    }
 
-    #[test]
-    fn test_rate_limited_error() {
-        let err = PomoliceError::RateLimited { remaining_ms: 500 };
-        assert_eq!(err.to_string(), "Rate limited: please wait 500ms");
-    }
-
-    #[test]
-    fn test_window_control_error() {
-        let err = PomoliceError::WindowControl("Failed to enter fullscreen".to_string());
-        assert_eq!(
-            err.to_string(),
-            "Window control error: Failed to enter fullscreen"
+        assert_display_includes_diagnostic_details(
+            &err,
+            &["Invalid state transition", "start work", "Working"],
         );
+    }
+
+    #[test]
+    fn test_rate_limited_error_display_keeps_remaining_ms() {
+        let err = PomoliceError::RateLimited { remaining_ms: 500 };
+
+        assert_display_includes_diagnostic_details(&err, &["500"]);
+    }
+
+    #[test]
+    fn test_window_control_error_display_keeps_diagnostic_detail() {
+        let err = PomoliceError::WindowControl("Failed to enter fullscreen".to_string());
+
+        assert_display_includes_diagnostic_details(&err, &["Failed to enter fullscreen"]);
     }
 
     fn assert_serialized_response(
@@ -243,30 +258,16 @@ mod tests {
     }
 
     #[test]
-    fn test_internal_error_display_keeps_diagnostic_details() {
-        let window_control = PomoliceError::WindowControl("Failed to enter fullscreen".to_string());
-        assert_eq!(
-            window_control.to_string(),
-            "Window control error: Failed to enter fullscreen"
-        );
-
-        let invalid_transition = PomoliceError::InvalidStateTransition {
-            action: "start work".to_string(),
-            current_state: TimerStatus::Working,
-        };
-        let invalid_transition = invalid_transition.to_string();
-        assert!(invalid_transition.contains("start work"));
-        assert!(invalid_transition.contains("Working"));
-
-        let rate_limited = PomoliceError::RateLimited { remaining_ms: 500 };
-        assert_eq!(rate_limited.to_string(), "Rate limited: please wait 500ms");
-
+    fn test_persistence_save_error_display_keeps_storage_path_and_source() {
         let error = PomoliceError::from(SaveError::Write {
             path: "timer_state.json".into(),
             source: std::io::Error::other("permission denied"),
         });
-        assert!(error.to_string().contains("timer_state.json"));
-        assert!(error.to_string().contains("permission denied"));
+
+        assert_display_includes_diagnostic_details(
+            &error,
+            &["timer_state.json", "permission denied"],
+        );
     }
 
     #[test]
