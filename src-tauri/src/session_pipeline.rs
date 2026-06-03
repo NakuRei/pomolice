@@ -79,6 +79,25 @@ fn session_completion_emit_order(
     }
 }
 
+trait SessionPipelineRuntimeEffects {
+    fn emit_event<T: serde::Serialize>(&mut self, event_name: &'static str, payload: &T);
+    fn update_tray(&mut self, tick_payload: &types::TimerTickPayload);
+}
+
+struct AppHandleSessionPipelineRuntimeEffects<'a> {
+    app: &'a AppHandle,
+}
+
+impl SessionPipelineRuntimeEffects for AppHandleSessionPipelineRuntimeEffects<'_> {
+    fn emit_event<T: serde::Serialize>(&mut self, event_name: &'static str, payload: &T) {
+        let _ = self.app.emit(event_name, payload);
+    }
+
+    fn update_tray(&mut self, tick_payload: &types::TimerTickPayload) {
+        tray::update_tray_icon(self.app, tick_payload);
+    }
+}
+
 fn lib_handle_timer_tick_future(app: AppHandle) -> TimerTickFuture {
     Box::pin(async move {
         let state_handle = app.state::<state::AppState>();
@@ -272,8 +291,8 @@ fn log_session_completion_finalized(
     );
 }
 
-fn emit_pipeline_events(
-    app: &AppHandle,
+fn emit_pipeline_events_with_effects(
+    effects: &mut impl SessionPipelineRuntimeEffects,
     emit_order: &[PipelineEmitEvent],
     transition_outcome: Option<&types::SessionTransitionOutcome>,
     tick_payload: &types::TimerTickPayload,
@@ -290,17 +309,28 @@ fn emit_pipeline_events(
                 };
                 let completed_payload =
                     types::SessionCompletedPayload::from_transition_outcome(transition_outcome);
-                let _ = app.emit("session_completed", &completed_payload);
+                effects.emit_event("session_completed", &completed_payload);
             }
             PipelineEmitEvent::AutoRunStopped => {
-                let _ = app.emit("auto_run_stopped", serde_json::json!({}));
+                let payload = serde_json::json!({});
+                effects.emit_event("auto_run_stopped", &payload);
             }
             PipelineEmitEvent::TimerTick => {
-                let _ = app.emit("timer_tick", tick_payload);
-                tray::update_tray_icon(app, tick_payload);
+                effects.emit_event("timer_tick", tick_payload);
+                effects.update_tray(tick_payload);
             }
         }
     }
+}
+
+fn emit_pipeline_events(
+    app: &AppHandle,
+    emit_order: &[PipelineEmitEvent],
+    transition_outcome: Option<&types::SessionTransitionOutcome>,
+    tick_payload: &types::TimerTickPayload,
+) {
+    let mut effects = AppHandleSessionPipelineRuntimeEffects { app };
+    emit_pipeline_events_with_effects(&mut effects, emit_order, transition_outcome, tick_payload);
 }
 
 async fn persist_timer_state(app: &AppHandle) {
@@ -580,19 +610,35 @@ pub(crate) async fn lib_handle_external_break_exit(app: AppHandle) {
 #[cfg(test)]
 mod emit_order_tests {
     use super::{
-        session_completion_emit_order, start_input_monitor_for_break, PipelineEmitEvent,
-        SESSION_COMPLETION_EMIT_ORDER_DEFAULT, SESSION_COMPLETION_EMIT_ORDER_SCHEDULED_STOP,
+        build_session_completion_effect_plan, emit_pipeline_events_with_effects,
+        start_input_monitor_for_break, SessionPipelineRuntimeEffects,
     };
     use crate::error::PomoliceError;
     use crate::managers::clock::testing::FixedClock;
     use crate::managers::clock::Clock;
     use crate::managers::persistence::PersistenceManager;
     use crate::state::AppState;
-    use crate::types::SessionTransitionReason;
+    use crate::types::{SessionTransitionOutcome, SessionType, TimerState, TimerTickPayload};
     use chrono::{Local, TimeZone, Utc};
     use std::sync::atomic::AtomicBool as StdAtomicBool;
     use std::sync::{Arc, Mutex as StdMutex};
     use std::time::Duration as StdDuration;
+
+    #[derive(Default)]
+    struct RecordingSessionPipelineRuntimeEffects {
+        emitted_event_names: Vec<&'static str>,
+        tray_update_count: usize,
+    }
+
+    impl SessionPipelineRuntimeEffects for RecordingSessionPipelineRuntimeEffects {
+        fn emit_event<T: serde::Serialize>(&mut self, event_name: &'static str, _payload: &T) {
+            self.emitted_event_names.push(event_name);
+        }
+
+        fn update_tray(&mut self, _tick_payload: &TimerTickPayload) {
+            self.tray_update_count += 1;
+        }
+    }
 
     fn create_utc_datetime(
         year: i32,
@@ -683,31 +729,54 @@ mod emit_order_tests {
         })
     }
 
+    fn assert_session_completion_emits(
+        transition_outcome: &SessionTransitionOutcome,
+        expected_event_names: &[&'static str],
+    ) {
+        let effect_plan = build_session_completion_effect_plan(transition_outcome, false);
+        let tick_payload = TimerState::default().to_tick_payload();
+        let mut effects = RecordingSessionPipelineRuntimeEffects::default();
+
+        emit_pipeline_events_with_effects(
+            &mut effects,
+            effect_plan.emit_order,
+            Some(transition_outcome),
+            &tick_payload,
+        );
+
+        assert_eq!(effects.emitted_event_names.as_slice(), expected_event_names);
+        assert_eq!(effects.tray_update_count, 1);
+    }
+
     #[test]
-    fn test_session_completion_emit_order_for_non_scheduled_stop() {
-        let emit_order = session_completion_emit_order(SessionTransitionReason::BreakAutoStarted);
-        assert_eq!(emit_order, &SESSION_COMPLETION_EMIT_ORDER_DEFAULT);
-        assert_eq!(
-            emit_order,
-            &[
-                PipelineEmitEvent::SessionCompleted,
-                PipelineEmitEvent::TimerTick,
-            ]
+    fn test_work_to_break_session_completion_emits_session_completed_then_timer_tick() {
+        assert_session_completion_emits(
+            &SessionTransitionOutcome::work_to_break(SessionType::ShortBreak),
+            &["session_completed", "timer_tick"],
         );
     }
 
     #[test]
-    fn test_session_completion_emit_order_for_scheduled_stop() {
-        let emit_order =
-            session_completion_emit_order(SessionTransitionReason::ScheduledStopExecuted);
-        assert_eq!(emit_order, &SESSION_COMPLETION_EMIT_ORDER_SCHEDULED_STOP);
-        assert_eq!(
-            emit_order,
-            &[
-                PipelineEmitEvent::SessionCompleted,
-                PipelineEmitEvent::AutoRunStopped,
-                PipelineEmitEvent::TimerTick,
-            ]
+    fn test_break_waiting_decision_session_completion_emits_session_completed_then_timer_tick() {
+        assert_session_completion_emits(
+            &SessionTransitionOutcome::break_waiting_decision(SessionType::ShortBreak),
+            &["session_completed", "timer_tick"],
+        );
+    }
+
+    #[test]
+    fn test_break_auto_started_session_completion_emits_session_completed_then_timer_tick() {
+        assert_session_completion_emits(
+            &SessionTransitionOutcome::break_auto_started(SessionType::ShortBreak),
+            &["session_completed", "timer_tick"],
+        );
+    }
+
+    #[test]
+    fn test_scheduled_stop_session_completion_emits_auto_run_stopped_before_timer_tick() {
+        assert_session_completion_emits(
+            &SessionTransitionOutcome::scheduled_stop_executed(SessionType::Work),
+            &["session_completed", "auto_run_stopped", "timer_tick"],
         );
     }
 
