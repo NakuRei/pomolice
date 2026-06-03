@@ -507,26 +507,22 @@ mod tests {
     }
 
     #[test]
-    fn test_idle_glyph_origin_uses_even_coordinates() {
-        assert_eq!(IDLE_GLYPH_ORIGIN_X % 2, 0);
-        assert_eq!(IDLE_GLYPH_ORIGIN_Y % 2, 0);
-    }
+    fn test_idle_glyph_variants_bounds_are_center_aligned() {
+        for variant in IDLE_GLYPH_VARIANTS {
+            let icon = render_idle_icon_for_variant(variant);
+            let bounds = white_pixel_bounds(&icon).expect("Idle icon must include white pixels");
+            let horizontal_center_twice = bounds.0 + bounds.1;
+            let vertical_center_twice = bounds.2 + bounds.3;
+            let icon_center_twice = ICON_SIZE - 1;
 
-    #[test]
-    fn test_idle_glyph_bounds_are_center_aligned() {
-        let icon = render_idle_icon();
-        let bounds = white_pixel_bounds(&icon).expect("Idle icon must include white pixels");
-        let horizontal_center_twice = bounds.0 + bounds.1;
-        let vertical_center_twice = bounds.2 + bounds.3;
-        let icon_center_twice = ICON_SIZE - 1;
-
-        assert!(
-            horizontal_center_twice.abs_diff(icon_center_twice) <= 1,
-            "Idle glyph horizontal center is misaligned"
-        );
-        assert!(
-            vertical_center_twice.abs_diff(icon_center_twice) <= 1,
-            "Idle glyph vertical center is misaligned"
-        );
+            assert!(
+                horizontal_center_twice.abs_diff(icon_center_twice) <= 1,
+                "Idle glyph variant {variant:?} horizontal center is misaligned"
+            );
+            assert!(
+                vertical_center_twice.abs_diff(icon_center_twice) <= 1,
+                "Idle glyph variant {variant:?} vertical center is misaligned"
+            );
+        }
     }
 }
