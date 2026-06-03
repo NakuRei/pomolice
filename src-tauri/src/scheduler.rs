@@ -328,14 +328,14 @@ async fn process_crossed_end_boundaries(
 
         log_info_event(
             BackendLogEvent::SchedulerCrossedEndBoundary,
-            &[("boundary_id", end_boundary.0.clone())],
+            &[("boundary_id", end_boundary.as_str().to_string())],
         );
         let did_mark_stop_pending =
             mark_scheduled_stop_pending_for_current_session(app.clone()).await;
         if did_mark_stop_pending {
             log_info_event(
                 BackendLogEvent::SchedulerMarkedStopPending,
-                &[("boundary_id", end_boundary.0.clone())],
+                &[("boundary_id", end_boundary.as_str().to_string())],
             );
         }
     }
@@ -361,7 +361,7 @@ async fn process_crossed_start_boundaries(
 
         log_info_event(
             BackendLogEvent::SchedulerCrossedStartBoundary,
-            &[("boundary_id", start_boundary.0.clone())],
+            &[("boundary_id", start_boundary.as_str().to_string())],
         );
         let did_start = start_work_from_scheduler_when_idle(
             app.clone(),
@@ -374,7 +374,7 @@ async fn process_crossed_start_boundaries(
         if did_start {
             log_info_event(
                 BackendLogEvent::SchedulerStartedWorkFromBoundary,
-                &[("boundary_id", start_boundary.0.clone())],
+                &[("boundary_id", start_boundary.as_str().to_string())],
             );
         }
     }
@@ -397,13 +397,10 @@ pub(crate) fn trim_old_processed_boundaries(
         (now_local - ChronoDuration::days(PROCESSED_BOUNDARY_RETENTION_DAYS)).timestamp();
 
     processed_boundary_occurrences.retain(|boundary_id| {
-        extract_boundary_epoch_seconds(boundary_id)
+        boundary_id
+            .epoch_seconds()
             .is_some_and(|epoch_seconds| epoch_seconds >= oldest_epoch_to_keep)
     });
-}
-
-pub(crate) fn extract_boundary_epoch_seconds(boundary_id: &BoundaryOccurrenceId) -> Option<i64> {
-    boundary_id.0.rsplit('|').next()?.parse::<i64>().ok()
 }
 
 async fn mark_scheduled_stop_pending_for_current_session(app: AppHandle) -> bool {
@@ -474,7 +471,7 @@ async fn start_work_from_scheduler_when_idle_with_effects(
         else {
             log_warn_event(
                 BackendLogEvent::SchedulerSkippedAutoStartDueToRejection,
-                &[("boundary_id", start_boundary.0.clone())],
+                &[("boundary_id", start_boundary.as_str().to_string())],
             );
             return false;
         };
@@ -667,7 +664,7 @@ mod tests {
     }
 
     fn scheduler_boundary_id() -> BoundaryOccurrenceId {
-        BoundaryOccurrenceId("mon|start|1738562400".to_string())
+        BoundaryOccurrenceId::for_schedule_boundary("mon", "start", 1_738_562_400)
     }
 
     #[tokio::test]

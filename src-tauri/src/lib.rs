@@ -23,7 +23,7 @@ use crate::logging_event::{
 };
 pub use scheduler::lib_start_scheduler_task;
 #[cfg(test)]
-pub(crate) use scheduler::{extract_boundary_epoch_seconds, trim_old_processed_boundaries};
+pub(crate) use scheduler::trim_old_processed_boundaries;
 fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
         if window.label() == "main" {

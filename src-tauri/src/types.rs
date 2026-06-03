@@ -763,7 +763,30 @@ impl SessionTransitionOutcome {
 /// Unique boundary identifier used to deduplicate processed schedule boundaries.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(transparent)]
-pub(crate) struct BoundaryOccurrenceId(pub String);
+pub(crate) struct BoundaryOccurrenceId(String);
+
+impl BoundaryOccurrenceId {
+    pub(crate) fn for_schedule_boundary(
+        slot_key: &str,
+        boundary_kind: &str,
+        epoch_seconds: i64,
+    ) -> Self {
+        Self(format!("{slot_key}|{boundary_kind}|{epoch_seconds}"))
+    }
+
+    pub(crate) fn epoch_seconds(&self) -> Option<i64> {
+        self.0.rsplit('|').next()?.parse::<i64>().ok()
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_raw_for_tests(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+}
 
 /// Runtime state for the one-time startup confirmation decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -1093,12 +1116,21 @@ mod tests {
     }
 
     #[test]
-    fn test_boundary_occurrence_id_default_and_constructor() {
-        let default_id = BoundaryOccurrenceId::default();
-        assert_eq!(default_id.0, "");
+    fn test_boundary_occurrence_id_exposes_schedule_boundary_epoch() {
+        let boundary_id =
+            BoundaryOccurrenceId::for_schedule_boundary("mon", "start", 1_738_707_600);
 
-        let custom_id = BoundaryOccurrenceId("mon|start|1738707600".to_string());
-        assert_eq!(custom_id.0, "mon|start|1738707600");
+        assert_eq!(boundary_id.epoch_seconds(), Some(1_738_707_600));
+    }
+
+    #[test]
+    fn test_boundary_occurrence_id_matches_same_schedule_boundary() {
+        let first = BoundaryOccurrenceId::for_schedule_boundary("mon", "start", 1_738_707_600);
+        let same = BoundaryOccurrenceId::for_schedule_boundary("mon", "start", 1_738_707_600);
+        let different = BoundaryOccurrenceId::for_schedule_boundary("mon", "end", 1_738_707_600);
+
+        assert_eq!(first, same);
+        assert_ne!(first, different);
     }
 
     #[test]

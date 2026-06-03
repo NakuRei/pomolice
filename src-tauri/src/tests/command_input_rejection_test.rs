@@ -82,8 +82,15 @@ fn test_extract_invoke_error_message_serializes_non_string_values() {
         "argument": "work_duration_secs",
     }));
 
+    let message = extract_invoke_error_message(&invoke_error);
+    let parsed_message: serde_json::Value =
+        serde_json::from_str(&message).expect("non-string invoke error should serialize as JSON");
+
     assert_eq!(
-        extract_invoke_error_message(&invoke_error),
-        "{\"argument\":\"work_duration_secs\",\"code\":\"invalid_args\"}"
+        parsed_message,
+        json!({
+            "code": "invalid_args",
+            "argument": "work_duration_secs",
+        })
     );
 }

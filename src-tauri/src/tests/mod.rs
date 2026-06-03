@@ -26,15 +26,15 @@ mod scheduler_boundary_runtime_tests {
 
     use chrono::{Local, TimeZone};
 
+    use crate::trim_old_processed_boundaries;
     use crate::types::BoundaryOccurrenceId;
-    use crate::{extract_boundary_epoch_seconds, trim_old_processed_boundaries};
 
     fn boundary_id(
         slot_key: &str,
         boundary_type: &str,
         epoch_seconds: i64,
     ) -> BoundaryOccurrenceId {
-        BoundaryOccurrenceId(format!("{slot_key}|{boundary_type}|{epoch_seconds}"))
+        BoundaryOccurrenceId::for_schedule_boundary(slot_key, boundary_type, epoch_seconds)
     }
 
     #[test]
@@ -48,12 +48,12 @@ mod scheduler_boundary_runtime_tests {
     }
 
     #[test]
-    fn test_extract_boundary_epoch_seconds_parses_expected_suffix() {
+    fn test_boundary_occurrence_id_exposes_epoch_seconds() {
         let valid = boundary_id("mon", "end", 1_736_154_400);
-        let invalid = BoundaryOccurrenceId("invalid-boundary-id".to_string());
+        let invalid = BoundaryOccurrenceId::from_raw_for_tests("invalid-boundary-id");
 
-        assert_eq!(extract_boundary_epoch_seconds(&valid), Some(1_736_154_400));
-        assert_eq!(extract_boundary_epoch_seconds(&invalid), None);
+        assert_eq!(valid.epoch_seconds(), Some(1_736_154_400));
+        assert_eq!(invalid.epoch_seconds(), None);
     }
 
     #[test]
@@ -67,7 +67,7 @@ mod scheduler_boundary_runtime_tests {
 
         let stale_boundary = boundary_id("mon", "start", stale_epoch);
         let recent_boundary = boundary_id("tue", "end", recent_epoch);
-        let invalid_boundary = BoundaryOccurrenceId("invalid".to_string());
+        let invalid_boundary = BoundaryOccurrenceId::from_raw_for_tests("invalid");
 
         let mut processed = HashSet::from([
             stale_boundary.clone(),

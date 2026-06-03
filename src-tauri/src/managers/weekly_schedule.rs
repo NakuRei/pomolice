@@ -212,7 +212,7 @@ fn collect_crossed_boundaries(
     crossed_boundaries.sort_by(|left, right| {
         left.0
             .cmp(&right.0)
-            .then_with(|| left.1 .0.cmp(&right.1 .0))
+            .then_with(|| left.1.as_str().cmp(right.1.as_str()))
     });
     crossed_boundaries.dedup_by(|left, right| left.1 == right.1);
 
@@ -228,10 +228,11 @@ fn build_boundary_occurrence_id(
     boundary_type: BoundaryType,
     boundary_epoch_seconds: i64,
 ) -> BoundaryOccurrenceId {
-    BoundaryOccurrenceId(format!(
-        "{slot_key}|{}|{boundary_epoch_seconds}",
-        boundary_type.as_str()
-    ))
+    BoundaryOccurrenceId::for_schedule_boundary(
+        slot_key,
+        boundary_type.as_str(),
+        boundary_epoch_seconds,
+    )
 }
 
 fn build_slot_descriptors(config: &WeeklyAutoRunConfig) -> [SlotDescriptor; 7] {
@@ -450,14 +451,27 @@ mod tests {
         .expect("updated weekly config should be valid");
     }
 
-    fn parse_epoch_seconds_from_boundary_id(boundary_id: &BoundaryOccurrenceId) -> i64 {
-        boundary_id
-            .0
-            .split('|')
-            .nth(2)
-            .expect("boundary id should include epoch seconds")
-            .parse::<i64>()
-            .expect("epoch seconds should parse")
+    fn boundary_epochs(boundary_ids: &[BoundaryOccurrenceId]) -> Vec<i64> {
+        boundary_ids
+            .iter()
+            .map(|boundary_id| {
+                boundary_id
+                    .epoch_seconds()
+                    .expect("boundary id should expose epoch seconds")
+            })
+            .collect()
+    }
+
+    fn schedule_boundary_id(
+        slot_key: &str,
+        boundary_kind: &str,
+        boundary_time: DateTime<Local>,
+    ) -> BoundaryOccurrenceId {
+        BoundaryOccurrenceId::for_schedule_boundary(
+            slot_key,
+            boundary_kind,
+            boundary_time.timestamp(),
+        )
     }
 
     fn weekday_key_from_weekday(weekday: Weekday) -> &'static str {
@@ -609,7 +623,7 @@ mod tests {
     }
 
     #[test]
-    fn test_collect_crossed_start_boundaries_returns_boundary_id_with_fixed_format() {
+    fn test_collect_crossed_start_boundaries_returns_boundary_at_crossed_start_time() {
         let mut config = WeeklyAutoRunConfig::default();
         update_weekday_slot(&mut config, "mon", true, "09:00", "18:00");
 
@@ -617,18 +631,18 @@ mod tests {
         let now_local = local_datetime(2025, 1, 6, 9, 0, 10);
         let boundary_ids = collect_crossed_start_boundaries(previous_local, now_local, &config);
 
-        assert_eq!(boundary_ids.len(), 1);
-        assert!(boundary_ids[0].0.starts_with("mon|start|"));
-
-        let expected_boundary_epoch = local_datetime(2025, 1, 6, 9, 0, 0).timestamp();
         assert_eq!(
-            parse_epoch_seconds_from_boundary_id(&boundary_ids[0]),
-            expected_boundary_epoch
+            boundary_ids,
+            vec![schedule_boundary_id(
+                "mon",
+                "start",
+                local_datetime(2025, 1, 6, 9, 0, 0)
+            )]
         );
     }
 
     #[test]
-    fn test_collect_crossed_end_boundaries_for_overnight_slot_uses_start_weekday_slot_key() {
+    fn test_collect_crossed_end_boundaries_for_overnight_slot_returns_end_time_boundary() {
         let mut config = WeeklyAutoRunConfig::default();
         update_weekday_slot(&mut config, "mon", true, "22:00", "02:00");
 
@@ -636,13 +650,13 @@ mod tests {
         let now_local = local_datetime(2025, 1, 7, 2, 0, 10); // Tuesday
         let boundary_ids = collect_crossed_end_boundaries(previous_local, now_local, &config);
 
-        assert_eq!(boundary_ids.len(), 1);
-        assert!(boundary_ids[0].0.starts_with("mon|end|"));
-
-        let expected_boundary_epoch = local_datetime(2025, 1, 7, 2, 0, 0).timestamp();
         assert_eq!(
-            parse_epoch_seconds_from_boundary_id(&boundary_ids[0]),
-            expected_boundary_epoch
+            boundary_ids,
+            vec![schedule_boundary_id(
+                "mon",
+                "end",
+                local_datetime(2025, 1, 7, 2, 0, 0)
+            )]
         );
     }
 
@@ -656,13 +670,13 @@ mod tests {
         let now_local = local_datetime(2025, 1, 7, 9, 0, 10); // Tuesday
         let boundary_ids = collect_crossed_start_boundaries(previous_local, now_local, &config);
 
-        assert_eq!(boundary_ids.len(), 2);
-        assert!(boundary_ids[0].0.starts_with("mon|start|"));
-        assert!(boundary_ids[1].0.starts_with("tue|start|"));
-
-        let first_epoch = parse_epoch_seconds_from_boundary_id(&boundary_ids[0]);
-        let second_epoch = parse_epoch_seconds_from_boundary_id(&boundary_ids[1]);
-        assert!(first_epoch < second_epoch);
+        assert_eq!(
+            boundary_ids,
+            vec![
+                schedule_boundary_id("mon", "start", local_datetime(2025, 1, 6, 9, 0, 0)),
+                schedule_boundary_id("tue", "start", local_datetime(2025, 1, 7, 9, 0, 0)),
+            ]
+        );
     }
 
     #[test]
@@ -686,7 +700,10 @@ mod tests {
         let oldest_allowed_epoch = (now_local - Duration::days(8)).timestamp();
         for boundary_id in boundary_ids {
             assert!(
-                parse_epoch_seconds_from_boundary_id(&boundary_id) >= oldest_allowed_epoch,
+                boundary_id
+                    .epoch_seconds()
+                    .expect("boundary should expose epoch seconds")
+                    >= oldest_allowed_epoch,
                 "boundary should remain inside the bounded lookback window"
             );
         }
@@ -719,10 +736,9 @@ mod tests {
 
         let boundary_ids = collect_crossed_start_boundaries(previous_local, now_local, &config);
 
+        let matched_epochs = boundary_epochs(&boundary_ids);
         assert!(
-            boundary_ids
-                .iter()
-                .any(|boundary_id| boundary_id.0.starts_with(&format!("{weekday_key}|start|"))),
+            matched_epochs.contains(&after_gap_local.timestamp()),
             "expected crossed start boundary for missing DST local time"
         );
     }
@@ -750,20 +766,12 @@ mod tests {
         update_weekday_slot(&mut config, weekday_key, true, &start_time, "23:59");
 
         let boundary_ids = collect_crossed_start_boundaries(previous_local, now_local, &config);
-        let matching_boundary_ids: Vec<&BoundaryOccurrenceId> = boundary_ids
-            .iter()
-            .filter(|boundary_id| boundary_id.0.starts_with(&format!("{weekday_key}|start|")))
-            .collect();
+        let matched_epochs = boundary_epochs(&boundary_ids);
 
         assert!(
-            matching_boundary_ids.len() >= 2,
+            matched_epochs.len() >= 2,
             "expected duplicated DST local time to produce two boundary occurrences"
         );
-
-        let matched_epochs: Vec<i64> = matching_boundary_ids
-            .iter()
-            .map(|boundary_id| parse_epoch_seconds_from_boundary_id(boundary_id))
-            .collect();
 
         assert!(
             matched_epochs.contains(&first_occurrence.timestamp()),
@@ -788,20 +796,16 @@ mod tests {
         let now_local = local_datetime(2025, 1, 10, 9, 0, 10); // Friday
         let boundary_ids = collect_crossed_start_boundaries(previous_local, now_local, &config);
 
-        assert_eq!(boundary_ids.len(), 5);
-        assert!(boundary_ids[0].0.starts_with("mon|start|"));
-        assert!(boundary_ids[1].0.starts_with("tue|start|"));
-        assert!(boundary_ids[2].0.starts_with("wed|start|"));
-        assert!(boundary_ids[3].0.starts_with("thu|start|"));
-        assert!(boundary_ids[4].0.starts_with("fri|start|"));
-
-        let matched_epochs: Vec<i64> = boundary_ids
-            .iter()
-            .map(parse_epoch_seconds_from_boundary_id)
-            .collect();
-        assert!(matched_epochs
-            .windows(2)
-            .all(|window| window[0] < window[1]));
+        assert_eq!(
+            boundary_ids,
+            vec![
+                schedule_boundary_id("mon", "start", local_datetime(2025, 1, 6, 9, 0, 0)),
+                schedule_boundary_id("tue", "start", local_datetime(2025, 1, 7, 9, 0, 0)),
+                schedule_boundary_id("wed", "start", local_datetime(2025, 1, 8, 9, 0, 0)),
+                schedule_boundary_id("thu", "start", local_datetime(2025, 1, 9, 9, 0, 0)),
+                schedule_boundary_id("fri", "start", local_datetime(2025, 1, 10, 9, 0, 0)),
+            ]
+        );
     }
 
     #[test]
