@@ -109,7 +109,7 @@ async fn persist_current_state_with_trigger(app: &AppHandle, trigger: &'static s
 
 pub async fn lib_start_scheduler_task(app: AppHandle) {
     let state_handle = app.state::<state::AppState>();
-    state_handle.stop_scheduler_task();
+    state_handle.cancel_and_wait_scheduler_task().await;
 
     let now_local = state_handle.clock.now_local();
     let startup_timer_status = {
@@ -178,10 +178,7 @@ pub async fn lib_start_scheduler_task(app: AppHandle) {
         log_info_event(BackendLogEvent::SchedulerStopped, &[]);
     });
 
-    if let Ok(mut scheduler_task_state) = state_handle.scheduler_task_state.lock() {
-        scheduler_task_state.cancellation_token = Some(cancellation_token);
-        scheduler_task_state.join_handle = Some(scheduler_join_handle);
-    };
+    state_handle.store_scheduler_task(cancellation_token, scheduler_join_handle);
 }
 
 async fn lib_run_scheduler_tick(app: AppHandle, runtime_state: &mut SchedulerRuntimeState) {

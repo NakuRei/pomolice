@@ -10,15 +10,39 @@ mod scheduler_concurrency_tests {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use chrono::{Local, TimeZone, Utc};
     use tokio::sync::{Barrier, Mutex};
-    use tokio::task::JoinHandle;
     use tokio_util::sync::CancellationToken;
 
+    use crate::managers::clock::testing::FixedClock;
+    use crate::managers::clock::Clock;
+    use crate::managers::persistence::PersistenceManager;
     use crate::managers::timer::TimerStateManager;
+    use crate::state::AppState;
     use crate::types::{
         PostBreakDecisionAction, PostBreakTransitionPolicy, SessionTransitionReason, SessionType,
         TimerSettings, TimerStartSource, TimerStatus,
     };
+
+    fn fixed_clock() -> Arc<FixedClock> {
+        let now_utc = Utc
+            .with_ymd_and_hms(2025, 2, 1, 9, 0, 0)
+            .single()
+            .expect("valid UTC datetime");
+        Arc::new(FixedClock::new(now_utc.with_timezone(&Local)))
+    }
+
+    fn as_clock_trait(clock: &Arc<FixedClock>) -> Arc<dyn Clock + Send + Sync> {
+        Arc::<FixedClock>::clone(clock) as Arc<dyn Clock + Send + Sync>
+    }
+
+    async fn build_test_state_without_persistence_path() -> AppState {
+        let clock = fixed_clock();
+        let persistence = PersistenceManager::new(as_clock_trait(&clock), None);
+        let (app_state, _) =
+            AppState::build_startup_state_for_tests(as_clock_trait(&clock), persistence).await;
+        app_state
+    }
 
     async fn race_two_start_sources(
         first_source: TimerStartSource,
@@ -172,7 +196,7 @@ mod scheduler_concurrency_tests {
                         && timer.get_state().scheduled_stop_state
                             == crate::types::ScheduledStopState::Pending
                     {
-                        let _ = timer.transition_to_idle_due_to_scheduled_stop(SessionType::Work);
+                        let _ = timer.complete_work_session_transition();
                     }
                 }
                 tokio::task::yield_now().await;
@@ -367,78 +391,57 @@ mod scheduler_concurrency_tests {
         assert!(!timer.get_state().post_break_decision_pending);
     }
 
-    #[derive(Default)]
-    struct FakeSchedulerTaskState {
-        cancellation_token: Option<CancellationToken>,
-        join_handle: Option<JoinHandle<()>>,
-    }
-
-    #[derive(Default)]
-    struct FakeSchedulerController {
-        task_state: Arc<Mutex<FakeSchedulerTaskState>>,
+    fn spawn_counted_scheduler_worker(
         active_worker_count: Arc<AtomicUsize>,
+    ) -> (CancellationToken, tauri::async_runtime::JoinHandle<()>) {
+        let cancellation_token = CancellationToken::new();
+        let worker_cancel_token = cancellation_token.clone();
+
+        let join_handle = tauri::async_runtime::spawn(async move {
+            active_worker_count.fetch_add(1, Ordering::SeqCst);
+            loop {
+                tokio::select! {
+                    () = worker_cancel_token.cancelled() => break,
+                    () = tokio::time::sleep(Duration::from_millis(10)) => {}
+                }
+            }
+            active_worker_count.fetch_sub(1, Ordering::SeqCst);
+        });
+
+        (cancellation_token, join_handle)
     }
 
-    impl FakeSchedulerController {
-        async fn restart_scheduler(&self) {
-            self.stop_scheduler().await;
-
-            let cancellation_token = CancellationToken::new();
-            let worker_cancel_token = cancellation_token.clone();
-            let active_worker_count = Arc::clone(&self.active_worker_count);
-
-            let join_handle = tokio::spawn(async move {
-                active_worker_count.fetch_add(1, Ordering::SeqCst);
-                loop {
-                    tokio::select! {
-                        () = worker_cancel_token.cancelled() => break,
-                        () = tokio::time::sleep(Duration::from_millis(10)) => {}
-                    }
-                }
-                active_worker_count.fetch_sub(1, Ordering::SeqCst);
-            });
-
-            let mut task_state = self.task_state.lock().await;
-            task_state.cancellation_token = Some(cancellation_token);
-            task_state.join_handle = Some(join_handle);
-        }
-
-        async fn stop_scheduler(&self) {
-            let join_handle = {
-                let mut task_state = self.task_state.lock().await;
-                if let Some(cancellation_token) = task_state.cancellation_token.take() {
-                    cancellation_token.cancel();
-                }
-                task_state.join_handle.take()
-            };
-
-            if let Some(handle) = join_handle {
-                let _ = handle.await;
-            }
-        }
+    async fn restart_counted_scheduler_worker(
+        state: &AppState,
+        active_worker_count: Arc<AtomicUsize>,
+    ) {
+        state.cancel_and_wait_scheduler_task().await;
+        let (cancellation_token, join_handle) = spawn_counted_scheduler_worker(active_worker_count);
+        state.store_scheduler_task(cancellation_token, join_handle);
     }
 
     #[tokio::test]
     async fn test_scheduler_restart_does_not_leave_duplicate_running_tasks() {
-        let controller = FakeSchedulerController::default();
+        let state = build_test_state_without_persistence_path().await;
+        let active_worker_count = Arc::new(AtomicUsize::new(0));
 
         for _ in 0..6 {
-            controller.restart_scheduler().await;
+            restart_counted_scheduler_worker(&state, Arc::clone(&active_worker_count)).await;
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
 
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert_eq!(
-            controller.active_worker_count.load(Ordering::SeqCst),
+            active_worker_count.load(Ordering::SeqCst),
             1,
             "exactly one scheduler worker should remain after repeated restart"
         );
 
-        controller.stop_scheduler().await;
+        state.cancel_and_wait_scheduler_task().await;
         tokio::time::sleep(Duration::from_millis(20)).await;
 
         assert_eq!(
-            controller.active_worker_count.load(Ordering::SeqCst),
+            active_worker_count.load(Ordering::SeqCst),
             0,
             "all scheduler workers should stop after shutdown"
         );

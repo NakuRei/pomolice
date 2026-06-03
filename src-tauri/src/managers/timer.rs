@@ -434,19 +434,7 @@ impl TimerStateManager {
         payload
     }
 
-    /// Transition to idle when a scheduled stop is pending at session boundary.
-    ///
-    /// This path intentionally skips the continue dialog and clears scheduled-stop
-    /// metadata so later sessions start cleanly.
-    #[cfg(test)]
-    pub(crate) fn transition_to_idle_due_to_scheduled_stop(
-        &mut self,
-        completed_session_type: SessionType,
-    ) -> SessionCompletedPayload {
-        self.execute_scheduled_stop_transition(completed_session_type)
-    }
-
-    pub(crate) fn execute_scheduled_stop_transition(
+    fn execute_scheduled_stop_transition(
         &mut self,
         completed_session_type: SessionType,
     ) -> SessionCompletedPayload {
@@ -1472,7 +1460,7 @@ mod tests {
     }
 
     #[test]
-    fn test_transition_to_idle_due_to_scheduled_stop_from_work_cleans_up_and_skips_dialog() {
+    fn test_scheduled_stop_at_work_boundary_cleans_up_and_skips_dialog() {
         let mut mgr = make_manager();
         let expected_work_preview_secs = 1800;
         mgr.state.status = TimerStatus::Working;
@@ -1485,7 +1473,7 @@ mod tests {
         mgr.state.scheduled_stop_state = ScheduledStopState::Pending;
         mgr.state.settings = make_settings(expected_work_preview_secs, 300, 900, 4);
 
-        let payload = mgr.transition_to_idle_due_to_scheduled_stop(SessionType::Work);
+        let payload = mgr.complete_work_session_transition();
 
         assert_eq!(payload.completed_session_type, SessionType::Work);
         assert_eq!(
@@ -1506,7 +1494,7 @@ mod tests {
     }
 
     #[test]
-    fn test_transition_to_idle_due_to_scheduled_stop_from_long_break_resets_cycle() {
+    fn test_scheduled_stop_at_long_break_boundary_resets_cycle() {
         let mut mgr = make_manager();
         mgr.state.status = TimerStatus::OnBreak;
         mgr.state.session_type = SessionType::LongBreak;
@@ -1515,7 +1503,7 @@ mod tests {
         mgr.state.timer_start_source = Some(TimerStartSource::ScheduledAutoStart);
         mgr.state.scheduled_stop_state = ScheduledStopState::Pending;
 
-        let payload = mgr.transition_to_idle_due_to_scheduled_stop(SessionType::LongBreak);
+        let payload = mgr.complete_break_session_transition();
 
         assert_eq!(payload.completed_session_type, SessionType::LongBreak);
         assert_eq!(

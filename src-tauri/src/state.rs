@@ -309,16 +309,31 @@ impl AppState {
         self
     }
 
-    /// Stops the scheduler task by canceling the token and taking ownership
-    /// of the stored `JoinHandle`.
-    pub(crate) fn stop_scheduler_task(&self) {
+    pub(crate) fn cancel_and_take_scheduler_task(&self) -> Option<JoinHandle<()>> {
         if let Ok(mut scheduler_task_state) = self.scheduler_task_state.lock() {
             if let Some(cancellation_token) = scheduler_task_state.cancellation_token.take() {
                 cancellation_token.cancel();
             }
-            if let Some(join_handle) = scheduler_task_state.join_handle.take() {
-                join_handle.abort();
-            }
+            return scheduler_task_state.join_handle.take();
+        }
+
+        None
+    }
+
+    pub(crate) async fn cancel_and_wait_scheduler_task(&self) {
+        if let Some(join_handle) = self.cancel_and_take_scheduler_task() {
+            let _ = join_handle.await;
+        }
+    }
+
+    pub(crate) fn store_scheduler_task(
+        &self,
+        cancellation_token: CancellationToken,
+        join_handle: JoinHandle<()>,
+    ) {
+        if let Ok(mut scheduler_task_state) = self.scheduler_task_state.lock() {
+            scheduler_task_state.cancellation_token = Some(cancellation_token);
+            scheduler_task_state.join_handle = Some(join_handle);
         }
     }
 

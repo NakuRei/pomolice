@@ -28,33 +28,6 @@ pub(crate) enum PipelineEmitEvent {
     TimerTick,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BreakModeChange {
-    None,
-    Enter,
-    Exit,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PersistenceRequirement {
-    Skip,
-    Persist,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TimerTaskRestart {
-    NoRestart,
-    Restart,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PipelineEffectPlan {
-    pub emit_order: &'static [PipelineEmitEvent],
-    pub break_mode_change: BreakModeChange,
-    pub persistence_requirement: PersistenceRequirement,
-    pub timer_task_restart: TimerTaskRestart,
-}
-
 const TIMER_TICK_ONLY_EMIT_ORDER: [PipelineEmitEvent; 1] = [PipelineEmitEvent::TimerTick];
 
 const SESSION_COMPLETION_EMIT_ORDER_DEFAULT: [PipelineEmitEvent; 2] = [
@@ -79,9 +52,13 @@ fn session_completion_emit_order(
     }
 }
 
-trait SessionPipelineRuntimeEffects {
+pub(crate) trait SessionPipelineRuntimeEffects {
     fn emit_event<T: serde::Serialize>(&mut self, event_name: &'static str, payload: &T);
     fn update_tray(&mut self, tick_payload: &types::TimerTickPayload);
+    fn enter_break_mode<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+    fn exit_break_mode<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+    fn persist_timer_state<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+    fn restart_timer_task<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 }
 
 struct AppHandleSessionPipelineRuntimeEffects<'a> {
@@ -95,6 +72,34 @@ impl SessionPipelineRuntimeEffects for AppHandleSessionPipelineRuntimeEffects<'_
 
     fn update_tray(&mut self, tick_payload: &types::TimerTickPayload) {
         tray::update_tray_icon(self.app, tick_payload);
+    }
+
+    fn enter_break_mode<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            enter_break_mode(self.app.clone()).await;
+        })
+    }
+
+    fn exit_break_mode<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            exit_break_mode(self.app.clone()).await;
+        })
+    }
+
+    fn persist_timer_state<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            persist_timer_state_with_trigger(
+                self.app,
+                PERSISTENCE_WRITE_TRIGGER_SESSION_COMPLETION,
+            )
+            .await;
+        })
+    }
+
+    fn restart_timer_task<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            restart_timer_task(self.app).await;
+        })
     }
 }
 
@@ -187,40 +192,6 @@ fn break_mode_requirements(transition_outcome: &types::SessionTransitionOutcome)
     (requires_enter_break_mode, requires_exit_break_mode)
 }
 
-pub(crate) fn build_startup_resume_effect_plan() -> PipelineEffectPlan {
-    PipelineEffectPlan {
-        emit_order: &TIMER_TICK_ONLY_EMIT_ORDER,
-        break_mode_change: BreakModeChange::None,
-        persistence_requirement: PersistenceRequirement::Skip,
-        timer_task_restart: TimerTaskRestart::Restart,
-    }
-}
-
-pub(crate) fn build_session_completion_effect_plan(
-    transition_outcome: &types::SessionTransitionOutcome,
-    restart_timer_task: bool,
-) -> PipelineEffectPlan {
-    let (requires_enter_break_mode, requires_exit_break_mode) =
-        break_mode_requirements(transition_outcome);
-
-    PipelineEffectPlan {
-        emit_order: session_completion_emit_order(transition_outcome.transition_reason),
-        break_mode_change: if requires_enter_break_mode {
-            BreakModeChange::Enter
-        } else if requires_exit_break_mode {
-            BreakModeChange::Exit
-        } else {
-            BreakModeChange::None
-        },
-        persistence_requirement: PersistenceRequirement::Persist,
-        timer_task_restart: if restart_timer_task {
-            TimerTaskRestart::Restart
-        } else {
-            TimerTaskRestart::NoRestart
-        },
-    }
-}
-
 async fn complete_session_transition(app: &AppHandle) -> types::SessionTransitionOutcome {
     let state_handle = app.state::<state::AppState>();
     let mut timer = state_handle.timer_manager.lock().await;
@@ -240,16 +211,9 @@ async fn complete_session_transition(app: &AppHandle) -> types::SessionTransitio
     transition_outcome
 }
 
-async fn apply_break_mode_transition(app: &AppHandle, effect_plan: &PipelineEffectPlan) {
-    match effect_plan.break_mode_change {
-        BreakModeChange::None => {}
-        BreakModeChange::Enter => enter_break_mode(app.clone()).await,
-        BreakModeChange::Exit => exit_break_mode(app.clone()).await,
-    }
-}
-
-async fn finalized_session_completion_state(app: &AppHandle) -> FinalizedSessionCompletionState {
-    let state_handle = app.state::<state::AppState>();
+async fn finalized_session_completion_state(
+    state_handle: &state::AppState,
+) -> FinalizedSessionCompletionState {
     let timer = state_handle.timer_manager.lock().await;
     let state = timer.get_state();
 
@@ -323,18 +287,24 @@ fn emit_pipeline_events_with_effects(
     }
 }
 
-fn emit_pipeline_events(
-    app: &AppHandle,
-    emit_order: &[PipelineEmitEvent],
-    transition_outcome: Option<&types::SessionTransitionOutcome>,
+fn emit_startup_resume_events_with_effects(
+    effects: &mut impl SessionPipelineRuntimeEffects,
     tick_payload: &types::TimerTickPayload,
 ) {
-    let mut effects = AppHandleSessionPipelineRuntimeEffects { app };
-    emit_pipeline_events_with_effects(&mut effects, emit_order, transition_outcome, tick_payload);
+    emit_pipeline_events_with_effects(effects, &TIMER_TICK_ONLY_EMIT_ORDER, None, tick_payload);
 }
 
-async fn persist_timer_state(app: &AppHandle) {
-    persist_timer_state_with_trigger(app, PERSISTENCE_WRITE_TRIGGER_SESSION_COMPLETION).await;
+fn emit_session_completion_events_with_effects(
+    effects: &mut impl SessionPipelineRuntimeEffects,
+    transition_outcome: &types::SessionTransitionOutcome,
+    tick_payload: &types::TimerTickPayload,
+) {
+    emit_pipeline_events_with_effects(
+        effects,
+        session_completion_emit_order(transition_outcome.transition_reason),
+        Some(transition_outcome),
+        tick_payload,
+    );
 }
 
 async fn persist_timer_state_with_trigger(app: &AppHandle, trigger: &'static str) {
@@ -391,41 +361,54 @@ pub(crate) async fn spawn_timer_task(app: &AppHandle) {
     });
 }
 
-async fn execute_session_completion_effect_plan(
-    app: &AppHandle,
+async fn apply_session_completion_runtime_effects(
+    state_handle: &state::AppState,
     transition_outcome: &types::SessionTransitionOutcome,
     restart_timer_task_after_effects: bool,
+    effects: &mut (impl SessionPipelineRuntimeEffects + Send),
 ) {
-    let effect_plan =
-        build_session_completion_effect_plan(transition_outcome, restart_timer_task_after_effects);
-    apply_break_mode_transition(app, &effect_plan).await;
-    let finalized_state = finalized_session_completion_state(app).await;
+    let (requires_enter_break_mode, requires_exit_break_mode) =
+        break_mode_requirements(transition_outcome);
+
+    if requires_enter_break_mode {
+        effects.enter_break_mode().await;
+    } else if requires_exit_break_mode {
+        effects.exit_break_mode().await;
+    }
+
+    let finalized_state = finalized_session_completion_state(state_handle).await;
 
     log_session_completion_finalized(transition_outcome, &finalized_state);
-    emit_pipeline_events(
-        app,
-        effect_plan.emit_order,
-        Some(transition_outcome),
+    emit_session_completion_events_with_effects(
+        effects,
+        transition_outcome,
         &finalized_state.tick_payload,
     );
 
-    if effect_plan.persistence_requirement == PersistenceRequirement::Persist {
-        persist_timer_state(app).await;
-    }
+    effects.persist_timer_state().await;
 
-    if effect_plan.timer_task_restart == TimerTaskRestart::Restart {
-        restart_timer_task(app).await;
+    if restart_timer_task_after_effects {
+        effects.restart_timer_task().await;
     }
 }
 
 pub(crate) async fn lib_handle_session_complete(app: AppHandle) {
     let transition_outcome = complete_session_transition(&app).await;
-    execute_session_completion_effect_plan(&app, &transition_outcome, false).await;
+    let state_handle = app.state::<state::AppState>();
+    let mut effects = AppHandleSessionPipelineRuntimeEffects { app: &app };
+    apply_session_completion_runtime_effects(
+        &state_handle,
+        &transition_outcome,
+        false,
+        &mut effects,
+    )
+    .await;
 }
 
-pub(crate) async fn lib_handle_startup_restore(
-    app: AppHandle,
+pub(crate) async fn apply_startup_restore_with_effects(
+    state_handle: &state::AppState,
     initialization_outcome: state::AppInitializationOutcome,
+    effects: &mut (impl SessionPipelineRuntimeEffects + Send),
 ) {
     let state::AppInitializationOutcome {
         initial_tick_payload,
@@ -444,19 +427,29 @@ pub(crate) async fn lib_handle_startup_restore(
                 return;
             };
 
-            let effect_plan = build_startup_resume_effect_plan();
-            emit_pipeline_events(&app, effect_plan.emit_order, None, &tick_payload);
-
-            if effect_plan.timer_task_restart == TimerTaskRestart::Restart {
-                restart_timer_task(&app).await;
-            }
+            emit_startup_resume_events_with_effects(effects, &tick_payload);
+            effects.restart_timer_task().await;
         }
         state::StartupRestoreAction::FinalizeExpiredRestoredWork(transition_outcome) => {
             let restart_timer_task = transition_outcome.next_status != types::TimerStatus::Idle;
-            execute_session_completion_effect_plan(&app, &transition_outcome, restart_timer_task)
-                .await;
+            apply_session_completion_runtime_effects(
+                state_handle,
+                &transition_outcome,
+                restart_timer_task,
+                effects,
+            )
+            .await;
         }
     }
+}
+
+pub(crate) async fn lib_handle_startup_restore(
+    app: AppHandle,
+    initialization_outcome: state::AppInitializationOutcome,
+) {
+    let state_handle = app.state::<state::AppState>();
+    let mut effects = AppHandleSessionPipelineRuntimeEffects { app: &app };
+    apply_startup_restore_with_effects(&state_handle, initialization_outcome, &mut effects).await;
 }
 
 async fn enter_break_mode(app: AppHandle) {
@@ -610,8 +603,8 @@ pub(crate) async fn lib_handle_external_break_exit(app: AppHandle) {
 #[cfg(test)]
 mod emit_order_tests {
     use super::{
-        build_session_completion_effect_plan, emit_pipeline_events_with_effects,
-        start_input_monitor_for_break, SessionPipelineRuntimeEffects,
+        emit_session_completion_events_with_effects, start_input_monitor_for_break,
+        SessionPipelineRuntimeEffects,
     };
     use crate::error::PomoliceError;
     use crate::managers::clock::testing::FixedClock;
@@ -620,6 +613,8 @@ mod emit_order_tests {
     use crate::state::AppState;
     use crate::types::{SessionTransitionOutcome, SessionType, TimerState, TimerTickPayload};
     use chrono::{Local, TimeZone, Utc};
+    use std::future::Future;
+    use std::pin::Pin;
     use std::sync::atomic::AtomicBool as StdAtomicBool;
     use std::sync::{Arc, Mutex as StdMutex};
     use std::time::Duration as StdDuration;
@@ -637,6 +632,22 @@ mod emit_order_tests {
 
         fn update_tray(&mut self, _tick_payload: &TimerTickPayload) {
             self.tray_update_count += 1;
+        }
+
+        fn enter_break_mode<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+            Box::pin(async {})
+        }
+
+        fn exit_break_mode<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+            Box::pin(async {})
+        }
+
+        fn persist_timer_state<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+            Box::pin(async {})
+        }
+
+        fn restart_timer_task<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+            Box::pin(async {})
         }
     }
 
@@ -733,14 +744,12 @@ mod emit_order_tests {
         transition_outcome: &SessionTransitionOutcome,
         expected_event_names: &[&'static str],
     ) {
-        let effect_plan = build_session_completion_effect_plan(transition_outcome, false);
         let tick_payload = TimerState::default().to_tick_payload();
         let mut effects = RecordingSessionPipelineRuntimeEffects::default();
 
-        emit_pipeline_events_with_effects(
+        emit_session_completion_events_with_effects(
             &mut effects,
-            effect_plan.emit_order,
-            Some(transition_outcome),
+            transition_outcome,
             &tick_payload,
         );
 
