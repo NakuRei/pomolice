@@ -141,7 +141,7 @@ mod tests {
         assert_display_includes_diagnostic_details(&err, &["Failed to enter fullscreen"]);
     }
 
-    fn assert_serialized_response(
+    fn assert_public_backend_error_response(
         error: &PomoliceError,
         expected_code: &str,
         expected_message: &str,
@@ -151,7 +151,18 @@ mod tests {
             .as_object()
             .expect("serialized error should be a JSON object");
 
-        assert_eq!(response.len(), 2);
+        let allowed_fields = ["code", "message"];
+        assert_eq!(
+            response.len(),
+            allowed_fields.len(),
+            "public backend errors must expose only allowlisted fields"
+        );
+        for allowed_field in allowed_fields {
+            assert!(
+                response.contains_key(allowed_field),
+                "public backend errors should include allowlisted field {allowed_field:?}"
+            );
+        }
         assert_eq!(
             response
                 .get("code")
@@ -171,10 +182,10 @@ mod tests {
     }
 
     #[test]
-    fn test_error_serialization_uses_structured_response() {
+    fn test_error_serialization_uses_public_allowlisted_response() {
         let err = PomoliceError::RateLimited { remaining_ms: 300 };
 
-        assert_serialized_response(&err, "rate_limited", "Rate limited");
+        assert_public_backend_error_response(&err, "rate_limited", "Rate limited");
     }
 
     #[test]
@@ -197,8 +208,11 @@ mod tests {
                 .to_string(),
         );
 
-        let serialized =
-            assert_serialized_response(&error, "window_control_error", "Window control error");
+        let serialized = assert_public_backend_error_response(
+            &error,
+            "window_control_error",
+            "Window control error",
+        );
         let serialized = serialized.to_string();
 
         assert!(!serialized.contains("Failed to set fullscreen"));
@@ -210,13 +224,17 @@ mod tests {
     #[test]
     fn test_non_target_error_serialization_uses_explicit_safe_responses() {
         let unauthorized = PomoliceError::Unauthorized("settings".to_string());
-        assert_serialized_response(&unauthorized, "unauthorized_window", "Unauthorized window");
+        assert_public_backend_error_response(
+            &unauthorized,
+            "unauthorized_window",
+            "Unauthorized window",
+        );
 
         let invalid_transition = PomoliceError::InvalidStateTransition {
             action: "skip protected break".to_string(),
             current_state: TimerStatus::OnBreak,
         };
-        assert_serialized_response(
+        assert_public_backend_error_response(
             &invalid_transition,
             "invalid_state_transition",
             "Invalid state transition",
@@ -225,13 +243,13 @@ mod tests {
         let rate_limited = PomoliceError::RateLimited {
             remaining_ms: 1_500,
         };
-        assert_serialized_response(&rate_limited, "rate_limited", "Rate limited");
+        assert_public_backend_error_response(&rate_limited, "rate_limited", "Rate limited");
 
         let error = PomoliceError::from(SaveError::Commit {
             path: "C:\\Users\\nak\\AppData\\Roaming\\Pomolice\\timer_state.json".into(),
             source: std::io::Error::other("disk full"),
         });
-        assert_serialized_response(&error, "persistence_error", "Persistence error");
+        assert_public_backend_error_response(&error, "persistence_error", "Persistence error");
 
         let runtime = tokio::runtime::Runtime::new().expect("test runtime should be created");
         let join_error = runtime.block_on(async {
@@ -242,7 +260,7 @@ mod tests {
             .expect_err("spawned panic should surface as join error")
         });
         let join_error = PomoliceError::PersistenceTaskJoin { source: join_error };
-        assert_serialized_response(&join_error, "persistence_error", "Persistence error");
+        assert_public_backend_error_response(&join_error, "persistence_error", "Persistence error");
 
         let serialized =
             serde_json::to_string(&[unauthorized, invalid_transition, rate_limited, error])
@@ -278,7 +296,7 @@ mod tests {
         });
 
         let serialized =
-            assert_serialized_response(&error, "persistence_error", "Persistence error")
+            assert_public_backend_error_response(&error, "persistence_error", "Persistence error")
                 .to_string();
 
         assert!(!serialized.contains("timer_state.json"));
@@ -299,7 +317,7 @@ mod tests {
         let error = PomoliceError::PersistenceTaskJoin { source: join_error };
 
         let serialized =
-            assert_serialized_response(&error, "persistence_error", "Persistence error")
+            assert_public_backend_error_response(&error, "persistence_error", "Persistence error")
                 .to_string();
 
         assert!(!serialized.contains("simulated persistence worker panic"));
