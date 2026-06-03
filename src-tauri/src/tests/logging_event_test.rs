@@ -98,6 +98,22 @@ fn test_render_event_message_redacts_error_message_and_masks_high_risk_tokens() 
 }
 
 #[test]
+fn test_render_event_message_truncates_long_error_message() {
+    let long_message = "a".repeat(10_000);
+    let error = io::Error::other(long_message.clone());
+    let rendered = render_event_message(
+        BackendLogEvent::SessionFullscreenBreakEnterFailed,
+        &[],
+        Some(&error),
+    );
+
+    assert_rendered_event_identity(&rendered, "session.fullscreen_break.enter_failed");
+    assert_rendered_field_names(&rendered, &["error_message"]);
+    assert!(rendered.len() < long_message.len());
+    assert!(rendered.contains("...[truncated]"));
+}
+
+#[test]
 fn test_render_event_message_includes_persistence_trigger_context() {
     let error = io::Error::other("disk full");
     let rendered = render_event_message(

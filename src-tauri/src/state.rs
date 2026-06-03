@@ -932,10 +932,6 @@ mod tests {
         ));
 
         let timer_state = app_state.timer_manager.lock().await.get_state().clone();
-        assert_ne!(
-            (timer_state.status, timer_state.remaining_seconds),
-            (TimerStatus::Working, 0)
-        );
         assert_eq!(timer_state.status, TimerStatus::OnBreak);
         assert_eq!(timer_state.session_type, SessionType::ShortBreak);
         assert_eq!(timer_state.remaining_seconds, 300);

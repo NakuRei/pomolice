@@ -10,8 +10,6 @@ const REDACTED_HOME_PROFILE_PATH: &str = "[USER_HOME]";
 const REDACTED_TRUNCATED_SUFFIX: &str = "...[truncated]";
 const SENSITIVE_VALUE_LIMIT: usize = 160;
 const EXCEPTION_MESSAGE_LIMIT: usize = 256;
-#[cfg(test)]
-const STACKTRACE_LIMIT: usize = 1024;
 const HIGH_RISK_ASSIGNMENT_KEYS: [&str; 6] = [
     "password",
     "token",
@@ -37,14 +35,6 @@ pub(crate) fn redact_exception_message(value: &str) -> String {
     escape_log_component(&truncate_redacted_value(
         &mask_high_risk_tokens(&redact_home_profile_paths(value)),
         EXCEPTION_MESSAGE_LIMIT,
-    ))
-}
-
-#[cfg(test)]
-pub(crate) fn redact_exception_stacktrace(value: &str) -> String {
-    escape_log_component(&truncate_redacted_value(
-        &mask_high_risk_tokens(&redact_home_profile_paths(value)),
-        STACKTRACE_LIMIT,
     ))
 }
 

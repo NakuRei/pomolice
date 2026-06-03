@@ -1,6 +1,4 @@
-use crate::log_redaction::{
-    redact_exception_message, redact_exception_stacktrace, redact_field_value, RedactionClass,
-};
+use crate::log_redaction::{redact_exception_message, redact_field_value, RedactionClass};
 
 #[test]
 fn test_secret_field_values_are_fully_redacted() {
@@ -54,12 +52,13 @@ fn test_exception_message_masks_same_token_vocabulary_as_frontend() {
 }
 
 #[test]
-fn test_exception_stacktrace_masks_high_risk_tokens_and_truncates() {
-    let stacktrace = format!("{} password=abc", "x".repeat(1100));
-    let redacted = redact_exception_stacktrace(&stacktrace);
+fn test_exception_messages_are_truncated() {
+    let message = "a".repeat(10_000);
+    let redacted = redact_exception_message(&message);
 
+    assert!(redacted.chars().count() < message.chars().count());
+    assert_ne!(redacted, message);
     assert!(redacted.ends_with("...[truncated]"));
-    assert!(!redacted.contains("password=abc"));
 }
 
 #[test]
