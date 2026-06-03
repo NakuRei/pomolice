@@ -3,7 +3,7 @@
  * Phase 5: Multi-step skip confirmation flow
  */
 
-import { afterEach, describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   generateEasyProblem,
   generateHardProblem,
@@ -36,10 +36,6 @@ function getQuestionOperands(question: string): [number, number] {
 }
 
 describe("mathGenerator", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   describe("generateEasyProblem", () => {
     it("should generate a problem with valid structure", () => {
       const problem = generateEasyProblem();
@@ -69,25 +65,32 @@ describe("mathGenerator", () => {
       }
     });
 
-    it("should generate addition problems", () => {
-      vi.spyOn(Math, "random").mockReturnValue(0.4);
+    it("should generate addition and subtraction problems within their ranges", () => {
+      const seenOperators = new Set<string>();
 
-      const problem = generateEasyProblem();
+      for (let i = 0; i < 50; i++) {
+        const problem = generateEasyProblem();
+        const [a, b] = getQuestionOperands(problem.question);
 
-      expect(problem.question).toContain("+");
-      const [a, b] = getQuestionOperands(problem.question);
-      expect(problem.answer).toBe(a + b);
-    });
+        if (problem.question.includes("+")) {
+          seenOperators.add("+");
+          expect(problem.answer).toBe(a + b);
+          expect(a).toBeGreaterThanOrEqual(10);
+          expect(a).toBeLessThanOrEqual(99);
+          expect(b).toBeGreaterThanOrEqual(10);
+          expect(b).toBeLessThanOrEqual(99);
+        } else {
+          seenOperators.add("-");
+          expect(problem.answer).toBe(a - b);
+          expect(problem.answer).toBeGreaterThan(0);
+          expect(a).toBeGreaterThanOrEqual(20);
+          expect(a).toBeLessThanOrEqual(99);
+          expect(b).toBeGreaterThanOrEqual(10);
+          expect(b).toBeLessThanOrEqual(50);
+        }
+      }
 
-    it("should generate subtraction problems", () => {
-      vi.spyOn(Math, "random").mockReturnValue(0.6);
-
-      const problem = generateEasyProblem();
-
-      expect(problem.question).toContain("-");
-      const [a, b] = getQuestionOperands(problem.question);
-      expect(problem.answer).toBe(a - b);
-      expect(problem.answer).toBeGreaterThan(0);
+      expect(seenOperators).toEqual(new Set(["+", "-"]));
     });
 
     it("should have correct answer for generated problems", () => {
@@ -117,32 +120,31 @@ describe("mathGenerator", () => {
       expect(typeof problem.answer).toBe("number");
     });
 
-    it("should generate multiplication problems", () => {
-      vi.spyOn(Math, "random").mockReturnValue(0.4);
+    it("should generate multiplication and large-subtraction problems within their ranges", () => {
+      const seenOperators = new Set<string>();
 
-      const problem = generateHardProblem();
+      for (let i = 0; i < 50; i++) {
+        const problem = generateHardProblem();
+        const [a, b] = getQuestionOperands(problem.question);
 
-      expect(problem.question).toContain("×");
-      const [a, b] = getQuestionOperands(problem.question);
-      expect(problem.answer).toBe(a * b);
-      expect(a).toBeGreaterThanOrEqual(2);
-      expect(a).toBeLessThanOrEqual(12);
-      expect(b).toBeGreaterThanOrEqual(2);
-      expect(b).toBeLessThanOrEqual(12);
-    });
+        if (problem.question.includes("×")) {
+          seenOperators.add("×");
+          expect(problem.answer).toBe(a * b);
+          expect(a).toBeGreaterThanOrEqual(2);
+          expect(a).toBeLessThanOrEqual(12);
+          expect(b).toBeGreaterThanOrEqual(2);
+          expect(b).toBeLessThanOrEqual(12);
+        } else {
+          seenOperators.add("-");
+          expect(problem.answer).toBe(a - b);
+          expect(a).toBeGreaterThanOrEqual(100);
+          expect(a).toBeLessThanOrEqual(200);
+          expect(b).toBeGreaterThanOrEqual(20);
+          expect(b).toBeLessThanOrEqual(80);
+        }
+      }
 
-    it("should generate large subtraction problems", () => {
-      vi.spyOn(Math, "random").mockReturnValue(0.6);
-
-      const problem = generateHardProblem();
-
-      expect(problem.question).toContain("-");
-      const [a, b] = getQuestionOperands(problem.question);
-      expect(problem.answer).toBe(a - b);
-      expect(a).toBeGreaterThanOrEqual(100);
-      expect(a).toBeLessThanOrEqual(200);
-      expect(b).toBeGreaterThanOrEqual(20);
-      expect(b).toBeLessThanOrEqual(80);
+      expect(seenOperators).toEqual(new Set(["×", "-"]));
     });
 
     it("should have correct answer for generated problems", () => {
