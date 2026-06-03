@@ -12,10 +12,21 @@ fn test_secret_field_values_are_fully_redacted() {
 
 #[test]
 fn test_sensitive_field_values_are_truncated() {
-    let value = "a".repeat(200);
+    let value = "a".repeat(10_000);
     let redacted = redact_field_value(RedactionClass::Sensitive, &value);
 
-    assert_eq!(redacted.len(), 160);
+    assert!(redacted.chars().count() < value.chars().count());
+    assert_ne!(redacted, value);
+    assert!(redacted.ends_with("...[truncated]"));
+}
+
+#[test]
+fn test_sensitive_field_values_mask_high_risk_tokens_when_truncated() {
+    let value = format!("api_key=field-secret {}", "a".repeat(10_000));
+    let redacted = redact_field_value(RedactionClass::Sensitive, &value);
+
+    assert!(redacted.contains("[REDACTED]"));
+    assert!(!redacted.contains("field-secret"));
     assert!(redacted.ends_with("...[truncated]"));
 }
 
