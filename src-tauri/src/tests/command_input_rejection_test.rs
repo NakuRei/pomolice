@@ -24,7 +24,7 @@ fn test_observe_command_arg_result_success_wraps_inner_value() {
 }
 
 #[test]
-fn test_observe_command_arg_result_rejection_logs_event_once() {
+fn test_invalid_command_argument_logs_rejection_context_and_returns_original_error() {
     let invoke_error = InvokeError(json!("password=abc token=xyz"));
     let mut captured_logs = Vec::new();
 
@@ -50,20 +50,21 @@ fn test_observe_command_arg_result_rejection_logs_event_once() {
 
     let (event, fields) = &captured_logs[0];
     assert_eq!(*event, BackendLogEvent::TimerCommandInputRejected);
+    assert_log_field(fields, "command_name", "start_work");
+    assert_log_field(fields, "window_label", "main");
+    assert_log_field(fields, "argument_name", "work_duration_secs");
+    assert_log_field(fields, "error_message", "password=abc token=xyz");
+}
+
+fn assert_log_field(fields: &[(String, String)], expected_name: &str, expected_value: &str) {
+    let actual_value = fields
+        .iter()
+        .find_map(|(name, value)| (name == expected_name).then_some(value.as_str()));
+
     assert_eq!(
-        fields,
-        &vec![
-            ("command_name".to_string(), "start_work".to_string()),
-            ("window_label".to_string(), "main".to_string()),
-            (
-                "argument_name".to_string(),
-                "work_duration_secs".to_string()
-            ),
-            (
-                "error_message".to_string(),
-                "password=abc token=xyz".to_string()
-            ),
-        ]
+        actual_value,
+        Some(expected_value),
+        "expected log field {expected_name}={expected_value}, got {fields:?}"
     );
 }
 
