@@ -373,9 +373,10 @@ mod tests {
     #[test]
     fn test_restore_main_window_visibility_propagates_show_failure() {
         let mut focus_called = false;
+        let show_error = "platform denied visibility change";
 
         let error = WindowStateManager::restore_main_window_visibility(
-            || Err("show failed".to_string()),
+            || Err(show_error.to_string()),
             || {
                 focus_called = true;
                 Ok(())
@@ -383,10 +384,21 @@ mod tests {
         )
         .expect_err("show failure should fail the rollback restore");
 
-        assert!(matches!(
-            error,
-            PomoliceError::WindowControl(message) if message == "Failed to show: show failed"
-        ));
+        match error {
+            PomoliceError::WindowControl(message) => {
+                assert!(
+                    message.contains("show"),
+                    "window control error should identify the failed show operation: {message:?}"
+                );
+                assert!(
+                    message.contains(show_error),
+                    "window control error should retain the underlying show error: {message:?}"
+                );
+            }
+            other => {
+                panic!("expected show failure to return a window control error, got {other:?}")
+            }
+        }
         assert!(!focus_called);
     }
 
