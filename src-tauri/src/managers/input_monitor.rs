@@ -2,6 +2,7 @@
 // Manages global input monitoring without global statics
 
 use rdev::{listen, Event, EventType, Key};
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -32,24 +33,45 @@ impl InputMonitorRuntime for RdevInputMonitorRuntime {
 
 #[derive(Default, Clone)]
 struct ModifierState {
-    ctrl: bool,
-    alt: bool,
-    shift: bool,
+    pressed_modifier_keys: HashSet<Key>,
 }
 
 impl ModifierState {
     fn update(&mut self, key: Key, pressed: bool) {
-        match key {
-            Key::ControlLeft | Key::ControlRight => self.ctrl = pressed,
-            Key::Alt | Key::AltGr => self.alt = pressed,
-            Key::ShiftLeft | Key::ShiftRight => self.shift = pressed,
-            _ => {}
+        if !is_modifier_key(key) {
+            return;
+        }
+
+        if pressed {
+            let _ = self.pressed_modifier_keys.insert(key);
+        } else {
+            let _ = self.pressed_modifier_keys.remove(&key);
         }
     }
 
     fn is_escape_combo(&self, key: Key) -> bool {
-        self.ctrl && self.alt && self.shift && matches!(key, Key::KeyE)
+        matches!(key, Key::KeyE)
+            && self.any_pressed([Key::ControlLeft, Key::ControlRight])
+            && self.any_pressed([Key::Alt, Key::AltGr])
+            && self.any_pressed([Key::ShiftLeft, Key::ShiftRight])
     }
+
+    fn any_pressed(&self, keys: [Key; 2]) -> bool {
+        keys.iter()
+            .any(|key| self.pressed_modifier_keys.contains(key))
+    }
+}
+
+fn is_modifier_key(key: Key) -> bool {
+    matches!(
+        key,
+        Key::ControlLeft
+            | Key::ControlRight
+            | Key::Alt
+            | Key::AltGr
+            | Key::ShiftLeft
+            | Key::ShiftRight
+    )
 }
 
 /// Manager for global input monitoring
@@ -476,22 +498,32 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_modifier_state_default() {
-        let mods = ModifierState::default();
-        assert!(!mods.ctrl);
-        assert!(!mods.alt);
-        assert!(!mods.shift);
+    fn key_press_event(key: Key) -> Event {
+        Event {
+            time: std::time::SystemTime::now(),
+            name: None,
+            event_type: EventType::KeyPress(key),
+        }
+    }
+
+    fn press_keys(mods: &mut ModifierState, keys: impl IntoIterator<Item = Key>) {
+        for key in keys {
+            mods.update(key, true);
+        }
+    }
+
+    fn release_keys(mods: &mut ModifierState, keys: impl IntoIterator<Item = Key>) {
+        for key in keys {
+            mods.update(key, false);
+        }
     }
 
     #[test]
-    fn test_escape_combo_detection() {
+    fn test_escape_combo_requires_all_modifier_groups_and_e_key() {
         let mut mods = ModifierState::default();
 
-        // Not enough modifiers
         assert!(!mods.is_escape_combo(Key::KeyE));
 
-        // Add modifiers one by one
         mods.update(Key::ControlLeft, true);
         assert!(!mods.is_escape_combo(Key::KeyE));
 
@@ -499,99 +531,104 @@ mod tests {
         assert!(!mods.is_escape_combo(Key::KeyE));
 
         mods.update(Key::ShiftLeft, true);
-        // Now all modifiers are pressed
         assert!(mods.is_escape_combo(Key::KeyE));
 
-        // Wrong key
         assert!(!mods.is_escape_combo(Key::KeyA));
     }
 
     #[test]
-    fn test_modifier_state_update_press_and_release() {
-        let mut mods = ModifierState::default();
+    fn test_escape_combo_accepts_supported_modifier_key_variants() {
+        for (ctrl, alt, shift) in [
+            (Key::ControlLeft, Key::Alt, Key::ShiftLeft),
+            (Key::ControlRight, Key::Alt, Key::ShiftRight),
+            (Key::ControlLeft, Key::AltGr, Key::ShiftRight),
+            (Key::ControlRight, Key::AltGr, Key::ShiftLeft),
+        ] {
+            let mut mods = ModifierState::default();
 
-        // Press left control
-        mods.update(Key::ControlLeft, true);
-        assert!(mods.ctrl);
+            press_keys(&mut mods, [ctrl, alt, shift]);
 
-        // Release left control
-        mods.update(Key::ControlLeft, false);
-        assert!(!mods.ctrl);
-
-        // Press right control
-        mods.update(Key::ControlRight, true);
-        assert!(mods.ctrl);
-
-        // Release right control
-        mods.update(Key::ControlRight, false);
-        assert!(!mods.ctrl);
+            assert!(mods.is_escape_combo(Key::KeyE));
+            assert!(!mods.is_escape_combo(Key::KeyA));
+        }
     }
 
     #[test]
-    fn test_modifier_state_all_modifier_keys() {
-        let mut mods = ModifierState::default();
+    fn test_escape_combo_stays_active_until_all_keys_in_modifier_group_are_released() {
+        for (modifier_group_keys, other_required_keys) in [
+            (
+                [Key::ControlLeft, Key::ControlRight],
+                [Key::Alt, Key::ShiftLeft],
+            ),
+            ([Key::Alt, Key::AltGr], [Key::ControlLeft, Key::ShiftLeft]),
+            (
+                [Key::ShiftLeft, Key::ShiftRight],
+                [Key::ControlLeft, Key::Alt],
+            ),
+        ] {
+            let mut mods = ModifierState::default();
 
-        // Test Alt
-        mods.update(Key::Alt, true);
-        assert!(mods.alt);
-        mods.update(Key::Alt, false);
-        assert!(!mods.alt);
+            press_keys(&mut mods, modifier_group_keys);
+            press_keys(&mut mods, other_required_keys);
+            assert!(mods.is_escape_combo(Key::KeyE));
 
-        mods.update(Key::AltGr, true);
-        assert!(mods.alt);
-        mods.update(Key::AltGr, false);
-        assert!(!mods.alt);
+            mods.update(modifier_group_keys[0], false);
+            assert!(mods.is_escape_combo(Key::KeyE));
 
-        // Test Shift
-        mods.update(Key::ShiftLeft, true);
-        assert!(mods.shift);
-        mods.update(Key::ShiftLeft, false);
-        assert!(!mods.shift);
-
-        mods.update(Key::ShiftRight, true);
-        assert!(mods.shift);
-        mods.update(Key::ShiftRight, false);
-        assert!(!mods.shift);
-
-        // Test Ctrl
-        mods.update(Key::ControlLeft, true);
-        assert!(mods.ctrl);
-        mods.update(Key::ControlLeft, false);
-        assert!(!mods.ctrl);
-
-        mods.update(Key::ControlRight, true);
-        assert!(mods.ctrl);
-        mods.update(Key::ControlRight, false);
-        assert!(!mods.ctrl);
+            mods.update(modifier_group_keys[1], false);
+            assert!(!mods.is_escape_combo(Key::KeyE));
+        }
     }
 
     #[test]
-    fn test_escape_combo_with_right_modifiers() {
+    fn test_escape_combo_ignores_non_modifier_state_updates() {
         let mut mods = ModifierState::default();
 
-        // Use right-side modifiers
-        mods.update(Key::ControlRight, true);
-        mods.update(Key::AltGr, true);
-        mods.update(Key::ShiftRight, true);
-
-        // Should detect combo with right modifiers
+        press_keys(&mut mods, [Key::ControlLeft, Key::Alt, Key::ShiftLeft]);
         assert!(mods.is_escape_combo(Key::KeyE));
 
-        // Wrong key should still fail
-        assert!(!mods.is_escape_combo(Key::KeyA));
+        press_keys(&mut mods, [Key::KeyA, Key::KeyE, Key::Space]);
+        release_keys(&mut mods, [Key::KeyA, Key::KeyE, Key::Space]);
+
+        assert!(mods.is_escape_combo(Key::KeyE));
     }
 
     #[test]
-    fn test_escape_combo_mixed_modifiers() {
-        let mut mods = ModifierState::default();
+    fn test_escape_combo_callback_disables_monitoring_after_single_escape() {
+        let enabled = Arc::new(AtomicBool::new(true));
+        let modifier_state = Arc::new(parking_lot::Mutex::new(ModifierState::default()));
+        let escape_combo_count = Arc::new(AtomicUsize::new(0));
+        let input_event_count = Arc::new(AtomicUsize::new(0));
 
-        // Mix left and right modifiers
-        mods.update(Key::ControlLeft, true);
-        mods.update(Key::AltGr, true);
-        mods.update(Key::ShiftRight, true);
+        let escape_combo_count_for_callback = Arc::clone(&escape_combo_count);
+        let input_event_count_for_callback = Arc::clone(&input_event_count);
+        let callback = build_event_callback(
+            Arc::clone(&enabled),
+            Arc::clone(&modifier_state),
+            Arc::new(move || {
+                escape_combo_count_for_callback.fetch_add(1, Ordering::SeqCst);
+            }),
+            Arc::new(move || {
+                input_event_count_for_callback.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
 
-        // Should still work
-        assert!(mods.is_escape_combo(Key::KeyE));
+        for key in [Key::ControlLeft, Key::Alt, Key::ShiftLeft, Key::KeyE] {
+            callback(key_press_event(key));
+        }
+
+        assert_eq!(escape_combo_count.load(Ordering::SeqCst), 1);
+        assert!(!enabled.load(Ordering::SeqCst));
+
+        let input_count_after_escape = input_event_count.load(Ordering::SeqCst);
+        callback(mouse_move_event());
+        callback(key_press_event(Key::KeyA));
+
+        assert_eq!(escape_combo_count.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            input_event_count.load(Ordering::SeqCst),
+            input_count_after_escape
+        );
     }
 
     #[test]
@@ -616,11 +653,7 @@ mod tests {
         );
 
         for key in [Key::ControlLeft, Key::Alt, Key::ShiftLeft, Key::KeyE] {
-            callback(Event {
-                time: std::time::SystemTime::now(),
-                name: None,
-                event_type: EventType::KeyPress(key),
-            });
+            callback(key_press_event(key));
         }
 
         assert!(callback_observed_unlocked_state.load(Ordering::SeqCst));
