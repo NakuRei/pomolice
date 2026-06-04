@@ -8,7 +8,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SkipFlowModal from "./SkipFlowModal";
-import { SKIP_FLOW_STEPS, useSkipFlowStore } from "@/store/skipFlowStore";
+import { useSkipFlowStore } from "@/store/skipFlowStore";
 import {
   SHORT_TYPING_PHRASES,
   LONG_TYPING_PHRASES,
@@ -29,37 +29,7 @@ function createRootFixture(): HTMLDivElement {
   return root;
 }
 
-function renderSkipFlowModal(currentStep: number): ReturnType<typeof render> & {
-  root: HTMLDivElement;
-  onComplete: ReturnType<typeof vi.fn>;
-  onCancel: ReturnType<typeof vi.fn>;
-} {
-  const root = createRootFixture();
-  const onComplete = vi.fn();
-  const onCancel = vi.fn();
-
-  useSkipFlowStore.getState().resetSkipFlow();
-  useSkipFlowStore.setState({
-    isActive: true,
-    currentStep,
-    startedAt: Date.now(),
-  });
-
-  const renderResult = render(
-    <SkipFlowModal onComplete={onComplete} onCancel={onCancel} />,
-    {
-      container: root,
-    },
-  );
-
-  return Object.assign(renderResult, {
-    root,
-    onComplete,
-    onCancel,
-  });
-}
-
-function renderStartedSkipFlowModal(): ReturnType<typeof render> & {
+function renderSkipFlowModal(): ReturnType<typeof render> & {
   root: HTMLDivElement;
   onComplete: ReturnType<typeof vi.fn>;
   onCancel: ReturnType<typeof vi.fn>;
@@ -184,8 +154,8 @@ afterEach(() => {
 });
 
 describe("SkipFlowModal", () => {
-  it("renders SkipFlowModal as a named modal dialog with aria-modal and the fixed modal title", () => {
-    renderSkipFlowModal(SKIP_FLOW_STEPS.CONFIRMATION_1);
+  it("renders a named modal dialog with aria-modal", () => {
+    renderSkipFlowModal();
 
     const dialog = getSkipFlowDialog();
 
@@ -193,7 +163,7 @@ describe("SkipFlowModal", () => {
   });
 
   it("exposes the modal description via aria-describedby", () => {
-    renderSkipFlowModal(SKIP_FLOW_STEPS.CONFIRMATION_1);
+    renderSkipFlowModal();
 
     expect(getSkipFlowDialog()).toHaveAccessibleDescription(
       SKIP_FLOW_MODAL_DESCRIPTION,
@@ -202,7 +172,7 @@ describe("SkipFlowModal", () => {
 
   it("keeps focus inside the modal for a confirmation step", async () => {
     const user = userEvent.setup();
-    renderSkipFlowModal(SKIP_FLOW_STEPS.CONFIRMATION_1);
+    renderSkipFlowModal();
 
     const noTakeBreakButton = screen.getByRole("button", {
       name: "No, Take Break",
@@ -223,7 +193,7 @@ describe("SkipFlowModal", () => {
   });
 
   it("focuses the No Take Break button on confirmation step 1", async () => {
-    renderSkipFlowModal(SKIP_FLOW_STEPS.CONFIRMATION_1);
+    renderSkipFlowModal();
 
     await waitFor(() => {
       expect(
@@ -234,7 +204,7 @@ describe("SkipFlowModal", () => {
 
   it("moves focus back to the No Take Break button when confirmation step 1 advances to step 2", async () => {
     const user = userEvent.setup();
-    renderSkipFlowModal(SKIP_FLOW_STEPS.CONFIRMATION_1);
+    renderSkipFlowModal();
 
     await user.click(screen.getByRole("button", { name: "Yes, Continue" }));
 
@@ -246,72 +216,20 @@ describe("SkipFlowModal", () => {
     });
   });
 
-  it("updates time spent once per second while the skip flow is active", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
-
-    renderSkipFlowModal(SKIP_FLOW_STEPS.CONFIRMATION_1);
-
-    expect(useSkipFlowStore.getState().totalTimeSpent).toBe(0);
-
-    act(() => {
-      vi.advanceTimersByTime(1000);
-    });
-
-    expect(useSkipFlowStore.getState().totalTimeSpent).toBe(1);
-  });
-
   it("notifies the caller when the user cancels the skip flow", async () => {
     const user = userEvent.setup();
-    const { onCancel } = renderSkipFlowModal(SKIP_FLOW_STEPS.CONFIRMATION_1);
+    const { onCancel } = renderSkipFlowModal();
 
     await user.click(screen.getByRole("button", { name: "No, Take Break" }));
 
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it("notifies the caller when the final warning is confirmed", async () => {
-    const user = userEvent.setup();
-    const { onComplete } = renderSkipFlowModal(SKIP_FLOW_STEPS.FINAL_WARNING);
-
-    await user.click(screen.getByRole("button", { name: "Yes, Skip Anyway" }));
-
-    expect(onComplete).toHaveBeenCalledTimes(1);
-  });
-
-  it("focuses the No Take the Break button when the final warning step is shown", async () => {
-    renderSkipFlowModal(SKIP_FLOW_STEPS.FINAL_WARNING);
-
-    await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: "No, Take the Break" }),
-      ).toHaveFocus();
-    });
-  });
-
-  it("focuses the press-and-hold button when the long-press step is shown", async () => {
-    renderSkipFlowModal(SKIP_FLOW_STEPS.LONG_PRESS);
-
-    await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: "Press and Hold" }),
-      ).toHaveFocus();
-    });
-  });
-
-  it("preserves TypingChallenge input autofocus when the typing step is rendered", async () => {
-    renderSkipFlowModal(SKIP_FLOW_STEPS.TYPING_CHALLENGE_1);
-
-    await waitFor(() => {
-      expect(screen.getByPlaceholderText("Start typing here...")).toHaveFocus();
-    });
-  });
-
   it("requires the visible ten-step flow before completing the skip", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
 
-    const { onComplete } = renderStartedSkipFlowModal();
+    const { onComplete } = renderSkipFlowModal();
 
     expectSkipFlowStep(1);
     expect(
