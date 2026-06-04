@@ -4,9 +4,12 @@ import { BreakStats } from "./BreakStats";
 import { useTimerStore } from "@/store/timerStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 
-function expectBreakStat(labelText: string, valueText: string): void {
-  const label = screen.getByText(labelText);
-  expect(label.parentElement).toHaveTextContent(`${labelText} ${valueText}`);
+function expectBreakStat(
+  scope: HTMLElement,
+  labelText: string,
+  valueText: string,
+): void {
+  expect(scope).toHaveTextContent(`${labelText} ${valueText}`);
 }
 
 describe("BreakStats", () => {
@@ -27,14 +30,14 @@ describe("BreakStats", () => {
       currentCycle: 2,
     });
 
-    render(<BreakStats />);
+    const { container } = render(<BreakStats />);
 
-    expectBreakStat("今日のポモドーロ:", "3");
-    expectBreakStat("現在のサイクル:", "2");
+    expectBreakStat(container, "今日のポモドーロ:", "3");
+    expectBreakStat(container, "現在のサイクル:", "2");
   });
 
   it("reacts to timer-store updates", () => {
-    render(<BreakStats />);
+    const { container } = render(<BreakStats />);
 
     act(() => {
       useTimerStore.setState({
@@ -43,7 +46,7 @@ describe("BreakStats", () => {
       });
     });
 
-    expectBreakStat("今日のポモドーロ:", "5");
-    expectBreakStat("現在のサイクル:", "4");
+    expectBreakStat(container, "今日のポモドーロ:", "5");
+    expectBreakStat(container, "現在のサイクル:", "4");
   });
 });
