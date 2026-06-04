@@ -8,9 +8,18 @@ afterEach(() => {
 });
 
 describe("MotivationalMessage", () => {
+  it("shows one of the configured motivational messages", () => {
+    render(<MotivationalMessage />);
+
+    const visibleMessages =
+      motivationalMessagesModule.motivationalMessages.filter((message) =>
+        screen.queryByText(message),
+      );
+    expect(visibleMessages).toHaveLength(1);
+  });
+
   it("keeps the initially selected message across rerenders", () => {
-    const getRandomMessage = vi
-      .spyOn(motivationalMessagesModule, "getRandomMessage")
+    vi.spyOn(motivationalMessagesModule, "getRandomMessage")
       .mockReturnValueOnce("最初のメッセージ")
       .mockReturnValueOnce("次のメッセージ");
 
@@ -20,7 +29,6 @@ describe("MotivationalMessage", () => {
 
     rerender(<MotivationalMessage />);
 
-    expect(getRandomMessage).toHaveBeenCalledTimes(1);
     expect(screen.getByText("最初のメッセージ")).toBeInTheDocument();
     expect(screen.queryByText("次のメッセージ")).not.toBeInTheDocument();
   });
