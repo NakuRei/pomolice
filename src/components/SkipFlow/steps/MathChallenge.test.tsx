@@ -3,38 +3,57 @@
  * Phase 5: Multi-step skip confirmation flow
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import MathChallenge from "./MathChallenge";
+import { useSkipFlowStore } from "@/store/skipFlowStore";
 
-const mockRetryStep = vi.fn();
+/**
+ * Solves the math problem currently displayed on screen by parsing the
+ * rendered question. Driving input from the visible problem keeps the test
+ * independent of how problems are generated.
+ */
+function solveDisplayedProblem(): number {
+  const text = screen.getByText(/[=]\s*\?/u).textContent;
+  const groups = /(?<left>-?\d+)\s*(?<operator>[+\-×])\s*(?<right>-?\d+)/u.exec(
+    text,
+  )?.groups;
 
-// Mock the store
-vi.mock("@/store/skipFlowStore", () => ({
-  useSkipFlowStore: vi.fn(
-    (selector: (state: { retryStep: typeof mockRetryStep }) => unknown) =>
-      selector({
-        retryStep: mockRetryStep,
-      }),
-  ),
-}));
+  if (groups?.operator === undefined) {
+    throw new Error(`could not parse displayed problem: "${text}"`);
+  }
 
-// Mock math generator
-vi.mock("@/utils/mathGenerator", () => ({
-  generateEasyProblem: vi.fn(() => ({
-    question: "10 + 20 = ?",
-    answer: 30,
-  })),
-  generateHardProblem: vi.fn(() => ({
-    question: "5 × 6 = ?",
-    answer: 30,
-  })),
-  validateAnswer: vi.fn((input: string | number, answer: number) => {
-    const parsed = typeof input === "string" ? parseInt(input, 10) : input;
-    return parsed === answer;
-  }),
-}));
+  const left = Number(groups.left);
+  const right = Number(groups.right);
+
+  switch (groups.operator) {
+    case "+":
+      return left + right;
+    case "×":
+      return left * right;
+    case "-":
+      return left - right;
+    default:
+      throw new Error(`unexpected operator in problem: "${text}"`);
+  }
+}
+
+function formElementOf(input: HTMLElement): HTMLFormElement {
+  const form = input.closest("form");
+
+  if (form === null) {
+    throw new Error("answer input is not inside a form");
+  }
+
+  return form;
+}
 
 describe("MathChallenge", () => {
   const mockOnComplete = vi.fn();
@@ -42,7 +61,16 @@ describe("MathChallenge", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRetryStep.mockReset();
+    useSkipFlowStore.getState().resetSkipFlow();
+  });
+
+  afterEach(() => {
+    if (vi.isFakeTimers()) {
+      act(() => {
+        vi.runOnlyPendingTimers();
+      });
+    }
+    vi.useRealTimers();
   });
 
   describe("Rendering", () => {
@@ -160,13 +188,6 @@ describe("MathChallenge", () => {
     it("should call onComplete when correct answer is submitted", async () => {
       const user = userEvent.setup();
 
-      // Mock to generate predictable problem
-      const { generateEasyProblem } = await import("@/utils/mathGenerator");
-      vi.mocked(generateEasyProblem).mockReturnValue({
-        question: "10 + 5 = ?",
-        answer: 15,
-      });
-
       render(
         <MathChallenge
           difficulty="easy"
@@ -178,12 +199,43 @@ describe("MathChallenge", () => {
       const input = screen.getByPlaceholderText("Your answer");
       const submitButton = screen.getByRole("button", { name: /Submit/iu });
 
-      await user.type(input, "15");
+      await user.type(input, String(solveDisplayedProblem()));
       await user.click(submitButton);
 
       await waitFor(() => {
         expect(mockOnComplete).toHaveBeenCalledTimes(1);
       });
+    });
+
+    it("shows an error and recovers with a fresh problem after a wrong answer", () => {
+      // Fake timers are opt-in here because the recovery is delayed by a timeout,
+      // and userEvent deadlocks with fake timers under Vitest.
+      vi.useFakeTimers();
+
+      render(
+        <MathChallenge
+          difficulty="easy"
+          onComplete={mockOnComplete}
+          onCancel={mockOnCancel}
+        />,
+      );
+
+      const input = screen.getByPlaceholderText("Your answer");
+      const wrongAnswer = solveDisplayedProblem() + 1;
+      fireEvent.change(input, { target: { value: String(wrongAnswer) } });
+      fireEvent.submit(formElementOf(input));
+
+      expect(screen.getByText(/Incorrect/iu)).toBeInTheDocument();
+      expect(input).toBeDisabled();
+      expect(mockOnComplete).not.toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(1500);
+      });
+
+      expect(screen.queryByText(/Incorrect/iu)).not.toBeInTheDocument();
+      expect(input).toHaveValue("");
+      expect(input).not.toBeDisabled();
     });
   });
 

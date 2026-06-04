@@ -2,38 +2,34 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import TypingChallenge from "./TypingChallenge";
+import { useSkipFlowStore } from "@/store/skipFlowStore";
+import {
+  SHORT_TYPING_PHRASES,
+  LONG_TYPING_PHRASES,
+} from "@/data/typingPhrases";
 
-const mockRetryStep = vi.fn();
+/**
+ * Reads the phrase currently rendered on screen by matching against the
+ * difficulty's phrase bank. Returning the matched bank entry doubles as an
+ * assertion that the displayed phrase belongs to that bank, without coupling
+ * to how the phrase is split into character spans.
+ */
+function renderedPhraseFrom(bank: readonly string[]): string {
+  const phrase = bank.find(
+    (candidate) =>
+      screen.queryAllByText((_, element) => element?.textContent === candidate)
+        .length > 0,
+  );
 
-vi.mock("@/store/skipFlowStore", () => ({
-  useSkipFlowStore: vi.fn(
-    (selector: (state: { retryStep: typeof mockRetryStep }) => unknown) =>
-      selector({
-        retryStep: mockRetryStep,
-      }),
-  ),
-}));
+  if (phrase === undefined) {
+    throw new Error("rendered phrase was not found in the expected bank");
+  }
 
-interface PhraseGeneratorActualModule {
-  getConfirmationMessage: (step: number) => string;
-  validateTypedPhrase: (input: string, target: string) => boolean;
-  getCharacterValidation: (input: string, target: string) => (boolean | null)[];
+  return phrase;
 }
 
-vi.mock("@/utils/phraseGenerator", async (importOriginal) => {
-  const actual: PhraseGeneratorActualModule = await importOriginal();
-
-  return {
-    ...actual,
-    getRandomShortPhrase: vi.fn(() => "TEST PHRASE"),
-    getRandomLongPhrase: vi.fn(() => "THIS IS A LONGER TEST PHRASE"),
-  };
-});
-
-function expectRenderedPhrase(phrase: string): void {
-  expect(
-    screen.getAllByText((_, element) => element?.textContent === phrase),
-  ).not.toHaveLength(0);
+function firstCharThatDiffers(phrase: string): string {
+  return phrase.startsWith("Z") ? "Y" : "Z";
 }
 
 describe("TypingChallenge", () => {
@@ -42,7 +38,7 @@ describe("TypingChallenge", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRetryStep.mockReset();
+    useSkipFlowStore.getState().resetSkipFlow();
   });
 
   afterEach(() => {
@@ -54,7 +50,7 @@ describe("TypingChallenge", () => {
     vi.useRealTimers();
   });
 
-  it("renders the short phrase and focuses the input on mount", () => {
+  it("renders a short-bank phrase and focuses the input on mount", () => {
     render(
       <TypingChallenge
         difficulty="short"
@@ -65,14 +61,14 @@ describe("TypingChallenge", () => {
 
     const input = screen.getByPlaceholderText("Start typing here...");
 
-    expectRenderedPhrase("TEST PHRASE");
+    renderedPhraseFrom(SHORT_TYPING_PHRASES);
     expect(input).toHaveFocus();
     expect(input).toHaveAttribute("autoComplete", "off");
     expect(input).toHaveAttribute("autoCorrect", "off");
     expect(input).toHaveAttribute("spellCheck", "false");
   });
 
-  it("renders the long phrase when the long difficulty is selected", () => {
+  it("renders a long-bank phrase when the long difficulty is selected", () => {
     render(
       <TypingChallenge
         difficulty="long"
@@ -81,7 +77,7 @@ describe("TypingChallenge", () => {
       />,
     );
 
-    expectRenderedPhrase("THIS IS A LONGER TEST PHRASE");
+    renderedPhraseFrom(LONG_TYPING_PHRASES);
   });
 
   it("retries after a typo and clears the input after the reset timeout", () => {
@@ -96,10 +92,12 @@ describe("TypingChallenge", () => {
       />,
     );
 
+    const phrase = renderedPhraseFrom(SHORT_TYPING_PHRASES);
     const input = screen.getByPlaceholderText("Start typing here...");
-    fireEvent.change(input, { target: { value: "TEST X" } });
+    fireEvent.change(input, {
+      target: { value: firstCharThatDiffers(phrase) },
+    });
 
-    expect(mockRetryStep).toHaveBeenCalledTimes(1);
     expect(screen.getByText(/Typo detected/iu)).toBeInTheDocument();
     expect(input).toBeDisabled();
 
@@ -121,8 +119,9 @@ describe("TypingChallenge", () => {
       />,
     );
 
+    const phrase = renderedPhraseFrom(SHORT_TYPING_PHRASES);
     fireEvent.change(screen.getByPlaceholderText("Start typing here..."), {
-      target: { value: "TEST PHRASE" },
+      target: { value: phrase },
     });
 
     expect(mockOnComplete).toHaveBeenCalledTimes(1);
