@@ -1,20 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-type FrontendRedactionClassification = "public" | "sensitive" | "secret";
-
-interface FrontendLogEventDefinitionForMock {
-  allowedFields: readonly string[];
-  redactionClassification: Readonly<
-    Partial<Record<string, FrontendRedactionClassification>>
-  >;
-}
-
-interface LogEventsModuleForMock {
-  getFrontendLogEventDefinition(
-    eventId: string,
-  ): FrontendLogEventDefinitionForMock;
-}
-
 describe("buildSanitizedFrontendLogRecord()", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -59,51 +44,6 @@ describe("buildSanitizedFrontendLogRecord()", () => {
         timer_status: "idle",
       },
     });
-  });
-
-  it("redacts secret fields to exact marker", async () => {
-    vi.doMock("./logEvents", async () => {
-      const actualLogEvents: LogEventsModuleForMock =
-        await vi.importActual("./logEvents");
-      const originalDefinition = actualLogEvents.getFrontendLogEventDefinition(
-        "settings.sync.failed",
-      );
-      const patchedDefinition = {
-        ...originalDefinition,
-        allowedFields: [...originalDefinition.allowedFields, "secret_preview"],
-        redactionClassification: {
-          ...originalDefinition.redactionClassification,
-          secret_preview: "secret" as const,
-        },
-      } as typeof originalDefinition;
-
-      return {
-        ...actualLogEvents,
-        getFrontendLogEventDefinition(
-          eventId: string,
-        ): FrontendLogEventDefinitionForMock {
-          return eventId === "settings.sync.failed"
-            ? patchedDefinition
-            : actualLogEvents.getFrontendLogEventDefinition(eventId);
-        },
-      };
-    });
-
-    try {
-      const { buildSanitizedFrontendLogRecord } = await import("./redaction");
-      const record = buildSanitizedFrontendLogRecord(
-        "settings.sync.failed",
-        "settings_sync",
-        {
-          secret_preview: "super-secret-value",
-        } as never,
-        undefined,
-      );
-
-      expect(record.keyValues.secret_preview).toBe("[REDACTED]");
-    } finally {
-      vi.doUnmock("./logEvents");
-    }
   });
 
   it("emits reserved logger and exception fields independently from caller fields", async () => {

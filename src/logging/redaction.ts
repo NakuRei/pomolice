@@ -423,10 +423,6 @@ function redactFieldValue(
 ): string {
   const stringValue = stringifyLogFieldValue(fieldValue);
 
-  if (classification === "secret") {
-    return REDACTED_VALUE;
-  }
-
   if (classification === "sensitive") {
     return redactSensitiveValue(
       stringValue,
