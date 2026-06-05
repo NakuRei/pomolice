@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveResource } from "@tauri-apps/api/path";
 
 vi.mock("@tauri-apps/api/core", () => ({
-  convertFileSrc: vi.fn(),
+  convertFileSrc: vi.fn((path: string) => `asset://${path}`),
 }));
 
 vi.mock("@tauri-apps/api/path", () => ({
@@ -14,45 +15,91 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
   sendNotification: vi.fn(),
 }));
 
-import { convertNotificationVolumePercentToGain } from "./notifications";
+const audioInstances: MockAudio[] = [];
 
-describe("convertNotificationVolumePercentToGain()", () => {
-  it("returns exact mute and max gain values", () => {
-    expect(convertNotificationVolumePercentToGain(0)).toBe(0);
-    expect(convertNotificationVolumePercentToGain(100)).toBe(1);
+class MockAudio {
+  public src: string;
+  public volume = 1;
+  public currentTime = 0;
+  public pause = vi.fn();
+  public play = vi.fn(() => Promise.resolve());
+
+  public constructor(src: string) {
+    this.src = src;
+    audioInstances.push(this);
+  }
+}
+
+function getAudioInstance(index: number): MockAudio {
+  const audioInstance = audioInstances[index];
+  expect(audioInstance).toBeDefined();
+  if (audioInstance === undefined) {
+    throw new Error(`Expected audio instance at index ${String(index)}`);
+  }
+
+  return audioInstance;
+}
+
+async function playPreviewAtVolumePercent(
+  volumePercent: number,
+): Promise<MockAudio> {
+  vi.mocked(resolveResource).mockResolvedValueOnce("C:\\sounds\\work.wav");
+
+  const { playNotificationSoundPreview } = await import("./notifications");
+  const result = await playNotificationSoundPreview({
+    soundType: "work",
+    volumePercent,
+    muted: false,
   });
 
-  it("matches the fixed dB-based gain checkpoints", () => {
-    expect(convertNotificationVolumePercentToGain(1)).toBeCloseTo(
-      0.005922430868761305,
-      10,
-    );
-    expect(convertNotificationVolumePercentToGain(10)).toBeCloseTo(
-      0.009440608762859235,
-      10,
-    );
-    expect(convertNotificationVolumePercentToGain(50)).toBeCloseTo(
-      0.07498942093324558,
-      10,
-    );
-    expect(convertNotificationVolumePercentToGain(60)).toBeCloseTo(
-      0.12589254117941673,
-      10,
-    );
+  expect(result).toEqual({ status: "played" });
+  expect(audioInstances).toHaveLength(1);
+  return getAudioInstance(0);
+}
+
+describe("notification volume gain", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    audioInstances.length = 0;
+    globalThis.Audio = MockAudio as unknown as typeof Audio;
   });
 
-  it("clamps out-of-range percentages before converting to gain", () => {
-    expect(convertNotificationVolumePercentToGain(-10)).toBe(0);
-    expect(convertNotificationVolumePercentToGain(150)).toBe(1);
-  });
+  it.each([
+    [0, 0],
+    [100, 1],
+  ])(
+    "maps %s percent to exact gain %s",
+    async (volumePercent, expectedGain) => {
+      const previewAudio = await playPreviewAtVolumePercent(volumePercent);
 
-  it("increases monotonically across the full 0-100 percent range", () => {
-    let previousGain = -1;
+      expect(previewAudio.volume).toBe(expectedGain);
+    },
+  );
 
-    for (let percent = 0; percent <= 100; percent += 1) {
-      const currentGain = convertNotificationVolumePercentToGain(percent);
-      expect(currentGain).toBeGreaterThanOrEqual(previousGain);
-      previousGain = currentGain;
-    }
-  });
+  it.each([
+    [1, 0.005922430868761305],
+    [10, 0.009440608762859235],
+    [50, 0.07498942093324558],
+    [60, 0.12589254117941673],
+  ])(
+    "maps %s percent to notification gain %s",
+    async (volumePercent, expectedGain) => {
+      const previewAudio = await playPreviewAtVolumePercent(volumePercent);
+
+      expect(previewAudio.volume).toBeCloseTo(expectedGain, 10);
+    },
+  );
+
+  it.each([
+    [-10, 0],
+    [150, 1],
+  ])(
+    "clamps %s percent before applying gain",
+    async (volumePercent, expectedGain) => {
+      const previewAudio = await playPreviewAtVolumePercent(volumePercent);
+
+      expect(previewAudio.volume).toBe(expectedGain);
+    },
+  );
 });

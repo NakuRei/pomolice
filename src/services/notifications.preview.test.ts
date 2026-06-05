@@ -72,13 +72,13 @@ describe("playNotificationSoundPreview()", () => {
     globalThis.Audio = MockAudio as unknown as typeof Audio;
   });
 
-  it("should play preview sound with clamped max volume", async () => {
+  it("should play preview sound", async () => {
     vi.mocked(resolveResource).mockResolvedValueOnce("C:\\sounds\\work.wav");
 
     const { playNotificationSoundPreview } = await import("./notifications");
     const result = await playNotificationSoundPreview({
       soundType: "work",
-      volumePercent: 150,
+      volumePercent: 50,
       muted: false,
     });
 
@@ -87,50 +87,8 @@ describe("playNotificationSoundPreview()", () => {
     expect(convertFileSrc).toHaveBeenCalledWith("C:/sounds/work.wav");
     expect(audioInstances).toHaveLength(1);
     const previewAudio = getAudioInstance(0);
-    expect(previewAudio.volume).toBe(1);
     expect(previewAudio.play).toHaveBeenCalledTimes(1);
   });
-
-  it("should play preview sound with clamped min volume", async () => {
-    vi.mocked(resolveResource).mockResolvedValueOnce("C:\\sounds\\work.wav");
-
-    const { playNotificationSoundPreview } = await import("./notifications");
-    const result = await playNotificationSoundPreview({
-      soundType: "work",
-      volumePercent: -10,
-      muted: false,
-    });
-
-    expect(result).toEqual({ status: "played" });
-    expect(audioInstances).toHaveLength(1);
-    const previewAudio = getAudioInstance(0);
-    expect(previewAudio.volume).toBe(0);
-    expect(previewAudio.play).toHaveBeenCalledTimes(1);
-  });
-
-  it.each([1, 10, 50, 60])(
-    "should play preview sound with the shared nonlinear gain curve at %s percent",
-    async (volumePercent) => {
-      vi.mocked(resolveResource).mockResolvedValueOnce("C:\\sounds\\work.wav");
-
-      const {
-        convertNotificationVolumePercentToGain,
-        playNotificationSoundPreview,
-      } = await import("./notifications");
-      const result = await playNotificationSoundPreview({
-        soundType: "work",
-        volumePercent,
-        muted: false,
-      });
-
-      expect(result).toEqual({ status: "played" });
-      expect(audioInstances).toHaveLength(1);
-      expect(getAudioInstance(0).volume).toBeCloseTo(
-        convertNotificationVolumePercentToGain(volumePercent),
-        10,
-      );
-    },
-  );
 
   it("should skip playback when preview is muted", async () => {
     const { playNotificationSoundPreview } = await import("./notifications");

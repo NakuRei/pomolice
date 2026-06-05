@@ -87,7 +87,7 @@ describe("session complete notifications", () => {
     setNavigatorUserAgent("Windows NT 10.0");
   });
 
-  it("shows a silent Windows banner and plays one managed notification sound with the shared gain curve", async () => {
+  it("shows a silent Windows banner and plays one managed notification sound with the configured volume", async () => {
     vi.mocked(isPermissionGranted).mockResolvedValue(true);
     vi.mocked(resolveResource).mockResolvedValueOnce("C:\\sounds\\work.wav");
 
@@ -98,8 +98,7 @@ describe("session complete notifications", () => {
       notificationSoundVolumePercent: 60,
     });
 
-    const { convertNotificationVolumePercentToGain, notifyBreakComplete } =
-      await import("./notifications");
+    const { notifyBreakComplete } = await import("./notifications");
 
     await notifyBreakComplete();
 
@@ -119,10 +118,7 @@ describe("session complete notifications", () => {
     expect(resolveResource).toHaveBeenCalledWith("resources/sounds/work.wav");
     expect(convertFileSrc).toHaveBeenCalledWith("C:/sounds/work.wav");
     expect(audioInstances).toHaveLength(1);
-    expect(getAudioInstance(0).volume).toBeCloseTo(
-      convertNotificationVolumePercentToGain(60),
-      10,
-    );
+    expect(getAudioInstance(0).volume).toBeCloseTo(0.12589254117941673, 10);
     expect(getAudioInstance(0).play).toHaveBeenCalledTimes(1);
   });
 

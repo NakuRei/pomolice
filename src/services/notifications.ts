@@ -86,9 +86,7 @@ function isWindowsPlatform(): boolean {
  * - `db = minDb * (1 - percent / 100)`
  * - `gain = 10 ** (db / 20)`
  */
-export function convertNotificationVolumePercentToGain(
-  volumePercent: number,
-): number {
+function convertNotificationVolumePercentToGain(volumePercent: number): number {
   const clampedVolumePercent = Math.max(0, Math.min(100, volumePercent));
 
   if (clampedVolumePercent === 0) {
