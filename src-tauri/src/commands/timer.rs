@@ -960,6 +960,17 @@ mod tests {
         app_state
     }
 
+    async fn build_test_state_with_panicking_persistence_hook() -> AppState {
+        let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
+        let persistence = PersistenceManager::new(as_clock_trait(&clock), Some(PathBuf::from(".")))
+            .with_injected_save_error_hook(Arc::new(|| {
+                panic!("simulated persistence worker panic at C:\\Users\\nak\\secret")
+            }));
+        let (app_state, _) =
+            AppState::build_startup_state_for_tests(as_clock_trait(&clock), persistence).await;
+        app_state
+    }
+
     fn timer_settings(
         work_duration_secs: u64,
         short_break_duration_secs: u64,
@@ -1088,6 +1099,56 @@ mod tests {
         assert!(matches!(result, Err(PomoliceError::PersistenceSave(_))));
     }
 
+    fn assert_command_result_public_error<T>(
+        result: Result<T>,
+        expected_code: &str,
+        diagnostic_fragments: &[&str],
+    ) {
+        let Err(error) = result else {
+            panic!("command result should fail");
+        };
+
+        let serialized = serde_json::to_value(&error).expect("command error should serialize");
+        let response = serialized
+            .as_object()
+            .expect("command error should serialize as a JSON object");
+
+        assert_eq!(
+            response
+                .get("code")
+                .expect("command error should include code")
+                .as_str(),
+            Some(expected_code)
+        );
+        let message = response
+            .get("message")
+            .expect("command error should include message")
+            .as_str()
+            .expect("command error message should be text");
+        assert!(!message.is_empty());
+        assert_public_error_excludes_retry_affordance(response);
+
+        let serialized = serialized.to_string();
+        for fragment in diagnostic_fragments {
+            assert!(
+                !serialized.contains(fragment),
+                "public command error leaked diagnostic fragment: {fragment}"
+            );
+        }
+    }
+
+    fn assert_public_error_excludes_retry_affordance(
+        response: &serde_json::Map<String, serde_json::Value>,
+    ) {
+        for key in response.keys() {
+            let normalized = key.to_ascii_lowercase();
+            assert!(
+                !normalized.contains("retry") && !normalized.contains("transient"),
+                "backend public command error encoded retry eligibility in field: {key}"
+            );
+        }
+    }
+
     async fn wait_for_transition_event_count(
         events: &StdMutex<Vec<&'static str>>,
         expected_count: usize,
@@ -1184,6 +1245,17 @@ mod tests {
             result,
             Err(PomoliceError::Unauthorized(window_label)) if window_label == "settings"
         ));
+    }
+
+    #[test]
+    fn test_unauthorized_window_returns_public_command_error() {
+        let result = authorize_main_window_label("C:\\Users\\nak\\secret\\settings");
+
+        assert_command_result_public_error(
+            result,
+            "unauthorized_window",
+            &["C:\\Users\\nak", "secret", "settings"],
+        );
     }
 
     #[test]
@@ -1343,6 +1415,68 @@ mod tests {
             result,
             Err(PomoliceError::InvalidStateTransition { .. })
         ));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_post_break_decision_invalid_state_returns_public_command_error() {
+        let state = build_test_state_without_persistence_path().await;
+        let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+
+        let result = resolve_post_break_decision_with_runtime_effects(
+            &state,
+            PostBreakDecisionAction::Continue,
+            &mut runtime_effect_shell,
+        )
+        .await;
+
+        assert_command_result_public_error(
+            result,
+            "invalid_state_transition",
+            &["resolve post-break decision", "Idle"],
+        );
+    }
+
+    #[tokio::test]
+    async fn test_start_work_rate_limit_returns_public_command_error() {
+        let state = build_test_state_without_persistence_path().await;
+        let mut first_runtime_effect_shell = RecordingRuntimeEffectShell::default();
+
+        start_work_for_tests(
+            &state,
+            timer_settings(
+                1500,
+                300,
+                900,
+                4,
+                PostBreakTransitionPolicy::RequireManualContinue,
+            ),
+            TimerStartSource::ManualOutsideWindow,
+            &mut first_runtime_effect_shell,
+        )
+        .await
+        .expect("first start should succeed");
+
+        {
+            let mut timer = state.timer_manager.lock().await;
+            timer.emergency_stop();
+        }
+
+        let mut second_runtime_effect_shell = RecordingRuntimeEffectShell::default();
+        let result = start_work_for_tests(
+            &state,
+            timer_settings(
+                1500,
+                300,
+                900,
+                4,
+                PostBreakTransitionPolicy::RequireManualContinue,
+            ),
+            TimerStartSource::ManualOutsideWindow,
+            &mut second_runtime_effect_shell,
+        )
+        .await;
+
+        assert_command_result_public_error(result, "rate_limited", &["please wait", "ms"]);
     }
 
     #[test]
@@ -1721,6 +1855,53 @@ mod tests {
         assert_event_once(
             &automation_runtime_effect_shell,
             RuntimeEffectEvent::Persist,
+        );
+    }
+
+    #[tokio::test]
+    async fn test_timer_command_persistence_failure_returns_public_command_error() {
+        let state = build_test_state_with_injected_persistence_error().await;
+        prepare_post_break_decision_pending_state(&state).await;
+        let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+
+        let result = resolve_post_break_decision_with_runtime_effects(
+            &state,
+            PostBreakDecisionAction::Continue,
+            &mut runtime_effect_shell,
+        )
+        .await;
+
+        assert_command_result_public_error(
+            result,
+            "persistence_error",
+            &[
+                "failed to serialize persisted timer state",
+                "expected value",
+            ],
+        );
+    }
+
+    #[tokio::test]
+    async fn test_timer_command_persistence_task_join_returns_public_command_error() {
+        let state = build_test_state_with_panicking_persistence_hook().await;
+        prepare_post_break_decision_pending_state(&state).await;
+        let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+
+        let result = resolve_post_break_decision_with_runtime_effects(
+            &state,
+            PostBreakDecisionAction::Continue,
+            &mut runtime_effect_shell,
+        )
+        .await;
+
+        assert_command_result_public_error(
+            result,
+            "persistence_error",
+            &[
+                "simulated persistence worker panic",
+                "C:\\Users\\nak",
+                "secret",
+            ],
         );
     }
 

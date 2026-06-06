@@ -5,7 +5,8 @@ export type BackendErrorCode =
   | "invalid_state_transition"
   | "rate_limited"
   | "window_control_error"
-  | "persistence_error";
+  | "persistence_error"
+  | "invalid_command_input";
 
 export interface BackendErrorResponse {
   code: BackendErrorCode;
@@ -23,6 +24,7 @@ export interface BackendErrorClassification {
    */
   isTransient: boolean;
   severity: ErrorSeverity;
+  canRetry: boolean;
 }
 
 const CODE_CLASSIFICATIONS: Readonly<
@@ -32,26 +34,37 @@ const CODE_CLASSIFICATIONS: Readonly<
     userMessage: "権限エラーが発生しました",
     isTransient: false,
     severity: "recoverable",
+    canRetry: false,
   },
   invalid_state_transition: {
     userMessage: "現在の状態では実行できません",
     isTransient: false,
     severity: "recoverable",
+    canRetry: false,
   },
   rate_limited: {
     userMessage: "少々お待ちください",
     isTransient: true,
     severity: "recoverable",
+    canRetry: true,
   },
   window_control_error: {
     userMessage: "ウィンドウ操作に失敗しました",
     isTransient: false,
     severity: "recoverable",
+    canRetry: true,
   },
   persistence_error: {
     userMessage: "データの保存に失敗しました",
     isTransient: false,
     severity: "recoverable",
+    canRetry: true,
+  },
+  invalid_command_input: {
+    userMessage: "入力内容を確認してください",
+    isTransient: false,
+    severity: "recoverable",
+    canRetry: false,
   },
 };
 
@@ -59,6 +72,7 @@ const DEFAULT_BACKEND_ERROR_CLASSIFICATION: BackendErrorClassification = {
   userMessage: "予期しないエラーが発生しました",
   isTransient: false,
   severity: "recoverable",
+  canRetry: false,
 };
 
 const BACKEND_ERROR_CODES: ReadonlySet<string> = new Set(
@@ -69,7 +83,9 @@ function isBackendErrorCode(code: unknown): code is BackendErrorCode {
   return typeof code === "string" && BACKEND_ERROR_CODES.has(code);
 }
 
-function isBackendErrorResponse(error: unknown): error is BackendErrorResponse {
+export function isBackendErrorResponse(
+  error: unknown,
+): error is BackendErrorResponse {
   if (typeof error !== "object" || error === null) {
     return false;
   }
@@ -91,6 +107,14 @@ export function formatBackendErrorDetail(error: unknown): string {
 
   if (typeof error === "string") {
     return error;
+  }
+
+  return "Unexpected backend error";
+}
+
+export function formatPublicCommandErrorDetail(error: unknown): string {
+  if (isBackendErrorResponse(error)) {
+    return error.code;
   }
 
   return "Unexpected backend error";

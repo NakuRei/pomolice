@@ -2,88 +2,199 @@ import { describe, expect, it } from "vitest";
 import {
   classifyBackendError,
   formatBackendErrorDetail,
+  formatPublicCommandErrorDetail,
+  type BackendErrorClassification,
+  type BackendErrorCode,
 } from "./classifyBackendError";
 
 describe("classifyBackendError", () => {
   it("classifies known structured backend error responses by code", () => {
-    expect(
-      classifyBackendError({
+    const classifications: {
+      code: BackendErrorCode;
+      expected: Omit<BackendErrorClassification, "userMessage">;
+    }[] = [
+      {
         code: "invalid_state_transition",
-        message: "cannot start_work from idle",
-      }),
-    ).toEqual({
-      userMessage: "現在の状態では実行できません",
-      isTransient: false,
-      severity: "recoverable",
-    });
-
-    expect(
-      classifyBackendError({
+        expected: {
+          isTransient: false,
+          severity: "recoverable",
+          canRetry: false,
+        },
+      },
+      {
         code: "rate_limited",
-        message: "please wait 300ms",
-      }),
-    ).toEqual({
-      userMessage: "少々お待ちください",
-      isTransient: true,
-      severity: "recoverable",
-    });
-
-    expect(
-      classifyBackendError({
+        expected: {
+          isTransient: true,
+          severity: "recoverable",
+          canRetry: true,
+        },
+      },
+      {
         code: "window_control_error",
-        message: "failed to lock window",
-      }),
-    ).toEqual({
-      userMessage: "ウィンドウ操作に失敗しました",
-      isTransient: false,
-      severity: "recoverable",
-    });
-
-    expect(
-      classifyBackendError({
+        expected: {
+          isTransient: false,
+          severity: "recoverable",
+          canRetry: true,
+        },
+      },
+      {
         code: "persistence_error",
-        message: "failed to save timer state",
-      }),
-    ).toEqual({
-      userMessage: "データの保存に失敗しました",
-      isTransient: false,
-      severity: "recoverable",
+        expected: {
+          isTransient: false,
+          severity: "recoverable",
+          canRetry: true,
+        },
+      },
+      {
+        code: "unauthorized_window",
+        expected: {
+          isTransient: false,
+          severity: "recoverable",
+          canRetry: false,
+        },
+      },
+      {
+        code: "invalid_command_input",
+        expected: {
+          isTransient: false,
+          severity: "recoverable",
+          canRetry: false,
+        },
+      },
+    ];
+    const fallbackClassification = classifyBackendError({
+      code: "unknown_error",
+      message: "fallback diagnostic",
+    });
+    const displayIdentities = new Set<string>();
+
+    for (const { code, expected } of classifications) {
+      const diagnosticMessage = `diagnostic from C:\\secret for ${code}`;
+      const classification = classifyBackendError({
+        code,
+        message: diagnosticMessage,
+      });
+      const sameCodeWithDifferentMessage = classifyBackendError({
+        code,
+        message: `other diagnostic from C:\\other-secret for ${code}`,
+      });
+
+      expect(classification).toMatchObject(expected);
+      expect(sameCodeWithDifferentMessage).toEqual(classification);
+      expect(classification.userMessage).toEqual(expect.any(String));
+      expect(classification.userMessage).not.toBe("");
+      expect(classification.userMessage).not.toBe(
+        fallbackClassification.userMessage,
+      );
+      expect(classification.userMessage).not.toBe(diagnosticMessage);
+      expect(classification.userMessage).not.toContain("C:\\secret");
+      displayIdentities.add(classification.userMessage);
+    }
+
+    expect(displayIdentities.size).toBe(classifications.length);
+  });
+
+  it("does not use public envelope messages for presentation fields", () => {
+    const first = classifyBackendError({
+      code: "window_control_error",
+      message: "failed for C:\\Users\\nak\\secret\\timer_state.json",
+    });
+    const second = classifyBackendError({
+      code: "window_control_error",
+      message: "panic at C:\\Users\\nak\\other-secret",
     });
 
-    expect(
-      classifyBackendError({
-        code: "unauthorized_window",
-        message: "window is not owned",
-      }),
-    ).toEqual({
-      userMessage: "権限エラーが発生しました",
-      isTransient: false,
-      severity: "recoverable",
-    });
+    expect(first).toEqual(second);
+    expect(first.userMessage).not.toContain("C:\\Users\\nak");
+    expect(first.userMessage).not.toContain("timer_state.json");
   });
 
   it("uses the default classification for malformed values, unknown codes, and legacy strings", () => {
-    const defaultClassification = {
-      userMessage: "予期しないエラーが発生しました",
-      isTransient: false,
-      severity: "recoverable",
-    };
-
-    expect(
-      classifyBackendError({
+    const inputs: unknown[] = [
+      {
+        code: "unknown_error",
+        message: "first diagnostic",
+      },
+      {
         code: "unknown_error",
         message: "should not be trusted",
-      }),
-    ).toEqual(defaultClassification);
-    expect(
-      classifyBackendError({ code: "rate_limited", message: 300 }),
-    ).toEqual(defaultClassification);
-    expect(classifyBackendError("Rate limited: please wait 300ms")).toEqual(
-      defaultClassification,
-    );
-    expect(classifyBackendError(null)).toEqual(defaultClassification);
-    expect(classifyBackendError(undefined)).toEqual(defaultClassification);
-    expect(classifyBackendError(500)).toEqual(defaultClassification);
+      },
+      { code: "rate_limited", message: 300 },
+      "Rate limited: please wait 300ms",
+      null,
+      undefined,
+      500,
+    ];
+
+    for (const input of inputs) {
+      const classification = classifyBackendError(input);
+
+      expect(classification).toMatchObject({
+        isTransient: false,
+        severity: "recoverable",
+        canRetry: false,
+      });
+      expect(classification.userMessage).toEqual(expect.any(String));
+      expect(classification.userMessage).not.toBe("");
+      expect(classification.userMessage).not.toContain("first diagnostic");
+      expect(classification.userMessage).not.toContain("should not be trusted");
+      expect(classification.userMessage).not.toContain("please wait 300ms");
+    }
+  });
+});
+
+describe("formatPublicCommandErrorDetail", () => {
+  function expectSafePublicCommandFallbackDetail(error: unknown): void {
+    const detail = formatPublicCommandErrorDetail(error);
+
+    expect(detail).toEqual(expect.any(String));
+    expect(detail).not.toBe("");
+    expect(detail).not.toContain("C:\\secret");
+    expect(detail).not.toContain("panic");
+    expect(detail).not.toContain("internal path");
+  }
+
+  it("stores diagnostics from recognized public codes without raw message text", () => {
+    const cases: {
+      error: Parameters<typeof formatPublicCommandErrorDetail>[0];
+      expectedDetail: string;
+      excludedFragments: string[];
+    }[] = [
+      {
+        error: {
+          code: "window_control_error",
+          message: "failed for C:\\Users\\nak\\secret\\timer_state.json",
+        },
+        expectedDetail: "window_control_error",
+        excludedFragments: ["failed for", "C:\\Users\\nak", "timer_state.json"],
+      },
+      {
+        error: {
+          code: "invalid_command_input",
+          message: "invalid type: string C:\\secret",
+        },
+        expectedDetail: "invalid_command_input",
+        excludedFragments: ["invalid type", "string", "C:\\secret"],
+      },
+    ];
+
+    for (const { error, expectedDetail, excludedFragments } of cases) {
+      const detail = formatPublicCommandErrorDetail(error);
+
+      expect(detail).toBe(expectedDetail);
+      for (const fragment of excludedFragments) {
+        expect(detail).not.toContain(fragment);
+      }
+    }
+  });
+
+  it("uses a safe fallback for malformed command failures", () => {
+    expectSafePublicCommandFallbackDetail(new Error("C:\\secret"));
+    expectSafePublicCommandFallbackDetail("panic at C:\\secret");
+    expectSafePublicCommandFallbackDetail({
+      code: "unknown_error",
+      message: "internal path C:\\secret",
+    });
   });
 });
 

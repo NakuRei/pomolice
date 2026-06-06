@@ -7,6 +7,7 @@ import { useErrorStore } from "./errorStore";
 import {
   classifyBackendError,
   formatBackendErrorDetail,
+  formatPublicCommandErrorDetail,
 } from "../errors/classifyBackendError";
 import { createLogger } from "../logging/logger";
 import { FRONTEND_LOG_EVENT_IDS } from "../logging/logEvents";
@@ -290,16 +291,21 @@ export const useTimerStore = create<TimerStore>()(
           });
           useErrorStore.getState().clearError("start_work");
         } catch (error) {
-          const detail = formatBackendErrorDetail(error);
-          const { userMessage, severity } = classifyBackendError(error);
+          const detail = formatPublicCommandErrorDetail(error);
+          const { userMessage, severity, canRetry } =
+            classifyBackendError(error);
           useErrorStore.getState().reportError({
             id: "start_work",
             message: userMessage,
             technicalDetail: detail,
             severity,
             origin: "backend_command",
-            canRetry: false,
-            retryFn: null,
+            canRetry,
+            retryFn: canRetry
+              ? async (): Promise<void> => {
+                  await get().start();
+                }
+              : null,
           });
           throw error;
         }
@@ -316,18 +322,21 @@ export const useTimerStore = create<TimerStore>()(
           });
           useErrorStore.getState().clearError("resolve_post_break_decision");
         } catch (error) {
-          const detail = formatBackendErrorDetail(error);
-          const { userMessage, severity } = classifyBackendError(error);
+          const detail = formatPublicCommandErrorDetail(error);
+          const { userMessage, severity, canRetry } =
+            classifyBackendError(error);
           useErrorStore.getState().reportError({
             id: "resolve_post_break_decision",
             message: userMessage,
             technicalDetail: detail,
             severity,
             origin: "backend_command",
-            canRetry: true,
-            retryFn: async () => {
-              await get().resolvePostBreakDecision(action);
-            },
+            canRetry,
+            retryFn: canRetry
+              ? async (): Promise<void> => {
+                  await get().resolvePostBreakDecision(action);
+                }
+              : null,
           });
           throw error;
         }
@@ -339,16 +348,20 @@ export const useTimerStore = create<TimerStore>()(
           await invoke("emergency_stop");
           useErrorStore.getState().clearError("emergency_stop");
         } catch (error) {
-          const detail = formatBackendErrorDetail(error);
-          const { userMessage } = classifyBackendError(error);
+          const detail = formatPublicCommandErrorDetail(error);
+          const { userMessage, canRetry } = classifyBackendError(error);
           useErrorStore.getState().reportError({
             id: "emergency_stop",
             message: userMessage,
             technicalDetail: detail,
             severity: "critical",
             origin: "backend_command",
-            canRetry: true,
-            retryFn: null,
+            canRetry,
+            retryFn: canRetry
+              ? async (): Promise<void> => {
+                  await get().emergencyStop();
+                }
+              : null,
           });
           throw error;
         }
@@ -386,16 +399,21 @@ export const useTimerStore = create<TimerStore>()(
             state.shouldPromptStartOnBoot = false;
           });
         } catch (error) {
-          const detail = formatBackendErrorDetail(error);
-          const { userMessage, severity } = classifyBackendError(error);
+          const detail = formatPublicCommandErrorDetail(error);
+          const { userMessage, severity, canRetry } =
+            classifyBackendError(error);
           useErrorStore.getState().reportError({
             id: "resolve_boot_auto_start_prompt",
             message: userMessage,
             technicalDetail: detail,
             severity,
             origin: "backend_command",
-            canRetry: true,
-            retryFn: null,
+            canRetry,
+            retryFn: canRetry
+              ? async (): Promise<void> => {
+                  await get().resolveBootAutoStartPrompt(startNow);
+                }
+              : null,
           });
           throw error;
         }

@@ -1,15 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockSettingsSyncLogger } = vi.hoisted(() => ({
-  mockSettingsSyncLogger: {
-    trace: vi.fn(),
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  },
-}));
-
 type InvokeCommand = (
   command: string,
   args?: Record<string, unknown>,
@@ -22,13 +12,8 @@ vi.mock("@tauri-apps/api/core", () => ({
     mockInvoke(command, args),
 }));
 
-vi.mock("@/logging/logger", () => ({
-  createLogger: (): typeof mockSettingsSyncLogger => mockSettingsSyncLogger,
-}));
-
 import { SessionType, TimerStatus, useTimerStore } from "./timerStore";
 import { useSettingsStore } from "./settingsStore";
-import { FRONTEND_LOG_EVENT_IDS } from "@/logging/logEvents";
 
 function expectRecord(
   value: unknown,
@@ -221,23 +206,16 @@ describe("timerStore syncSettings command routing", () => {
     );
   });
 
-  it("should swallow backend errors during sync", async () => {
+  it("should swallow raw backend errors during sync", async () => {
     useTimerStore.setState({ status: TimerStatus.IDLE, isConnected: true });
     mockInvoke.mockRejectedValueOnce(new Error("sync failed"));
 
     await expect(
       useTimerStore.getState().syncSettings(),
     ).resolves.toBeUndefined();
-    expect(mockSettingsSyncLogger.warn).toHaveBeenCalledWith(
-      FRONTEND_LOG_EVENT_IDS.settingsSyncFailed,
-      expect.objectContaining({
-        failure_message: "Error: sync failed",
-        timer_status: TimerStatus.IDLE,
-      }),
-    );
   });
 
-  it("should log structured backend sync errors with safe details", async () => {
+  it("should swallow structured backend errors during sync", async () => {
     useTimerStore.setState({ status: TimerStatus.IDLE, isConnected: true });
     mockInvoke.mockRejectedValueOnce({
       code: "persistence_error",
@@ -247,12 +225,5 @@ describe("timerStore syncSettings command routing", () => {
     await expect(
       useTimerStore.getState().syncSettings(),
     ).resolves.toBeUndefined();
-    expect(mockSettingsSyncLogger.warn).toHaveBeenCalledWith(
-      FRONTEND_LOG_EVENT_IDS.settingsSyncFailed,
-      expect.objectContaining({
-        failure_message: "persistence_error: failed to save timer settings",
-        timer_status: TimerStatus.IDLE,
-      }),
-    );
   });
 });

@@ -15,6 +15,62 @@ fn rejection_context() -> CommandInputRejectionContext {
     }
 }
 
+fn assert_public_command_input_error(value: &serde_json::Value) {
+    let response = value
+        .as_object()
+        .expect("command rejection should be a JSON object");
+
+    assert_eq!(
+        response
+            .get("code")
+            .expect("command rejection should include code")
+            .as_str(),
+        Some("invalid_command_input")
+    );
+    let message = response
+        .get("message")
+        .expect("command rejection should include message")
+        .as_str()
+        .expect("command rejection message should be text");
+    assert!(!message.is_empty());
+    assert_public_error_excludes_retry_affordance(response);
+}
+
+fn assert_public_error_excludes_retry_affordance(
+    response: &serde_json::Map<String, serde_json::Value>,
+) {
+    for key in response.keys() {
+        let normalized = key.to_ascii_lowercase();
+        assert!(
+            !normalized.contains("retry") && !normalized.contains("transient"),
+            "backend public command error encoded retry eligibility in field: {key}"
+        );
+    }
+}
+
+fn assert_value_excludes(value: &serde_json::Value, diagnostic_fragments: &[&str]) {
+    let serialized = value.to_string();
+
+    for fragment in diagnostic_fragments {
+        assert!(
+            !serialized.contains(fragment),
+            "command rejection leaked diagnostic fragment: {fragment}"
+        );
+    }
+}
+
+fn assert_log_field(fields: &[(String, String)], expected_name: &str, expected_value: &str) {
+    let actual_value = fields
+        .iter()
+        .find_map(|(name, value)| (name == expected_name).then_some(value.as_str()));
+
+    assert_eq!(
+        actual_value,
+        Some(expected_value),
+        "expected log field {expected_name}={expected_value}, got {fields:?}"
+    );
+}
+
 #[test]
 fn test_observe_command_arg_result_success_wraps_inner_value() {
     let observed = observe_command_arg_result(Ok(42_u32), rejection_context())
@@ -24,7 +80,7 @@ fn test_observe_command_arg_result_success_wraps_inner_value() {
 }
 
 #[test]
-fn test_invalid_command_argument_logs_rejection_context_and_returns_original_error() {
+fn test_invalid_command_argument_logs_rejection_context_and_returns_public_error() {
     let invoke_error = InvokeError(json!("password=abc token=xyz"));
     let mut captured_logs = Vec::new();
 
@@ -45,7 +101,8 @@ fn test_invalid_command_argument_logs_rejection_context_and_returns_original_err
     let Err(returned_error) = result else {
         panic!("invalid command argument should be rejected");
     };
-    assert_eq!(returned_error.0, json!("password=abc token=xyz"));
+    assert_public_command_input_error(&returned_error.0);
+    assert_value_excludes(&returned_error.0, &["password=abc", "token=xyz"]);
     assert_eq!(captured_logs.len(), 1);
 
     let (event, fields) = &captured_logs[0];
@@ -56,16 +113,70 @@ fn test_invalid_command_argument_logs_rejection_context_and_returns_original_err
     assert_log_field(fields, "error_message", "password=abc token=xyz");
 }
 
-fn assert_log_field(fields: &[(String, String)], expected_name: &str, expected_value: &str) {
-    let actual_value = fields
-        .iter()
-        .find_map(|(name, value)| (name == expected_name).then_some(value.as_str()));
+#[test]
+fn test_command_argument_rejection_returns_public_error_without_framework_details() {
+    let invoke_error = InvokeError(json!({
+        "code": "invalid_args",
+        "command": "start_work",
+        "argument": "work_duration_secs",
+        "path": "C:\\Users\\nak\\secret\\timer_state.json",
+        "message": "missing required key work_duration_secs",
+    }));
 
-    assert_eq!(
-        actual_value,
-        Some(expected_value),
-        "expected log field {expected_name}={expected_value}, got {fields:?}"
-    );
+    let result = observe_command_arg_result::<u32>(Err(invoke_error), rejection_context());
+
+    let Err(returned_error) = result else {
+        panic!("invalid command argument should be rejected");
+    };
+    assert_public_command_input_error(&returned_error.0);
+
+    let returned_error = returned_error.0.to_string();
+    assert!(!returned_error.contains("invalid_args"));
+    assert!(!returned_error.contains("start_work"));
+    assert!(!returned_error.contains("work_duration_secs"));
+    assert!(!returned_error.contains("C:\\Users\\nak"));
+    assert!(!returned_error.contains("timer_state.json"));
+    assert!(!returned_error.contains("missing required key"));
+}
+
+#[test]
+fn test_command_argument_rejections_exclude_representative_diagnostics() {
+    let rejection_values = [
+        json!("invalid args at C:\\Users\\nak\\secret\\timer_state.json"),
+        json!("thread 'main' panicked at src\\commands\\timer.rs:123: invalid command input"),
+        json!({
+            "code": "invalid_args",
+            "message": "invalid type: string \"abc\", expected u64",
+            "command": "start_work",
+            "argument": "work_duration_secs",
+        }),
+        json!("Window control error: Failed to enter fullscreen"),
+    ];
+
+    for rejection in rejection_values {
+        let result =
+            observe_command_arg_result::<u32>(Err(InvokeError(rejection)), rejection_context());
+
+        let Err(returned_error) = result else {
+            panic!("invalid command argument should be rejected");
+        };
+
+        assert_public_command_input_error(&returned_error.0);
+        assert_value_excludes(
+            &returned_error.0,
+            &[
+                "C:\\Users\\nak",
+                "timer_state.json",
+                "thread 'main' panicked",
+                "src\\commands\\timer.rs",
+                "invalid type",
+                "expected u64",
+                "start_work",
+                "work_duration_secs",
+                "Failed to enter fullscreen",
+            ],
+        );
+    }
 }
 
 #[test]

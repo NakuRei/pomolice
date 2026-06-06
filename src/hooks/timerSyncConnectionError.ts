@@ -1,18 +1,51 @@
 import { useErrorStore } from "@/store/errorStore";
-import { formatBackendErrorDetail } from "@/errors/classifyBackendError";
+import {
+  classifyBackendError,
+  formatBackendErrorDetail,
+  formatPublicCommandErrorDetail,
+} from "@/errors/classifyBackendError";
+
+type TimerSyncConnectionFailureSource =
+  | "setup"
+  | "command"
+  | "initial_state_transport";
+
+const SETUP_CONNECTION_ERROR_MESSAGE =
+  "バックエンドに接続できません。アプリが正常に動作しない可能性があります。";
+
+export function formatTimerSyncConnectionErrorDetail(
+  error: unknown,
+  source: TimerSyncConnectionFailureSource = "setup",
+): string {
+  if (source === "command" || source === "initial_state_transport") {
+    return formatPublicCommandErrorDetail(error);
+  }
+
+  return formatBackendErrorDetail(error);
+}
 
 export function reportTimerSyncConnectionError(
   error: unknown,
   retryFn: () => Promise<void>,
+  source: TimerSyncConnectionFailureSource = "setup",
 ): void {
+  const presentation =
+    source === "command"
+      ? classifyBackendError(error)
+      : {
+          userMessage: SETUP_CONNECTION_ERROR_MESSAGE,
+          severity: "critical" as const,
+          canRetry: true,
+        };
+
   useErrorStore.getState().reportError({
     id: "connection",
-    message: "バックエンドに接続できません",
-    technicalDetail: formatBackendErrorDetail(error),
-    severity: "critical",
+    message: presentation.userMessage,
+    technicalDetail: formatTimerSyncConnectionErrorDetail(error, source),
+    severity: presentation.severity,
     origin: "backend_connection",
-    canRetry: true,
-    retryFn,
+    canRetry: presentation.canRetry,
+    retryFn: presentation.canRetry ? retryFn : null,
   });
 }
 

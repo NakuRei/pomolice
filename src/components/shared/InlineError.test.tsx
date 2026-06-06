@@ -72,6 +72,90 @@ describe("InlineError", () => {
     expect(getActiveError("start_work").retryCount).toBe(1);
   });
 
+  it("absorbs stored retry rejections after recording the retry attempt", async () => {
+    const user = userEvent.setup();
+    const retryFn = vi.fn(() => Promise.reject(new Error("retry failed")));
+
+    useErrorStore.getState().reportError({
+      id: "start_work",
+      message: "開始に失敗しました。",
+      technicalDetail: "backend timeout",
+      severity: "critical",
+      origin: "backend_command",
+      canRetry: true,
+      retryFn,
+    });
+
+    render(<InlineError errorId="start_work" />);
+
+    await user.click(screen.getByRole("button", { name: "再試行" }));
+    await Promise.resolve();
+
+    expect(retryFn).toHaveBeenCalledTimes(1);
+    expect(getActiveError("start_work").retryCount).toBe(1);
+  });
+
+  it("uses the supplied retry action when the error has no stored retry function", async () => {
+    const user = userEvent.setup();
+    const onRetry = vi.fn(() => Promise.resolve());
+
+    useErrorStore.getState().reportError({
+      id: "emergency_stop",
+      message: "停止に失敗しました。",
+      technicalDetail: "rate_limited",
+      severity: "critical",
+      origin: "backend_command",
+      canRetry: true,
+      retryFn: null,
+    });
+
+    render(<InlineError errorId="emergency_stop" onRetry={onRetry} />);
+
+    await user.click(screen.getByRole("button", { name: "再試行" }));
+
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(getActiveError("emergency_stop").retryCount).toBe(1);
+  });
+
+  it("absorbs supplied retry action rejections", async () => {
+    const user = userEvent.setup();
+    const onRetry = vi.fn(() => Promise.reject(new Error("retry failed")));
+
+    useErrorStore.getState().reportError({
+      id: "emergency_stop",
+      message: "停止に失敗しました。",
+      technicalDetail: "rate_limited",
+      severity: "critical",
+      origin: "backend_command",
+      canRetry: true,
+      retryFn: null,
+    });
+
+    render(<InlineError errorId="emergency_stop" onRetry={onRetry} />);
+
+    await user.click(screen.getByRole("button", { name: "再試行" }));
+    await Promise.resolve();
+
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(getActiveError("emergency_stop").retryCount).toBe(1);
+  });
+
+  it("does not render retry action when the error is not retryable", () => {
+    useErrorStore.getState().reportError({
+      id: "emergency_stop",
+      message: "停止に失敗しました。",
+      technicalDetail: "invalid_state_transition",
+      severity: "critical",
+      origin: "backend_command",
+      canRetry: false,
+      retryFn: null,
+    });
+
+    render(<InlineError errorId="emergency_stop" onRetry={() => undefined} />);
+
+    expect(screen.queryByRole("button", { name: "再試行" })).toBeNull();
+  });
+
   it("auto-clears recoverable errors after timeout", () => {
     vi.useFakeTimers();
 

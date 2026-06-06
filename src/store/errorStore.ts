@@ -54,7 +54,7 @@ export interface AppError {
   retryCount: number;
   /** Whether a retry button should be shown. */
   canRetry: boolean;
-  /** Async function to call when the user clicks retry. Null if canRetry is false. */
+  /** Async function to call when the user clicks retry. Component-level retry handlers may also provide the retry action. */
   retryFn: (() => Promise<void>) | null;
   timestamp: number;
 }

@@ -63,7 +63,9 @@ export function InlineError({
     incrementRetryCount(errorId);
     const retryAction = onRetry ?? error.retryFn;
     if (retryAction !== null) {
-      void retryAction();
+      void (async (): Promise<void> => {
+        await retryAction();
+      })().catch(() => undefined);
     }
   };
 

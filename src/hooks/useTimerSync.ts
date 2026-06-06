@@ -8,7 +8,6 @@ import { useEffect } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { createLogger } from "../logging/logger";
-import { formatBackendErrorDetail } from "../errors/classifyBackendError";
 import { FRONTEND_LOG_EVENT_IDS } from "../logging/logEvents";
 import {
   type TimerTickPayload,
@@ -28,8 +27,13 @@ import {
 } from "./timerSyncConnectionRetryPolicy";
 import {
   clearTimerSyncConnectionError,
+  formatTimerSyncConnectionErrorDetail,
   reportTimerSyncConnectionError,
 } from "./timerSyncConnectionError";
+import {
+  classifyBackendError,
+  isBackendErrorResponse,
+} from "../errors/classifyBackendError";
 
 const logger = createLogger("timer_sync");
 
@@ -172,6 +176,86 @@ export function useTimerSync(): void {
       }, delay);
     }
 
+    function shouldRetryTimerSyncSetupFailure(
+      error: unknown,
+      failureSource: "setup" | "command" | "initial_state_transport",
+      retryAttempt: number,
+    ): boolean {
+      if (!shouldRetryTimerSyncConnection(retryAttempt)) {
+        return false;
+      }
+
+      return (
+        failureSource !== "command" || classifyBackendError(error).canRetry
+      );
+    }
+
+    function initialFullStateFailureSource(
+      error: unknown,
+    ): "command" | "initial_state_transport" {
+      return isBackendErrorResponse(error)
+        ? "command"
+        : "initial_state_transport";
+    }
+
+    async function invokeInitialFullState(): Promise<
+      | { status: "ok"; fullState: FullStatePayload }
+      | { status: "error"; error: unknown }
+    > {
+      try {
+        return {
+          status: "ok",
+          fullState: await invoke<FullStatePayload>("get_full_state"),
+        };
+      } catch (error) {
+        return { status: "error", error };
+      }
+    }
+
+    function handleSetupFailure(
+      error: unknown,
+      failureSource: "setup" | "command" | "initial_state_transport",
+      retryAttempt: number,
+      listenerStartIndex: number,
+      retrySetup: (nextRetryAttempt: number) => Promise<void>,
+    ): void {
+      logger.error(FRONTEND_LOG_EVENT_IDS.timerSyncSetupFailed, error, {
+        retry_attempt: retryAttempt,
+        max_connection_retries: TIMER_SYNC_MAX_CONNECTION_RETRIES,
+        failure_message: formatTimerSyncConnectionErrorDetail(
+          error,
+          failureSource,
+        ),
+      });
+
+      clearListenersFrom(listenerStartIndex);
+
+      if (!mounted) {
+        return;
+      }
+
+      if (
+        shouldRetryTimerSyncSetupFailure(error, failureSource, retryAttempt)
+      ) {
+        // Schedule the next retry with exponential backoff
+        const delay = timerSyncRetryDelayMs(retryAttempt);
+        scheduleRetry(retryAttempt, delay, (nextRetryAttempt) => {
+          void retrySetup(nextRetryAttempt);
+        });
+      } else {
+        // All retries exhausted — surface the error to the user
+        setConnected(false);
+        reportTimerSyncConnectionError(
+          error,
+          async () => {
+            clearTimerSyncConnectionError();
+            await retrySetup(0);
+          },
+          failureSource,
+        );
+      }
+    }
+
     async function setup(retryAttempt = 0): Promise<void> {
       const listenerStartIndex = listeners.length;
 
@@ -180,11 +264,32 @@ export function useTimerSync(): void {
         if (!listenersRegistered) {
           return;
         }
+      } catch (error) {
+        handleSetupFailure(
+          error,
+          "setup",
+          retryAttempt,
+          listenerStartIndex,
+          setup,
+        );
+        return;
+      }
 
-        // Get initial state from backend
-        const fullState = await invoke<FullStatePayload>("get_full_state");
+      const fullStateResult = await invokeInitialFullState();
+      if (fullStateResult.status === "error") {
+        handleSetupFailure(
+          fullStateResult.error,
+          initialFullStateFailureSource(fullStateResult.error),
+          retryAttempt,
+          listenerStartIndex,
+          setup,
+        );
+        return;
+      }
+
+      try {
         if (mounted) {
-          handleFullState(fullState);
+          handleFullState(fullStateResult.fullState);
 
           // Sync frontend settings to backend
           await syncSettings();
@@ -195,32 +300,13 @@ export function useTimerSync(): void {
           clearTimerSyncConnectionError();
         }
       } catch (error) {
-        logger.error(FRONTEND_LOG_EVENT_IDS.timerSyncSetupFailed, error, {
-          retry_attempt: retryAttempt,
-          max_connection_retries: TIMER_SYNC_MAX_CONNECTION_RETRIES,
-          failure_message: formatBackendErrorDetail(error),
-        });
-
-        clearListenersFrom(listenerStartIndex);
-
-        if (!mounted) {
-          return;
-        }
-
-        if (shouldRetryTimerSyncConnection(retryAttempt)) {
-          // Schedule the next retry with exponential backoff
-          const delay = timerSyncRetryDelayMs(retryAttempt);
-          scheduleRetry(retryAttempt, delay, (nextRetryAttempt) => {
-            void setup(nextRetryAttempt);
-          });
-        } else {
-          // All retries exhausted — surface the error to the user
-          setConnected(false);
-          reportTimerSyncConnectionError(error, async () => {
-            clearTimerSyncConnectionError();
-            await setup(0);
-          });
-        }
+        handleSetupFailure(
+          error,
+          "setup",
+          retryAttempt,
+          listenerStartIndex,
+          setup,
+        );
       }
     }
 

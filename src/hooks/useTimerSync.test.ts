@@ -9,7 +9,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { useTimerStore, TimerStatus, SessionType } from "@/store/timerStore";
 import { useErrorStore } from "@/store/errorStore";
-import { FRONTEND_LOG_EVENT_IDS } from "@/logging/logEvents";
 import {
   notifyWorkComplete,
   notifyBreakAutoStarted,
@@ -34,15 +33,6 @@ type InvokeCommand = (
 const mockListen = vi.fn<ListenerRegistration>();
 const mockInvoke = vi.fn<InvokeCommand>();
 const noopUnlisten = (): void => undefined;
-const { mockTimerSyncLogger } = vi.hoisted(() => ({
-  mockTimerSyncLogger: {
-    trace: vi.fn(),
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  },
-}));
 
 vi.mock("@tauri-apps/api/event", () => ({
   listen: (
@@ -66,10 +56,6 @@ vi.mock("@/services/notifications", () => ({
   notifyWorkComplete: vi.fn(),
   notifyBreakAutoStarted: vi.fn(),
   notifyBreakComplete: vi.fn(),
-}));
-
-vi.mock("@/logging/logger", () => ({
-  createLogger: (): typeof mockTimerSyncLogger => mockTimerSyncLogger,
 }));
 
 // Import after mocking
@@ -130,6 +116,12 @@ async function advanceThroughTimerSyncConnectionRetries(): Promise<void> {
     },
     Promise.resolve(),
   );
+}
+
+function getFullStateInvokeCount(): number {
+  return mockInvoke.mock.calls.filter(
+    ([command]) => command === "get_full_state",
+  ).length;
 }
 
 describe("useTimerSync", () => {
@@ -199,49 +191,103 @@ describe("useTimerSync", () => {
     expect(listenCalls).toContain("auto_run_stopped");
   });
 
-  it("should log setup failures through the logger", async () => {
-    mockListen.mockRejectedValueOnce(new Error("listen failed"));
-
-    renderHook(() => {
-      useTimerSync();
-    });
-
-    await waitFor(() => {
-      expect(mockTimerSyncLogger.error).toHaveBeenCalledWith(
-        FRONTEND_LOG_EVENT_IDS.timerSyncSetupFailed,
-        expect.any(Error),
-        expect.objectContaining({
-          retry_attempt: 0,
-          max_connection_retries: TIMER_SYNC_MAX_CONNECTION_RETRIES,
-          failure_message: "Error: listen failed",
-        }),
-      );
-    });
-  });
-
-  it("should log structured setup failures with safe details", async () => {
+  it("should report get_full_state command failures through code-derived connection presentation", async () => {
+    vi.useFakeTimers();
     const backendError = {
       code: "window_control_error",
-      message: "failed to subscribe to timer events",
+      message: "failed to read full state from C:\\Users\\nak\\secret",
     };
-    mockListen.mockRejectedValueOnce(backendError);
+    mockInvoke.mockRejectedValue(backendError);
 
     renderHook(() => {
       useTimerSync();
     });
 
-    await waitFor(() => {
-      expect(mockTimerSyncLogger.error).toHaveBeenCalledWith(
-        FRONTEND_LOG_EVENT_IDS.timerSyncSetupFailed,
-        backendError,
-        expect.objectContaining({
-          retry_attempt: 0,
-          max_connection_retries: TIMER_SYNC_MAX_CONNECTION_RETRIES,
-          failure_message:
-            "window_control_error: failed to subscribe to timer events",
-        }),
-      );
+    await flushTimerSyncSetup();
+    await advanceThroughTimerSyncConnectionRetries();
+
+    const connectionError = useErrorStore.getState().errors.connection;
+    expect(connectionError).toMatchObject({
+      id: "connection",
+      technicalDetail: "window_control_error",
+      severity: "recoverable",
+      origin: "backend_connection",
+      canRetry: true,
     });
+    expect(connectionError?.retryFn).toEqual(expect.any(Function));
+    expect(connectionError?.message).toEqual(expect.any(String));
+    expect(connectionError?.message).not.toBe("");
+    expect(connectionError?.message).not.toContain("failed to read full state");
+    expect(connectionError?.message).not.toContain("C:\\Users\\nak");
+    expect(connectionError?.message).not.toContain("secret");
+  });
+
+  it("should retry raw get_full_state invoke failures as connection failures", async () => {
+    vi.useFakeTimers();
+    mockInvoke.mockRejectedValue(
+      new Error("transport failed from C:\\Users\\nak\\secret"),
+    );
+
+    renderHook(() => {
+      useTimerSync();
+    });
+
+    await flushTimerSyncSetup();
+    expect(getFullStateInvokeCount()).toBe(1);
+    expect(useErrorStore.getState().errors.connection).toBeUndefined();
+
+    await advanceThroughTimerSyncConnectionRetries();
+
+    expect(getFullStateInvokeCount()).toBe(
+      TIMER_SYNC_MAX_CONNECTION_RETRIES + 1,
+    );
+    const connectionError = useErrorStore.getState().errors.connection;
+    expect(connectionError).toMatchObject({
+      id: "connection",
+      message:
+        "バックエンドに接続できません。アプリが正常に動作しない可能性があります。",
+      technicalDetail: "Unexpected backend error",
+      severity: "critical",
+      origin: "backend_connection",
+      canRetry: true,
+    });
+    expect(connectionError?.retryFn).toEqual(expect.any(Function));
+  });
+
+  it("should report non-retryable get_full_state command failures without automatic retries", async () => {
+    vi.useFakeTimers();
+    const backendError = {
+      code: "invalid_command_input",
+      message: "invalid type near C:\\Users\\nak\\secret",
+    };
+    mockInvoke.mockRejectedValue(backendError);
+
+    renderHook(() => {
+      useTimerSync();
+    });
+
+    await flushTimerSyncSetup();
+
+    const connectionError = useErrorStore.getState().errors.connection;
+    expect(connectionError).toMatchObject({
+      id: "connection",
+      technicalDetail: "invalid_command_input",
+      severity: "recoverable",
+      origin: "backend_connection",
+      canRetry: false,
+      retryFn: null,
+    });
+    expect(connectionError?.message).toEqual(expect.any(String));
+    expect(connectionError?.message).not.toBe("");
+    expect(connectionError?.message).not.toContain("invalid type");
+    expect(connectionError?.message).not.toContain("C:\\Users\\nak");
+    expect(connectionError?.message).not.toContain("secret");
+
+    expect(getFullStateInvokeCount()).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(timerSyncRetryDelayMs(0));
+
+    expect(getFullStateInvokeCount()).toBe(1);
   });
 
   it("should clean up listeners from a failed setup attempt before retrying", async () => {
@@ -277,49 +323,27 @@ describe("useTimerSync", () => {
     });
 
     await flushTimerSyncSetup();
-
-    expect(mockTimerSyncLogger.error).toHaveBeenCalledWith(
-      FRONTEND_LOG_EVENT_IDS.timerSyncSetupFailed,
-      expect.any(Error),
-      expect.objectContaining({
-        retry_attempt: 0,
-        max_connection_retries: TIMER_SYNC_MAX_CONNECTION_RETRIES,
-        failure_message: "Error: listen failed",
-      }),
-    );
-
-    expect(mockTimerSyncLogger.error).toHaveBeenCalledTimes(1);
+    expect(mockListen).toHaveBeenCalledTimes(1);
 
     await timerSyncConnectionRetryAttempts().reduce<Promise<void>>(
       async (previousRetry, retryAttempt) => {
         await previousRetry;
         const retryDelayMs = timerSyncRetryDelayMs(retryAttempt);
-        const errorCountBeforeRetry = retryAttempt + 1;
+        const setupAttemptCountBeforeRetry = retryAttempt + 1;
 
         await vi.advanceTimersByTimeAsync(retryDelayMs - 1);
-        expect(mockTimerSyncLogger.error).toHaveBeenCalledTimes(
-          errorCountBeforeRetry,
-        );
+        expect(mockListen).toHaveBeenCalledTimes(setupAttemptCountBeforeRetry);
 
         await vi.advanceTimersByTimeAsync(1);
 
-        expect(mockTimerSyncLogger.error).toHaveBeenCalledWith(
-          FRONTEND_LOG_EVENT_IDS.timerSyncSetupFailed,
-          expect.any(Error),
-          expect.objectContaining({
-            retry_attempt: retryAttempt + 1,
-            max_connection_retries: TIMER_SYNC_MAX_CONNECTION_RETRIES,
-            failure_message: "Error: listen failed",
-          }),
-        );
-        expect(mockTimerSyncLogger.error).toHaveBeenCalledTimes(
-          errorCountBeforeRetry + 1,
+        expect(mockListen).toHaveBeenCalledTimes(
+          setupAttemptCountBeforeRetry + 1,
         );
       },
       Promise.resolve(),
     );
 
-    expect(mockTimerSyncLogger.error).toHaveBeenCalledTimes(
+    expect(mockListen).toHaveBeenCalledTimes(
       TIMER_SYNC_MAX_CONNECTION_RETRIES + 1,
     );
   });
@@ -333,14 +357,15 @@ describe("useTimerSync", () => {
     });
 
     await flushTimerSyncSetup();
-    expect(mockTimerSyncLogger.error).toHaveBeenCalledTimes(1);
+    expect(mockListen).toHaveBeenCalledTimes(1);
 
     await advanceThroughTimerSyncConnectionRetries();
 
     const connectionError = useErrorStore.getState().errors.connection;
     expect(connectionError).toMatchObject({
       id: "connection",
-      message: "バックエンドに接続できません",
+      message:
+        "バックエンドに接続できません。アプリが正常に動作しない可能性があります。",
       technicalDetail: "Error: listen failed",
       severity: "critical",
       origin: "backend_connection",
@@ -359,7 +384,7 @@ describe("useTimerSync", () => {
     });
 
     await flushTimerSyncSetup();
-    expect(mockTimerSyncLogger.error).toHaveBeenCalledTimes(1);
+    expect(mockListen).toHaveBeenCalledTimes(1);
 
     await advanceThroughTimerSyncConnectionRetries();
 
@@ -372,19 +397,11 @@ describe("useTimerSync", () => {
       throw new Error("Expected connection retry function");
     }
 
-    mockTimerSyncLogger.error.mockClear();
+    mockListen.mockClear();
     await retryFn();
 
     expect(useErrorStore.getState().errors.connection).toBeUndefined();
-    expect(mockTimerSyncLogger.error).toHaveBeenCalledWith(
-      FRONTEND_LOG_EVENT_IDS.timerSyncSetupFailed,
-      expect.any(Error),
-      expect.objectContaining({
-        retry_attempt: 0,
-        max_connection_retries: TIMER_SYNC_MAX_CONNECTION_RETRIES,
-        failure_message: "Error: listen failed",
-      }),
-    );
+    expect(mockListen).toHaveBeenCalledTimes(1);
   });
 
   it("should reconnect successfully when manual retry setup succeeds", async () => {
@@ -403,14 +420,17 @@ describe("useTimerSync", () => {
       throw new Error("Expected connection retry function");
     }
 
-    mockTimerSyncLogger.error.mockClear();
+    mockListen.mockClear();
+    mockInvoke.mockClear();
     mockListen.mockResolvedValue(noopUnlisten);
     await retryFn();
 
     expect(useErrorStore.getState().errors.connection).toBeUndefined();
     expect(useTimerStore.getState().isConnected).toBe(true);
     expect(mockInvoke.mock.calls).toContainEqual(["get_full_state", undefined]);
-    expect(mockTimerSyncLogger.error).not.toHaveBeenCalled();
+    expect(mockListen.mock.calls.map(([event]) => event)).toContain(
+      "timer_tick",
+    );
   });
 
   it("should call get_full_state on mount", async () => {

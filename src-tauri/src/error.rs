@@ -1,6 +1,7 @@
 // Error types for Pomolice application
 // Provides structured error handling across all modules
 
+use tauri::ipc::InvokeError;
 use thiserror::Error;
 
 use crate::managers::persistence::SaveError;
@@ -45,6 +46,7 @@ enum BackendErrorCode {
     RateLimited,
     WindowControlError,
     PersistenceError,
+    InvalidCommandInput,
 }
 
 #[derive(serde::Serialize)]
@@ -80,6 +82,13 @@ impl From<&PomoliceError> for BackendErrorResponse {
     }
 }
 
+pub(crate) fn public_command_argument_rejection_error() -> InvokeError {
+    InvokeError::from(BackendErrorResponse {
+        code: BackendErrorCode::InvalidCommandInput,
+        message: "Invalid command input",
+    })
+}
+
 impl serde::Serialize for PomoliceError {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
@@ -92,6 +101,10 @@ impl serde::Serialize for PomoliceError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::logging_event::{
+        render_persistence_write_failure_message, PERSISTENCE_WRITE_TRIGGER_RUN_EVENT_EXIT,
+    };
+    use crate::types::TimerState;
 
     fn assert_display_includes_diagnostic_details(
         error: &PomoliceError,
@@ -179,6 +192,22 @@ mod tests {
         );
 
         serialized
+    }
+
+    fn assert_not_public_command_error_envelope(value: &serde_json::Value) {
+        let Some(response) = value.as_object() else {
+            return;
+        };
+
+        let has_code_field = matches!(response.get("code"), Some(code) if code.is_string());
+        let has_message_field =
+            matches!(response.get("message"), Some(message) if message.is_string());
+        let has_public_command_error_fields = has_code_field && has_message_field;
+
+        assert!(
+            !has_public_command_error_fields,
+            "excluded surface serialized as a public command error envelope: {value}"
+        );
     }
 
     #[test]
@@ -273,6 +302,33 @@ mod tests {
         assert!(!serialized.contains("timer_state.json"));
         assert!(!serialized.contains("AppData"));
         assert!(!serialized.contains("disk full"));
+    }
+
+    #[test]
+    fn test_excluded_surfaces_do_not_use_public_command_error_envelope() {
+        let timer_state = TimerState::default();
+        let event_payload =
+            serde_json::to_value(timer_state.to_tick_payload()).expect("event payload serializes");
+        let success_payload = serde_json::to_value(timer_state.to_full_payload())
+            .expect("success payload serializes");
+        let notification_error =
+            tauri_plugin_notification::Error::Io(std::io::Error::other("toast failed"));
+        let notification_failure =
+            serde_json::to_value(notification_error).expect("notification error should serialize");
+        let log_storage_failure = serde_json::to_value(render_persistence_write_failure_message(
+            PERSISTENCE_WRITE_TRIGGER_RUN_EVENT_EXIT,
+            &std::io::Error::other("disk full"),
+        ))
+        .expect("log message should serialize");
+
+        for excluded_surface in [
+            event_payload,
+            success_payload,
+            notification_failure,
+            log_storage_failure,
+        ] {
+            assert_not_public_command_error_envelope(&excluded_surface);
+        }
     }
 
     #[test]

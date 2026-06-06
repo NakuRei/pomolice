@@ -37,6 +37,8 @@ export function ConnectionBanner(): React.ReactElement | null {
     setIsRetrying(true);
     try {
       await error.retryFn();
+    } catch {
+      // The retry source reports the updated error state before rethrowing.
     } finally {
       setIsRetrying(false);
     }
@@ -74,9 +76,7 @@ export function ConnectionBanner(): React.ReactElement | null {
         ) : undefined
       }
     >
-      {isRetrying
-        ? "接続を試みています..."
-        : "バックエンドに接続できません。アプリが正常に動作しない可能性があります。"}
+      {isRetrying ? "接続を試みています..." : error.message}
     </StatusNotice>
   );
 }
