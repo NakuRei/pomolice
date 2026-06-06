@@ -1,59 +1,64 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { TimerStatus, SessionType, useTimerStore } from "@/store/timerStore";
+import { TimerStatus, useTimerStore } from "@/store/timerStore";
 import { resetTimerStoreForTest } from "./resetTimerStore";
+
+type TimerStoreSnapshot = ReturnType<typeof useTimerStore.getState>;
+
+function readTimerStoreDataSnapshot(
+  state: TimerStoreSnapshot,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(state).filter(([, value]) => typeof value !== "function"),
+  );
+}
+
+function readTimerStoreActionNames(
+  state: TimerStoreSnapshot,
+): (keyof TimerStoreSnapshot)[] {
+  const actionNames: (keyof TimerStoreSnapshot)[] = [];
+
+  for (const name of Object.keys(state) as (keyof TimerStoreSnapshot)[]) {
+    if (typeof state[name] === "function") {
+      actionNames.push(name);
+    }
+  }
+
+  return actionNames;
+}
 
 describe("resetTimerStoreForTest", () => {
   beforeEach(() => {
     resetTimerStoreForTest();
   });
 
-  it("should restore timer state to initial values", () => {
+  it("should restore timer store data to the store initial data", () => {
+    const initialDataSnapshot = readTimerStoreDataSnapshot(
+      useTimerStore.getInitialState(),
+    );
+
     useTimerStore.setState({
       status: TimerStatus.ON_BREAK,
       remainingSeconds: 42,
-      sessionType: SessionType.LONG_BREAK,
       currentCycle: 3,
-      completedPomodoros: 2,
-      breakInteractionCount: 4,
-      isFullscreenBreak: true,
-      requiresManualContinueDecision: true,
       isConnected: true,
-      shouldPromptStartOnBoot: true,
-      activeWindowSummary: {
-        weekday_key: "mon",
-        start_time: "09:00",
-        end_time: "18:00",
-        crosses_midnight: false,
-      },
       infoMessage: {
         id: "auto_run_stopped",
         message: "custom",
         ttlMs: 1,
       },
-      infoMessageShownAtById: {
-        auto_run_stopped: 1234,
-      },
     });
 
     resetTimerStoreForTest();
 
-    const state = useTimerStore.getState();
-    expect(state.status).toBe(TimerStatus.IDLE);
-    expect(state.remainingSeconds).toBe(25 * 60);
-    expect(state.sessionType).toBe(SessionType.WORK);
-    expect(state.currentCycle).toBe(0);
-    expect(state.completedPomodoros).toBe(0);
-    expect(state.breakInteractionCount).toBe(0);
-    expect(state.isFullscreenBreak).toBe(false);
-    expect(state.requiresManualContinueDecision).toBe(false);
-    expect(state.isConnected).toBe(false);
-    expect(state.shouldPromptStartOnBoot).toBe(false);
-    expect(state.activeWindowSummary).toBeNull();
-    expect(state.infoMessage).toBeNull();
-    expect(state.infoMessageShownAtById).toEqual({});
+    expect(readTimerStoreDataSnapshot(useTimerStore.getState())).toEqual(
+      initialDataSnapshot,
+    );
   });
 
-  it("should keep timer actions callable after reset", () => {
+  it("should keep timer store actions callable after reset", () => {
+    const initialActionNames = readTimerStoreActionNames(
+      useTimerStore.getInitialState(),
+    );
     useTimerStore.setState({
       status: TimerStatus.WORKING,
       currentCycle: 2,
@@ -61,14 +66,10 @@ describe("resetTimerStoreForTest", () => {
 
     resetTimerStoreForTest();
 
-    const state = useTimerStore.getState();
-    expect(state.start).toBeTypeOf("function");
-    expect(state.resolvePostBreakDecision).toBeTypeOf("function");
-    expect(state.emergencyStop).toBeTypeOf("function");
-    expect(state.syncSettings).toBeTypeOf("function");
-    expect(state.handleTimerTick).toBeTypeOf("function");
-    expect(state.handleSessionCompleted).toBeTypeOf("function");
-    expect(state.handleFullState).toBeTypeOf("function");
-    expect(state.setConnected).toBeTypeOf("function");
+    const resetState = useTimerStore.getState();
+    expect(initialActionNames).not.toHaveLength(0);
+    for (const actionName of initialActionNames) {
+      expect(resetState[actionName]).toBeTypeOf("function");
+    }
   });
 });

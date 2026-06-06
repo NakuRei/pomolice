@@ -14,26 +14,9 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import { useErrorStore } from "./errorStore";
-import { SessionType, TimerStatus, useTimerStore } from "./timerStore";
+import { resetTimerStoreForTest } from "@/test/resetTimerStore";
+import { useTimerStore } from "./timerStore";
 import { useSettingsStore } from "./settingsStore";
-
-function resetTimerStore(): void {
-  useTimerStore.setState({
-    status: TimerStatus.IDLE,
-    remainingSeconds: 25 * 60,
-    sessionType: SessionType.WORK,
-    currentCycle: 0,
-    completedPomodoros: 0,
-    breakInteractionCount: 0,
-    isFullscreenBreak: false,
-    requiresManualContinueDecision: false,
-    isConnected: false,
-    shouldPromptStartOnBoot: false,
-    activeWindowSummary: null,
-    infoMessage: null,
-    infoMessageShownAtById: {},
-  });
-}
 
 async function expectCommandRejection(
   action: () => Promise<void>,
@@ -46,7 +29,7 @@ describe("timerStore backend command errors", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useErrorStore.getState().clearAllErrors();
-    resetTimerStore();
+    resetTimerStoreForTest();
     useSettingsStore.getState().resetToDefaults();
   });
 
