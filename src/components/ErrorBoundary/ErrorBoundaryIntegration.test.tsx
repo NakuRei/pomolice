@@ -1,10 +1,4 @@
-import {
-  act,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   afterAll,
@@ -16,6 +10,9 @@ import {
   vi,
 } from "vitest";
 import { AppRoot } from "../../AppRoot";
+import type * as FullscreenBreakModule from "../../components/BreakScreen/FullscreenBreak";
+import type * as HomeScreenModule from "../../components/Home/HomeScreen";
+import type * as SettingsTimerPageModule from "../../components/Settings/SettingsTimerPage";
 import { FRONTEND_LOG_EVENT_IDS } from "../../logging/logEvents";
 import { useSettingsStore } from "../../store/settingsStore";
 import {
@@ -24,190 +21,129 @@ import {
   useTimerStore,
 } from "../../store/timerStore";
 
-const {
-  debugLoggerMock,
-  errorLoggerMock,
-  infoLoggerMock,
-  traceLoggerMock,
-  uiState,
-  warnLoggerMock,
-} = vi.hoisted(() => ({
-  debugLoggerMock: vi.fn(),
+const { crash, errorLoggerMock, infoLoggerMock } = vi.hoisted(() => ({
+  crash: {
+    fullscreen: false,
+    home: false,
+    settingsTimer: false,
+  },
   errorLoggerMock: vi.fn(),
   infoLoggerMock: vi.fn(),
-  traceLoggerMock: vi.fn(),
-  uiState: {
-    fullscreenShouldThrow: false,
-    homeShouldThrow: false,
-    settingsAutoRunShouldThrow: false,
-    settingsNotificationShouldThrow: false,
-    settingsTimerShouldThrow: false,
-    settingsTopShouldThrow: false,
-  },
-  warnLoggerMock: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn().mockResolvedValue(vi.fn()),
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn().mockResolvedValue({
+    active_window_summary: null,
+    break_interaction_count: 0,
+    completed_pomodoros: 0,
+    current_cycle: 0,
+    is_fullscreen_break: false,
+    post_break_decision_pending: false,
+    remaining_seconds: 1500,
+    session_type: "work",
+    settings: {
+      long_break_duration_secs: 900,
+      long_break_interval: 4,
+      post_break_transition_policy: "require_manual_continue",
+      short_break_duration_secs: 300,
+      work_duration_secs: 1500,
+    },
+    should_prompt_start_on_boot: false,
+    status: "idle",
+  }),
+}));
+
+vi.mock("@tauri-apps/plugin-notification", () => ({
+  isPermissionGranted: vi.fn().mockResolvedValue(false),
+  requestPermission: vi.fn().mockResolvedValue("denied"),
+  sendNotification: vi.fn(),
+}));
+
+vi.mock("../../services/notifications", () => ({
+  playNotificationSoundPreview: vi.fn(() =>
+    Promise.resolve({ status: "played" }),
+  ),
 }));
 
 vi.mock("../../hooks/useTimerSync", () => ({
-  useTimerSync: (): void => undefined,
+  useTimerSync: vi.fn(),
 }));
 
 vi.mock("../../logging/logger", () => ({
   createLogger: vi.fn(() => ({
-    debug: debugLoggerMock,
+    debug: vi.fn(),
     error: errorLoggerMock,
     info: infoLoggerMock,
-    trace: traceLoggerMock,
-    warn: warnLoggerMock,
+    trace: vi.fn(),
+    warn: vi.fn(),
   })),
 }));
 
-vi.mock("../../components/Home/HomeScreen", () => ({
-  HomeScreen: ({
-    onOpenSettingsTopScreen,
-  }: {
-    onOpenSettingsTopScreen: () => void;
-  }): React.ReactElement => {
-    if (uiState.homeShouldThrow) {
-      throw new Error("home crash");
-    }
+vi.mock("../../components/Home/HomeScreen", async (orig) => {
+  const actual = await orig<typeof HomeScreenModule>();
+  const { throwOnRender } = await import("../../test/throwOnRender");
+  const Throwing = throwOnRender("home crash");
+  const RealHomeScreen = actual.HomeScreen;
 
-    return (
-      <div>
-        <h1>Pomolice</h1>
-        <button type="button" onClick={onOpenSettingsTopScreen}>
-          設定を開く
-        </button>
-      </div>
+  function HomeScreen(
+    props: React.ComponentProps<typeof RealHomeScreen>,
+  ): React.ReactElement {
+    return crash.home ? <Throwing /> : <RealHomeScreen {...props} />;
+  }
+
+  return { ...actual, HomeScreen };
+});
+
+vi.mock("../../components/BreakScreen/FullscreenBreak", async (orig) => {
+  const actual = await orig<typeof FullscreenBreakModule>();
+  const { throwOnRender } = await import("../../test/throwOnRender");
+  const Throwing = throwOnRender("fullscreen crash");
+  const RealFullscreenBreak = actual.FullscreenBreak;
+
+  function FullscreenBreak(): React.ReactElement {
+    return crash.fullscreen ? <Throwing /> : <RealFullscreenBreak />;
+  }
+
+  return { ...actual, FullscreenBreak };
+});
+
+vi.mock("../../components/Settings/SettingsTimerPage", async (orig) => {
+  const actual = await orig<typeof SettingsTimerPageModule>();
+  const { throwOnRender } = await import("../../test/throwOnRender");
+  const Throwing = throwOnRender("settings timer crash");
+  const RealSettingsTimerPage = actual.SettingsTimerPage;
+
+  function SettingsTimerPage(
+    props: React.ComponentProps<typeof RealSettingsTimerPage>,
+  ): React.ReactElement {
+    return crash.settingsTimer ? (
+      <Throwing />
+    ) : (
+      <RealSettingsTimerPage {...props} />
     );
-  },
-}));
+  }
 
-vi.mock("../../components/BreakScreen/FullscreenBreak", () => ({
-  FullscreenBreak: (): React.ReactElement => {
-    if (uiState.fullscreenShouldThrow) {
-      throw new Error("fullscreen crash");
-    }
+  return { ...actual, SettingsTimerPage };
+});
 
-    return <div>休憩</div>;
-  },
-}));
+function resetCrashFlags(): void {
+  crash.fullscreen = false;
+  crash.home = false;
+  crash.settingsTimer = false;
+}
 
-vi.mock("../../components/Settings/SettingsScreenLayout", () => ({
-  SettingsScreenLayout: ({
-    children,
-    mainTestId,
-  }: {
-    children: React.ReactNode;
-    mainTestId: string;
-  }): React.ReactElement => <main data-testid={mainTestId}>{children}</main>,
-}));
-
-vi.mock("../../components/Settings/SettingsTopPage", () => ({
-  SettingsTopPage: ({
-    openAutoRunSettings,
-    openHomeScreen,
-    openNotificationSettings,
-    openTimerSettings,
-  }: {
-    openAutoRunSettings: () => void;
-    openHomeScreen: () => void;
-    openNotificationSettings: () => void;
-    openTimerSettings: () => void;
-  }): React.ReactElement => {
-    if (uiState.settingsTopShouldThrow) {
-      throw new Error("settings top crash");
-    }
-
-    return (
-      <div>
-        <h1>設定</h1>
-        <button type="button" onClick={openHomeScreen}>
-          ホームへ戻る
-        </button>
-        <button type="button" onClick={openTimerSettings}>
-          タイマー設定
-        </button>
-        <button type="button" onClick={openAutoRunSettings}>
-          曜日別自動実行
-        </button>
-        <button type="button" onClick={openNotificationSettings}>
-          通知と音量
-        </button>
-      </div>
-    );
-  },
-}));
-
-vi.mock("../../components/Settings/SettingsTimerPage", () => ({
-  SettingsTimerPage: ({
-    openSettingsTopScreen,
-  }: {
-    openSettingsTopScreen: () => void;
-  }): React.ReactElement => {
-    if (uiState.settingsTimerShouldThrow) {
-      throw new Error("settings timer crash");
-    }
-
-    return (
-      <div>
-        <h1>タイマー設定</h1>
-        <button type="button" onClick={openSettingsTopScreen}>
-          設定へ戻る
-        </button>
-      </div>
-    );
-  },
-}));
-
-vi.mock("../../components/Settings/SettingsAutoRunPage", () => ({
-  SettingsAutoRunPage: ({
-    openSettingsTopScreen,
-  }: {
-    openSettingsTopScreen: () => void;
-  }): React.ReactElement => {
-    if (uiState.settingsAutoRunShouldThrow) {
-      throw new Error("settings auto-run crash");
-    }
-
-    return (
-      <div>
-        <h1>曜日別自動実行設定</h1>
-        <button type="button" onClick={openSettingsTopScreen}>
-          設定へ戻る
-        </button>
-      </div>
-    );
-  },
-}));
-
-vi.mock("../../components/Settings/SettingsNotificationPage", () => ({
-  SettingsNotificationPage: ({
-    openSettingsTopScreen,
-  }: {
-    openSettingsTopScreen: () => void;
-  }): React.ReactElement => {
-    if (uiState.settingsNotificationShouldThrow) {
-      throw new Error("settings notification crash");
-    }
-
-    return (
-      <div>
-        <h1>通知設定</h1>
-        <button type="button" onClick={openSettingsTopScreen}>
-          設定へ戻る
-        </button>
-      </div>
-    );
-  },
-}));
-
-function resetMockedUiState(): void {
-  uiState.homeShouldThrow = false;
-  uiState.fullscreenShouldThrow = false;
-  uiState.settingsTopShouldThrow = false;
-  uiState.settingsTimerShouldThrow = false;
-  uiState.settingsAutoRunShouldThrow = false;
-  uiState.settingsNotificationShouldThrow = false;
+function caughtErrorPayloads(): Record<string, unknown>[] {
+  return errorLoggerMock.mock.calls
+    .filter(
+      (callArguments) =>
+        callArguments[0] ===
+        FRONTEND_LOG_EVENT_IDS.errorBoundaryBoundaryRenderErrorCaught,
+    )
+    .map((callArguments) => callArguments[2] as Record<string, unknown>);
 }
 
 async function openSettingsTop(
@@ -216,10 +152,10 @@ async function openSettingsTop(
   await user.click(screen.getByRole("button", { name: "設定を開く" }));
 }
 
-async function openTimerSettingsFromSettingsTop(
+async function openTimerSettings(
   user: ReturnType<typeof userEvent.setup>,
 ): Promise<void> {
-  await user.click(screen.getByRole("button", { name: "タイマー設定" }));
+  await user.click(screen.getByRole("button", { name: /^タイマー設定/u }));
 }
 
 describe("ErrorBoundary integration", () => {
@@ -232,8 +168,9 @@ describe("ErrorBoundary integration", () => {
   });
 
   beforeEach(() => {
-    vi.clearAllMocks();
-    resetMockedUiState();
+    errorLoggerMock.mockClear();
+    infoLoggerMock.mockClear();
+    resetCrashFlags();
     useSettingsStore.getState().reset();
     useTimerStore.setState({
       activeWindowSummary: null,
@@ -252,9 +189,8 @@ describe("ErrorBoundary integration", () => {
     });
   });
 
-  it("shows the fullscreen fallback, logs the fullscreen scope, and retries successfully", async () => {
-    const user = userEvent.setup();
-    uiState.fullscreenShouldThrow = true;
+  it("shows the fullscreen fallback and logs the fullscreen scope without a current_screen", async () => {
+    crash.fullscreen = true;
     act(() => {
       useTimerStore.setState({ isFullscreenBreak: true });
     });
@@ -264,32 +200,28 @@ describe("ErrorBoundary integration", () => {
     expect(
       await screen.findByText("表示エラーが発生しました"),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByText("アプリケーションエラーが発生しました"),
+    ).not.toBeInTheDocument();
     expect(errorLoggerMock).toHaveBeenCalledWith(
       FRONTEND_LOG_EVENT_IDS.errorBoundaryBoundaryRenderErrorCaught,
       expect.any(Error),
-      expect.objectContaining({
-        boundary_scope: "fullscreen_break",
-        failure_message: "fullscreen crash",
-      }),
+      expect.objectContaining({ boundary_scope: "fullscreen_break" }),
     );
-
-    uiState.fullscreenShouldThrow = false;
-    await user.click(screen.getByRole("button", { name: "再表示を試みる" }));
-
-    expect(await screen.findByText("休憩")).toBeInTheDocument();
-    expect(infoLoggerMock).toHaveBeenCalledWith(
-      FRONTEND_LOG_EVENT_IDS.errorBoundaryRenderErrorReset,
-      { boundary_scope: "fullscreen_break" },
-    );
+    const caughtPayloads = caughtErrorPayloads();
+    expect(caughtPayloads.length).toBeGreaterThan(0);
+    for (const caughtPayload of caughtPayloads) {
+      expect(caughtPayload).not.toHaveProperty("current_screen");
+    }
   });
 
-  it("contains settings crashes within the settings boundary and returns home", async () => {
+  it("contains settings crashes within the settings boundary and logs the current settings screen", async () => {
     const user = userEvent.setup();
 
     render(<AppRoot />);
     await openSettingsTop(user);
-    uiState.settingsTimerShouldThrow = true;
-    await openTimerSettingsFromSettingsTop(user);
+    crash.settingsTimer = true;
+    await openTimerSettings(user);
 
     expect(
       await screen.findByText("設定画面の表示中にエラーが発生しました"),
@@ -303,28 +235,12 @@ describe("ErrorBoundary integration", () => {
       expect.objectContaining({
         boundary_scope: "settings",
         current_screen: "settingsTimer",
-        failure_message: "settings timer crash",
       }),
-    );
-
-    uiState.settingsTimerShouldThrow = false;
-    await user.click(screen.getByRole("button", { name: "ホームへ戻る" }));
-
-    expect(await screen.findByText("Pomolice")).toBeInTheDocument();
-    expect(infoLoggerMock).toHaveBeenCalledWith(
-      FRONTEND_LOG_EVENT_IDS.errorBoundaryRenderErrorReset,
-      { boundary_scope: "settings" },
-    );
-    expect(errorLoggerMock).not.toHaveBeenCalledWith(
-      FRONTEND_LOG_EVENT_IDS.errorBoundaryBoundaryRenderErrorCaught,
-      expect.any(Error),
-      expect.objectContaining({ boundary_scope: "app" }),
     );
   });
 
-  it("shows the app fallback for home-screen crashes and retries successfully", async () => {
-    const user = userEvent.setup();
-    uiState.homeShouldThrow = true;
+  it("shows the app fallback for home-screen crashes and logs the app scope without a current_screen", async () => {
+    crash.home = true;
 
     render(<AppRoot />);
 
@@ -334,43 +250,131 @@ describe("ErrorBoundary integration", () => {
     expect(errorLoggerMock).toHaveBeenCalledWith(
       FRONTEND_LOG_EVENT_IDS.errorBoundaryBoundaryRenderErrorCaught,
       expect.any(Error),
-      expect.objectContaining({
-        boundary_scope: "app",
-        failure_message: "home crash",
-      }),
+      expect.objectContaining({ boundary_scope: "app" }),
     );
+    const caughtPayloads = caughtErrorPayloads();
+    expect(caughtPayloads.length).toBeGreaterThan(0);
+    for (const caughtPayload of caughtPayloads) {
+      expect(caughtPayload).not.toHaveProperty("current_screen");
+    }
+  });
 
-    uiState.homeShouldThrow = false;
-    await user.click(screen.getByRole("button", { name: "再表示を試みる" }));
+  it("recovers the settings boundary and logs a reset once the crash is resolved", async () => {
+    const user = userEvent.setup();
+
+    render(<AppRoot />);
+    await openSettingsTop(user);
+    crash.settingsTimer = true;
+    await openTimerSettings(user);
+
+    expect(
+      await screen.findByText("設定画面の表示中にエラーが発生しました"),
+    ).toBeInTheDocument();
+
+    crash.settingsTimer = false;
+    await user.click(screen.getByRole("button", { name: "ホームへ戻る" }));
 
     expect(await screen.findByText("Pomolice")).toBeInTheDocument();
+    expect(
+      screen.queryByText("設定画面の表示中にエラーが発生しました"),
+    ).not.toBeInTheDocument();
+    expect(infoLoggerMock).toHaveBeenCalledWith(
+      FRONTEND_LOG_EVENT_IDS.errorBoundaryRenderErrorReset,
+      { boundary_scope: "settings" },
+    );
+  });
+
+  it("keeps the fallback when retrying while the crash still occurs", async () => {
+    const user = userEvent.setup();
+    crash.fullscreen = true;
+    act(() => {
+      useTimerStore.setState({ isFullscreenBreak: true });
+    });
+
+    render(<AppRoot />);
+
+    expect(
+      await screen.findByText("表示エラーが発生しました"),
+    ).toBeInTheDocument();
+
+    await user.click(within(screen.getByRole("alert")).getByRole("button"));
+
+    await waitFor(() => {
+      expect(screen.getByText("表示エラーが発生しました")).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByText("アプリケーションエラーが発生しました"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("restores the fullscreen break and logs a reset when retry succeeds after the crash is resolved", async () => {
+    const user = userEvent.setup();
+    crash.fullscreen = true;
+    act(() => {
+      useTimerStore.setState({ isFullscreenBreak: true });
+    });
+
+    render(<AppRoot />);
+
+    expect(
+      await screen.findByText("表示エラーが発生しました"),
+    ).toBeInTheDocument();
+
+    crash.fullscreen = false;
+    await user.click(within(screen.getByRole("alert")).getByRole("button"));
+
+    expect(await screen.findByText("休憩")).toBeInTheDocument();
+    expect(
+      screen.queryByText("表示エラーが発生しました"),
+    ).not.toBeInTheDocument();
+    expect(infoLoggerMock).toHaveBeenCalledWith(
+      FRONTEND_LOG_EVENT_IDS.errorBoundaryRenderErrorReset,
+      { boundary_scope: "fullscreen_break" },
+    );
+  });
+
+  it("restores the app boundary and logs a reset when retry succeeds after the crash is resolved", async () => {
+    const user = userEvent.setup();
+    crash.home = true;
+
+    render(<AppRoot />);
+
+    expect(
+      await screen.findByText("アプリケーションエラーが発生しました"),
+    ).toBeInTheDocument();
+
+    crash.home = false;
+    await user.click(within(screen.getByRole("alert")).getByRole("button"));
+
+    expect(await screen.findByText("Pomolice")).toBeInTheDocument();
+    expect(
+      screen.queryByText("アプリケーションエラーが発生しました"),
+    ).not.toBeInTheDocument();
     expect(infoLoggerMock).toHaveBeenCalledWith(
       FRONTEND_LOG_EVENT_IDS.errorBoundaryRenderErrorReset,
       { boundary_scope: "app" },
     );
   });
 
-  it("auto-resets the settings boundary when the current settings screen changes", async () => {
+  it("resets the settings boundary and logs a reset when navigating to another settings screen", async () => {
     const user = userEvent.setup();
 
     render(<AppRoot />);
     await openSettingsTop(user);
-    uiState.settingsTimerShouldThrow = true;
-    await openTimerSettingsFromSettingsTop(user);
+    crash.settingsTimer = true;
+    await openTimerSettings(user);
 
     expect(
       await screen.findByText("設定画面の表示中にエラーが発生しました"),
     ).toBeInTheDocument();
 
-    uiState.settingsTimerShouldThrow = false;
-    fireEvent.keyDown(window, { key: "Escape" });
+    crash.settingsTimer = false;
+    await user.keyboard("{Escape}");
 
-    await waitFor(() => {
-      expect(screen.getByText("設定")).toBeInTheDocument();
-    });
+    expect(await screen.findByText("設定")).toBeInTheDocument();
     expect(
       screen.queryByText("設定画面の表示中にエラーが発生しました"),
-    ).toBeNull();
+    ).not.toBeInTheDocument();
     expect(infoLoggerMock).toHaveBeenCalledWith(
       FRONTEND_LOG_EVENT_IDS.errorBoundaryRenderErrorReset,
       { boundary_scope: "settings" },
