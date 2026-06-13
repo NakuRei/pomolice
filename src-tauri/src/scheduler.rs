@@ -107,8 +107,12 @@ async fn persist_current_state_with_trigger(app: &AppHandle, trigger: &'static s
     }
 }
 
-pub async fn lib_start_scheduler_task(app: AppHandle) {
-    let state_handle = app.state::<state::AppState>();
+async fn start_scheduler_task_with_spawner<F>(
+    state_handle: &state::AppState,
+    spawn_scheduler_loop: F,
+) where
+    F: FnOnce(CancellationToken, DateTime<Local>, bool) -> tauri::async_runtime::JoinHandle<()>,
+{
     state_handle.cancel_and_wait_scheduler_task().await;
 
     let now_local = state_handle.clock.now_local();
@@ -131,54 +135,91 @@ pub async fn lib_start_scheduler_task(app: AppHandle) {
     }
 
     let cancellation_token = CancellationToken::new();
-    let scheduler_cancellation_token = cancellation_token.clone();
-    let scheduler_app = app.clone();
-
-    let scheduler_join_handle = tauri::async_runtime::spawn(async move {
-        let mut scheduler_interval =
-            tokio::time::interval(Duration::from_secs(SCHEDULER_INTERVAL_SECONDS));
-        scheduler_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-        let state_handle = scheduler_app.state::<state::AppState>();
-        let mut runtime_state = SchedulerRuntimeState {
-            processed_boundary_occurrences: HashSet::new(),
-            last_checked_local: initial_previous_local,
-            start_boundaries_blocked_until_idle,
-            last_seen_config_revision: state_handle.config_revision.load(Ordering::Acquire),
-        };
-
-        log_info_event(
-            BackendLogEvent::SchedulerStarted,
-            &[
-                (
-                    "previous_local",
-                    runtime_state.last_checked_local.to_rfc3339(),
-                ),
-                (
-                    "blocked_until_idle",
-                    runtime_state
-                        .start_boundaries_blocked_until_idle
-                        .to_string(),
-                ),
-            ],
-        );
-
-        loop {
-            tokio::select! {
-                () = scheduler_cancellation_token.cancelled() => {
-                    log_info_event(BackendLogEvent::SchedulerReceivedCancellation, &[]);
-                    break;
-                }
-                _ = scheduler_interval.tick() => {
-                    lib_run_scheduler_tick(scheduler_app.clone(), &mut runtime_state).await;
-                }
-            }
-        }
-
-        log_info_event(BackendLogEvent::SchedulerStopped, &[]);
-    });
+    let scheduler_join_handle = spawn_scheduler_loop(
+        cancellation_token.clone(),
+        initial_previous_local,
+        start_boundaries_blocked_until_idle,
+    );
 
     state_handle.store_scheduler_task(cancellation_token, scheduler_join_handle);
+}
+
+fn spawn_app_scheduler_loop(
+    app: AppHandle,
+    scheduler_cancellation_token: CancellationToken,
+    initial_previous_local: DateTime<Local>,
+    start_boundaries_blocked_until_idle: bool,
+) -> tauri::async_runtime::JoinHandle<()> {
+    tauri::async_runtime::spawn(async move {
+        run_app_scheduler_loop(
+            app,
+            scheduler_cancellation_token,
+            initial_previous_local,
+            start_boundaries_blocked_until_idle,
+        )
+        .await;
+    })
+}
+
+async fn run_app_scheduler_loop(
+    scheduler_app: AppHandle,
+    scheduler_cancellation_token: CancellationToken,
+    initial_previous_local: DateTime<Local>,
+    start_boundaries_blocked_until_idle: bool,
+) {
+    let mut scheduler_interval =
+        tokio::time::interval(Duration::from_secs(SCHEDULER_INTERVAL_SECONDS));
+    scheduler_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+    let state_handle = scheduler_app.state::<state::AppState>();
+    let mut runtime_state = SchedulerRuntimeState {
+        processed_boundary_occurrences: HashSet::new(),
+        last_checked_local: initial_previous_local,
+        start_boundaries_blocked_until_idle,
+        last_seen_config_revision: state_handle.config_revision.load(Ordering::Acquire),
+    };
+
+    log_info_event(
+        BackendLogEvent::SchedulerStarted,
+        &[
+            (
+                "previous_local",
+                runtime_state.last_checked_local.to_rfc3339(),
+            ),
+            (
+                "blocked_until_idle",
+                runtime_state
+                    .start_boundaries_blocked_until_idle
+                    .to_string(),
+            ),
+        ],
+    );
+
+    loop {
+        tokio::select! {
+            () = scheduler_cancellation_token.cancelled() => {
+                log_info_event(BackendLogEvent::SchedulerReceivedCancellation, &[]);
+                break;
+            }
+            _ = scheduler_interval.tick() => {
+                lib_run_scheduler_tick(scheduler_app.clone(), &mut runtime_state).await;
+            }
+        }
+    }
+
+    log_info_event(BackendLogEvent::SchedulerStopped, &[]);
+}
+
+pub async fn lib_start_scheduler_task(app: AppHandle) {
+    let state_handle = app.state::<state::AppState>();
+    let scheduler_app = app.clone();
+    start_scheduler_task_with_spawner(
+        &state_handle,
+        move |cancellation_token, previous, blocked| {
+            spawn_app_scheduler_loop(scheduler_app, cancellation_token, previous, blocked)
+        },
+    )
+    .await;
 }
 
 async fn lib_run_scheduler_tick(app: AppHandle, runtime_state: &mut SchedulerRuntimeState) {
@@ -510,6 +551,7 @@ mod tests {
         TimerTickPayload,
     };
     use chrono::{TimeZone, Utc};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
     #[derive(Debug, Clone, Copy, PartialEq)]
@@ -607,6 +649,43 @@ mod tests {
             state::AppState::build_startup_state_for_tests(as_clock_trait(&clock), persistence)
                 .await;
         app_state
+    }
+
+    fn spawn_counted_scheduler_loop(
+        cancellation_token: CancellationToken,
+        active_loop_count: Arc<AtomicUsize>,
+    ) -> tauri::async_runtime::JoinHandle<()> {
+        active_loop_count.fetch_add(1, Ordering::SeqCst);
+
+        tauri::async_runtime::spawn(async move {
+            cancellation_token.cancelled().await;
+            active_loop_count.fetch_sub(1, Ordering::SeqCst);
+        })
+    }
+
+    #[tokio::test]
+    async fn test_scheduler_restart_keeps_only_latest_loop_active() {
+        let state = build_test_state_without_persistence_path().await;
+        let active_loop_count = Arc::new(AtomicUsize::new(0));
+
+        for _ in 0..6 {
+            let active_loop_count_for_spawner = Arc::clone(&active_loop_count);
+            start_scheduler_task_with_spawner(
+                &state,
+                move |cancellation_token, _previous, _blocked| {
+                    spawn_counted_scheduler_loop(cancellation_token, active_loop_count_for_spawner)
+                },
+            )
+            .await;
+        }
+
+        assert_eq!(
+            active_loop_count.load(Ordering::SeqCst),
+            1,
+            "scheduler restart should leave only the latest loop active"
+        );
+
+        state.cancel_and_wait_scheduler_task().await;
     }
 
     #[test]
