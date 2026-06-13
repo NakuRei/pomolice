@@ -22,14 +22,6 @@ pub(crate) fn build_log_plugin<R: Runtime>() -> TauriPlugin<R> {
     build_log_builder(cfg!(debug_assertions), None).build()
 }
 
-#[cfg(test)]
-pub(crate) fn build_log_plugin_for_directory<R: Runtime>(
-    log_directory: &Path,
-    is_dev: bool,
-) -> TauriPlugin<R> {
-    build_log_builder(is_dev, Some(log_directory)).build()
-}
-
 pub(crate) fn build_log_builder(
     is_dev: bool,
     log_directory: Option<&Path>,

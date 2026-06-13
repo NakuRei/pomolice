@@ -99,9 +99,3 @@ fn test_should_log_allows_app_targets_and_filters_noisy_dependencies() {
     assert!(!should_log(&metadata("rdev::listen")));
     assert!(!should_log(&metadata("hyper::client")));
 }
-
-#[test]
-fn test_build_log_plugin_for_directory_is_available_for_wry_runtime() {
-    let factory = crate::logging::build_log_plugin_for_directory::<tauri::Wry>;
-    std::hint::black_box(factory);
-}
