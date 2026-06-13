@@ -12,3 +12,12 @@ export type AppScreen =
   | "settingsTimer"
   | "settingsAutoRun"
   | "settingsNotification";
+
+export const SETTINGS_SCREEN_VALUES = [
+  "settingsTop",
+  "settingsTimer",
+  "settingsAutoRun",
+  "settingsNotification",
+] as const satisfies readonly AppScreen[];
+
+export type SettingsScreen = (typeof SETTINGS_SCREEN_VALUES)[number];

@@ -1,4 +1,5 @@
-import type { AppScreen } from "../types/appScreen";
+import type { SettingsScreen } from "../types/appScreen";
+export type { SettingsScreen } from "../types/appScreen";
 
 export type LogFieldValue = string | number | boolean | null;
 
@@ -7,7 +8,6 @@ export type FrontendLogSeverity = "trace" | "debug" | "info" | "warn" | "error";
 export type RedactionClassification = "public" | "sensitive";
 
 export type ErrorBoundaryScope = "fullscreen_break" | "settings" | "app";
-export type SettingsScreen = Exclude<AppScreen, "home">;
 
 export type FrontendScope =
   | "bootstrap"

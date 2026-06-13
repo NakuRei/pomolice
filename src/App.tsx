@@ -1,21 +1,21 @@
 import { useEffect, useState } from "react";
-import { ErrorBoundary } from "react-error-boundary";
-import { FullscreenBreakErrorFallback } from "./components/ErrorBoundary/FullscreenBreakErrorFallback";
-import { SettingsErrorFallback } from "./components/ErrorBoundary/SettingsErrorFallback";
+import { FullscreenBreak } from "./components/BreakScreen/FullscreenBreak";
+import { FullscreenBreakErrorBoundary } from "./components/ErrorBoundary/FullscreenBreakErrorBoundary";
+import { SettingsErrorBoundary } from "./components/ErrorBoundary/SettingsErrorBoundary";
+import { HomeScreen } from "./components/Home/HomeScreen";
 import { SettingsAutoRunPage } from "./components/Settings/SettingsAutoRunPage";
 import { SettingsNotificationPage } from "./components/Settings/SettingsNotificationPage";
 import { SettingsScreenLayout } from "./components/Settings/SettingsScreenLayout";
 import { SettingsTopPage } from "./components/Settings/SettingsTopPage";
 import { SettingsTimerPage } from "./components/Settings/SettingsTimerPage";
-import { FullscreenBreak } from "./components/BreakScreen/FullscreenBreak";
-import { HomeScreen } from "./components/Home/HomeScreen";
 import { useTimerSync } from "./hooks/useTimerSync";
-import { getFailureMessage } from "./logging/createRootErrorCallbacks";
-import { FRONTEND_LOG_EVENT_IDS } from "./logging/logEvents";
-import { createLogger } from "./logging/logger";
 import { useSettingsStore } from "./store/settingsStore";
 import { useTimerStore } from "./store/timerStore";
-import type { AppScreen } from "./types/appScreen";
+import {
+  SETTINGS_SCREEN_VALUES,
+  type AppScreen,
+  type SettingsScreen,
+} from "./types/appScreen";
 
 const ESCAPE_BACK_TARGET_BY_SCREEN: Partial<Record<AppScreen, AppScreen>> = {
   settingsTop: "home",
@@ -23,17 +23,6 @@ const ESCAPE_BACK_TARGET_BY_SCREEN: Partial<Record<AppScreen, AppScreen>> = {
   settingsAutoRun: "settingsTop",
   settingsNotification: "settingsTop",
 };
-
-const SETTINGS_SCREEN_VALUES = [
-  "settingsTop",
-  "settingsTimer",
-  "settingsAutoRun",
-  "settingsNotification",
-] as const satisfies readonly AppScreen[];
-
-type SettingsScreen = (typeof SETTINGS_SCREEN_VALUES)[number];
-
-const logger = createLogger("error_boundary");
 
 function isSettingsScreen(screen: AppScreen): screen is SettingsScreen {
   return SETTINGS_SCREEN_VALUES.includes(screen as SettingsScreen);
@@ -163,64 +152,22 @@ function App(): React.ReactElement {
   // Show fullscreen break overlay when in break mode
   if (isFullscreenBreak) {
     return (
-      <ErrorBoundary
-        fallbackRender={(fallbackProps) => (
-          <FullscreenBreakErrorFallback {...fallbackProps} />
-        )}
-        onError={(error, errorInfo): void => {
-          logger.error(
-            FRONTEND_LOG_EVENT_IDS.errorBoundaryBoundaryRenderErrorCaught,
-            error,
-            {
-              boundary_scope: "fullscreen_break",
-              component_stack: errorInfo.componentStack ?? undefined,
-              failure_message: getFailureMessage(error),
-            },
-          );
-        }}
-        onReset={(): void => {
-          logger.info(FRONTEND_LOG_EVENT_IDS.errorBoundaryRenderErrorReset, {
-            boundary_scope: "fullscreen_break",
-          });
-        }}
-      >
+      <FullscreenBreakErrorBoundary>
         <FullscreenBreak />
-      </ErrorBoundary>
+      </FullscreenBreakErrorBoundary>
     );
   }
 
   if (isSettingsScreen(currentScreen)) {
     return (
-      <ErrorBoundary
-        fallbackRender={(fallbackProps) => (
-          <SettingsErrorFallback
-            {...fallbackProps}
-            onBackToHome={() => {
-              moveToScreen("home");
-            }}
-          />
-        )}
-        onError={(error, errorInfo): void => {
-          logger.error(
-            FRONTEND_LOG_EVENT_IDS.errorBoundaryBoundaryRenderErrorCaught,
-            error,
-            {
-              boundary_scope: "settings",
-              component_stack: errorInfo.componentStack ?? undefined,
-              current_screen: currentScreen,
-              failure_message: getFailureMessage(error),
-            },
-          );
+      <SettingsErrorBoundary
+        currentScreen={currentScreen}
+        onBackToHome={() => {
+          moveToScreen("home");
         }}
-        onReset={(): void => {
-          logger.info(FRONTEND_LOG_EVENT_IDS.errorBoundaryRenderErrorReset, {
-            boundary_scope: "settings",
-          });
-        }}
-        resetKeys={[currentScreen]}
       >
         {renderSettingsScreen(currentScreen, moveToScreen)}
-      </ErrorBoundary>
+      </SettingsErrorBoundary>
     );
   }
 
