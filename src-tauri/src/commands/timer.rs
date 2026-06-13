@@ -1770,48 +1770,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sync_automation_policies_scheduler_revision_scope() {
-        let state = build_test_state_without_persistence_path().await;
-        let initial_revision = state.config_revision.load(Ordering::Acquire);
-        let mut policy_runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
-
-        sync_automation_policies_with_runtime_effects(
-            &state,
-            false,
-            WeeklyAutoRunConfig::default(),
-            PostBreakTransitionPolicy::StartNextWorkAutomatically,
-            &mut policy_runtime_effect_shell,
-        )
-        .await
-        .expect("policy-only sync should succeed");
-
-        assert_eq!(
-            state.config_revision.load(Ordering::Acquire),
-            initial_revision
-        );
-        assert_tick_emit_and_tray_match(&policy_runtime_effect_shell);
-        assert_event_once(&policy_runtime_effect_shell, RuntimeEffectEvent::Persist);
-
-        let mut topology_runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
-        sync_automation_policies_with_runtime_effects(
-            &state,
-            true,
-            make_enabled_daytime_monday_config(),
-            PostBreakTransitionPolicy::StartNextWorkAutomatically,
-            &mut topology_runtime_effect_shell,
-        )
-        .await
-        .expect("topology sync should succeed");
-
-        assert_eq!(
-            state.config_revision.load(Ordering::Acquire),
-            initial_revision + 1
-        );
-        assert_tick_emit_and_tray_match(&topology_runtime_effect_shell);
-        assert_event_once(&topology_runtime_effect_shell, RuntimeEffectEvent::Persist);
-    }
-
-    #[tokio::test]
     async fn test_command_timer_side_effects_preserve_persistence_failure_policy() {
         let continue_state = build_test_state_with_injected_persistence_error().await;
         prepare_post_break_decision_pending_state(&continue_state).await;

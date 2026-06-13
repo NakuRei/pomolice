@@ -225,35 +225,48 @@ pub async fn lib_start_scheduler_task(app: AppHandle) {
 async fn lib_run_scheduler_tick(app: AppHandle, runtime_state: &mut SchedulerRuntimeState) {
     let state_handle = app.state::<state::AppState>();
     let now_local = state_handle.clock.now_local();
+    let mut effects = AppHandleSchedulerRuntimeEffects { app: &app };
+
+    run_scheduler_tick_with_effects(&state_handle, runtime_state, now_local, &mut effects).await;
+}
+
+async fn run_scheduler_tick_with_effects(
+    state_handle: &state::AppState,
+    runtime_state: &mut SchedulerRuntimeState,
+    now_local: DateTime<Local>,
+    effects: &mut impl SchedulerRuntimeEffects,
+) {
     let previous_local = runtime_state.last_checked_local;
 
-    let timer_snapshot = load_scheduler_timer_snapshot(&state_handle).await;
+    let timer_snapshot = load_scheduler_timer_snapshot(state_handle).await;
     resume_start_boundary_evaluation_when_idle(runtime_state, timer_snapshot.status);
 
     let tick_plan = build_scheduler_tick_plan(
-        &state_handle,
+        state_handle,
         runtime_state,
         now_local,
         timer_snapshot.auto_run_feature_enabled,
     );
 
-    process_crossed_end_boundaries(
-        &app,
+    process_crossed_end_boundaries_with_effects(
+        state_handle,
         runtime_state,
         &timer_snapshot.weekly_auto_run_config,
         timer_snapshot.auto_run_feature_enabled,
         tick_plan.end_boundary_previous_local,
         now_local,
+        effects,
     )
     .await;
 
     if tick_plan.should_evaluate_start_boundaries {
-        process_crossed_start_boundaries(
-            &app,
+        process_crossed_start_boundaries_with_effects(
+            state_handle,
             runtime_state,
             &timer_snapshot,
             previous_local,
             now_local,
+            effects,
         )
         .await;
     }
@@ -347,13 +360,14 @@ fn boot_prompt_gate_allows_start_boundary_evaluation(
         && boot_prompt_runtime_state != BootPromptRuntimeState::AwaitingDecision
 }
 
-async fn process_crossed_end_boundaries(
-    app: &AppHandle,
+async fn process_crossed_end_boundaries_with_effects(
+    state_handle: &state::AppState,
     runtime_state: &mut SchedulerRuntimeState,
     weekly_auto_run_config: &WeeklyAutoRunConfig,
     auto_run_feature_enabled: bool,
     previous_local: DateTime<Local>,
     now_local: DateTime<Local>,
+    effects: &mut impl SchedulerRuntimeEffects,
 ) {
     if !auto_run_feature_enabled {
         return;
@@ -372,7 +386,7 @@ async fn process_crossed_end_boundaries(
             &[("boundary_id", end_boundary.as_str().to_string())],
         );
         let did_mark_stop_pending =
-            mark_scheduled_stop_pending_for_current_session(app.clone()).await;
+            mark_scheduled_stop_pending_with_effects(state_handle, effects).await;
         if did_mark_stop_pending {
             log_info_event(
                 BackendLogEvent::SchedulerMarkedStopPending,
@@ -382,12 +396,13 @@ async fn process_crossed_end_boundaries(
     }
 }
 
-async fn process_crossed_start_boundaries(
-    app: &AppHandle,
+async fn process_crossed_start_boundaries_with_effects(
+    state_handle: &state::AppState,
     runtime_state: &mut SchedulerRuntimeState,
     timer_snapshot: &SchedulerTimerSnapshot,
     previous_local: DateTime<Local>,
     now_local: DateTime<Local>,
+    effects: &mut impl SchedulerRuntimeEffects,
 ) {
     let crossed_start_boundaries = collect_crossed_start_boundaries(
         previous_local,
@@ -404,11 +419,12 @@ async fn process_crossed_start_boundaries(
             BackendLogEvent::SchedulerCrossedStartBoundary,
             &[("boundary_id", start_boundary.as_str().to_string())],
         );
-        let did_start = start_work_from_scheduler_when_idle(
-            app.clone(),
+        let did_start = start_work_from_scheduler_when_idle_with_effects(
+            state_handle,
             timer_snapshot.status,
             timer_snapshot.timer_settings.clone(),
             &start_boundary,
+            effects,
         )
         .await;
 
@@ -444,13 +460,6 @@ pub(crate) fn trim_old_processed_boundaries(
     });
 }
 
-async fn mark_scheduled_stop_pending_for_current_session(app: AppHandle) -> bool {
-    let state_handle = app.state::<state::AppState>();
-    let mut effects = AppHandleSchedulerRuntimeEffects { app: &app };
-
-    mark_scheduled_stop_pending_with_effects(&state_handle, &mut effects).await
-}
-
 async fn mark_scheduled_stop_pending_with_effects(
     state_handle: &state::AppState,
     effects: &mut impl SchedulerRuntimeEffects,
@@ -468,25 +477,6 @@ async fn mark_scheduled_stop_pending_with_effects(
     }
 
     should_persist
-}
-
-async fn start_work_from_scheduler_when_idle(
-    app: AppHandle,
-    timer_status_at_tick_start: TimerStatus,
-    timer_settings: TimerSettings,
-    start_boundary: &BoundaryOccurrenceId,
-) -> bool {
-    let state_handle = app.state::<state::AppState>();
-    let mut effects = AppHandleSchedulerRuntimeEffects { app: &app };
-
-    start_work_from_scheduler_when_idle_with_effects(
-        &state_handle,
-        timer_status_at_tick_start,
-        timer_settings,
-        start_boundary,
-        &mut effects,
-    )
-    .await
 }
 
 async fn start_work_from_scheduler_when_idle_with_effects(
@@ -547,10 +537,10 @@ mod tests {
     use crate::managers::clock::Clock;
     use crate::managers::persistence::PersistenceManager;
     use crate::types::{
-        PostBreakTransitionPolicy, ScheduledStopState, SessionType, TimerStartSource,
-        TimerTickPayload,
+        DayAutoRunSlot, HhMm, PostBreakTransitionPolicy, ScheduledStopState, SessionType,
+        TimerStartSource, TimerTickPayload, WeeklyAutoRunConfig,
     };
-    use chrono::{TimeZone, Utc};
+    use chrono::{LocalResult, TimeZone, Utc};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -855,6 +845,224 @@ mod tests {
         assert_eq!(
             state.timer_manager.lock().await.status(),
             TimerStatus::Working
+        );
+    }
+
+    fn local_datetime(
+        year: i32,
+        month: u32,
+        day: u32,
+        hour: u32,
+        minute: u32,
+        second: u32,
+    ) -> DateTime<Local> {
+        match Local.with_ymd_and_hms(year, month, day, hour, minute, second) {
+            LocalResult::Single(datetime) => datetime,
+            LocalResult::Ambiguous(first, _) => first,
+            LocalResult::None => panic!("test local datetime should exist"),
+        }
+    }
+
+    fn enabled_daytime_slot() -> DayAutoRunSlot {
+        DayAutoRunSlot::try_new(
+            true,
+            HhMm::try_new(9, 0).expect("start time should be valid"),
+            HhMm::try_new(18, 0).expect("end time should be valid"),
+        )
+        .expect("daytime slot should be valid")
+    }
+
+    fn weekly_config_with_monday_daytime() -> WeeklyAutoRunConfig {
+        WeeklyAutoRunConfig::try_new(
+            enabled_daytime_slot(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+        )
+        .expect("weekly config should be valid")
+    }
+
+    fn weekly_config_with_monday_and_tuesday_daytime() -> WeeklyAutoRunConfig {
+        WeeklyAutoRunConfig::try_new(
+            enabled_daytime_slot(),
+            enabled_daytime_slot(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+        )
+        .expect("weekly config should be valid")
+    }
+
+    /// Opens the boot-prompt and auto-start gates so that start boundaries are
+    /// actually evaluated during a tick.
+    fn open_start_boundary_gate(state: &state::AppState) {
+        state
+            .auto_start_boundary_enabled
+            .store(true, Ordering::Release);
+        state
+            .boot_prompt_check_pending
+            .store(false, Ordering::Release);
+        *state
+            .boot_prompt_runtime_state
+            .lock()
+            .expect("boot prompt runtime state mutex should not be poisoned") =
+            BootPromptRuntimeState::NotApplicable;
+    }
+
+    async fn apply_schedule(
+        state: &state::AppState,
+        config: WeeklyAutoRunConfig,
+        post_break_policy: PostBreakTransitionPolicy,
+    ) {
+        let mut timer = state.timer_manager.lock().await;
+        let _ = timer.sync_automation_policies(true, config, post_break_policy);
+    }
+
+    fn runtime_state_at(
+        previous_local: DateTime<Local>,
+        last_seen_config_revision: u64,
+    ) -> SchedulerRuntimeState {
+        SchedulerRuntimeState {
+            processed_boundary_occurrences: HashSet::new(),
+            last_checked_local: previous_local,
+            start_boundaries_blocked_until_idle: false,
+            last_seen_config_revision,
+        }
+    }
+
+    #[tokio::test]
+    async fn arriving_start_boundary_auto_starts_when_gate_is_open() {
+        let state = build_test_state_without_persistence_path().await;
+        open_start_boundary_gate(&state);
+        apply_schedule(
+            &state,
+            weekly_config_with_monday_daytime(),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+
+        let mut runtime_state = runtime_state_at(
+            local_datetime(2025, 1, 6, 8, 59, 50),
+            state.config_revision.load(Ordering::Acquire),
+        );
+        let mut effects = RecordingSchedulerRuntimeEffects::default();
+
+        run_scheduler_tick_with_effects(
+            &state,
+            &mut runtime_state,
+            local_datetime(2025, 1, 6, 9, 0, 10),
+            &mut effects,
+        )
+        .await;
+
+        assert!(
+            !effects.work_started_durations.is_empty(),
+            "an arriving start boundary should auto-start work when the gate is open"
+        );
+    }
+
+    #[tokio::test]
+    async fn policy_only_change_keeps_scheduled_auto_start_firing() {
+        let state = build_test_state_without_persistence_path().await;
+        open_start_boundary_gate(&state);
+        apply_schedule(
+            &state,
+            weekly_config_with_monday_daytime(),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+
+        // A post-break policy change leaves the schedule topology untouched,
+        // so it does not invalidate the scheduler baseline.
+        apply_schedule(
+            &state,
+            weekly_config_with_monday_daytime(),
+            PostBreakTransitionPolicy::StartNextWorkAutomatically,
+        )
+        .await;
+
+        let mut runtime_state = runtime_state_at(
+            local_datetime(2025, 1, 6, 8, 59, 50),
+            state.config_revision.load(Ordering::Acquire),
+        );
+        let mut effects = RecordingSchedulerRuntimeEffects::default();
+
+        run_scheduler_tick_with_effects(
+            &state,
+            &mut runtime_state,
+            local_datetime(2025, 1, 6, 9, 0, 10),
+            &mut effects,
+        )
+        .await;
+
+        assert!(
+            !effects.work_started_durations.is_empty(),
+            "a policy-only change must not suppress an arriving scheduled auto-start"
+        );
+    }
+
+    #[tokio::test]
+    async fn topology_change_suppresses_retroactive_start_then_fires_on_next_boundary() {
+        let state = build_test_state_without_persistence_path().await;
+        open_start_boundary_gate(&state);
+        apply_schedule(
+            &state,
+            weekly_config_with_monday_and_tuesday_daytime(),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+
+        // A schedule (topology) edit bumps the scheduler config revision, so the
+        // runtime state lags one revision behind at the first post-edit tick.
+        let revision_before_edit = state.config_revision.load(Ordering::Acquire);
+        state.config_revision.fetch_add(1, Ordering::AcqRel);
+
+        // At edit time it is already past Monday's 09:00 boundary.
+        let mut runtime_state =
+            runtime_state_at(local_datetime(2025, 1, 6, 9, 59, 50), revision_before_edit);
+        let mut effects = RecordingSchedulerRuntimeEffects::default();
+
+        // First post-edit tick: the invalidation rebaselines the scheduler.
+        run_scheduler_tick_with_effects(
+            &state,
+            &mut runtime_state,
+            local_datetime(2025, 1, 6, 10, 0, 0),
+            &mut effects,
+        )
+        .await;
+
+        // Subsequent tick that does not re-cross any boundary: Monday's already
+        // past 09:00 boundary must not be replayed retroactively.
+        run_scheduler_tick_with_effects(
+            &state,
+            &mut runtime_state,
+            local_datetime(2025, 1, 6, 10, 0, 30),
+            &mut effects,
+        )
+        .await;
+
+        assert!(
+            effects.work_started_durations.is_empty(),
+            "a boundary already in the past at edit time must not fire retroactively"
+        );
+
+        // A legitimate boundary that arrives after the edit is honored.
+        run_scheduler_tick_with_effects(
+            &state,
+            &mut runtime_state,
+            local_datetime(2025, 1, 7, 9, 0, 10),
+            &mut effects,
+        )
+        .await;
+
+        assert!(
+            !effects.work_started_durations.is_empty(),
+            "a boundary arriving after the edit must auto-start under the new schedule"
         );
     }
 }
