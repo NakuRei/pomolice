@@ -888,6 +888,7 @@ mod tests {
     use std::future::Future;
     use std::pin::Pin;
     use std::sync::Arc;
+    use std::time::{Duration, Instant};
 
     #[derive(Debug, Default, PartialEq, Eq)]
     struct InputPenaltyEffectArtifact {
@@ -985,5 +986,27 @@ mod tests {
             skipped_effects.artifact(),
             &InputPenaltyEffectArtifact::default()
         );
+    }
+
+    #[tokio::test]
+    async fn test_skipped_input_penalty_has_no_side_effects() {
+        let app_state = build_test_state_without_persistence_path().await;
+        replace_timer_state(
+            &app_state,
+            TimerState {
+                status: TimerStatus::OnBreak,
+                session_type: SessionType::ShortBreak,
+                remaining_seconds: 1,
+                last_penalty_time: Some(Instant::now() + Duration::from_secs(60)),
+                break_interaction_count: 1,
+                ..TimerState::default()
+            },
+        )
+        .await;
+
+        let mut effects = RecordingInputPenaltyRuntimeEffects::default();
+        apply_input_penalty_with_effects(&app_state, &mut effects).await;
+
+        assert_eq!(effects.artifact(), &InputPenaltyEffectArtifact::default());
     }
 }

@@ -14,6 +14,8 @@ use crate::types::{
     WeeklyAutoRunConfig, WorkDurationSecs,
 };
 
+const INPUT_PENALTY_DEBOUNCE_DURATION: Duration = Duration::from_millis(100);
+
 /// Manager for timer state and lifecycle
 ///
 /// This struct holds only pure timer state and task lifecycle handles.
@@ -264,6 +266,10 @@ impl TimerStateManager {
     /// Returns the tick payload for the caller to emit as `"timer_tick"`,
     /// or `None` if the penalty was skipped (not on break, or debounced).
     pub(crate) fn apply_input_penalty(&mut self) -> Option<TimerTickPayload> {
+        self.apply_input_penalty_at(Instant::now())
+    }
+
+    fn apply_input_penalty_at(&mut self, now: Instant) -> Option<TimerTickPayload> {
         // Only apply penalty if on break
         if self.state.status != TimerStatus::OnBreak {
             return None;
@@ -271,14 +277,15 @@ impl TimerStateManager {
 
         // Debounce: 100ms between penalties
         if let Some(last) = self.state.last_penalty_time {
-            if last.elapsed() < Duration::from_millis(100) {
+            let elapsed_since_last_penalty = now.checked_duration_since(last)?;
+            if elapsed_since_last_penalty < INPUT_PENALTY_DEBOUNCE_DURATION {
                 return None;
             }
         }
 
         // Increment interaction count
         self.state.break_interaction_count += 1;
-        self.state.last_penalty_time = Some(Instant::now());
+        self.state.last_penalty_time = Some(now);
 
         // Reset break timer to full duration
         self.state.remaining_seconds = self.state.get_break_duration();
@@ -1257,6 +1264,78 @@ mod tests {
         // Timer reset to full short break duration
         assert_eq!(mgr.state.remaining_seconds, 300);
         assert_eq!(mgr.state.break_interaction_count, 1);
+    }
+
+    #[test]
+    fn test_apply_input_penalty_ignores_repeated_input_before_debounce_boundary() {
+        let mut mgr = make_manager();
+        let settings = make_settings(1500, 300, 900, 4);
+        mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+            .unwrap();
+        mgr.transition_to_break();
+
+        let base_time = Instant::now();
+        let first_result = mgr.apply_input_penalty_at(base_time);
+        assert!(first_result.is_some());
+        assert_eq!(mgr.state.break_interaction_count, 1);
+        assert_eq!(mgr.state.remaining_seconds, 300);
+
+        mgr.state.remaining_seconds = 42;
+
+        let Some(just_before_debounce_boundary) =
+            INPUT_PENALTY_DEBOUNCE_DURATION.checked_sub(Duration::from_millis(1))
+        else {
+            panic!("input penalty debounce duration should be at least 1ms");
+        };
+        let debounced_result =
+            mgr.apply_input_penalty_at(base_time + just_before_debounce_boundary);
+
+        assert!(debounced_result.is_none());
+        assert_eq!(mgr.state.break_interaction_count, 1);
+        assert_eq!(mgr.state.remaining_seconds, 42);
+    }
+
+    #[test]
+    fn test_apply_input_penalty_accepts_repeated_input_at_debounce_boundary() {
+        let mut mgr = make_manager();
+        let settings = make_settings(1500, 300, 900, 4);
+        mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+            .unwrap();
+        mgr.transition_to_break();
+
+        let base_time = Instant::now();
+        let first_result = mgr.apply_input_penalty_at(base_time);
+        assert!(first_result.is_some());
+
+        mgr.state.remaining_seconds = 42;
+
+        let boundary_result =
+            mgr.apply_input_penalty_at(base_time + INPUT_PENALTY_DEBOUNCE_DURATION);
+
+        assert!(boundary_result.is_some());
+        assert_eq!(mgr.state.break_interaction_count, 2);
+        assert_eq!(mgr.state.remaining_seconds, 300);
+    }
+
+    #[test]
+    fn test_apply_input_penalty_ignores_timestamp_before_last_penalty() {
+        let mut mgr = make_manager();
+        let settings = make_settings(1500, 300, 900, 4);
+        mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+            .unwrap();
+        mgr.transition_to_break();
+
+        let earlier_time = Instant::now();
+        let first_result = mgr.apply_input_penalty_at(earlier_time + Duration::from_millis(1));
+        assert!(first_result.is_some());
+
+        mgr.state.remaining_seconds = 42;
+
+        let earlier_result = mgr.apply_input_penalty_at(earlier_time);
+
+        assert!(earlier_result.is_none());
+        assert_eq!(mgr.state.break_interaction_count, 1);
+        assert_eq!(mgr.state.remaining_seconds, 42);
     }
 
     #[test]
