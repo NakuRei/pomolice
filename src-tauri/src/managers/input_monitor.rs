@@ -302,6 +302,7 @@ fn build_event_callback(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rdev::Button;
     use std::collections::VecDeque;
     use std::sync::atomic::AtomicUsize;
     use std::sync::{Arc as StdArc, Mutex as StdMutex};
@@ -491,18 +492,18 @@ mod tests {
     }
 
     fn mouse_move_event() -> Event {
-        Event {
-            time: std::time::SystemTime::now(),
-            name: None,
-            event_type: EventType::MouseMove { x: 1.0, y: 1.0 },
-        }
+        input_event(EventType::MouseMove { x: 1.0, y: 1.0 })
     }
 
     fn key_press_event(key: Key) -> Event {
+        input_event(EventType::KeyPress(key))
+    }
+
+    fn input_event(event_type: EventType) -> Event {
         Event {
             time: std::time::SystemTime::now(),
             name: None,
-            event_type: EventType::KeyPress(key),
+            event_type,
         }
     }
 
@@ -687,6 +688,45 @@ mod tests {
         mgr.stop();
         runtime.release_next_listener();
         runtime.wait_for_completed_listen_call_count(1, "the active input listener to stop");
+    }
+
+    #[test]
+    fn test_active_monitor_reports_all_penalized_input_event_types() {
+        for (event_name, event_type) in [
+            ("key press", EventType::KeyPress(Key::KeyA)),
+            ("key release", EventType::KeyRelease(Key::KeyA)),
+            ("button press", EventType::ButtonPress(Button::Left)),
+            ("button release", EventType::ButtonRelease(Button::Left)),
+            ("mouse move", EventType::MouseMove { x: 1.0, y: 1.0 }),
+            (
+                "wheel",
+                EventType::Wheel {
+                    delta_x: 0,
+                    delta_y: 1,
+                },
+            ),
+        ] {
+            let runtime = RecordingInputMonitorRuntime::with_steps([ListenStep::BlockThenOk]);
+            let input_event_count = StdArc::new(AtomicUsize::new(0));
+            let input_event_count_for_callback = StdArc::clone(&input_event_count);
+            let mut mgr = make_manager_with_runtime(runtime.clone(), move || {
+                input_event_count_for_callback.fetch_add(1, Ordering::SeqCst);
+            });
+
+            mgr.start();
+            runtime.wait_for_listen_call_count(1, "the input listener callback to become active");
+            runtime.dispatch_event(input_event(event_type));
+            let observed_input_event_count = input_event_count.load(Ordering::SeqCst);
+
+            mgr.stop();
+            runtime.release_next_listener();
+            runtime.wait_for_completed_listen_call_count(1, "the stopped input listener to return");
+
+            assert_eq!(
+                observed_input_event_count, 1,
+                "{event_name} must report input detection once while monitoring is active"
+            );
+        }
     }
 
     #[test]
