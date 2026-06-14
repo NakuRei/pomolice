@@ -595,7 +595,7 @@ mod tests {
     }
 
     #[test]
-    fn test_escape_combo_callback_disables_monitoring_after_single_escape() {
+    fn test_escape_combo_penalizes_setup_keys_but_not_completion_key() {
         let enabled = Arc::new(AtomicBool::new(true));
         let modifier_state = Arc::new(parking_lot::Mutex::new(ModifierState::default()));
         let escape_combo_count = Arc::new(AtomicUsize::new(0));
@@ -614,21 +614,34 @@ mod tests {
             }),
         );
 
-        for key in [Key::ControlLeft, Key::Alt, Key::ShiftLeft, Key::KeyE] {
-            callback(key_press_event(key));
-        }
+        callback(key_press_event(Key::ControlLeft));
+        assert_eq!(input_event_count.load(Ordering::SeqCst), 1);
+
+        callback(key_press_event(Key::Alt));
+        assert_eq!(input_event_count.load(Ordering::SeqCst), 2);
+
+        callback(key_press_event(Key::ShiftLeft));
+        assert_eq!(input_event_count.load(Ordering::SeqCst), 3);
+        assert_eq!(escape_combo_count.load(Ordering::SeqCst), 0);
+
+        callback(key_press_event(Key::KeyE));
 
         assert_eq!(escape_combo_count.load(Ordering::SeqCst), 1);
         assert!(!enabled.load(Ordering::SeqCst));
+        assert_eq!(
+            input_event_count.load(Ordering::SeqCst),
+            3,
+            "escape combo completion key must not report input detection"
+        );
 
-        let input_count_after_escape = input_event_count.load(Ordering::SeqCst);
         callback(mouse_move_event());
         callback(key_press_event(Key::KeyA));
 
         assert_eq!(escape_combo_count.load(Ordering::SeqCst), 1);
         assert_eq!(
             input_event_count.load(Ordering::SeqCst),
-            input_count_after_escape
+            3,
+            "input after escape combo must be ignored"
         );
     }
 
