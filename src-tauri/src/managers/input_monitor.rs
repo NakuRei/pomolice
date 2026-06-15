@@ -141,6 +141,7 @@ impl InputMonitorManager {
 
         // If the supervisor thread is already running, just re-enable callbacks.
         if self.listener_alive.load(Ordering::SeqCst) {
+            self.shutdown_requested.store(false, Ordering::SeqCst);
             self.enabled.store(true, Ordering::SeqCst);
             log_info_event(BackendLogEvent::InputMonitoringAlreadyRunning, &[]);
             return;
@@ -163,6 +164,10 @@ impl InputMonitorManager {
             let mut backoff = Duration::from_secs(1);
 
             loop {
+                if shutdown_requested.load(Ordering::SeqCst) {
+                    break;
+                }
+
                 let callback: InputEventCallback = Box::new(build_event_callback(
                     Arc::clone(&enabled),
                     Arc::clone(&modifier_state),
@@ -191,6 +196,13 @@ impl InputMonitorManager {
                             None,
                         );
                         runtime.sleep(backoff);
+                        if shutdown_requested.load(Ordering::SeqCst) {
+                            log_info_event(
+                                BackendLogEvent::InputMonitoringShutdownRequestedAfterError,
+                                &[],
+                            );
+                            break;
+                        }
                         backoff = (backoff * 2).min(INPUT_MONITOR_MAX_BACKOFF);
                     }
                 }
@@ -315,7 +327,19 @@ mod tests {
         runtime: RecordingInputMonitorRuntime,
         on_input_detected: impl Fn() + Send + Sync + 'static,
     ) -> InputMonitorManager {
-        InputMonitorManager::new_with_runtime(|| {}, on_input_detected, StdArc::new(runtime))
+        make_manager_with_callbacks(runtime, || {}, on_input_detected)
+    }
+
+    fn make_manager_with_callbacks(
+        runtime: RecordingInputMonitorRuntime,
+        on_escape_combo: impl Fn() + Send + Sync + 'static,
+        on_input_detected: impl Fn() + Send + Sync + 'static,
+    ) -> InputMonitorManager {
+        InputMonitorManager::new_with_runtime(
+            on_escape_combo,
+            on_input_detected,
+            StdArc::new(runtime),
+        )
     }
 
     enum ListenStep {
@@ -336,7 +360,9 @@ mod tests {
         completed_listen_call_count: usize,
         blocked_listen_call_count: usize,
         released_blocking_listen_call_count: usize,
-        sleep_call_count: usize,
+        retry_wait_count: usize,
+        completed_retry_wait_count: usize,
+        released_retry_wait_count: usize,
         active_callback: Option<InputEventCallback>,
     }
 
@@ -357,11 +383,38 @@ mod tests {
                 .listen_call_count
         }
 
-        fn sleep_call_count(&self) -> usize {
+        fn retry_wait_count(&self) -> usize {
             self.inner
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .sleep_call_count
+                .retry_wait_count
+        }
+
+        fn wait_for_retry_wait_count(&self, expected_count: usize, context: &str) {
+            for _ in 0..100 {
+                if self.retry_wait_count() >= expected_count {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+
+            panic!("timed out waiting for {context}");
+        }
+
+        fn wait_for_completed_retry_wait_count(&self, expected_count: usize, context: &str) {
+            for _ in 0..100 {
+                let completed_count = self
+                    .inner
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .completed_retry_wait_count;
+                if completed_count >= expected_count {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+
+            panic!("timed out waiting for {context}");
         }
 
         fn wait_for_listen_call_count(&self, expected_count: usize, context: &str) {
@@ -399,6 +452,14 @@ mod tests {
             runtime_state.released_blocking_listen_call_count += 1;
         }
 
+        fn release_next_retry_wait(&self) {
+            let mut runtime_state = self
+                .inner
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            runtime_state.released_retry_wait_count += 1;
+        }
+
         fn dispatch_event(&self, event: Event) {
             let mut runtime_state = self
                 .inner
@@ -418,6 +479,21 @@ mod tests {
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .released_blocking_listen_call_count
                     >= block_index;
+                if is_released {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+
+        fn wait_until_retry_wait_released(&self, wait_index: usize) {
+            loop {
+                let is_released = self
+                    .inner
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .released_retry_wait_count
+                    >= wait_index;
                 if is_released {
                     return;
                 }
@@ -483,11 +559,22 @@ mod tests {
         }
 
         fn sleep(&self, _duration: Duration) {
+            let wait_index = {
+                let mut runtime_state = self
+                    .inner
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                runtime_state.retry_wait_count += 1;
+                runtime_state.retry_wait_count
+            };
+
+            self.wait_until_retry_wait_released(wait_index);
+
             let mut runtime_state = self
                 .inner
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            runtime_state.sleep_call_count += 1;
+            runtime_state.completed_retry_wait_count += 1;
         }
     }
 
@@ -797,15 +884,173 @@ mod tests {
         std::thread::sleep(Duration::from_millis(50));
 
         assert_eq!(
-            runtime.sleep_call_count(),
-            0,
-            "stopped listener errors must not enter retry backoff"
-        );
-        assert_eq!(
             runtime.listen_call_count(),
             1,
             "stopped listener errors must not retry listening"
         );
+    }
+
+    #[test]
+    fn test_listener_error_waits_before_restart() {
+        let runtime = RecordingInputMonitorRuntime::with_steps([
+            ListenStep::BlockThenErr("listen failed"),
+            ListenStep::BlockThenOk,
+        ]);
+        let mut mgr = make_manager_with_runtime(runtime.clone(), || {});
+
+        mgr.start();
+        runtime.wait_for_listen_call_count(1, "the first input listener start");
+        runtime.release_next_listener();
+        runtime.wait_for_completed_listen_call_count(1, "the failed input listener to return");
+        runtime.wait_for_retry_wait_count(1, "retry wait after listener error");
+        std::thread::sleep(Duration::from_millis(50));
+
+        assert_eq!(
+            runtime.listen_call_count(),
+            1,
+            "listener errors must wait before retrying"
+        );
+
+        runtime.release_next_retry_wait();
+        runtime.wait_for_listen_call_count(2, "the restarted input listener");
+
+        mgr.stop();
+        runtime.release_next_listener();
+        runtime.wait_for_completed_listen_call_count(2, "the restarted input listener to stop");
+    }
+
+    #[test]
+    fn test_restarted_listener_reports_input_events() {
+        let runtime = RecordingInputMonitorRuntime::with_steps([
+            ListenStep::BlockThenErr("listen failed"),
+            ListenStep::BlockThenOk,
+        ]);
+        let input_event_count = StdArc::new(AtomicUsize::new(0));
+        let input_event_count_for_callback = StdArc::clone(&input_event_count);
+        let mut mgr = make_manager_with_runtime(runtime.clone(), move || {
+            input_event_count_for_callback.fetch_add(1, Ordering::SeqCst);
+        });
+
+        mgr.start();
+        runtime.wait_for_listen_call_count(1, "the first input listener start");
+        runtime.release_next_listener();
+        runtime.wait_for_completed_listen_call_count(1, "the failed input listener to return");
+        runtime.wait_for_retry_wait_count(1, "retry wait after listener error");
+        runtime.release_next_retry_wait();
+        runtime.wait_for_listen_call_count(2, "the restarted input listener");
+
+        runtime.dispatch_event(mouse_move_event());
+
+        assert_eq!(
+            input_event_count.load(Ordering::SeqCst),
+            1,
+            "restarted listener must report input detection"
+        );
+
+        mgr.stop();
+        runtime.release_next_listener();
+        runtime.wait_for_completed_listen_call_count(2, "the restarted input listener to stop");
+    }
+
+    #[test]
+    fn test_restarted_listener_preserves_escape_combo() {
+        let runtime = RecordingInputMonitorRuntime::with_steps([
+            ListenStep::BlockThenErr("listen failed"),
+            ListenStep::BlockThenOk,
+        ]);
+        let escape_combo_count = StdArc::new(AtomicUsize::new(0));
+        let input_event_count = StdArc::new(AtomicUsize::new(0));
+        let escape_combo_count_for_callback = StdArc::clone(&escape_combo_count);
+        let input_event_count_for_callback = StdArc::clone(&input_event_count);
+        let mut mgr = make_manager_with_callbacks(
+            runtime.clone(),
+            move || {
+                escape_combo_count_for_callback.fetch_add(1, Ordering::SeqCst);
+            },
+            move || {
+                input_event_count_for_callback.fetch_add(1, Ordering::SeqCst);
+            },
+        );
+
+        mgr.start();
+        runtime.wait_for_listen_call_count(1, "the first input listener start");
+        runtime.release_next_listener();
+        runtime.wait_for_completed_listen_call_count(1, "the failed input listener to return");
+        runtime.wait_for_retry_wait_count(1, "retry wait after listener error");
+        runtime.release_next_retry_wait();
+        runtime.wait_for_listen_call_count(2, "the restarted input listener");
+
+        for key in [Key::ControlLeft, Key::Alt, Key::ShiftLeft, Key::KeyE] {
+            runtime.dispatch_event(key_press_event(key));
+        }
+
+        assert_eq!(escape_combo_count.load(Ordering::SeqCst), 1);
+        assert!(!mgr.is_enabled_for_tests());
+        assert_eq!(
+            input_event_count.load(Ordering::SeqCst),
+            3,
+            "escape combo completion key must not report input detection after restart"
+        );
+
+        runtime.dispatch_event(mouse_move_event());
+        assert_eq!(
+            input_event_count.load(Ordering::SeqCst),
+            3,
+            "input after restarted escape combo must be ignored"
+        );
+
+        runtime.release_next_listener();
+        runtime.wait_for_completed_listen_call_count(2, "the restarted input listener to stop");
+    }
+
+    #[test]
+    fn test_stop_during_retry_wait_prevents_restart() {
+        let runtime = RecordingInputMonitorRuntime::with_steps([
+            ListenStep::BlockThenErr("listen failed"),
+            ListenStep::BlockThenOk,
+        ]);
+        let mut mgr = make_manager_with_runtime(runtime.clone(), || {});
+
+        mgr.start();
+        runtime.wait_for_listen_call_count(1, "the first input listener start");
+        runtime.release_next_listener();
+        runtime.wait_for_completed_listen_call_count(1, "the failed input listener to return");
+        runtime.wait_for_retry_wait_count(1, "retry wait after listener error");
+
+        mgr.stop();
+        runtime.release_next_retry_wait();
+        runtime.wait_for_completed_retry_wait_count(1, "retry wait to finish");
+        std::thread::sleep(Duration::from_millis(50));
+
+        assert_eq!(
+            runtime.listen_call_count(),
+            1,
+            "stopping during retry wait must prevent restarting the listener"
+        );
+    }
+
+    #[test]
+    fn test_start_during_retry_wait_reenables_restart() {
+        let runtime = RecordingInputMonitorRuntime::with_steps([
+            ListenStep::BlockThenErr("listen failed"),
+            ListenStep::BlockThenOk,
+        ]);
+        let mut mgr = make_manager_with_runtime(runtime.clone(), || {});
+
+        mgr.start();
+        runtime.wait_for_listen_call_count(1, "the first input listener start");
+        runtime.release_next_listener();
+        runtime.wait_for_completed_listen_call_count(1, "the failed input listener to return");
+        runtime.wait_for_retry_wait_count(1, "retry wait after listener error");
+
+        mgr.stop();
+        mgr.start();
+        runtime.release_next_retry_wait();
+        runtime.wait_for_listen_call_count(2, "the restarted input listener");
+
+        mgr.stop();
+        runtime.release_next_listener();
+        runtime.wait_for_completed_listen_call_count(2, "the restarted input listener to stop");
     }
 
     #[test]
