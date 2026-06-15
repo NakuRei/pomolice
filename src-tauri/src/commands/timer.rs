@@ -550,14 +550,11 @@ async fn prepare_manual_start_sequence(
     settings: TimerSettings,
     manual_start_source: TimerStartSource,
 ) -> Result<StartRuntimeSequence> {
-    // Manual start intentionally stays on the replacement flow: cancel first, then transition.
-    // Boot-prompt resolution uses the opposite order because it must degrade an already-started
-    // replacement session to NotApplicable without tearing that session back down.
     let start_sequence = {
         let mut timer = state.timer_manager.lock().await;
-        let old_task = timer.cancel_and_take_task();
         let (tick_payload, work_duration) =
             timer.start_work_with_source(settings, manual_start_source)?;
+        let old_task = timer.cancel_and_take_task();
         StartRuntimeSequence {
             old_task,
             tick_payload,
@@ -1075,6 +1072,22 @@ mod tests {
         stale_tick_count
     }
 
+    async fn install_timer_countdown_task(state: &Arc<AppState>) {
+        let state_for_task = Arc::downgrade(state);
+
+        state.timer_manager.lock().await.spawn_timer_task(move || {
+            let state_for_tick = std::sync::Weak::clone(&state_for_task);
+            async move {
+                if let Some(state) = state_for_tick.upgrade() {
+                    let mut timer = state.timer_manager.lock().await;
+                    if timer.status() != TimerStatus::Idle {
+                        let _ = timer.tick();
+                    }
+                }
+            }
+        });
+    }
+
     fn assert_tick_emit_and_tray_match(runtime_effect_shell: &RecordingCommandRuntimeEffectShell) {
         assert_eq!(runtime_effect_shell.emitted_tick_snapshots.len(), 1);
         assert_eq!(runtime_effect_shell.tray_tick_snapshots.len(), 1);
@@ -1491,6 +1504,61 @@ mod tests {
         .await;
 
         assert_command_result_public_error(result, "rate_limited", &["please wait", "ms"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_start_work_rejected_during_break_keeps_break_countdown_running() {
+        let state = Arc::new(build_test_state_without_persistence_path().await);
+        prepare_fullscreen_break_state(&state).await;
+        install_timer_countdown_task(&state).await;
+
+        tokio::task::yield_now().await;
+        tokio::time::advance(StdDuration::from_secs(1)).await;
+        tokio::task::yield_now().await;
+
+        let remaining_after_first_tick = {
+            let timer = state.timer_manager.lock().await;
+            let full_state = timer.get_full_state();
+            assert_eq!(full_state.status, TimerStatus::OnBreak);
+            assert!(full_state.is_fullscreen_break);
+            assert!(full_state.remaining_seconds < 300);
+            full_state.remaining_seconds
+        };
+
+        let mut runtime_effect_shell = RecordingRuntimeEffectShell::default();
+        let result = start_work_for_tests(
+            state.as_ref(),
+            timer_settings(
+                1500,
+                300,
+                900,
+                4,
+                PostBreakTransitionPolicy::RequireManualContinue,
+            ),
+            TimerStartSource::ManualOutsideWindow,
+            &mut runtime_effect_shell,
+        )
+        .await;
+
+        assert_command_result_public_error(result, "invalid_state_transition", &["start work"]);
+
+        let remaining_after_rejection = {
+            let timer = state.timer_manager.lock().await;
+            let full_state = timer.get_full_state();
+            assert_eq!(full_state.status, TimerStatus::OnBreak);
+            assert!(full_state.is_fullscreen_break);
+            assert_eq!(full_state.remaining_seconds, remaining_after_first_tick);
+            full_state.remaining_seconds
+        };
+
+        tokio::time::advance(StdDuration::from_secs(3)).await;
+        tokio::task::yield_now().await;
+
+        let timer = state.timer_manager.lock().await;
+        let full_state = timer.get_full_state();
+        assert_eq!(full_state.status, TimerStatus::OnBreak);
+        assert!(full_state.is_fullscreen_break);
+        assert!(full_state.remaining_seconds < remaining_after_rejection);
     }
 
     #[test]

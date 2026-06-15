@@ -947,6 +947,51 @@ mod tests {
     }
 
     #[test]
+    fn test_start_work_rejects_on_break_for_all_start_sources() {
+        for start_source in [
+            TimerStartSource::ManualOutsideWindow,
+            TimerStartSource::ManualInsideWindow,
+            TimerStartSource::ScheduledAutoStart,
+        ] {
+            let mut mgr = make_manager();
+            let settings = make_settings(1500, 300, 900, 4);
+
+            mgr.start_work_with_source(settings.clone(), TimerStartSource::ManualOutsideWindow)
+                .expect("initial work session should start");
+            mgr.transition_to_break();
+            let before = mgr.get_full_state();
+
+            let err = mgr
+                .start_work_with_source(settings, start_source)
+                .expect_err("work must not start during break");
+
+            assert!(matches!(
+                err,
+                PomoliceError::InvalidStateTransition {
+                    current_state: TimerStatus::OnBreak,
+                    ..
+                }
+            ));
+
+            let after = mgr.get_full_state();
+            assert_eq!(after.status, before.status);
+            assert_eq!(after.remaining_seconds, before.remaining_seconds);
+            assert_eq!(after.session_type, before.session_type);
+            assert_eq!(after.current_cycle, before.current_cycle);
+            assert_eq!(after.completed_pomodoros, before.completed_pomodoros);
+            assert_eq!(
+                after.break_interaction_count,
+                before.break_interaction_count
+            );
+            assert_eq!(after.is_fullscreen_break, before.is_fullscreen_break);
+            assert_eq!(
+                after.post_break_decision_pending,
+                before.post_break_decision_pending
+            );
+        }
+    }
+
+    #[test]
     fn test_tick_decrements_remaining_seconds() {
         let mut mgr = make_manager();
         let settings = make_settings(5, 300, 900, 4);
