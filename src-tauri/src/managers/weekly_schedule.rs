@@ -661,6 +661,49 @@ mod tests {
     }
 
     #[test]
+    fn test_collect_crossed_end_boundaries_returns_boundary_at_standard_end_time() {
+        let mut config = WeeklyAutoRunConfig::default();
+        update_weekday_slot(&mut config, "mon", true, "09:00", "18:00");
+
+        let previous_local = local_datetime(2025, 1, 6, 17, 59, 50);
+        let now_local = local_datetime(2025, 1, 6, 18, 0, 10);
+        let boundary_ids = collect_crossed_end_boundaries(previous_local, now_local, &config);
+
+        assert_eq!(
+            boundary_ids,
+            vec![schedule_boundary_id(
+                "mon",
+                "end",
+                local_datetime(2025, 1, 6, 18, 0, 0)
+            )]
+        );
+    }
+
+    #[test]
+    fn test_collect_crossed_end_boundaries_ignores_disabled_slot() {
+        let mut config = WeeklyAutoRunConfig::default();
+        update_weekday_slot(&mut config, "mon", false, "09:00", "18:00");
+
+        let previous_local = local_datetime(2025, 1, 6, 17, 59, 50);
+        let now_local = local_datetime(2025, 1, 6, 18, 0, 10);
+        let boundary_ids = collect_crossed_end_boundaries(previous_local, now_local, &config);
+
+        assert!(boundary_ids.is_empty());
+    }
+
+    #[test]
+    fn test_collect_crossed_end_boundaries_returns_empty_when_time_does_not_advance() {
+        let mut config = WeeklyAutoRunConfig::default();
+        update_weekday_slot(&mut config, "mon", true, "09:00", "18:00");
+
+        let previous_local = local_datetime(2025, 1, 6, 18, 0, 10);
+        let now_local = local_datetime(2025, 1, 6, 18, 0, 0);
+        let boundary_ids = collect_crossed_end_boundaries(previous_local, now_local, &config);
+
+        assert!(boundary_ids.is_empty());
+    }
+
+    #[test]
     fn test_collect_crossed_start_boundaries_returns_time_sorted_boundaries() {
         let mut config = WeeklyAutoRunConfig::default();
         update_weekday_slot(&mut config, "mon", true, "09:00", "18:00");

@@ -537,8 +537,9 @@ mod tests {
     use crate::managers::clock::Clock;
     use crate::managers::persistence::PersistenceManager;
     use crate::types::{
-        DayAutoRunSlot, HhMm, PostBreakTransitionPolicy, ScheduledStopState, SessionType,
-        TimerStartSource, TimerTickPayload, WeeklyAutoRunConfig,
+        DayAutoRunSlot, HhMm, PostBreakTransitionPolicy, ScheduledStopState,
+        SessionTransitionReason, SessionType, TimerStartSource, TimerTickPayload,
+        WeeklyAutoRunConfig,
     };
     use chrono::{LocalResult, TimeZone, Utc};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -919,8 +920,17 @@ mod tests {
         config: WeeklyAutoRunConfig,
         post_break_policy: PostBreakTransitionPolicy,
     ) {
+        apply_schedule_with_feature_enabled(state, true, config, post_break_policy).await;
+    }
+
+    async fn apply_schedule_with_feature_enabled(
+        state: &state::AppState,
+        auto_run_feature_enabled: bool,
+        config: WeeklyAutoRunConfig,
+        post_break_policy: PostBreakTransitionPolicy,
+    ) {
         let mut timer = state.timer_manager.lock().await;
-        let _ = timer.sync_automation_policies(true, config, post_break_policy);
+        let _ = timer.sync_automation_policies(auto_run_feature_enabled, config, post_break_policy);
     }
 
     fn runtime_state_at(
@@ -933,6 +943,163 @@ mod tests {
             start_boundaries_blocked_until_idle: false,
             last_seen_config_revision,
         }
+    }
+
+    async fn start_work_with_schedule_source(
+        state: &state::AppState,
+        auto_run_feature_enabled: bool,
+        timer_start_source: TimerStartSource,
+    ) {
+        apply_schedule_with_feature_enabled(
+            state,
+            auto_run_feature_enabled,
+            weekly_config_with_monday_daytime(),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+
+        let mut timer = state.timer_manager.lock().await;
+        timer
+            .start_work_with_source(TimerSettings::default(), timer_start_source)
+            .expect("work session should start");
+    }
+
+    fn close_start_boundary_gate(state: &state::AppState) {
+        state
+            .auto_start_boundary_enabled
+            .store(false, Ordering::Release);
+        state
+            .boot_prompt_check_pending
+            .store(true, Ordering::Release);
+        *state
+            .boot_prompt_runtime_state
+            .lock()
+            .expect("boot prompt runtime state mutex should not be poisoned") =
+            BootPromptRuntimeState::AwaitingDecision;
+    }
+
+    fn assert_no_work_start_effects(effects: &RecordingSchedulerRuntimeEffects) {
+        assert!(effects.timer_tick_payloads.is_empty());
+        assert!(effects.tray_update_payloads.is_empty());
+        assert!(effects.work_started_durations.is_empty());
+        assert_eq!(effects.timer_task_spawn_count, 0);
+    }
+
+    async fn complete_work_session(state: &state::AppState) -> SessionTransitionReason {
+        let mut timer = state.timer_manager.lock().await;
+        timer.complete_work_session_transition().transition_reason
+    }
+
+    #[tokio::test]
+    async fn end_boundary_emits_stop_pending_for_auto_run_session() {
+        let state = build_test_state_without_persistence_path().await;
+        close_start_boundary_gate(&state);
+        start_work_with_schedule_source(&state, true, TimerStartSource::ManualInsideWindow).await;
+
+        let mut runtime_state = runtime_state_at(
+            local_datetime(2025, 1, 6, 17, 59, 50),
+            state.config_revision.load(Ordering::Acquire),
+        );
+        let mut effects = RecordingSchedulerRuntimeEffects::default();
+
+        run_scheduler_tick_with_effects(
+            &state,
+            &mut runtime_state,
+            local_datetime(2025, 1, 6, 18, 0, 10),
+            &mut effects,
+        )
+        .await;
+
+        assert_eq!(effects.auto_run_stop_pending_count, 1);
+        assert_no_work_start_effects(&effects);
+        assert_eq!(
+            complete_work_session(&state).await,
+            SessionTransitionReason::ScheduledStopExecuted
+        );
+    }
+
+    #[tokio::test]
+    async fn end_boundary_does_not_reemit_stop_pending_for_same_boundary() {
+        let state = build_test_state_without_persistence_path().await;
+        start_work_with_schedule_source(&state, true, TimerStartSource::ManualInsideWindow).await;
+
+        let mut runtime_state = runtime_state_at(
+            local_datetime(2025, 1, 6, 17, 59, 50),
+            state.config_revision.load(Ordering::Acquire),
+        );
+        let mut effects = RecordingSchedulerRuntimeEffects::default();
+
+        run_scheduler_tick_with_effects(
+            &state,
+            &mut runtime_state,
+            local_datetime(2025, 1, 6, 18, 0, 10),
+            &mut effects,
+        )
+        .await;
+        run_scheduler_tick_with_effects(
+            &state,
+            &mut runtime_state,
+            local_datetime(2025, 1, 6, 18, 0, 30),
+            &mut effects,
+        )
+        .await;
+
+        assert_eq!(effects.auto_run_stop_pending_count, 1);
+        assert_no_work_start_effects(&effects);
+    }
+
+    #[tokio::test]
+    async fn end_boundary_does_not_emit_stop_pending_when_auto_run_is_disabled() {
+        let state = build_test_state_without_persistence_path().await;
+        start_work_with_schedule_source(&state, false, TimerStartSource::ManualInsideWindow).await;
+
+        let mut runtime_state = runtime_state_at(
+            local_datetime(2025, 1, 6, 17, 59, 50),
+            state.config_revision.load(Ordering::Acquire),
+        );
+        let mut effects = RecordingSchedulerRuntimeEffects::default();
+
+        run_scheduler_tick_with_effects(
+            &state,
+            &mut runtime_state,
+            local_datetime(2025, 1, 6, 18, 0, 10),
+            &mut effects,
+        )
+        .await;
+
+        assert_eq!(effects.auto_run_stop_pending_count, 0);
+        assert_no_work_start_effects(&effects);
+        assert_eq!(
+            complete_work_session(&state).await,
+            SessionTransitionReason::WorkToBreak
+        );
+    }
+
+    #[tokio::test]
+    async fn end_boundary_does_not_emit_stop_pending_for_outside_window_session() {
+        let state = build_test_state_without_persistence_path().await;
+        start_work_with_schedule_source(&state, true, TimerStartSource::ManualOutsideWindow).await;
+
+        let mut runtime_state = runtime_state_at(
+            local_datetime(2025, 1, 6, 17, 59, 50),
+            state.config_revision.load(Ordering::Acquire),
+        );
+        let mut effects = RecordingSchedulerRuntimeEffects::default();
+
+        run_scheduler_tick_with_effects(
+            &state,
+            &mut runtime_state,
+            local_datetime(2025, 1, 6, 18, 0, 10),
+            &mut effects,
+        )
+        .await;
+
+        assert_eq!(effects.auto_run_stop_pending_count, 0);
+        assert_no_work_start_effects(&effects);
+        assert_eq!(
+            complete_work_session(&state).await,
+            SessionTransitionReason::WorkToBreak
+        );
     }
 
     #[tokio::test]
