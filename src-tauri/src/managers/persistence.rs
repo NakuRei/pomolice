@@ -783,6 +783,27 @@ mod tests {
         }
     }
 
+    fn write_timer_state_json(temp_dir: &Path, persisted_json: &serde_json::Value) {
+        fs::write(
+            temp_dir.join("timer_state.json"),
+            serde_json::to_string_pretty(persisted_json).expect("json should serialize"),
+        )
+        .expect("json should be writable");
+    }
+
+    fn restore_timer_state(persistence: &PersistenceManager) -> (TimerState, DateTime<Utc>) {
+        match persistence.load_state_sync() {
+            PersistenceLoadOutcome::Restored {
+                timer_state,
+                saved_at_utc,
+            } => (timer_state, saved_at_utc),
+            PersistenceLoadOutcome::NoState => panic!("expected restored state, got no state"),
+            PersistenceLoadOutcome::UnsupportedSchemaFallback => {
+                panic!("expected restored state, got unsupported schema fallback")
+            }
+        }
+    }
+
     #[test]
     fn test_save_state_sync_writes_v4_persisted_state_contract() {
         let temp_dir = create_temp_dir("save-v4-contract");
@@ -898,6 +919,77 @@ mod tests {
                 panic!("expected restored state, got unsupported schema fallback")
             }
         }
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_load_state_sync_restores_saved_break_session_as_idle_work_session() {
+        let temp_dir = create_temp_dir("load-saved-break-as-idle-work");
+        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
+        let restored_at_utc = create_utc_datetime(2025, 2, 1, 9, 3, 0);
+        let clock = fixed_clock(restored_at_utc);
+        let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
+        let mut persisted_json = contract_persisted_state_json(saved_at_utc);
+        persisted_json["status"] = json!("on_break");
+        persisted_json["remaining_seconds"] = json!(123);
+        persisted_json["session_type"] = json!("short_break");
+        persisted_json["current_cycle"] = json!(4);
+        persisted_json["completed_pomodoros"] = json!(3);
+
+        write_timer_state_json(&temp_dir, &persisted_json);
+
+        let (timer_state, restored_saved_at_utc) = restore_timer_state(&persistence);
+
+        assert_eq!(restored_saved_at_utc, saved_at_utc);
+        assert_eq!(timer_state.status, TimerStatus::Idle);
+        assert_eq!(timer_state.session_type, SessionType::Work);
+        assert_eq!(
+            timer_state.remaining_seconds,
+            timer_state.settings.work_duration_secs.get()
+        );
+        assert_eq!(timer_state.current_cycle, 4);
+        assert_eq!(timer_state.completed_pomodoros, 2);
+        assert_timer_settings_match_contract(&timer_state.settings);
+        assert_eq!(
+            timer_state.weekly_auto_run_config,
+            contract_weekly_auto_run_config()
+        );
+        assert!(timer_state.auto_run_feature_enabled);
+        assert!(!timer_state.post_break_decision_pending);
+        assert_eq!(timer_state.timer_start_source, None);
+        assert_eq!(timer_state.scheduled_stop_state, ScheduledStopState::None);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_load_state_sync_restores_saved_break_session_with_zero_completed_pomodoros() {
+        let temp_dir = create_temp_dir("load-saved-break-zero-completed");
+        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
+        let clock = fixed_clock(saved_at_utc);
+        let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
+        let mut persisted_json =
+            base_persisted_state_json(PERSISTED_STATE_SCHEMA_VERSION_V4, saved_at_utc);
+        persisted_json["status"] = json!("on_break");
+        persisted_json["remaining_seconds"] = json!(240);
+        persisted_json["session_type"] = json!("long_break");
+        persisted_json["completed_pomodoros"] = json!(0);
+
+        write_timer_state_json(&temp_dir, &persisted_json);
+
+        let (timer_state, restored_saved_at_utc) = restore_timer_state(&persistence);
+
+        assert_eq!(restored_saved_at_utc, saved_at_utc);
+        assert_eq!(timer_state.status, TimerStatus::Idle);
+        assert_eq!(timer_state.session_type, SessionType::Work);
+        assert_eq!(
+            timer_state.remaining_seconds,
+            timer_state.settings.work_duration_secs.get()
+        );
+        assert_eq!(timer_state.completed_pomodoros, 0);
+        assert_eq!(timer_state.timer_start_source, None);
+        assert_eq!(timer_state.scheduled_stop_state, ScheduledStopState::None);
 
         cleanup_temp_dir(&temp_dir);
     }
