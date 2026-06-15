@@ -840,6 +840,69 @@ mod tests {
     }
 
     #[test]
+    fn test_load_state_sync_restores_v4_file_missing_backward_compatible_fields() {
+        let temp_dir = create_temp_dir("load-v4-missing-backward-compatible-fields");
+        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
+        let clock = fixed_clock(saved_at_utc);
+        let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
+        let mut persisted_json =
+            base_persisted_state_json(PERSISTED_STATE_SCHEMA_VERSION_V4, saved_at_utc);
+
+        let persisted_object = persisted_json
+            .as_object_mut()
+            .expect("base persisted state json should be an object");
+        persisted_object.remove("post_break_decision_pending");
+        persisted_object.remove("auto_run_feature_enabled");
+        persisted_object.remove("timer_start_source");
+        persisted_object.remove("scheduled_stop_state");
+
+        fs::write(
+            temp_dir.join("timer_state.json"),
+            serde_json::to_string_pretty(&persisted_json).expect("json should serialize"),
+        )
+        .expect("json should be writable");
+
+        match persistence.load_state_sync() {
+            PersistenceLoadOutcome::Restored {
+                timer_state,
+                saved_at_utc: restored_saved_at_utc,
+            } => {
+                assert_eq!(restored_saved_at_utc, saved_at_utc);
+                assert_eq!(timer_state.status, TimerStatus::Working);
+                assert_eq!(timer_state.remaining_seconds, 1200);
+                assert_eq!(timer_state.session_type, SessionType::Work);
+                assert_eq!(timer_state.current_cycle, 2);
+                assert_eq!(timer_state.completed_pomodoros, 1);
+                assert_eq!(timer_state.settings.work_duration_secs.get(), 1500);
+                assert_eq!(timer_state.settings.short_break_duration_secs.get(), 300);
+                assert_eq!(timer_state.settings.long_break_duration_secs.get(), 900);
+                assert_eq!(timer_state.settings.long_break_interval.get(), 4);
+                assert_eq!(
+                    timer_state.settings.post_break_transition_policy,
+                    PostBreakTransitionPolicy::RequireManualContinue
+                );
+                assert_eq!(
+                    timer_state.weekly_auto_run_config,
+                    WeeklyAutoRunConfig::default()
+                );
+                assert!(!timer_state.post_break_decision_pending);
+                assert!(!timer_state.auto_run_feature_enabled);
+                assert_eq!(
+                    timer_state.timer_start_source,
+                    Some(TimerStartSource::ManualOutsideWindow)
+                );
+                assert_eq!(timer_state.scheduled_stop_state, ScheduledStopState::None);
+            }
+            PersistenceLoadOutcome::NoState => panic!("expected restored state, got no state"),
+            PersistenceLoadOutcome::UnsupportedSchemaFallback => {
+                panic!("expected restored state, got unsupported schema fallback")
+            }
+        }
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
     fn test_save_then_load_state_sync_round_trips_all_persisted_fields() {
         let temp_dir = create_temp_dir("save-load-v4-contract");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
