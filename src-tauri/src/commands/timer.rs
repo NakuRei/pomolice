@@ -765,7 +765,7 @@ mod tests {
     use std::time::Duration as StdDuration;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use crate::types::{DayAutoRunSlot, HhMm, SessionType};
+    use crate::types::{DayAutoRunSlot, HhMm, SessionType, TimerState};
     use chrono::TimeZone;
     use serde_json::json;
     use tokio_util::sync::CancellationToken;
@@ -1017,6 +1017,29 @@ mod tests {
             .expect("work session should start");
         timer.transition_to_break();
         timer.complete_break_session_transition();
+        assert_eq!(timer.status(), TimerStatus::Idle);
+        assert!(timer.get_state().post_break_decision_pending);
+    }
+
+    async fn apply_restored_post_break_decision_pending_state(state: &AppState) {
+        let mut timer = state.timer_manager.lock().await;
+        let settings = timer_settings(
+            1500,
+            300,
+            900,
+            4,
+            PostBreakTransitionPolicy::RequireManualContinue,
+        );
+        let _ = timer.apply_persisted_state(TimerState {
+            status: TimerStatus::Idle,
+            remaining_seconds: settings.work_duration_secs.get(),
+            session_type: SessionType::Work,
+            current_cycle: 4,
+            completed_pomodoros: 3,
+            post_break_decision_pending: true,
+            settings,
+            ..TimerState::default()
+        });
         assert_eq!(timer.status(), TimerStatus::Idle);
         assert!(timer.get_state().post_break_decision_pending);
     }
@@ -1639,6 +1662,62 @@ mod tests {
             runtime_effect_shell.emitted_tick_snapshots[0].status,
             TimerStatus::Working
         );
+    }
+
+    #[tokio::test]
+    async fn test_resolve_post_break_decision_continue_after_restore_starts_work() {
+        let state = build_test_state_without_persistence_path().await;
+        apply_restored_post_break_decision_pending_state(&state).await;
+        let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+
+        resolve_post_break_decision_with_runtime_effects(
+            &state,
+            PostBreakDecisionAction::Continue,
+            &mut runtime_effect_shell,
+        )
+        .await
+        .expect("restored continue decision should succeed");
+
+        assert_tick_emit_and_tray_match(&runtime_effect_shell);
+        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::EmitTick);
+        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::UpdateTray);
+        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::SpawnTimerTask);
+        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::Persist);
+
+        let timer = state.timer_manager.lock().await;
+        let timer_state = timer.get_state();
+        assert_eq!(timer_state.status, TimerStatus::Working);
+        assert_eq!(timer_state.session_type, SessionType::Work);
+        assert_eq!(timer_state.remaining_seconds, 1500);
+        assert!(!timer_state.post_break_decision_pending);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_post_break_decision_stop_after_restore_returns_to_idle() {
+        let state = build_test_state_without_persistence_path().await;
+        apply_restored_post_break_decision_pending_state(&state).await;
+        let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+
+        resolve_post_break_decision_with_runtime_effects(
+            &state,
+            PostBreakDecisionAction::StopCycle,
+            &mut runtime_effect_shell,
+        )
+        .await
+        .expect("restored stop decision should succeed");
+
+        assert_tick_emit_and_tray_match(&runtime_effect_shell);
+        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::EmitTick);
+        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::UpdateTray);
+        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::Persist);
+        assert_event_absent(&runtime_effect_shell, RuntimeEffectEvent::SpawnTimerTask);
+
+        let timer = state.timer_manager.lock().await;
+        let timer_state = timer.get_state();
+        assert_eq!(timer_state.status, TimerStatus::Idle);
+        assert_eq!(timer_state.session_type, SessionType::Work);
+        assert_eq!(timer_state.remaining_seconds, 1500);
+        assert!(!timer_state.post_break_decision_pending);
     }
 
     #[tokio::test]

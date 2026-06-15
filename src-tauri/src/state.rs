@@ -899,6 +899,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_build_startup_state_restores_pending_post_break_decision_without_restarting() {
+        let temp_dir = create_temp_dir("build-startup-state-pending-post-break-decision");
+        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
+        let restore_at_utc = create_utc_datetime(2025, 2, 1, 9, 5, 0);
+        let save_clock = fixed_clock(saved_at_utc);
+        let restore_clock = fixed_clock(restore_at_utc);
+
+        save_state_to_dir(
+            Arc::clone(&save_clock),
+            &temp_dir,
+            TimerState {
+                status: TimerStatus::Working,
+                remaining_seconds: 123,
+                session_type: SessionType::ShortBreak,
+                post_break_decision_pending: true,
+                timer_start_source: Some(TimerStartSource::ManualInsideWindow),
+                scheduled_stop_state: ScheduledStopState::Pending,
+                ..TimerState::default()
+            },
+        );
+
+        let (app_state, outcome) =
+            build_startup_state_for_tests(Arc::clone(&restore_clock), &temp_dir).await;
+
+        assert_eq!(outcome.restore_status, AppRestoreStatus::Restored);
+        assert!(outcome.initial_tick_payload.is_none());
+        assert!(matches!(outcome.startup_action, StartupRestoreAction::None));
+        assert!(app_state.restored_running_saved_at_local().is_none());
+
+        let full_state = app_state.timer_manager.lock().await.get_full_state();
+        assert_eq!(full_state.status, TimerStatus::Idle);
+        assert_eq!(full_state.session_type, SessionType::Work);
+        assert_eq!(
+            full_state.remaining_seconds,
+            full_state.settings.work_duration_secs.get()
+        );
+        assert!(full_state.post_break_decision_pending);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[tokio::test]
     async fn test_build_startup_state_finalizes_expired_work_before_manage() {
         let temp_dir = create_temp_dir("build-startup-state-expired-work-to-break");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);

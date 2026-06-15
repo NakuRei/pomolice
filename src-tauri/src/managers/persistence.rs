@@ -924,6 +924,37 @@ mod tests {
     }
 
     #[test]
+    fn test_load_state_sync_restores_pending_post_break_decision_as_idle_work_preview() {
+        let temp_dir = create_temp_dir("load-pending-post-break-decision");
+        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
+        let restored_at_utc = create_utc_datetime(2025, 2, 1, 9, 5, 0);
+        let clock = fixed_clock(restored_at_utc);
+        let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
+        let mut persisted_json = contract_persisted_state_json(saved_at_utc);
+        persisted_json["status"] = json!("working");
+        persisted_json["remaining_seconds"] = json!(123);
+        persisted_json["session_type"] = json!("short_break");
+        persisted_json["post_break_decision_pending"] = json!(true);
+        persisted_json["timer_start_source"] = json!("manual_inside_window");
+        persisted_json["scheduled_stop_state"] = json!("pending");
+
+        write_timer_state_json(&temp_dir, &persisted_json);
+
+        let (timer_state, restored_saved_at_utc) = restore_timer_state(&persistence);
+
+        assert_eq!(restored_saved_at_utc, saved_at_utc);
+        assert_eq!(timer_state.status, TimerStatus::Idle);
+        assert_eq!(timer_state.session_type, SessionType::Work);
+        assert_eq!(
+            timer_state.remaining_seconds,
+            timer_state.settings.work_duration_secs.get()
+        );
+        assert!(timer_state.post_break_decision_pending);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
     fn test_load_state_sync_restores_saved_break_session_as_idle_work_session() {
         let temp_dir = create_temp_dir("load-saved-break-as-idle-work");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
