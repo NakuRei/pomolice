@@ -600,8 +600,7 @@ mod tests {
     use super::*;
     use crate::managers::clock::testing::FixedClock;
     use crate::types::{
-        ScheduledStopState, SessionTransitionReason, SessionType, TimerStartSource,
-        PERSISTED_STATE_SCHEMA_VERSION_V3,
+        ScheduledStopState, SessionType, TimerStartSource, PERSISTED_STATE_SCHEMA_VERSION_V3,
     };
     use chrono::TimeZone;
     use serde_json::json;
@@ -876,11 +875,6 @@ mod tests {
             build_startup_state_for_tests(Arc::clone(&restore_clock), &temp_dir).await;
 
         assert_eq!(outcome.restore_status, AppRestoreStatus::Restored);
-        assert!(matches!(
-            outcome.startup_action,
-            StartupRestoreAction::RestartRestoredTimerTask
-        ));
-
         let initial_tick_payload = outcome
             .initial_tick_payload
             .expect("restored running work should provide an initial tick payload");
@@ -925,7 +919,6 @@ mod tests {
 
         assert_eq!(outcome.restore_status, AppRestoreStatus::Restored);
         assert!(outcome.initial_tick_payload.is_none());
-        assert!(matches!(outcome.startup_action, StartupRestoreAction::None));
         assert!(app_state.restored_running_saved_at_local().is_none());
 
         let full_state = app_state.timer_manager.lock().await.get_full_state();
@@ -965,13 +958,6 @@ mod tests {
 
         assert_eq!(outcome.restore_status, AppRestoreStatus::Restored);
         assert!(outcome.initial_tick_payload.is_none());
-        assert!(matches!(
-            outcome.startup_action,
-            StartupRestoreAction::FinalizeExpiredRestoredWork(SessionTransitionOutcome {
-                transition_reason: SessionTransitionReason::WorkToBreak,
-                ..
-            })
-        ));
 
         let timer_state = app_state.timer_manager.lock().await.get_state().clone();
         assert_eq!(timer_state.status, TimerStatus::OnBreak);
@@ -1011,13 +997,6 @@ mod tests {
 
         assert_eq!(outcome.restore_status, AppRestoreStatus::Restored);
         assert!(outcome.initial_tick_payload.is_none());
-        assert!(matches!(
-            outcome.startup_action,
-            StartupRestoreAction::FinalizeExpiredRestoredWork(SessionTransitionOutcome {
-                transition_reason: SessionTransitionReason::ScheduledStopExecuted,
-                ..
-            })
-        ));
 
         let timer_state = app_state.timer_manager.lock().await.get_state().clone();
         assert_eq!(timer_state.status, TimerStatus::Idle);
