@@ -557,7 +557,10 @@ impl Default for PersistenceManager {
 mod tests {
     use super::*;
     use crate::managers::clock::testing::FixedClock;
-    use crate::types::{PERSISTED_STATE_SCHEMA_VERSION_V3, PERSISTED_STATE_SCHEMA_VERSION_V4};
+    use crate::types::{
+        DayAutoRunSlot, HhMm, PostBreakTransitionPolicy, PERSISTED_STATE_SCHEMA_VERSION_V3,
+        PERSISTED_STATE_SCHEMA_VERSION_V4,
+    };
     use chrono::{Local, TimeZone};
     use serde_json::json;
     use std::sync::{Arc, Barrier};
@@ -613,6 +616,135 @@ mod tests {
         })
     }
 
+    fn hh_mm(hour: u8, minute: u8) -> HhMm {
+        HhMm::try_new(hour, minute).expect("contract time should be valid")
+    }
+
+    fn enabled_day_slot(
+        start_hour: u8,
+        start_minute: u8,
+        end_hour: u8,
+        end_minute: u8,
+    ) -> DayAutoRunSlot {
+        DayAutoRunSlot::try_new(
+            true,
+            hh_mm(start_hour, start_minute),
+            hh_mm(end_hour, end_minute),
+        )
+        .expect("contract schedule slot should be valid")
+    }
+
+    fn contract_weekly_auto_run_config() -> WeeklyAutoRunConfig {
+        WeeklyAutoRunConfig::try_new(
+            enabled_day_slot(8, 30, 12, 15),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+        )
+        .expect("contract schedule should be valid")
+    }
+
+    fn contract_timer_settings() -> TimerSettings {
+        TimerSettings::try_from_raw(
+            2700,
+            420,
+            1200,
+            3,
+            PostBreakTransitionPolicy::StartNextWorkAutomatically,
+        )
+        .expect("contract settings should be valid")
+    }
+
+    fn contract_timer_state() -> TimerState {
+        TimerState {
+            status: TimerStatus::Working,
+            remaining_seconds: 1234,
+            session_type: SessionType::Work,
+            current_cycle: 3,
+            completed_pomodoros: 2,
+            post_break_decision_pending: false,
+            settings: contract_timer_settings(),
+            auto_run_feature_enabled: true,
+            weekly_auto_run_config: contract_weekly_auto_run_config(),
+            timer_start_source: Some(TimerStartSource::ManualInsideWindow),
+            scheduled_stop_state: ScheduledStopState::Pending,
+            ..TimerState::default()
+        }
+    }
+
+    fn contract_weekly_config_json() -> serde_json::Value {
+        json!({
+            "mon": { "enabled": true, "start_time": "08:30", "end_time": "12:15" },
+            "tue": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
+            "wed": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
+            "thu": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
+            "fri": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
+            "sat": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
+            "sun": { "enabled": false, "start_time": "09:00", "end_time": "18:00" }
+        })
+    }
+
+    fn contract_persisted_state_json(saved_at_utc: DateTime<Utc>) -> serde_json::Value {
+        json!({
+            "schema_version": PERSISTED_STATE_SCHEMA_VERSION_V4,
+            "status": "working",
+            "remaining_seconds": 1234,
+            "session_type": "work",
+            "current_cycle": 3,
+            "completed_pomodoros": 2,
+            "post_break_decision_pending": false,
+            "settings": {
+                "work_duration_secs": 2700,
+                "short_break_duration_secs": 420,
+                "long_break_duration_secs": 1200,
+                "long_break_interval": 3,
+                "post_break_transition_policy": "start_next_work_automatically"
+            },
+            "saved_at": saved_at_utc,
+            "auto_run_feature_enabled": true,
+            "weekly_auto_run_config": contract_weekly_config_json(),
+            "timer_start_source": "manual_inside_window",
+            "scheduled_stop_state": "pending"
+        })
+    }
+
+    fn assert_timer_settings_match_contract(settings: &TimerSettings) {
+        assert_eq!(settings.work_duration_secs.get(), 2700);
+        assert_eq!(settings.short_break_duration_secs.get(), 420);
+        assert_eq!(settings.long_break_duration_secs.get(), 1200);
+        assert_eq!(settings.long_break_interval.get(), 3);
+        assert_eq!(
+            settings.post_break_transition_policy,
+            PostBreakTransitionPolicy::StartNextWorkAutomatically
+        );
+    }
+
+    fn assert_timer_state_matches_persistence_contract(timer_state: &TimerState) {
+        assert_eq!(timer_state.status, TimerStatus::Working);
+        assert_eq!(timer_state.remaining_seconds, 1234);
+        assert_eq!(timer_state.session_type, SessionType::Work);
+        assert_eq!(timer_state.current_cycle, 3);
+        assert_eq!(timer_state.completed_pomodoros, 2);
+        assert!(!timer_state.post_break_decision_pending);
+        assert_timer_settings_match_contract(&timer_state.settings);
+        assert!(timer_state.auto_run_feature_enabled);
+        assert_eq!(
+            timer_state.weekly_auto_run_config,
+            contract_weekly_auto_run_config()
+        );
+        assert_eq!(
+            timer_state.timer_start_source,
+            Some(TimerStartSource::ManualInsideWindow)
+        );
+        assert_eq!(
+            timer_state.scheduled_stop_state,
+            ScheduledStopState::Pending
+        );
+    }
+
     fn base_persisted_state_json(
         schema_version: u32,
         saved_at_utc: DateTime<Utc>,
@@ -652,12 +784,13 @@ mod tests {
     }
 
     #[test]
-    fn test_save_state_sync_writes_schema_version_four() {
-        let temp_dir = create_temp_dir("save-schema-v4");
-        let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
+    fn test_save_state_sync_writes_v4_persisted_state_contract() {
+        let temp_dir = create_temp_dir("save-v4-contract");
+        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
+        let clock = fixed_clock(saved_at_utc);
         let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
 
-        let state = working_timer_state(1500, 0);
+        let state = contract_timer_state();
 
         persistence
             .save_state_sync(state)
@@ -668,31 +801,62 @@ mod tests {
         let parsed_json: serde_json::Value =
             serde_json::from_str(&raw_json).expect("saved json should be valid");
 
-        assert_eq!(
-            parsed_json["schema_version"],
-            json!(PERSISTED_STATE_SCHEMA_VERSION_V4)
-        );
+        assert_eq!(parsed_json, contract_persisted_state_json(saved_at_utc));
 
         cleanup_temp_dir(&temp_dir);
     }
 
     #[test]
-    fn test_load_state_sync_restores_saved_state() {
-        let temp_dir = create_temp_dir("save-load-injected-path");
-        let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
+    fn test_load_state_sync_restores_v4_persisted_state_contract() {
+        let temp_dir = create_temp_dir("load-v4-contract");
+        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
+        let clock = fixed_clock(saved_at_utc);
         let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
 
-        let state = working_timer_state(777, 0);
+        fs::write(
+            temp_dir.join("timer_state.json"),
+            serde_json::to_string_pretty(&contract_persisted_state_json(saved_at_utc))
+                .expect("contract json should serialize"),
+        )
+        .expect("contract json should be writable");
 
-        persistence
-            .save_state_sync(state)
-            .expect("sync save should succeed");
         let outcome = persistence.load_state_sync();
 
         match outcome {
-            PersistenceLoadOutcome::Restored { timer_state, .. } => {
-                assert_eq!(timer_state.status, TimerStatus::Working);
-                assert_eq!(timer_state.remaining_seconds, 777);
+            PersistenceLoadOutcome::Restored {
+                timer_state,
+                saved_at_utc: restored_saved_at_utc,
+            } => {
+                assert_eq!(restored_saved_at_utc, saved_at_utc);
+                assert_timer_state_matches_persistence_contract(&timer_state);
+            }
+            PersistenceLoadOutcome::NoState => panic!("expected restored state, got no state"),
+            PersistenceLoadOutcome::UnsupportedSchemaFallback => {
+                panic!("expected restored state, got unsupported schema fallback")
+            }
+        }
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_save_then_load_state_sync_round_trips_all_persisted_fields() {
+        let temp_dir = create_temp_dir("save-load-v4-contract");
+        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
+        let clock = fixed_clock(saved_at_utc);
+        let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
+
+        persistence
+            .save_state_sync(contract_timer_state())
+            .expect("sync save should succeed");
+
+        match persistence.load_state_sync() {
+            PersistenceLoadOutcome::Restored {
+                timer_state,
+                saved_at_utc: restored_saved_at_utc,
+            } => {
+                assert_eq!(restored_saved_at_utc, saved_at_utc);
+                assert_timer_state_matches_persistence_contract(&timer_state);
             }
             PersistenceLoadOutcome::NoState => panic!("expected restored state, got no state"),
             PersistenceLoadOutcome::UnsupportedSchemaFallback => {
