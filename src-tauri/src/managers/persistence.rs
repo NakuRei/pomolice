@@ -23,6 +23,9 @@ type BeforeSaveHook = Arc<dyn Fn() + Send + Sync>;
 #[cfg(test)]
 type InjectedSaveErrorHook = Arc<dyn Fn() -> Option<SaveError> + Send + Sync>;
 
+#[cfg(test)]
+type BeforePublishSaveErrorHook = Arc<dyn Fn(&Path) -> Option<SaveError> + Send + Sync>;
+
 #[derive(Debug, Clone, Copy, Deserialize)]
 struct PersistedSchemaEnvelope {
     schema_version: u32,
@@ -295,6 +298,8 @@ pub(crate) struct PersistenceManager {
     before_save_hook: Option<BeforeSaveHook>,
     #[cfg(test)]
     injected_save_error_hook: Option<InjectedSaveErrorHook>,
+    #[cfg(test)]
+    before_publish_save_error_hook: Option<BeforePublishSaveErrorHook>,
 }
 
 impl PersistenceManager {
@@ -308,6 +313,8 @@ impl PersistenceManager {
             before_save_hook: None,
             #[cfg(test)]
             injected_save_error_hook: None,
+            #[cfg(test)]
+            before_publish_save_error_hook: None,
         }
     }
 
@@ -324,6 +331,8 @@ impl PersistenceManager {
             self.before_save_hook.as_ref(),
             #[cfg(test)]
             self.injected_save_error_hook.as_ref(),
+            #[cfg(test)]
+            self.before_publish_save_error_hook.as_ref(),
             timer_state,
         )
     }
@@ -338,6 +347,7 @@ impl PersistenceManager {
         save_lock: &Mutex<()>,
         #[cfg(test)] before_save_hook: Option<&BeforeSaveHook>,
         #[cfg(test)] injected_save_error_hook: Option<&InjectedSaveErrorHook>,
+        #[cfg(test)] before_publish_save_error_hook: Option<&BeforePublishSaveErrorHook>,
         timer_state: TimerState,
     ) -> Result<(), SaveError> {
         let Some(path) = state_file_path else {
@@ -376,7 +386,13 @@ impl PersistenceManager {
         let _save_guard = save_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let save_result = Self::save_state_to_path(clock, timer_state, path);
+        let save_result = Self::save_state_to_path(
+            clock,
+            timer_state,
+            path,
+            #[cfg(test)]
+            before_publish_save_error_hook,
+        );
 
         match save_result {
             Ok(()) => {
@@ -416,14 +432,21 @@ impl PersistenceManager {
         clock: &dyn Clock,
         timer_state: TimerState,
         path: &Path,
+        #[cfg(test)] before_publish_save_error_hook: Option<&BeforePublishSaveErrorHook>,
     ) -> Result<(), SaveError> {
         let persisted_state = PersistedState::from_timer_state(timer_state, clock);
-        Self::save_persisted_state_to_path(&persisted_state, path)
+        Self::save_persisted_state_to_path(
+            &persisted_state,
+            path,
+            #[cfg(test)]
+            before_publish_save_error_hook,
+        )
     }
 
     fn save_persisted_state_to_path(
         persisted_state: &PersistedState,
         path: &Path,
+        #[cfg(test)] before_publish_save_error_hook: Option<&BeforePublishSaveErrorHook>,
     ) -> Result<(), SaveError> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|source| SaveError::CreateDir {
@@ -449,6 +472,13 @@ impl PersistenceManager {
                 path: path.to_path_buf(),
                 source,
             })?;
+
+        #[cfg(test)]
+        if let Some(hook) = before_publish_save_error_hook {
+            if let Some(error) = hook(path) {
+                return Err(error);
+            }
+        }
 
         temp_file.commit().map_err(|source| SaveError::Commit {
             path: path.to_path_buf(),
@@ -545,6 +575,15 @@ impl PersistenceManager {
         self.injected_save_error_hook = Some(hook);
         self
     }
+
+    #[cfg(test)]
+    pub(crate) fn with_before_publish_save_error_hook(
+        mut self,
+        hook: BeforePublishSaveErrorHook,
+    ) -> Self {
+        self.before_publish_save_error_hook = Some(hook);
+        self
+    }
 }
 
 impl Default for PersistenceManager {
@@ -563,7 +602,10 @@ mod tests {
     };
     use chrono::{Local, TimeZone};
     use serde_json::json;
-    use std::sync::{Arc, Barrier};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Barrier,
+    };
     use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -675,6 +717,30 @@ mod tests {
         }
     }
 
+    fn alternate_contract_timer_state() -> TimerState {
+        TimerState {
+            status: TimerStatus::Working,
+            remaining_seconds: 678,
+            session_type: SessionType::Work,
+            current_cycle: 9,
+            completed_pomodoros: 5,
+            post_break_decision_pending: false,
+            settings: TimerSettings::try_from_raw(
+                1800,
+                600,
+                1500,
+                5,
+                PostBreakTransitionPolicy::RequireManualContinue,
+            )
+            .expect("alternate contract settings should be valid"),
+            auto_run_feature_enabled: false,
+            weekly_auto_run_config: WeeklyAutoRunConfig::default(),
+            timer_start_source: Some(TimerStartSource::ScheduledAutoStart),
+            scheduled_stop_state: ScheduledStopState::None,
+            ..TimerState::default()
+        }
+    }
+
     fn contract_weekly_config_json() -> serde_json::Value {
         json!({
             "mon": { "enabled": true, "start_time": "08:30", "end_time": "12:15" },
@@ -745,6 +811,33 @@ mod tests {
         );
     }
 
+    fn assert_timer_state_matches_alternate_contract(timer_state: &TimerState) {
+        assert_eq!(timer_state.status, TimerStatus::Working);
+        assert_eq!(timer_state.remaining_seconds, 678);
+        assert_eq!(timer_state.session_type, SessionType::Work);
+        assert_eq!(timer_state.current_cycle, 9);
+        assert_eq!(timer_state.completed_pomodoros, 5);
+        assert!(!timer_state.post_break_decision_pending);
+        assert_eq!(timer_state.settings.work_duration_secs.get(), 1800);
+        assert_eq!(timer_state.settings.short_break_duration_secs.get(), 600);
+        assert_eq!(timer_state.settings.long_break_duration_secs.get(), 1500);
+        assert_eq!(timer_state.settings.long_break_interval.get(), 5);
+        assert_eq!(
+            timer_state.settings.post_break_transition_policy,
+            PostBreakTransitionPolicy::RequireManualContinue
+        );
+        assert!(!timer_state.auto_run_feature_enabled);
+        assert_eq!(
+            timer_state.weekly_auto_run_config,
+            WeeklyAutoRunConfig::default()
+        );
+        assert_eq!(
+            timer_state.timer_start_source,
+            Some(TimerStartSource::ScheduledAutoStart)
+        );
+        assert_eq!(timer_state.scheduled_stop_state, ScheduledStopState::None);
+    }
+
     fn base_persisted_state_json(
         schema_version: u32,
         saved_at_utc: DateTime<Utc>,
@@ -802,6 +895,22 @@ mod tests {
                 panic!("expected restored state, got unsupported schema fallback")
             }
         }
+    }
+
+    fn build_one_shot_before_publish_save_failure_hook() -> BeforePublishSaveErrorHook {
+        let call_count = Arc::new(AtomicUsize::new(0));
+
+        Arc::new(move |path| {
+            let call_index = call_count.fetch_add(1, Ordering::AcqRel);
+            if call_index == 0 {
+                Some(SaveError::Write {
+                    path: path.to_path_buf(),
+                    source: std::io::Error::other("injected before-publish save failure"),
+                })
+            } else {
+                None
+            }
+        })
     }
 
     #[test]
@@ -1049,6 +1158,82 @@ mod tests {
                 panic!("expected restored state, got unsupported schema fallback")
             }
         }
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_failed_save_preserves_existing_persisted_state() {
+        let temp_dir = create_temp_dir("failed-save-preserves-existing-state");
+        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
+        let attempted_saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 1, 0);
+        let clock = fixed_clock(saved_at_utc);
+        let persistence_clock: Arc<dyn Clock + Send + Sync> = Arc::<FixedClock>::clone(&clock);
+        let persistence = PersistenceManager::new(persistence_clock, Some(temp_dir.clone()))
+            .with_before_publish_save_error_hook(build_one_shot_before_publish_save_failure_hook());
+
+        write_timer_state_json(&temp_dir, &contract_persisted_state_json(saved_at_utc));
+        clock.set_now_local(attempted_saved_at_utc.with_timezone(&Local));
+
+        let save_result = persistence.save_state_sync(alternate_contract_timer_state());
+
+        assert!(save_result.is_err());
+        clock.set_now_local(saved_at_utc.with_timezone(&Local));
+        let (timer_state, restored_saved_at_utc) = restore_timer_state(&persistence);
+        assert_eq!(restored_saved_at_utc, saved_at_utc);
+        assert_timer_state_matches_persistence_contract(&timer_state);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_failed_initial_save_does_not_publish_partial_state() {
+        let temp_dir = create_temp_dir("failed-initial-save-no-partial-state");
+        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
+        let clock = fixed_clock(saved_at_utc);
+        let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()))
+            .with_before_publish_save_error_hook(build_one_shot_before_publish_save_failure_hook());
+
+        let save_result = persistence.save_state_sync(contract_timer_state());
+
+        assert!(save_result.is_err());
+        assert!(matches!(
+            persistence.load_state_sync(),
+            PersistenceLoadOutcome::NoState
+        ));
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_save_succeeds_after_failed_save_attempt() {
+        let temp_dir = create_temp_dir("save-succeeds-after-failed-attempt");
+        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
+        let successful_saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 1, 0);
+        let clock = fixed_clock(saved_at_utc);
+        let persistence_clock: Arc<dyn Clock + Send + Sync> = Arc::<FixedClock>::clone(&clock);
+        let persistence = PersistenceManager::new(persistence_clock, Some(temp_dir.clone()))
+            .with_before_publish_save_error_hook(build_one_shot_before_publish_save_failure_hook());
+
+        write_timer_state_json(&temp_dir, &contract_persisted_state_json(saved_at_utc));
+
+        clock.set_now_local(successful_saved_at_utc.with_timezone(&Local));
+        let first_save_result = persistence.save_state_sync(alternate_contract_timer_state());
+
+        assert!(first_save_result.is_err());
+        clock.set_now_local(saved_at_utc.with_timezone(&Local));
+        let (timer_state_after_failure, saved_at_after_failure) = restore_timer_state(&persistence);
+        assert_eq!(saved_at_after_failure, saved_at_utc);
+        assert_timer_state_matches_persistence_contract(&timer_state_after_failure);
+
+        clock.set_now_local(successful_saved_at_utc.with_timezone(&Local));
+        persistence
+            .save_state_sync(alternate_contract_timer_state())
+            .expect("sync save should succeed after a failed save attempt");
+
+        let (timer_state_after_success, saved_at_after_success) = restore_timer_state(&persistence);
+        assert_eq!(saved_at_after_success, successful_saved_at_utc);
+        assert_timer_state_matches_alternate_contract(&timer_state_after_success);
 
         cleanup_temp_dir(&temp_dir);
     }
