@@ -884,6 +884,11 @@ mod tests {
         .expect("json should be writable");
     }
 
+    fn write_timer_state_raw(temp_dir: &Path, persisted_content: &str) {
+        fs::write(temp_dir.join("timer_state.json"), persisted_content)
+            .expect("state file content should be writable");
+    }
+
     fn restore_timer_state(persistence: &PersistenceManager) -> (TimerState, DateTime<Utc>) {
         match persistence.load_state_sync() {
             PersistenceLoadOutcome::Restored {
@@ -1308,6 +1313,77 @@ mod tests {
             persistence.load_state_sync(),
             PersistenceLoadOutcome::UnsupportedSchemaFallback
         ));
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_load_malformed_state_file_returns_no_state() {
+        let temp_dir = create_temp_dir("malformed-state-file");
+        let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
+        let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
+
+        write_timer_state_raw(&temp_dir, "{ invalid json");
+
+        assert!(matches!(
+            persistence.load_state_sync(),
+            PersistenceLoadOutcome::NoState
+        ));
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_load_empty_state_file_returns_no_state() {
+        let temp_dir = create_temp_dir("empty-state-file");
+        let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
+        let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
+
+        write_timer_state_raw(&temp_dir, "");
+
+        assert!(matches!(
+            persistence.load_state_sync(),
+            PersistenceLoadOutcome::NoState
+        ));
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_load_unreadable_state_path_returns_no_state() {
+        let temp_dir = create_temp_dir("unreadable-state-path");
+        let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
+        let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
+
+        fs::create_dir(temp_dir.join("timer_state.json"))
+            .expect("state path fixture directory should be creatable");
+
+        assert!(matches!(
+            persistence.load_state_sync(),
+            PersistenceLoadOutcome::NoState
+        ));
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_load_future_saved_at_keeps_work_remaining_seconds() {
+        let temp_dir = create_temp_dir("future-saved-at");
+        let restored_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
+        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 5, 0);
+        let clock = fixed_clock(restored_at_utc);
+        let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
+
+        let persisted_json =
+            base_persisted_state_json(PERSISTED_STATE_SCHEMA_VERSION_V4, saved_at_utc);
+
+        write_timer_state_json(&temp_dir, &persisted_json);
+
+        let (timer_state, restored_saved_at_utc) = restore_timer_state(&persistence);
+
+        assert_eq!(restored_saved_at_utc, saved_at_utc);
+        assert_eq!(timer_state.status, TimerStatus::Working);
+        assert_eq!(timer_state.remaining_seconds, 1200);
 
         cleanup_temp_dir(&temp_dir);
     }

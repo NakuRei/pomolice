@@ -174,6 +174,30 @@ mod startup_restore_tests {
     }
 
     #[tokio::test]
+    async fn test_startup_with_unusable_persisted_state_uses_default_idle_state() {
+        let temp_dir = create_temp_dir("unusable-persisted-state");
+        let restore_clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
+
+        std::fs::write(temp_dir.join("timer_state.json"), "{ invalid json")
+            .expect("unusable state fixture should be writable");
+
+        let (app_state, effects) =
+            run_startup_restore_from_dir(Arc::clone(&restore_clock), &temp_dir).await;
+
+        let timer_state = current_timer_state(&app_state).await;
+        assert_eq!(timer_state.status, TimerStatus::Idle);
+        assert_eq!(timer_state.session_type, SessionType::Work);
+        assert_eq!(
+            timer_state.remaining_seconds,
+            timer_state.settings.work_duration_secs.get()
+        );
+        assert!(app_state.restored_running_saved_at_local().is_none());
+        assert_no_startup_effects(&effects);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[tokio::test]
     async fn test_startup_with_saved_idle_state_restores_without_runtime_effects() {
         let temp_dir = create_temp_dir("saved-idle-state");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
