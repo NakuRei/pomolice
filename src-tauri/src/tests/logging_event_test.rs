@@ -1,11 +1,114 @@
 use std::io;
 
-use log::Level;
-
 use crate::log_redaction::RedactionClass;
 use crate::logging_event::{
     render_event_message, BackendLogEvent, PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START,
 };
+
+macro_rules! with_backend_log_event_variants {
+    ($callback:ident $(, $arg:expr)?) => {
+        $callback!(
+            $($arg,)?
+            AppStartupCompleted,
+            AppStateCreated,
+            AppStateRestoredFromPersistence,
+            AppStateUsingDefaults,
+            AppStateInitializationStarted,
+            AppStateInitializationCompleted,
+            AppWindowHiddenToTray,
+            AppTrayInitialized,
+            AppTraySetupFailed,
+            AppTrayMenuExitSelected,
+            AppTrayPhantomMenuEventIgnored,
+            AppTrayIconUpdateFailed,
+            AppTrayTooltipUpdateFailed,
+            AppTrayIdleAppIconMissing,
+            TimerCommandInvoked,
+            TimerCommandUnauthorized,
+            TimerCommandInputRejected,
+            ToolingTrayIconFixtureExported,
+            ToolingTrayIconFixtureExportCompleted,
+            TimerStartRejected,
+            TimerStartRateLimited,
+            TimerTransitionRejected,
+            TimerWorkSessionStarted,
+            TimerTransitionCompleted,
+            SettingsSyncApplied,
+            SettingsSyncFailed,
+            StoragePersistenceWriteStarted,
+            StoragePersistenceWriteFailed,
+            StoragePersistenceWriteCompleted,
+            StoragePersistencePathUnavailable,
+            StoragePersistenceReadStarted,
+            StoragePersistenceReadFailed,
+            StoragePersistenceNoStateFile,
+            StoragePersistenceLoaded,
+            StoragePersistenceParseFailed,
+            StoragePersistenceSchemaVersionUnsupported,
+            StoragePersistenceRestoreNormalized,
+            SchedulerStarted,
+            SchedulerReceivedCancellation,
+            SchedulerStopped,
+            SchedulerResumedStartBoundaryEvaluation,
+            SchedulerConfigRevisionChanged,
+            SchedulerCrossedEndBoundary,
+            SchedulerMarkedStopPending,
+            SchedulerCrossedStartBoundary,
+            SchedulerStartedWorkFromBoundary,
+            SchedulerSkippedAutoStartDueToRejection,
+            InputMonitoringStarted,
+            InputMonitoringAlreadyRunning,
+            InputMonitoringListenerStarted,
+            InputMonitoringListenerStoppedCleanly,
+            InputMonitoringShutdownRequestedAfterError,
+            InputMonitoringListenerFailed,
+            InputMonitoringAlreadyStopped,
+            InputMonitoringStopping,
+            SessionFullscreenBreakEnterStarted,
+            SessionFullscreenBreakEntered,
+            SessionFullscreenBreakEnterFailed,
+            SessionFullscreenBreakExitStarted,
+            SessionFullscreenBreakExited,
+            SessionFullscreenBreakExitFailed,
+        );
+    };
+}
+
+macro_rules! declare_backend_log_event_slice {
+    ($($variant:ident),+ $(,)?) => {
+        const ALL_BACKEND_LOG_EVENTS: &[BackendLogEvent] = &[
+            $(BackendLogEvent::$variant),+
+        ];
+    };
+}
+
+macro_rules! match_backend_log_event_variants {
+    ($event:expr, $($variant:ident),+ $(,)?) => {
+        match $event {
+            $(BackendLogEvent::$variant)|+ => {}
+        }
+    };
+}
+
+with_backend_log_event_variants!(declare_backend_log_event_slice);
+
+const HIGH_RISK_FIELD_NAME_PARTS: &[&str] = &[
+    "password",
+    "token",
+    "secret",
+    "authorization",
+    "cookie",
+    "api_key",
+];
+const SENSITIVE_ASSIGNMENT_TOKEN: &str = "sensitive-field-token";
+const SENSITIVE_BEARER_TOKEN: &str = "sensitive-bearer-token";
+const SENSITIVE_HOME_USERNAME: &str = "SensitiveUser";
+const SECRET_FIELD_VALUE: &str = "secret-field-raw-value";
+const UNEXPECTED_FIELD_NAME: &str = "unexpected_probe";
+const UNEXPECTED_FIELD_VALUE: &str = "unexpected-raw-value";
+const ERROR_OBJECT_ASSIGNMENT_TOKEN: &str = "error-object-token";
+const ERROR_OBJECT_BEARER_TOKEN: &str = "error-bearer-token";
+const ERROR_OBJECT_HOME_USERNAME: &str = "ErrorUser";
 
 #[test]
 fn test_render_event_message_preserves_timer_command_unauthorized_log_contract() {
@@ -389,36 +492,94 @@ fn test_render_event_message_includes_break_step_context() {
 }
 
 #[test]
-fn test_backend_event_catalog_metadata_matches_contract() {
-    let event = BackendLogEvent::TimerCommandUnauthorized;
-
-    assert_eq!(event.event_id(), "timer.command.unauthorized");
-    assert_eq!(event.severity(), Level::Warn);
-    assert_field_contracts(
-        event,
-        &[
-            ("command_name", RedactionClass::Public),
-            ("window_label", RedactionClass::Public),
-            ("authorization_token", RedactionClass::Secret),
-        ],
-    );
+fn test_backend_event_catalog_test_case_list_is_exhaustive() {
+    for event in ALL_BACKEND_LOG_EVENTS {
+        assert_backend_log_event_has_catalog_policy_test_case(*event);
+    }
 }
 
 #[test]
-fn test_timer_command_input_rejected_event_catalog_metadata_matches_contract() {
-    let event = BackendLogEvent::TimerCommandInputRejected;
+fn test_backend_event_catalog_keeps_risky_fields_non_public() {
+    for event in ALL_BACKEND_LOG_EVENTS {
+        for field in event.allowed_fields() {
+            if field.name == "error_message" {
+                assert_eq!(
+                    field.redaction_classification,
+                    RedactionClass::Sensitive,
+                    "{} error_message must stay sensitive",
+                    event.event_id()
+                );
+            }
 
-    assert_eq!(event.event_id(), "timer.command.input_rejected");
-    assert_eq!(event.severity(), Level::Warn);
-    assert_field_contracts(
-        event,
-        &[
-            ("command_name", RedactionClass::Public),
-            ("window_label", RedactionClass::Public),
-            ("argument_name", RedactionClass::Public),
-            ("error_message", RedactionClass::Sensitive),
-        ],
-    );
+            if field.name == "authorization_token" {
+                assert_eq!(
+                    field.redaction_classification,
+                    RedactionClass::Secret,
+                    "{} authorization_token must stay secret",
+                    event.event_id()
+                );
+            }
+
+            assert!(
+                !is_high_risk_field_name(field.name)
+                    || field.redaction_classification != RedactionClass::Public,
+                "{} field {} must not be public",
+                event.event_id(),
+                field.name
+            );
+        }
+    }
+}
+
+#[test]
+fn test_backend_event_catalog_redacts_sensitive_and_secret_field_values() {
+    for event in ALL_BACKEND_LOG_EVENTS {
+        let fields = event
+            .allowed_fields()
+            .iter()
+            .map(|field| {
+                (
+                    field.name,
+                    catalog_probe_value(field.redaction_classification),
+                )
+            })
+            .collect::<Vec<_>>();
+        let rendered = render_event_message(*event, &fields, None);
+
+        assert_rendered_message_hides_probe_value(*event, &rendered, SENSITIVE_ASSIGNMENT_TOKEN);
+        assert_rendered_message_hides_probe_value(*event, &rendered, SENSITIVE_BEARER_TOKEN);
+        assert_rendered_message_hides_probe_value(*event, &rendered, SENSITIVE_HOME_USERNAME);
+        assert_rendered_message_hides_probe_value(*event, &rendered, SECRET_FIELD_VALUE);
+    }
+}
+
+#[test]
+fn test_render_event_message_ignores_unallowed_fields_across_catalog() {
+    for event in ALL_BACKEND_LOG_EVENTS {
+        let rendered = render_event_message(
+            *event,
+            &[(UNEXPECTED_FIELD_NAME, UNEXPECTED_FIELD_VALUE.to_string())],
+            None,
+        );
+
+        assert_rendered_message_hides_probe_value(*event, &rendered, UNEXPECTED_FIELD_NAME);
+        assert_rendered_message_hides_probe_value(*event, &rendered, UNEXPECTED_FIELD_VALUE);
+    }
+}
+
+#[test]
+fn test_render_event_message_redacts_error_object_across_catalog() {
+    for event in ALL_BACKEND_LOG_EVENTS {
+        let error = io::Error::other(format!(
+            "token={ERROR_OBJECT_ASSIGNMENT_TOKEN} Authorization: Bearer {ERROR_OBJECT_BEARER_TOKEN} C:\\Users\\{ERROR_OBJECT_HOME_USERNAME}\\Documents\\notes.txt /Users/{ERROR_OBJECT_HOME_USERNAME}/notes.txt /home/{ERROR_OBJECT_HOME_USERNAME}/notes.txt"
+        ));
+        let rendered = render_event_message(*event, &[], Some(&error));
+
+        assert_rendered_field_names(&rendered, &["error_message"]);
+        assert_rendered_message_hides_probe_value(*event, &rendered, ERROR_OBJECT_ASSIGNMENT_TOKEN);
+        assert_rendered_message_hides_probe_value(*event, &rendered, ERROR_OBJECT_BEARER_TOKEN);
+        assert_rendered_message_hides_probe_value(*event, &rendered, ERROR_OBJECT_HOME_USERNAME);
+    }
 }
 
 fn assert_rendered_event_identity(rendered: &str, event_id: &str) {
@@ -523,17 +684,35 @@ fn find_unescaped_character(value: &str, target: char) -> Option<usize> {
     None
 }
 
-fn assert_field_contracts(event: BackendLogEvent, expected_fields: &[(&str, RedactionClass)]) {
-    let actual_fields = event.allowed_fields();
+fn assert_backend_log_event_has_catalog_policy_test_case(event: BackendLogEvent) {
+    with_backend_log_event_variants!(match_backend_log_event_variants, event);
+}
 
-    assert_eq!(actual_fields.len(), expected_fields.len());
-    for (field_name, redaction_classification) in expected_fields {
-        assert!(
-            actual_fields.iter().any(|field| {
-                field.name == *field_name
-                    && field.redaction_classification == *redaction_classification
-            }),
-            "{field_name} should be classified as {redaction_classification:?}"
-        );
+fn is_high_risk_field_name(field_name: &str) -> bool {
+    let normalized_field_name = field_name.to_ascii_lowercase();
+    HIGH_RISK_FIELD_NAME_PARTS
+        .iter()
+        .any(|part| normalized_field_name.contains(part))
+}
+
+fn catalog_probe_value(redaction_classification: RedactionClass) -> String {
+    match redaction_classification {
+        RedactionClass::Public => "public-field-value".to_string(),
+        RedactionClass::Sensitive => format!(
+            "token={SENSITIVE_ASSIGNMENT_TOKEN} Authorization: Bearer {SENSITIVE_BEARER_TOKEN} C:\\Users\\{SENSITIVE_HOME_USERNAME}\\Documents\\notes.txt /Users/{SENSITIVE_HOME_USERNAME}/notes.txt /home/{SENSITIVE_HOME_USERNAME}/notes.txt"
+        ),
+        RedactionClass::Secret => SECRET_FIELD_VALUE.to_string(),
     }
+}
+
+fn assert_rendered_message_hides_probe_value(
+    event: BackendLogEvent,
+    rendered: &str,
+    hidden_value: &str,
+) {
+    assert!(
+        !rendered.contains(hidden_value),
+        "{} leaked {hidden_value}: {rendered}",
+        event.event_id()
+    );
 }
