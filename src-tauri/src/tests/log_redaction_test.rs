@@ -51,6 +51,25 @@ fn test_sensitive_field_values_mask_authorization_bearer_tokens() {
 }
 
 #[test]
+fn test_sensitive_field_values_mask_high_risk_assignment_tokens_case_insensitively() {
+    let cases = [
+        ("Password=field-password", "field-password"),
+        ("TOKEN=field-token", "field-token"),
+        ("Secret=field-secret", "field-secret"),
+        ("AUTHORIZATION=field-authorization", "field-authorization"),
+        ("Cookie=field-cookie", "field-cookie"),
+        ("API_KEY=field-api-key", "field-api-key"),
+    ];
+
+    for (message, secret) in cases {
+        let redacted = redact_field_value(RedactionClass::Sensitive, message);
+
+        assert_redacted_value_hides(&redacted, secret);
+        assert!(redacted.contains("[REDACTED]"));
+    }
+}
+
+#[test]
 fn test_exception_message_masks_same_token_vocabulary_as_frontend() {
     let redacted = redact_exception_message(
         "password=abc token=xyz secret=123 authorization=Bearer cookie=session api_key=456",
@@ -65,6 +84,21 @@ fn test_exception_message_masks_same_token_vocabulary_as_frontend() {
 }
 
 #[test]
+fn test_exception_message_masks_high_risk_assignment_tokens_case_insensitively() {
+    let redacted = redact_exception_message(
+        "Password=exception-password TOKEN=exception-token Secret=exception-secret AUTHORIZATION=exception-authorization Cookie=exception-cookie API_KEY=exception-api-key",
+    );
+
+    assert!(redacted.contains("[REDACTED]"));
+    assert_redacted_value_hides(&redacted, "exception-password");
+    assert_redacted_value_hides(&redacted, "exception-token");
+    assert_redacted_value_hides(&redacted, "exception-secret");
+    assert_redacted_value_hides(&redacted, "exception-authorization");
+    assert_redacted_value_hides(&redacted, "exception-cookie");
+    assert_redacted_value_hides(&redacted, "exception-api-key");
+}
+
+#[test]
 fn test_exception_message_masks_authorization_bearer_tokens() {
     let redacted = redact_exception_message("request failed: Authorization: Bearer abc123");
 
@@ -75,6 +109,39 @@ fn test_exception_message_masks_authorization_bearer_tokens() {
 }
 
 #[test]
+fn test_sensitive_values_mask_tokens_with_trailing_punctuation() {
+    let cases = [
+        (
+            "request failed token=punct-token,",
+            "punct-token",
+            "[REDACTED],",
+        ),
+        (
+            "request failed password=punct-password.",
+            "punct-password",
+            "[REDACTED].",
+        ),
+        (
+            "request failed api_key=punct-api-key)",
+            "punct-api-key",
+            "[REDACTED])",
+        ),
+        (
+            "request failed Bearer punct-bearer,",
+            "punct-bearer",
+            "[REDACTED],",
+        ),
+    ];
+
+    for (message, secret, preserved_suffix) in cases {
+        let redacted = redact_field_value(RedactionClass::Sensitive, message);
+
+        assert_redacted_value_hides(&redacted, secret);
+        assert!(redacted.contains(preserved_suffix));
+    }
+}
+
+#[test]
 fn test_exception_messages_are_truncated() {
     let message = "a".repeat(10_000);
     let redacted = redact_exception_message(&message);
@@ -82,6 +149,33 @@ fn test_exception_messages_are_truncated() {
     assert!(redacted.chars().count() < message.chars().count());
     assert_ne!(redacted, message);
     assert!(redacted.ends_with("...[truncated]"));
+}
+
+#[test]
+fn test_sensitive_field_value_truncation_boundary() {
+    let boundary_value = "a".repeat(160);
+    let over_boundary_value = "a".repeat(161);
+
+    let boundary_redacted = redact_field_value(RedactionClass::Sensitive, &boundary_value);
+    let over_boundary_redacted =
+        redact_field_value(RedactionClass::Sensitive, &over_boundary_value);
+
+    assert_eq!(boundary_redacted, boundary_value);
+    assert_eq!(over_boundary_redacted.chars().count(), 160);
+    assert!(over_boundary_redacted.ends_with("...[truncated]"));
+}
+
+#[test]
+fn test_exception_message_truncation_boundary() {
+    let boundary_message = "a".repeat(256);
+    let over_boundary_message = "a".repeat(257);
+
+    let boundary_redacted = redact_exception_message(&boundary_message);
+    let over_boundary_redacted = redact_exception_message(&over_boundary_message);
+
+    assert_eq!(boundary_redacted, boundary_message);
+    assert_eq!(over_boundary_redacted.chars().count(), 256);
+    assert!(over_boundary_redacted.ends_with("...[truncated]"));
 }
 
 #[test]
@@ -176,6 +270,13 @@ fn test_field_values_redact_full_profile_paths_when_suffix_repeats_username() {
         assert_home_path_is_redacted(&sensitive_redacted, &forbidden_fragments);
         assert_home_path_is_redacted(&exception_redacted, &forbidden_fragments);
     }
+}
+
+fn assert_redacted_value_hides(redacted: &str, secret: &str) {
+    assert!(
+        !redacted.contains(secret),
+        "redacted value should not contain {secret:?}: {redacted}"
+    );
 }
 
 fn assert_home_path_is_redacted(redacted: &str, forbidden_fragments: &[&str]) {

@@ -308,6 +308,40 @@ fn test_render_event_message_redacts_authorization_bearer_tokens_from_error_fiel
 }
 
 #[test]
+fn test_render_event_message_redacts_case_insensitive_tokens_with_trailing_punctuation() {
+    let rendered = render_event_message(
+        BackendLogEvent::TimerCommandInputRejected,
+        &[
+            (
+                "error_message",
+                "request failed: Password=event-password Authorization: Bearer event-bearer, API_KEY=event-api-key)".to_string(),
+            ),
+            ("argument_name", "authorizationHeader".to_string()),
+            ("window_label", "main".to_string()),
+            ("command_name", "sync_timer_duration_settings".to_string()),
+        ],
+        None,
+    );
+
+    assert_rendered_log_fields(
+        &rendered,
+        &[
+            "event_id",
+            "command_name",
+            "window_label",
+            "argument_name",
+            "error_message",
+        ],
+    );
+    assert!(rendered.contains("[REDACTED]"));
+    assert!(rendered.contains("[REDACTED],"));
+    assert!(rendered.contains("[REDACTED])"));
+    assert!(!rendered.contains("event-password"));
+    assert!(!rendered.contains("event-bearer"));
+    assert!(!rendered.contains("event-api-key"));
+}
+
+#[test]
 fn test_render_event_message_prevents_error_object_structure_injection() {
     let error = io::Error::other("failed \"quoted\" fake=value \\\r\n\twith backslash \\");
     let rendered = render_event_message(
