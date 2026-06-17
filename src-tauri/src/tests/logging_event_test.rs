@@ -147,6 +147,64 @@ fn test_render_event_message_redacts_error_message_and_masks_high_risk_tokens() 
 }
 
 #[test]
+fn test_render_event_message_redacts_authorization_bearer_tokens_from_error_object() {
+    let cases = [
+        ("request failed: Authorization: Bearer abc123", "abc123"),
+        ("request failed: authorization: bearer def456", "def456"),
+        ("request failed: AUTHORIZATION: BEARER ghi789", "ghi789"),
+        ("request failed: Bearer jkl012", "jkl012"),
+    ];
+
+    for (message, token) in cases {
+        let error = io::Error::other(message);
+        let rendered = render_event_message(
+            BackendLogEvent::SessionFullscreenBreakEnterFailed,
+            &[],
+            Some(&error),
+        );
+
+        assert_rendered_event_identity(&rendered, "session.fullscreen_break.enter_failed");
+        assert_rendered_log_fields(&rendered, &["event_id", "error_message"]);
+        assert!(rendered.contains("[REDACTED]"));
+        assert!(rendered.contains("request"));
+        assert!(rendered.contains("failed"));
+        assert!(!rendered.contains(token));
+    }
+}
+
+#[test]
+fn test_render_event_message_redacts_authorization_bearer_tokens_from_error_field() {
+    let rendered = render_event_message(
+        BackendLogEvent::TimerCommandInputRejected,
+        &[
+            (
+                "error_message",
+                "request failed: Authorization: Bearer abc123".to_string(),
+            ),
+            ("argument_name", "authorizationHeader".to_string()),
+            ("window_label", "main".to_string()),
+            ("command_name", "sync_timer_duration_settings".to_string()),
+        ],
+        None,
+    );
+
+    assert_rendered_log_fields(
+        &rendered,
+        &[
+            "event_id",
+            "command_name",
+            "window_label",
+            "argument_name",
+            "error_message",
+        ],
+    );
+    assert!(rendered.contains("[REDACTED]"));
+    assert!(rendered.contains("request"));
+    assert!(rendered.contains("failed"));
+    assert!(!rendered.contains("abc123"));
+}
+
+#[test]
 fn test_render_event_message_prevents_error_object_structure_injection() {
     let error = io::Error::other("failed \"quoted\" fake=value \\\r\n\twith backslash \\");
     let rendered = render_event_message(

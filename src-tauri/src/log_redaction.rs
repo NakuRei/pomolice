@@ -215,20 +215,29 @@ fn is_home_profile_path_text_delimiter(character: char) -> bool {
 }
 
 fn mask_high_risk_tokens(value: &str) -> String {
+    let segments = value.split_whitespace().collect::<Vec<_>>();
     let mut masked_segments = Vec::new();
+    let mut index = 0;
 
-    for segment in value.split_whitespace() {
+    while index < segments.len() {
+        if let Some((redacted, consumed_segments)) =
+            redact_bearer_scheme_token(segments[index], segments.get(index + 1).copied())
+        {
+            masked_segments.push(redacted);
+            index += consumed_segments;
+            continue;
+        }
+
+        let segment = segments[index];
         masked_segments.push(mask_high_risk_segment(segment));
+        index += 1;
     }
 
     masked_segments.join(" ")
 }
 
 fn mask_high_risk_segment(segment: &str) -> String {
-    let stripped = segment.trim_end_matches(|character: char| {
-        matches!(character, ',' | '.' | ';' | ':' | ')' | ']' | '}')
-    });
-    let trailing = &segment[stripped.len()..];
+    let (stripped, trailing) = split_trailing_log_punctuation(segment);
 
     for key in HIGH_RISK_ASSIGNMENT_KEYS {
         if let Some(redacted) = redact_assignment_token(stripped, key) {
@@ -243,6 +252,15 @@ fn mask_high_risk_segment(segment: &str) -> String {
     segment.to_string()
 }
 
+fn split_trailing_log_punctuation(segment: &str) -> (&str, &str) {
+    let stripped = segment.trim_end_matches(|character: char| {
+        matches!(character, ',' | '.' | ';' | ':' | ')' | ']' | '}')
+    });
+    let trailing = &segment[stripped.len()..];
+
+    (stripped, trailing)
+}
+
 fn redact_assignment_token(segment: &str, key: &str) -> Option<String> {
     let (raw_key, _raw_value) = segment.split_once('=')?;
     if !raw_key.eq_ignore_ascii_case(key) {
@@ -250,6 +268,27 @@ fn redact_assignment_token(segment: &str, key: &str) -> Option<String> {
     }
 
     Some(format!("{raw_key}={REDACTED_VALUE}"))
+}
+
+fn redact_bearer_scheme_token(
+    segment: &str,
+    next_segment: Option<&str>,
+) -> Option<(String, usize)> {
+    let (scheme, scheme_trailing) = split_trailing_log_punctuation(segment);
+    if !scheme.eq_ignore_ascii_case(HIGH_RISK_BEARER_PREFIX) {
+        return None;
+    }
+
+    let next_segment = next_segment?;
+    let (token, token_trailing) = split_trailing_log_punctuation(next_segment);
+    if token.is_empty() {
+        return None;
+    }
+
+    Some((
+        format!("{scheme}{scheme_trailing} {REDACTED_VALUE}{token_trailing}"),
+        2,
+    ))
 }
 
 fn redact_bearer_token(segment: &str) -> Option<String> {

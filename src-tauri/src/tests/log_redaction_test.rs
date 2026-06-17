@@ -38,6 +38,19 @@ fn test_api_key_is_masked_by_high_risk_token_rule() {
 }
 
 #[test]
+fn test_sensitive_field_values_mask_authorization_bearer_tokens() {
+    let redacted = redact_field_value(
+        RedactionClass::Sensitive,
+        "request failed: Authorization: Bearer abc123",
+    );
+
+    assert!(redacted.contains("[REDACTED]"));
+    assert!(redacted.contains("request"));
+    assert!(redacted.contains("failed"));
+    assert!(!redacted.contains("abc123"));
+}
+
+#[test]
 fn test_exception_message_masks_same_token_vocabulary_as_frontend() {
     let redacted = redact_exception_message(
         "password=abc token=xyz secret=123 authorization=Bearer cookie=session api_key=456",
@@ -49,6 +62,16 @@ fn test_exception_message_masks_same_token_vocabulary_as_frontend() {
     assert!(!redacted.contains("123"));
     assert!(!redacted.contains("session"));
     assert!(!redacted.contains("456"));
+}
+
+#[test]
+fn test_exception_message_masks_authorization_bearer_tokens() {
+    let redacted = redact_exception_message("request failed: Authorization: Bearer abc123");
+
+    assert!(redacted.contains("[REDACTED]"));
+    assert!(redacted.contains("request"));
+    assert!(redacted.contains("failed"));
+    assert!(!redacted.contains("abc123"));
 }
 
 #[test]
