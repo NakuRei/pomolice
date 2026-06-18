@@ -122,7 +122,13 @@ pub(crate) fn collect_crossed_start_boundaries(
     now_local: DateTime<Local>,
     config: &WeeklyAutoRunConfig,
 ) -> Vec<BoundaryOccurrenceId> {
-    collect_crossed_boundaries(previous_local, now_local, config, BoundaryType::Start)
+    collect_crossed_boundaries(
+        &previous_local,
+        &now_local,
+        &Local,
+        config,
+        BoundaryType::Start,
+    )
 }
 
 /// Collects crossed end boundaries in chronological order.
@@ -133,12 +139,19 @@ pub(crate) fn collect_crossed_end_boundaries(
     now_local: DateTime<Local>,
     config: &WeeklyAutoRunConfig,
 ) -> Vec<BoundaryOccurrenceId> {
-    collect_crossed_boundaries(previous_local, now_local, config, BoundaryType::End)
+    collect_crossed_boundaries(
+        &previous_local,
+        &now_local,
+        &Local,
+        config,
+        BoundaryType::End,
+    )
 }
 
-fn collect_crossed_boundaries(
-    previous_local: DateTime<Local>,
-    now_local: DateTime<Local>,
+fn collect_crossed_boundaries<Tz: TimeZone>(
+    previous_local: &DateTime<Tz>,
+    now_local: &DateTime<Tz>,
+    timezone: &Tz,
     config: &WeeklyAutoRunConfig,
     boundary_type: BoundaryType,
 ) -> Vec<BoundaryOccurrenceId> {
@@ -146,11 +159,12 @@ fn collect_crossed_boundaries(
         return Vec::new();
     }
 
-    let earliest_allowed_previous = now_local - Duration::days(MAX_BOUNDARY_LOOKBACK_DAYS);
-    let effective_previous_local = if previous_local < earliest_allowed_previous {
+    let earliest_allowed_previous =
+        now_local.to_owned() - Duration::days(MAX_BOUNDARY_LOOKBACK_DAYS);
+    let effective_previous_local = if previous_local < &earliest_allowed_previous {
         earliest_allowed_previous
     } else {
-        previous_local
+        previous_local.to_owned()
     };
 
     let previous_epoch_seconds = effective_previous_local.timestamp();
@@ -190,7 +204,9 @@ fn collect_crossed_boundaries(
                 continue;
             };
 
-            for boundary_epoch_seconds in collect_boundary_epoch_candidates(boundary_local_naive) {
+            for boundary_epoch_seconds in
+                collect_boundary_epoch_candidates(timezone, boundary_local_naive)
+            {
                 if previous_epoch_seconds < boundary_epoch_seconds
                     && boundary_epoch_seconds <= now_epoch_seconds
                 {
@@ -299,8 +315,11 @@ fn first_weekday_on_or_after(reference_date: NaiveDate, target_weekday: Weekday)
     reference_date + Duration::days(offset_days)
 }
 
-fn collect_boundary_epoch_candidates(boundary_local_naive: NaiveDateTime) -> Vec<i64> {
-    match Local.from_local_datetime(&boundary_local_naive) {
+fn collect_boundary_epoch_candidates<Tz: TimeZone>(
+    timezone: &Tz,
+    boundary_local_naive: NaiveDateTime,
+) -> Vec<i64> {
+    match timezone.from_local_datetime(&boundary_local_naive) {
         LocalResult::Single(boundary_local) => vec![boundary_local.timestamp()],
         LocalResult::Ambiguous(first, second) => {
             let mut epoch_candidates = vec![first.timestamp(), second.timestamp()];
@@ -308,21 +327,27 @@ fn collect_boundary_epoch_candidates(boundary_local_naive: NaiveDateTime) -> Vec
             epoch_candidates.dedup();
             epoch_candidates
         }
-        LocalResult::None => resolve_nonexistent_boundary_epoch(boundary_local_naive)
+        LocalResult::None => resolve_nonexistent_boundary_epoch(timezone, boundary_local_naive)
             .into_iter()
             .collect(),
     }
 }
 
-fn resolve_nonexistent_boundary_epoch(boundary_local_naive: NaiveDateTime) -> Option<i64> {
-    find_earliest_epoch_on_or_after(boundary_local_naive)
-        .or_else(|| find_latest_epoch_on_or_before(boundary_local_naive))
+fn resolve_nonexistent_boundary_epoch<Tz: TimeZone>(
+    timezone: &Tz,
+    boundary_local_naive: NaiveDateTime,
+) -> Option<i64> {
+    find_earliest_epoch_on_or_after(timezone, boundary_local_naive)
+        .or_else(|| find_latest_epoch_on_or_before(timezone, boundary_local_naive))
 }
 
-fn find_earliest_epoch_on_or_after(reference_local_naive: NaiveDateTime) -> Option<i64> {
+fn find_earliest_epoch_on_or_after<Tz: TimeZone>(
+    timezone: &Tz,
+    reference_local_naive: NaiveDateTime,
+) -> Option<i64> {
     for minute_offset in 0..=MAX_NONEXISTENT_TIME_SEARCH_MINUTES {
         let candidate_local_naive = reference_local_naive + Duration::minutes(minute_offset);
-        match Local.from_local_datetime(&candidate_local_naive) {
+        match timezone.from_local_datetime(&candidate_local_naive) {
             LocalResult::Single(candidate_local) => return Some(candidate_local.timestamp()),
             LocalResult::Ambiguous(first, second) => {
                 return Some(first.timestamp().min(second.timestamp()));
@@ -333,10 +358,13 @@ fn find_earliest_epoch_on_or_after(reference_local_naive: NaiveDateTime) -> Opti
     None
 }
 
-fn find_latest_epoch_on_or_before(reference_local_naive: NaiveDateTime) -> Option<i64> {
+fn find_latest_epoch_on_or_before<Tz: TimeZone>(
+    timezone: &Tz,
+    reference_local_naive: NaiveDateTime,
+) -> Option<i64> {
     for minute_offset in 0..=MAX_NONEXISTENT_TIME_SEARCH_MINUTES {
         let candidate_local_naive = reference_local_naive - Duration::minutes(minute_offset);
-        match Local.from_local_datetime(&candidate_local_naive) {
+        match timezone.from_local_datetime(&candidate_local_naive) {
             LocalResult::Single(candidate_local) => return Some(candidate_local.timestamp()),
             LocalResult::Ambiguous(first, second) => {
                 return Some(first.timestamp().max(second.timestamp()));
@@ -352,6 +380,7 @@ mod tests {
     use super::*;
     use crate::types::HhMm;
     use chrono::{NaiveDate, Timelike};
+    use chrono_tz::Tz;
 
     fn local_datetime(
         year: i32,
@@ -451,21 +480,10 @@ mod tests {
         .expect("updated weekly config should be valid");
     }
 
-    fn boundary_epochs(boundary_ids: &[BoundaryOccurrenceId]) -> Vec<i64> {
-        boundary_ids
-            .iter()
-            .map(|boundary_id| {
-                boundary_id
-                    .epoch_seconds()
-                    .expect("boundary id should expose epoch seconds")
-            })
-            .collect()
-    }
-
-    fn schedule_boundary_id(
+    fn schedule_boundary_id<Tz: TimeZone>(
         slot_key: &str,
         boundary_kind: &str,
-        boundary_time: DateTime<Local>,
+        boundary_time: &DateTime<Tz>,
     ) -> BoundaryOccurrenceId {
         BoundaryOccurrenceId::for_schedule_boundary(
             slot_key,
@@ -474,104 +492,77 @@ mod tests {
         )
     }
 
-    fn weekday_key_from_weekday(weekday: Weekday) -> &'static str {
-        match weekday {
-            Weekday::Mon => "mon",
-            Weekday::Tue => "tue",
-            Weekday::Wed => "wed",
-            Weekday::Thu => "thu",
-            Weekday::Fri => "fri",
-            Weekday::Sat => "sat",
-            Weekday::Sun => "sun",
+    fn new_york() -> Tz {
+        chrono_tz::America::New_York
+    }
+
+    fn new_york_datetime(
+        year: i32,
+        month: u32,
+        day: u32,
+        hour: u32,
+        minute: u32,
+        second: u32,
+    ) -> DateTime<Tz> {
+        match new_york().with_ymd_and_hms(year, month, day, hour, minute, second) {
+            LocalResult::Single(datetime) => datetime,
+            LocalResult::Ambiguous(_, _) => panic!("test fixture datetime should be unambiguous"),
+            LocalResult::None => panic!("test fixture datetime should exist"),
         }
     }
 
-    fn find_nonexistent_local_naive_datetime() -> Option<NaiveDateTime> {
-        let now_year = Local::now().year();
-        for year in [now_year - 1, now_year, now_year + 1] {
-            for ordinal in 1..=366 {
-                let Some(date) = NaiveDate::from_yo_opt(year, ordinal) else {
-                    continue;
-                };
-
-                for hour in 0..24 {
-                    for minute in 0..60 {
-                        let naive = date
-                            .and_hms_opt(hour, minute, 0)
-                            .expect("hour/minute in range should form NaiveDateTime");
-                        if matches!(Local.from_local_datetime(&naive), LocalResult::None) {
-                            return Some(naive);
-                        }
-                    }
-                }
-            }
-        }
-        None
+    fn new_york_naive_datetime(
+        year: i32,
+        month: u32,
+        day: u32,
+        hour: u32,
+        minute: u32,
+        second: u32,
+    ) -> NaiveDateTime {
+        NaiveDate::from_ymd_opt(year, month, day)
+            .expect("test fixture date should be valid")
+            .and_hms_opt(hour, minute, second)
+            .expect("test fixture time should be valid")
     }
 
-    fn find_ambiguous_local_naive_datetime(
-    ) -> Option<(NaiveDateTime, DateTime<Local>, DateTime<Local>)> {
-        let now_year = Local::now().year();
-        for year in [now_year - 1, now_year, now_year + 1] {
-            for ordinal in 1..=366 {
-                let Some(date) = NaiveDate::from_yo_opt(year, ordinal) else {
-                    continue;
-                };
-
-                for hour in 0..24 {
-                    for minute in 0..60 {
-                        let naive = date
-                            .and_hms_opt(hour, minute, 0)
-                            .expect("hour/minute in range should form NaiveDateTime");
-                        if let LocalResult::Ambiguous(first, second) =
-                            Local.from_local_datetime(&naive)
-                        {
-                            let (earlier, later) = if first < second {
-                                (first, second)
-                            } else {
-                                (second, first)
-                            };
-                            return Some((naive, earlier, later));
-                        }
-                    }
-                }
-            }
-        }
-        None
+    fn new_york_nonexistent_naive_datetime(
+        year: i32,
+        month: u32,
+        day: u32,
+        hour: u32,
+        minute: u32,
+        second: u32,
+    ) -> NaiveDateTime {
+        let naive = new_york_naive_datetime(year, month, day, hour, minute, second);
+        assert!(
+            matches!(new_york().from_local_datetime(&naive), LocalResult::None),
+            "test fixture should be nonexistent in New York local time"
+        );
+        naive
     }
 
-    fn find_valid_local_datetime_on_or_before(reference: NaiveDateTime) -> Option<DateTime<Local>> {
-        for minute_offset in 0..=MAX_NONEXISTENT_TIME_SEARCH_MINUTES {
-            let candidate_naive = reference - Duration::minutes(minute_offset);
-            match Local.from_local_datetime(&candidate_naive) {
-                LocalResult::Single(candidate) => return Some(candidate),
-                LocalResult::Ambiguous(first, second) => {
-                    if first < second {
-                        return Some(second);
-                    }
-                    return Some(first);
-                }
-                LocalResult::None => {}
-            }
+    fn new_york_ambiguous_naive_datetime(
+        year: i32,
+        month: u32,
+        day: u32,
+        hour: u32,
+        minute: u32,
+        second: u32,
+    ) -> (NaiveDateTime, DateTime<Tz>, DateTime<Tz>) {
+        let naive = new_york_naive_datetime(year, month, day, hour, minute, second);
+        let LocalResult::Ambiguous(first, second) = new_york().from_local_datetime(&naive) else {
+            panic!("test fixture should be ambiguous in New York local time");
+        };
+
+        if first < second {
+            (naive, first, second)
+        } else {
+            (naive, second, first)
         }
-        None
     }
 
-    fn find_valid_local_datetime_on_or_after(reference: NaiveDateTime) -> Option<DateTime<Local>> {
-        for minute_offset in 0..=MAX_NONEXISTENT_TIME_SEARCH_MINUTES {
-            let candidate_naive = reference + Duration::minutes(minute_offset);
-            match Local.from_local_datetime(&candidate_naive) {
-                LocalResult::Single(candidate) => return Some(candidate),
-                LocalResult::Ambiguous(first, second) => {
-                    if first < second {
-                        return Some(first);
-                    }
-                    return Some(second);
-                }
-                LocalResult::None => {}
-            }
-        }
-        None
+    fn hh_mm_string(naive: NaiveDateTime) -> String {
+        format!("{:02}:{:02}", naive.time().hour(), naive.time().minute())
     }
 
     #[test]
@@ -636,7 +627,7 @@ mod tests {
             vec![schedule_boundary_id(
                 "mon",
                 "start",
-                local_datetime(2025, 1, 6, 9, 0, 0)
+                &local_datetime(2025, 1, 6, 9, 0, 0)
             )]
         );
     }
@@ -655,7 +646,7 @@ mod tests {
             vec![schedule_boundary_id(
                 "mon",
                 "end",
-                local_datetime(2025, 1, 7, 2, 0, 0)
+                &local_datetime(2025, 1, 7, 2, 0, 0)
             )]
         );
     }
@@ -674,7 +665,7 @@ mod tests {
             vec![schedule_boundary_id(
                 "mon",
                 "end",
-                local_datetime(2025, 1, 6, 18, 0, 0)
+                &local_datetime(2025, 1, 6, 18, 0, 0)
             )]
         );
     }
@@ -716,8 +707,8 @@ mod tests {
         assert_eq!(
             boundary_ids,
             vec![
-                schedule_boundary_id("mon", "start", local_datetime(2025, 1, 6, 9, 0, 0)),
-                schedule_boundary_id("tue", "start", local_datetime(2025, 1, 7, 9, 0, 0)),
+                schedule_boundary_id("mon", "start", &local_datetime(2025, 1, 6, 9, 0, 0)),
+                schedule_boundary_id("tue", "start", &local_datetime(2025, 1, 7, 9, 0, 0)),
             ]
         );
     }
@@ -753,76 +744,128 @@ mod tests {
     }
 
     #[test]
-    fn test_collect_crossed_start_boundaries_detects_crossing_for_nonexistent_dst_local_time() {
-        let Some(nonexistent_local_naive) = find_nonexistent_local_naive_datetime() else {
-            // This environment has no DST missing local timestamp.
-            return;
-        };
-
-        let before_gap_local = find_valid_local_datetime_on_or_before(nonexistent_local_naive)
-            .expect("expected valid local datetime before DST gap");
-        let after_gap_local = find_valid_local_datetime_on_or_after(nonexistent_local_naive)
-            .expect("expected valid local datetime after DST gap");
-
-        let previous_local = before_gap_local - Duration::seconds(1);
-        let now_local = after_gap_local + Duration::seconds(1);
-
-        let weekday_key = weekday_key_from_weekday(nonexistent_local_naive.weekday());
-        let start_time = format!(
-            "{:02}:{:02}",
-            nonexistent_local_naive.time().hour(),
-            nonexistent_local_naive.time().minute()
+    fn test_collect_crossed_start_boundaries_detects_nonexistent_dst_boundary() {
+        let nonexistent_boundary = new_york_nonexistent_naive_datetime(2025, 3, 9, 2, 30, 0);
+        let mut config = WeeklyAutoRunConfig::default();
+        update_weekday_slot(
+            &mut config,
+            "sun",
+            true,
+            &hh_mm_string(nonexistent_boundary),
+            "23:59",
         );
 
-        let mut config = WeeklyAutoRunConfig::default();
-        update_weekday_slot(&mut config, weekday_key, true, &start_time, "23:59");
+        let previous_local = new_york_datetime(2025, 3, 9, 1, 59, 59);
+        let now_local = new_york_datetime(2025, 3, 9, 3, 0, 1);
+        let expected_boundary = new_york_datetime(2025, 3, 9, 3, 0, 0);
 
-        let boundary_ids = collect_crossed_start_boundaries(previous_local, now_local, &config);
+        let boundary_ids = collect_crossed_boundaries(
+            &previous_local,
+            &now_local,
+            &new_york(),
+            &config,
+            BoundaryType::Start,
+        );
 
-        let matched_epochs = boundary_epochs(&boundary_ids);
-        assert!(
-            matched_epochs.contains(&after_gap_local.timestamp()),
-            "expected crossed start boundary for missing DST local time"
+        assert_eq!(
+            boundary_ids,
+            vec![schedule_boundary_id("sun", "start", &expected_boundary)]
         );
     }
 
     #[test]
-    fn test_collect_crossed_start_boundaries_detects_crossing_for_ambiguous_dst_local_time() {
-        let Some((ambiguous_local_naive, first_occurrence, second_occurrence)) =
-            find_ambiguous_local_naive_datetime()
-        else {
-            // This environment has no DST duplicated local timestamp.
-            return;
-        };
+    fn test_collect_crossed_end_boundaries_detects_nonexistent_dst_boundary() {
+        let nonexistent_boundary = new_york_nonexistent_naive_datetime(2025, 3, 9, 2, 30, 0);
+        let mut config = WeeklyAutoRunConfig::default();
+        update_weekday_slot(
+            &mut config,
+            "sun",
+            true,
+            "00:00",
+            &hh_mm_string(nonexistent_boundary),
+        );
+
+        let previous_local = new_york_datetime(2025, 3, 9, 1, 59, 59);
+        let now_local = new_york_datetime(2025, 3, 9, 3, 0, 1);
+        let expected_boundary = new_york_datetime(2025, 3, 9, 3, 0, 0);
+
+        let boundary_ids = collect_crossed_boundaries(
+            &previous_local,
+            &now_local,
+            &new_york(),
+            &config,
+            BoundaryType::End,
+        );
+
+        assert_eq!(
+            boundary_ids,
+            vec![schedule_boundary_id("sun", "end", &expected_boundary)]
+        );
+    }
+
+    #[test]
+    fn test_collect_crossed_start_boundaries_detects_ambiguous_dst_boundaries() {
+        let (ambiguous_boundary, first_occurrence, second_occurrence) =
+            new_york_ambiguous_naive_datetime(2025, 11, 2, 1, 30, 0);
+        let mut config = WeeklyAutoRunConfig::default();
+        update_weekday_slot(
+            &mut config,
+            "sun",
+            true,
+            &hh_mm_string(ambiguous_boundary),
+            "23:59",
+        );
 
         let previous_local = first_occurrence - Duration::seconds(1);
         let now_local = second_occurrence + Duration::seconds(1);
 
-        let weekday_key = weekday_key_from_weekday(ambiguous_local_naive.weekday());
-        let start_time = format!(
-            "{:02}:{:02}",
-            ambiguous_local_naive.time().hour(),
-            ambiguous_local_naive.time().minute()
+        let boundary_ids = collect_crossed_boundaries(
+            &previous_local,
+            &now_local,
+            &new_york(),
+            &config,
+            BoundaryType::Start,
         );
 
+        assert_eq!(
+            boundary_ids,
+            vec![
+                schedule_boundary_id("sun", "start", &first_occurrence),
+                schedule_boundary_id("sun", "start", &second_occurrence),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_collect_crossed_end_boundaries_detects_ambiguous_dst_boundaries() {
+        let (ambiguous_boundary, first_occurrence, second_occurrence) =
+            new_york_ambiguous_naive_datetime(2025, 11, 2, 1, 30, 0);
         let mut config = WeeklyAutoRunConfig::default();
-        update_weekday_slot(&mut config, weekday_key, true, &start_time, "23:59");
-
-        let boundary_ids = collect_crossed_start_boundaries(previous_local, now_local, &config);
-        let matched_epochs = boundary_epochs(&boundary_ids);
-
-        assert!(
-            matched_epochs.len() >= 2,
-            "expected duplicated DST local time to produce two boundary occurrences"
+        update_weekday_slot(
+            &mut config,
+            "sun",
+            true,
+            "00:00",
+            &hh_mm_string(ambiguous_boundary),
         );
 
-        assert!(
-            matched_epochs.contains(&first_occurrence.timestamp()),
-            "first DST boundary occurrence should be included"
+        let previous_local = first_occurrence - Duration::seconds(1);
+        let now_local = second_occurrence + Duration::seconds(1);
+
+        let boundary_ids = collect_crossed_boundaries(
+            &previous_local,
+            &now_local,
+            &new_york(),
+            &config,
+            BoundaryType::End,
         );
-        assert!(
-            matched_epochs.contains(&second_occurrence.timestamp()),
-            "second DST boundary occurrence should be included"
+
+        assert_eq!(
+            boundary_ids,
+            vec![
+                schedule_boundary_id("sun", "end", &first_occurrence),
+                schedule_boundary_id("sun", "end", &second_occurrence),
+            ]
         );
     }
 
@@ -842,11 +885,11 @@ mod tests {
         assert_eq!(
             boundary_ids,
             vec![
-                schedule_boundary_id("mon", "start", local_datetime(2025, 1, 6, 9, 0, 0)),
-                schedule_boundary_id("tue", "start", local_datetime(2025, 1, 7, 9, 0, 0)),
-                schedule_boundary_id("wed", "start", local_datetime(2025, 1, 8, 9, 0, 0)),
-                schedule_boundary_id("thu", "start", local_datetime(2025, 1, 9, 9, 0, 0)),
-                schedule_boundary_id("fri", "start", local_datetime(2025, 1, 10, 9, 0, 0)),
+                schedule_boundary_id("mon", "start", &local_datetime(2025, 1, 6, 9, 0, 0)),
+                schedule_boundary_id("tue", "start", &local_datetime(2025, 1, 7, 9, 0, 0)),
+                schedule_boundary_id("wed", "start", &local_datetime(2025, 1, 8, 9, 0, 0)),
+                schedule_boundary_id("thu", "start", &local_datetime(2025, 1, 9, 9, 0, 0)),
+                schedule_boundary_id("fri", "start", &local_datetime(2025, 1, 10, 9, 0, 0)),
             ]
         );
     }
