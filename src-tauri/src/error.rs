@@ -9,7 +9,7 @@ use crate::types::TimerStatus;
 
 /// Main error type for the Pomolice application
 #[derive(Error, Debug, strum::EnumDiscriminants)]
-#[strum_discriminants(derive(strum::EnumIter))]
+#[strum_discriminants(derive(strum::EnumIter, PartialOrd, Ord))]
 pub(crate) enum PomoliceError {
     #[error("Unauthorized window: {0}")]
     Unauthorized(String),
@@ -446,38 +446,14 @@ mod tests {
         })
     }
 
-    fn pomolice_error_variant_name(error: &PomoliceError) -> &'static str {
-        match error {
-            PomoliceError::Unauthorized(_) => "Unauthorized",
-            PomoliceError::InvalidStateTransition { .. } => "InvalidStateTransition",
-            PomoliceError::RateLimited { .. } => "RateLimited",
-            PomoliceError::WindowControl(_) => "WindowControl",
-            PomoliceError::PersistenceSave(_) => "PersistenceSave",
-            PomoliceError::PersistenceTaskJoin { .. } => "PersistenceTaskJoin",
-        }
-    }
-
-    fn pomolice_error_discriminant_name(discriminant: PomoliceErrorDiscriminants) -> &'static str {
-        match discriminant {
-            PomoliceErrorDiscriminants::Unauthorized => "Unauthorized",
-            PomoliceErrorDiscriminants::InvalidStateTransition => "InvalidStateTransition",
-            PomoliceErrorDiscriminants::RateLimited => "RateLimited",
-            PomoliceErrorDiscriminants::WindowControl => "WindowControl",
-            PomoliceErrorDiscriminants::PersistenceSave => "PersistenceSave",
-            PomoliceErrorDiscriminants::PersistenceTaskJoin => "PersistenceTaskJoin",
-        }
-    }
-
     fn assert_all_pomolice_error_variants_are_represented(
         occurrences: &[(PomoliceError, Vec<&'static str>)],
     ) {
         let actual_variants = occurrences
             .iter()
-            .map(|(error, _)| pomolice_error_variant_name(error))
+            .map(|(error, _)| PomoliceErrorDiscriminants::from(error))
             .collect::<BTreeSet<_>>();
-        let expected_variants = PomoliceErrorDiscriminants::iter()
-            .map(pomolice_error_discriminant_name)
-            .collect::<BTreeSet<_>>();
+        let expected_variants = PomoliceErrorDiscriminants::iter().collect::<BTreeSet<_>>();
 
         assert_eq!(
             actual_variants, expected_variants,
