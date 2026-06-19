@@ -1019,7 +1019,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn end_boundary_does_not_reemit_stop_pending_for_same_boundary() {
+    async fn end_boundary_does_not_emit_stop_pending_after_boundary_window_has_passed() {
         let state = build_test_state_without_persistence_path().await;
         start_work_with_schedule_source(&state, true, TimerStartSource::ManualInsideWindow).await;
 
@@ -1046,6 +1046,60 @@ mod tests {
 
         assert_eq!(effects.auto_run_stop_pending_count, 1);
         assert_no_work_start_effects(&effects);
+    }
+
+    #[tokio::test]
+    async fn end_boundary_does_not_emit_stop_pending_when_tick_time_does_not_advance() {
+        let state = build_test_state_without_persistence_path().await;
+        start_work_with_schedule_source(&state, true, TimerStartSource::ManualInsideWindow).await;
+
+        let mut runtime_state = runtime_state_at(
+            local_datetime(2025, 1, 6, 18, 0, 0),
+            state.config_revision.load(Ordering::Acquire),
+        );
+        let mut effects = RecordingSchedulerRuntimeEffects::default();
+
+        run_scheduler_tick_with_effects(
+            &state,
+            &mut runtime_state,
+            local_datetime(2025, 1, 6, 18, 0, 0),
+            &mut effects,
+        )
+        .await;
+
+        assert_eq!(effects.auto_run_stop_pending_count, 0);
+        assert_no_work_start_effects(&effects);
+        assert_eq!(
+            complete_work_session(&state).await,
+            SessionTransitionReason::WorkToBreak
+        );
+    }
+
+    #[tokio::test]
+    async fn end_boundary_emits_stop_pending_after_large_time_jump_past_scheduled_end() {
+        let state = build_test_state_without_persistence_path().await;
+        start_work_with_schedule_source(&state, true, TimerStartSource::ManualInsideWindow).await;
+
+        let mut runtime_state = runtime_state_at(
+            local_datetime(2025, 1, 6, 17, 59, 50),
+            state.config_revision.load(Ordering::Acquire),
+        );
+        let mut effects = RecordingSchedulerRuntimeEffects::default();
+
+        run_scheduler_tick_with_effects(
+            &state,
+            &mut runtime_state,
+            local_datetime(2025, 1, 8, 10, 0, 0),
+            &mut effects,
+        )
+        .await;
+
+        assert_eq!(effects.auto_run_stop_pending_count, 1);
+        assert_no_work_start_effects(&effects);
+        assert_eq!(
+            complete_work_session(&state).await,
+            SessionTransitionReason::ScheduledStopExecuted
+        );
     }
 
     #[tokio::test]
