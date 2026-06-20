@@ -758,14 +758,15 @@ mod tests {
     use crate::managers::clock::testing::FixedClock;
     use crate::managers::clock::Clock;
     use crate::managers::persistence::PersistenceManager;
-    use chrono::Utc;
+    use crate::scheduler::SchedulerTickTestRuntime;
+    use chrono::{Local, LocalResult, Utc};
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool as StdAtomicBool, AtomicUsize as StdAtomicUsize};
     use std::sync::{Arc, Mutex as StdMutex};
     use std::time::Duration as StdDuration;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use crate::types::{DayAutoRunSlot, HhMm, SessionType, TimerState};
+    use crate::types::{DayAutoRunSlot, HhMm, SessionTransitionReason, SessionType, TimerState};
     use chrono::TimeZone;
     use serde_json::json;
     use tokio_util::sync::CancellationToken;
@@ -921,6 +922,21 @@ mod tests {
 
     fn fixed_clock(now_utc: chrono::DateTime<Utc>) -> Arc<FixedClock> {
         Arc::new(FixedClock::new(now_utc.with_timezone(&Local)))
+    }
+
+    fn local_datetime(
+        year: i32,
+        month: u32,
+        day: u32,
+        hour: u32,
+        minute: u32,
+        second: u32,
+    ) -> chrono::DateTime<Local> {
+        match Local.with_ymd_and_hms(year, month, day, hour, minute, second) {
+            LocalResult::Single(datetime) => datetime,
+            LocalResult::Ambiguous(first, _) => first,
+            LocalResult::None => panic!("test local datetime should exist"),
+        }
     }
 
     fn as_clock_trait(clock: &Arc<FixedClock>) -> Arc<dyn Clock + Send + Sync> {
@@ -1268,8 +1284,54 @@ mod tests {
         .expect("weekly config should be valid")
     }
 
+    fn monday_and_tuesday_config(start_time: &str, end_time: &str) -> WeeklyAutoRunConfig {
+        WeeklyAutoRunConfig::try_new(
+            enabled_slot(start_time, end_time),
+            enabled_slot(start_time, end_time),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+        )
+        .expect("weekly config should be valid")
+    }
+
     fn make_enabled_daytime_monday_config() -> WeeklyAutoRunConfig {
         monday_config("09:00", "18:00")
+    }
+
+    async fn sync_auto_run_policies_for_test(
+        state: &AppState,
+        weekly_auto_run_config: WeeklyAutoRunConfig,
+        post_break_transition_policy: PostBreakTransitionPolicy,
+    ) {
+        let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+
+        sync_automation_policies_with_runtime_effects(
+            state,
+            true,
+            weekly_auto_run_config,
+            post_break_transition_policy,
+            &mut runtime_effect_shell,
+        )
+        .await
+        .expect("automation policy sync should succeed");
+    }
+
+    async fn start_auto_run_eligible_work_session(state: &AppState) {
+        let mut timer = state.timer_manager.lock().await;
+        timer
+            .start_work_with_source(
+                TimerSettings::default(),
+                TimerStartSource::ManualInsideWindow,
+            )
+            .expect("eligible work session should start");
+    }
+
+    async fn complete_work_session_reason(state: &AppState) -> SessionTransitionReason {
+        let mut timer = state.timer_manager.lock().await;
+        timer.complete_work_session_transition().transition_reason
     }
 
     #[test]
@@ -1612,6 +1674,99 @@ mod tests {
         let changed = did_scheduler_topology_change(true, &previous_config, true, &next_config);
 
         assert!(changed);
+    }
+
+    #[tokio::test]
+    async fn topology_change_does_not_replay_past_end_boundary() {
+        let state = build_test_state_without_persistence_path().await;
+        sync_auto_run_policies_for_test(
+            &state,
+            make_enabled_daytime_monday_config(),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+        start_auto_run_eligible_work_session(&state).await;
+
+        let mut scheduler_runtime =
+            SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 17, 59, 50));
+
+        sync_auto_run_policies_for_test(
+            &state,
+            monday_and_tuesday_config("09:00", "18:00"),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+        scheduler_runtime
+            .run_tick(&state, local_datetime(2025, 1, 6, 18, 30, 0))
+            .await;
+
+        assert_eq!(
+            complete_work_session_reason(&state).await,
+            SessionTransitionReason::WorkToBreak
+        );
+    }
+
+    #[tokio::test]
+    async fn topology_change_keeps_future_end_boundary_active() {
+        let state = build_test_state_without_persistence_path().await;
+        sync_auto_run_policies_for_test(
+            &state,
+            make_enabled_daytime_monday_config(),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+        start_auto_run_eligible_work_session(&state).await;
+
+        let mut scheduler_runtime =
+            SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 17, 59, 50));
+
+        sync_auto_run_policies_for_test(
+            &state,
+            monday_and_tuesday_config("09:00", "18:00"),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+        scheduler_runtime
+            .run_tick(&state, local_datetime(2025, 1, 6, 18, 30, 0))
+            .await;
+        scheduler_runtime
+            .run_tick(&state, local_datetime(2025, 1, 7, 18, 0, 10))
+            .await;
+
+        assert_eq!(
+            complete_work_session_reason(&state).await,
+            SessionTransitionReason::ScheduledStopExecuted
+        );
+    }
+
+    #[tokio::test]
+    async fn policy_only_change_does_not_suppress_arriving_end_boundary() {
+        let state = build_test_state_without_persistence_path().await;
+        sync_auto_run_policies_for_test(
+            &state,
+            make_enabled_daytime_monday_config(),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+        start_auto_run_eligible_work_session(&state).await;
+
+        let mut scheduler_runtime =
+            SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 17, 59, 50));
+
+        sync_auto_run_policies_for_test(
+            &state,
+            make_enabled_daytime_monday_config(),
+            PostBreakTransitionPolicy::StartNextWorkAutomatically,
+        )
+        .await;
+        scheduler_runtime
+            .run_tick(&state, local_datetime(2025, 1, 6, 18, 0, 10))
+            .await;
+
+        assert_eq!(
+            complete_work_session_reason(&state).await,
+            SessionTransitionReason::ScheduledStopExecuted
+        );
     }
 
     #[tokio::test(start_paused = true)]

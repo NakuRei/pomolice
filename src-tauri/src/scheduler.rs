@@ -99,6 +99,75 @@ impl SchedulerRuntimeEffects for AppHandleSchedulerRuntimeEffects<'_> {
     }
 }
 
+#[cfg(test)]
+pub(crate) struct SchedulerTickTestRuntime {
+    runtime_state: SchedulerRuntimeState,
+}
+
+#[cfg(test)]
+impl SchedulerTickTestRuntime {
+    pub(crate) fn from_state(
+        state_handle: &state::AppState,
+        previous_local: DateTime<Local>,
+    ) -> Self {
+        Self::new(
+            previous_local,
+            state_handle.config_revision.load(Ordering::Acquire),
+        )
+    }
+
+    fn new(previous_local: DateTime<Local>, last_seen_config_revision: u64) -> Self {
+        Self {
+            runtime_state: SchedulerRuntimeState {
+                processed_boundary_occurrences: HashSet::new(),
+                last_checked_local: previous_local,
+                start_boundaries_blocked_until_idle: false,
+                last_seen_config_revision,
+            },
+        }
+    }
+
+    pub(crate) async fn run_tick(
+        &mut self,
+        state_handle: &state::AppState,
+        now_local: DateTime<Local>,
+    ) {
+        let mut effects = NoopSchedulerRuntimeEffects;
+        run_scheduler_tick_with_effects(
+            state_handle,
+            &mut self.runtime_state,
+            now_local,
+            &mut effects,
+        )
+        .await;
+    }
+}
+
+#[cfg(test)]
+struct NoopSchedulerRuntimeEffects;
+
+#[cfg(test)]
+impl SchedulerRuntimeEffects for NoopSchedulerRuntimeEffects {
+    fn emit_timer_tick(&mut self, _tick_payload: &crate::types::TimerTickPayload) {}
+
+    fn update_tray(&mut self, _tick_payload: &crate::types::TimerTickPayload) {}
+
+    fn emit_work_started(&mut self, _work_duration_secs: u64) {}
+
+    fn emit_auto_run_stop_pending(&mut self) {}
+
+    fn spawn_timer_task<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async {})
+    }
+
+    fn persist_current_state_with_trigger<'a>(
+        &'a mut self,
+        _trigger: &'static str,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async {})
+    }
+}
+
 async fn persist_current_state_with_trigger(app: &AppHandle, trigger: &'static str) {
     let state_handle = app.state::<state::AppState>();
 
