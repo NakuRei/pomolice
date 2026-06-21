@@ -665,8 +665,9 @@ pub(crate) async fn lib_handle_external_break_exit(app: AppHandle) {
 #[cfg(test)]
 mod emit_order_tests {
     use super::{
-        emit_session_completion_events_with_effects, enter_break_mode_with_effects,
-        exit_break_mode_with_effects, BreakLockRuntimeEffects, SessionPipelineRuntimeEffects,
+        apply_session_completion_runtime_effects, emit_session_completion_events_with_effects,
+        enter_break_mode_with_effects, exit_break_mode_with_effects, BreakLockRuntimeEffects,
+        SessionPipelineRuntimeEffects,
     };
     use crate::error::PomoliceError;
     use crate::managers::clock::testing::FixedClock;
@@ -675,7 +676,8 @@ mod emit_order_tests {
     use crate::managers::window::{WindowState, WindowStateManager};
     use crate::state::AppState;
     use crate::types::{
-        SessionTransitionOutcome, SessionType, TimerState, TimerStatus, TimerTickPayload,
+        PostBreakTransitionPolicy, SessionTransitionOutcome, SessionType, TimerSettings,
+        TimerState, TimerStatus, TimerTickPayload,
     };
     use chrono::{Local, TimeZone, Utc};
     use std::future::Future;
@@ -687,7 +689,13 @@ mod emit_order_tests {
     #[derive(Default)]
     struct RecordingSessionPipelineRuntimeEffects {
         emitted_event_names: Vec<&'static str>,
+        emitted_events: Vec<RecordedPipelineEvent>,
         tray_update_count: usize,
+    }
+
+    struct RecordedPipelineEvent {
+        event_name: &'static str,
+        event_payload: serde_json::Value,
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -781,8 +789,13 @@ mod emit_order_tests {
     }
 
     impl SessionPipelineRuntimeEffects for RecordingSessionPipelineRuntimeEffects {
-        fn emit_event<T: serde::Serialize>(&mut self, event_name: &'static str, _payload: &T) {
+        fn emit_event<T: serde::Serialize>(&mut self, event_name: &'static str, payload: &T) {
             self.emitted_event_names.push(event_name);
+            self.emitted_events.push(RecordedPipelineEvent {
+                event_name,
+                event_payload: serde_json::to_value(payload)
+                    .expect("pipeline event payload should serialize"),
+            });
         }
 
         fn update_tray(&mut self, _tick_payload: &TimerTickPayload) {
@@ -887,6 +900,56 @@ mod emit_order_tests {
         let _ = timer.apply_persisted_state(timer_state);
     }
 
+    fn timer_settings(
+        work_duration_secs: u64,
+        short_break_duration_secs: u64,
+        long_break_duration_secs: u64,
+        long_break_interval: u32,
+    ) -> TimerSettings {
+        TimerSettings::try_from_raw(
+            work_duration_secs,
+            short_break_duration_secs,
+            long_break_duration_secs,
+            long_break_interval,
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .expect("timer settings should be valid")
+    }
+
+    async fn complete_work_session_with_recorded_effects(
+        app_state: &AppState,
+        timer_state: TimerState,
+    ) -> RecordingSessionPipelineRuntimeEffects {
+        replace_timer_state(app_state, timer_state).await;
+
+        let transition_outcome = {
+            let mut timer = app_state.timer_manager.lock().await;
+            let completed_payload = timer.complete_work_session_transition();
+            SessionTransitionOutcome::from_completed_payload(&completed_payload)
+        };
+
+        let mut effects = RecordingSessionPipelineRuntimeEffects::default();
+        apply_session_completion_runtime_effects(
+            app_state,
+            &transition_outcome,
+            false,
+            &mut effects,
+        )
+        .await;
+        effects
+    }
+
+    fn emitted_timer_tick_payload(
+        effects: &RecordingSessionPipelineRuntimeEffects,
+    ) -> &serde_json::Value {
+        &effects
+            .emitted_events
+            .iter()
+            .find(|event| event.event_name == "timer_tick")
+            .expect("timer_tick event should be emitted")
+            .event_payload
+    }
+
     fn assert_session_completion_emits(
         transition_outcome: &SessionTransitionOutcome,
         expected_event_names: &[&'static str],
@@ -909,6 +972,92 @@ mod emit_order_tests {
         assert_session_completion_emits(
             &SessionTransitionOutcome::work_to_break(SessionType::ShortBreak),
             &["session_completed", "timer_tick"],
+        );
+    }
+
+    #[tokio::test]
+    async fn test_work_completion_emits_short_break_tick_with_completed_count_and_configured_duration(
+    ) {
+        let state = build_test_state_without_persistence_path().await;
+        let effects = complete_work_session_with_recorded_effects(
+            &state,
+            TimerState {
+                status: TimerStatus::Working,
+                session_type: SessionType::Work,
+                remaining_seconds: 0,
+                current_cycle: 1,
+                completed_pomodoros: 7,
+                settings: timer_settings(1500, 420, 1200, 4),
+                ..TimerState::default()
+            },
+        )
+        .await;
+
+        assert_eq!(
+            effects.emitted_event_names.as_slice(),
+            ["session_completed", "timer_tick"]
+        );
+        assert_eq!(effects.tray_update_count, 1);
+
+        let timer_tick_payload = emitted_timer_tick_payload(&effects);
+        assert_eq!(
+            timer_tick_payload["status"],
+            serde_json::to_value(TimerStatus::OnBreak).expect("status should serialize")
+        );
+        assert_eq!(
+            timer_tick_payload["session_type"],
+            serde_json::to_value(SessionType::ShortBreak).expect("session type should serialize")
+        );
+        assert_eq!(
+            timer_tick_payload["remaining_seconds"],
+            serde_json::json!(420)
+        );
+        assert_eq!(
+            timer_tick_payload["completed_pomodoros"],
+            serde_json::json!(8)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_work_completion_emits_long_break_tick_with_completed_count_and_configured_duration(
+    ) {
+        let state = build_test_state_without_persistence_path().await;
+        let effects = complete_work_session_with_recorded_effects(
+            &state,
+            TimerState {
+                status: TimerStatus::Working,
+                session_type: SessionType::Work,
+                remaining_seconds: 0,
+                current_cycle: 4,
+                completed_pomodoros: 7,
+                settings: timer_settings(1500, 420, 1200, 4),
+                ..TimerState::default()
+            },
+        )
+        .await;
+
+        assert_eq!(
+            effects.emitted_event_names.as_slice(),
+            ["session_completed", "timer_tick"]
+        );
+        assert_eq!(effects.tray_update_count, 1);
+
+        let timer_tick_payload = emitted_timer_tick_payload(&effects);
+        assert_eq!(
+            timer_tick_payload["status"],
+            serde_json::to_value(TimerStatus::OnBreak).expect("status should serialize")
+        );
+        assert_eq!(
+            timer_tick_payload["session_type"],
+            serde_json::to_value(SessionType::LongBreak).expect("session type should serialize")
+        );
+        assert_eq!(
+            timer_tick_payload["remaining_seconds"],
+            serde_json::json!(1200)
+        );
+        assert_eq!(
+            timer_tick_payload["completed_pomodoros"],
+            serde_json::json!(8)
         );
     }
 
