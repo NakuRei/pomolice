@@ -7,6 +7,16 @@ import {
   type BackendErrorCode,
 } from "./classifyBackendError";
 
+function expectOnlyClassificationResponsibilities(
+  classification: BackendErrorClassification,
+): void {
+  expect(Object.keys(classification).sort()).toEqual([
+    "canRetry",
+    "severity",
+    "userMessage",
+  ]);
+}
+
 describe("classifyBackendError", () => {
   it("classifies known structured backend error responses by code", () => {
     const classifications: {
@@ -16,7 +26,6 @@ describe("classifyBackendError", () => {
       {
         code: "invalid_state_transition",
         expected: {
-          isTransient: false,
           severity: "recoverable",
           canRetry: false,
         },
@@ -24,7 +33,6 @@ describe("classifyBackendError", () => {
       {
         code: "rate_limited",
         expected: {
-          isTransient: true,
           severity: "recoverable",
           canRetry: true,
         },
@@ -32,7 +40,6 @@ describe("classifyBackendError", () => {
       {
         code: "window_control_error",
         expected: {
-          isTransient: false,
           severity: "recoverable",
           canRetry: true,
         },
@@ -40,7 +47,6 @@ describe("classifyBackendError", () => {
       {
         code: "persistence_error",
         expected: {
-          isTransient: false,
           severity: "recoverable",
           canRetry: true,
         },
@@ -48,7 +54,6 @@ describe("classifyBackendError", () => {
       {
         code: "unauthorized_window",
         expected: {
-          isTransient: false,
           severity: "recoverable",
           canRetry: false,
         },
@@ -56,7 +61,6 @@ describe("classifyBackendError", () => {
       {
         code: "invalid_command_input",
         expected: {
-          isTransient: false,
           severity: "recoverable",
           canRetry: false,
         },
@@ -80,6 +84,7 @@ describe("classifyBackendError", () => {
       });
 
       expect(classification).toMatchObject(expected);
+      expectOnlyClassificationResponsibilities(classification);
       expect(sameCodeWithDifferentMessage).toEqual(classification);
       expect(classification.userMessage).toEqual(expect.any(String));
       expect(classification.userMessage).not.toBe("");
@@ -110,6 +115,10 @@ describe("classifyBackendError", () => {
   });
 
   it("uses the default classification for malformed values, unknown codes, and legacy strings", () => {
+    const defaultClassification = classifyBackendError({
+      code: "unknown_error",
+      message: "first diagnostic",
+    });
     const inputs: unknown[] = [
       {
         code: "unknown_error",
@@ -129,11 +138,8 @@ describe("classifyBackendError", () => {
     for (const input of inputs) {
       const classification = classifyBackendError(input);
 
-      expect(classification).toMatchObject({
-        isTransient: false,
-        severity: "recoverable",
-        canRetry: false,
-      });
+      expect(classification).toEqual(defaultClassification);
+      expectOnlyClassificationResponsibilities(classification);
       expect(classification.userMessage).toEqual(expect.any(String));
       expect(classification.userMessage).not.toBe("");
       expect(classification.userMessage).not.toContain("first diagnostic");

@@ -15,15 +15,11 @@ export interface BackendErrorResponse {
 
 /** The result of classifying a structured backend error response. */
 export interface BackendErrorClassification {
-  /** Japanese message to display in the UI. */
+  /** User-facing presentation identity shown in the UI. */
   userMessage: string;
-  /**
-   * Whether the error is likely to resolve on its own (e.g. a lock contention or rate limit).
-   * Transient errors may be retried automatically by the caller.
-   * Non-transient errors require user action or state change to resolve.
-   */
-  isTransient: boolean;
+  /** Display importance used to choose the UI treatment. */
   severity: ErrorSeverity;
+  /** Whether the UI should offer a retry action. */
   canRetry: boolean;
 }
 
@@ -32,37 +28,31 @@ const CODE_CLASSIFICATIONS: Readonly<
 > = {
   unauthorized_window: {
     userMessage: "権限エラーが発生しました",
-    isTransient: false,
     severity: "recoverable",
     canRetry: false,
   },
   invalid_state_transition: {
     userMessage: "現在の状態では実行できません",
-    isTransient: false,
     severity: "recoverable",
     canRetry: false,
   },
   rate_limited: {
     userMessage: "少々お待ちください",
-    isTransient: true,
     severity: "recoverable",
     canRetry: true,
   },
   window_control_error: {
     userMessage: "ウィンドウ操作に失敗しました",
-    isTransient: false,
     severity: "recoverable",
     canRetry: true,
   },
   persistence_error: {
     userMessage: "データの保存に失敗しました",
-    isTransient: false,
     severity: "recoverable",
     canRetry: true,
   },
   invalid_command_input: {
     userMessage: "入力内容を確認してください",
-    isTransient: false,
     severity: "recoverable",
     canRetry: false,
   },
@@ -70,7 +60,6 @@ const CODE_CLASSIFICATIONS: Readonly<
 
 const DEFAULT_BACKEND_ERROR_CLASSIFICATION: BackendErrorClassification = {
   userMessage: "予期しないエラーが発生しました",
-  isTransient: false,
   severity: "recoverable",
   canRetry: false,
 };
