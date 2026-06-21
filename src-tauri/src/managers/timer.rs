@@ -1015,6 +1015,46 @@ mod tests {
     }
 
     #[test]
+    fn test_tick_keeps_completed_work_session_payload_at_zero() {
+        let mut mgr = make_manager();
+        let settings = make_settings(1, 300, 900, 4);
+        mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+            .unwrap();
+
+        let (should_complete, payload) = mgr.tick();
+        assert!(should_complete);
+        assert_eq!(payload.remaining_seconds, 0);
+
+        let (should_complete_after_extra_tick, payload_after_extra_tick) = mgr.tick();
+        assert!(should_complete_after_extra_tick);
+        assert_eq!(payload_after_extra_tick.remaining_seconds, 0);
+        assert_eq!(payload_after_extra_tick.status, TimerStatus::Working);
+        assert_eq!(payload_after_extra_tick.session_type, SessionType::Work);
+    }
+
+    #[test]
+    fn test_tick_keeps_completed_break_session_payload_at_zero() {
+        let mut mgr = make_manager();
+        let settings = make_settings(1, 1, 900, 4);
+        mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+            .unwrap();
+        mgr.transition_to_break();
+
+        let (should_complete, payload) = mgr.tick();
+        assert!(should_complete);
+        assert_eq!(payload.remaining_seconds, 0);
+
+        let (should_complete_after_extra_tick, payload_after_extra_tick) = mgr.tick();
+        assert!(should_complete_after_extra_tick);
+        assert_eq!(payload_after_extra_tick.remaining_seconds, 0);
+        assert_eq!(payload_after_extra_tick.status, TimerStatus::OnBreak);
+        assert_eq!(
+            payload_after_extra_tick.session_type,
+            SessionType::ShortBreak
+        );
+    }
+
+    #[test]
     fn test_transition_to_break_emits_work_to_break_contract_fields() {
         let mut mgr = make_manager();
         let settings = make_settings(1500, 300, 900, 4);
