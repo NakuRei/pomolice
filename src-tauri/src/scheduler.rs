@@ -308,13 +308,15 @@ async fn run_scheduler_tick_with_effects(
     let previous_local = runtime_state.last_checked_local;
 
     let timer_snapshot = load_scheduler_timer_snapshot(state_handle).await;
-    resume_start_boundary_evaluation_when_idle(runtime_state, timer_snapshot.status);
+    let resumed_start_boundary_evaluation =
+        resume_start_boundary_evaluation_when_idle(runtime_state, timer_snapshot.status);
 
     let tick_plan = build_scheduler_tick_plan(
         state_handle,
         runtime_state,
         now_local,
         timer_snapshot.auto_run_feature_enabled,
+        resumed_start_boundary_evaluation,
     );
 
     process_crossed_end_boundaries_with_effects(
@@ -359,14 +361,17 @@ async fn load_scheduler_timer_snapshot(state_handle: &state::AppState) -> Schedu
 fn resume_start_boundary_evaluation_when_idle(
     runtime_state: &mut SchedulerRuntimeState,
     timer_status: TimerStatus,
-) {
+) -> bool {
     if runtime_state.start_boundaries_blocked_until_idle && timer_status == TimerStatus::Idle {
         runtime_state.start_boundaries_blocked_until_idle = false;
         log_info_event(
             BackendLogEvent::SchedulerResumedStartBoundaryEvaluation,
             &[],
         );
+        return true;
     }
+
+    false
 }
 
 fn build_scheduler_tick_plan(
@@ -374,6 +379,7 @@ fn build_scheduler_tick_plan(
     runtime_state: &mut SchedulerRuntimeState,
     now_local: DateTime<Local>,
     auto_run_feature_enabled: bool,
+    resumed_start_boundary_evaluation: bool,
 ) -> SchedulerTickPlan {
     let config_revision = state_handle.config_revision.load(Ordering::Acquire);
     let config_changed = config_revision != runtime_state.last_seen_config_revision;
@@ -404,6 +410,7 @@ fn build_scheduler_tick_plan(
             current_boot_prompt_runtime_state(state_handle),
         )
         && !runtime_state.start_boundaries_blocked_until_idle
+        && !resumed_start_boundary_evaluation
         && !skip_start_boundaries_this_tick;
 
     SchedulerTickPlan {
@@ -1014,6 +1021,18 @@ mod tests {
         }
     }
 
+    fn runtime_state_blocking_start_boundaries_at(
+        previous_local: DateTime<Local>,
+        last_seen_config_revision: u64,
+    ) -> SchedulerRuntimeState {
+        SchedulerRuntimeState {
+            processed_boundary_occurrences: HashSet::new(),
+            last_checked_local: previous_local,
+            start_boundaries_blocked_until_idle: true,
+            last_seen_config_revision,
+        }
+    }
+
     async fn start_work_with_schedule_source(
         state: &state::AppState,
         auto_run_feature_enabled: bool,
@@ -1253,6 +1272,58 @@ mod tests {
         assert!(
             !effects.work_started_durations.is_empty(),
             "an arriving start boundary should auto-start work when the gate is open"
+        );
+    }
+
+    #[tokio::test]
+    async fn restored_running_session_does_not_replay_past_start_boundary_after_returning_idle() {
+        let state = build_test_state_without_persistence_path().await;
+        open_start_boundary_gate(&state);
+        apply_schedule(
+            &state,
+            weekly_config_with_monday_and_tuesday_daytime(),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+
+        let mut runtime_state = runtime_state_blocking_start_boundaries_at(
+            local_datetime(2025, 1, 6, 8, 59, 50),
+            state.config_revision.load(Ordering::Acquire),
+        );
+        let mut effects = RecordingSchedulerRuntimeEffects::default();
+
+        run_scheduler_tick_with_effects(
+            &state,
+            &mut runtime_state,
+            local_datetime(2025, 1, 6, 9, 0, 10),
+            &mut effects,
+        )
+        .await;
+
+        assert_no_work_start_effects(&effects);
+        {
+            let timer = state.timer_manager.lock().await;
+            assert_eq!(timer.status(), TimerStatus::Idle);
+            assert_ne!(
+                timer.get_state().timer_start_source,
+                Some(TimerStartSource::ScheduledAutoStart)
+            );
+        }
+
+        run_scheduler_tick_with_effects(
+            &state,
+            &mut runtime_state,
+            local_datetime(2025, 1, 7, 9, 0, 10),
+            &mut effects,
+        )
+        .await;
+
+        assert_eq!(effects.work_started_durations, [1500]);
+        let timer = state.timer_manager.lock().await;
+        assert_eq!(timer.status(), TimerStatus::Working);
+        assert_eq!(
+            timer.get_state().timer_start_source,
+            Some(TimerStartSource::ScheduledAutoStart)
         );
     }
 
