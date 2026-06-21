@@ -488,16 +488,6 @@ async fn start_work_with_runtime_effects(
     apply_start_runtime_effects(state, &mut runtime_effect_shell, start_sequence, |_| {}).await
 }
 
-async fn resolve_boot_auto_start_prompt_start(
-    state: &AppState,
-    app: &tauri::AppHandle,
-    timer_settings: TimerSettings,
-) -> Result<BootPromptRuntimeState> {
-    let mut runtime_effect_shell = AppHandleRuntimeEffectShell { app };
-    resolve_boot_auto_start_prompt_start_contract(state, timer_settings, &mut runtime_effect_shell)
-        .await
-}
-
 async fn resolve_boot_auto_start_prompt_start_contract(
     state: &AppState,
     timer_settings: TimerSettings,
@@ -612,6 +602,15 @@ fn mark_boot_prompt_resolved_start(state: &AppState) {
         .store(true, Ordering::Release);
 }
 
+fn mark_boot_prompt_resolved_later(state: &AppState) {
+    if let Ok(mut runtime_state) = state.boot_prompt_runtime_state.lock() {
+        *runtime_state = BootPromptRuntimeState::ResolvedLater;
+    }
+    state
+        .auto_start_boundary_enabled
+        .store(true, Ordering::Release);
+}
+
 #[cfg(test)]
 async fn start_work_for_tests(
     state: &AppState,
@@ -645,14 +644,7 @@ fn evaluate_initial_boot_prompt_decision(
     (false, Some(BootPromptRuntimeState::NotApplicable), true)
 }
 
-/// Get full timer state for initial sync
-#[tauri::command]
-pub(crate) async fn get_full_state(
-    window: WebviewWindow,
-    state: State<'_, AppState>,
-) -> Result<FullStatePayload> {
-    authorize_main_window(&window, "get_full_state")?;
-
+async fn get_full_state_contract(state: &AppState) -> Result<FullStatePayload> {
     let now_local = state.clock.now_local();
     let is_first_get_full_state = state
         .boot_prompt_check_pending
@@ -701,16 +693,22 @@ pub(crate) async fn get_full_state(
     Ok(full_state_payload)
 }
 
-/// Resolve startup auto-start confirmation prompt.
+/// Get full timer state for initial sync
 #[tauri::command]
-pub(crate) async fn resolve_boot_auto_start_prompt(
+pub(crate) async fn get_full_state(
     window: WebviewWindow,
     state: State<'_, AppState>,
-    start_now: ObservedCommandArg<bool>,
-) -> Result<BootPromptRuntimeState> {
-    authorize_main_window(&window, "resolve_boot_auto_start_prompt")?;
-    let start_now = start_now.into_inner();
+) -> Result<FullStatePayload> {
+    authorize_main_window(&window, "get_full_state")?;
 
+    get_full_state_contract(&state).await
+}
+
+async fn resolve_boot_auto_start_prompt_contract(
+    state: &AppState,
+    start_now: bool,
+    runtime_effect_shell: &mut impl StartRuntimeEffectShell,
+) -> Result<BootPromptRuntimeState> {
     let current_runtime_state = match state.boot_prompt_runtime_state.lock() {
         Ok(runtime_state) => *runtime_state,
         Err(_) => BootPromptRuntimeState::NotApplicable,
@@ -724,12 +722,7 @@ pub(crate) async fn resolve_boot_auto_start_prompt(
 
     if !can_resolve_prompt {
         if current_runtime_state == BootPromptRuntimeState::AwaitingDecision {
-            if let Ok(mut runtime_state) = state.boot_prompt_runtime_state.lock() {
-                *runtime_state = BootPromptRuntimeState::NotApplicable;
-            }
-            state
-                .auto_start_boundary_enabled
-                .store(true, Ordering::Release);
+            mark_boot_prompt_not_applicable(state);
         }
         return Ok(BootPromptRuntimeState::NotApplicable);
     }
@@ -740,16 +733,31 @@ pub(crate) async fn resolve_boot_auto_start_prompt(
     };
 
     if start_now {
-        resolve_boot_auto_start_prompt_start(&state, window.app_handle(), timer_settings).await
-    } else {
-        if let Ok(mut runtime_state) = state.boot_prompt_runtime_state.lock() {
-            *runtime_state = BootPromptRuntimeState::ResolvedLater;
-        }
-        state
-            .auto_start_boundary_enabled
-            .store(true, Ordering::Release);
-        Ok(BootPromptRuntimeState::ResolvedLater)
+        return resolve_boot_auto_start_prompt_start_contract(
+            state,
+            timer_settings,
+            runtime_effect_shell,
+        )
+        .await;
     }
+
+    mark_boot_prompt_resolved_later(state);
+    Ok(BootPromptRuntimeState::ResolvedLater)
+}
+
+/// Resolve startup auto-start confirmation prompt.
+#[tauri::command]
+pub(crate) async fn resolve_boot_auto_start_prompt(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    start_now: ObservedCommandArg<bool>,
+) -> Result<BootPromptRuntimeState> {
+    authorize_main_window(&window, "resolve_boot_auto_start_prompt")?;
+    let start_now = start_now.into_inner();
+
+    let app = window.app_handle();
+    let mut runtime_effect_shell = AppHandleRuntimeEffectShell { app };
+    resolve_boot_auto_start_prompt_contract(&state, start_now, &mut runtime_effect_shell).await
 }
 
 #[cfg(test)]
@@ -953,6 +961,14 @@ mod tests {
 
     async fn build_test_state_without_persistence_path() -> AppState {
         let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
+        let persistence = PersistenceManager::new(as_clock_trait(&clock), None);
+        let (app_state, _) =
+            AppState::build_startup_state_for_tests(as_clock_trait(&clock), persistence).await;
+        app_state
+    }
+
+    async fn build_test_state_at(now_local: chrono::DateTime<Local>) -> AppState {
+        let clock = Arc::new(FixedClock::new(now_local));
         let persistence = PersistenceManager::new(as_clock_trait(&clock), None);
         let (app_state, _) =
             AppState::build_startup_state_for_tests(as_clock_trait(&clock), persistence).await;
@@ -1306,11 +1322,26 @@ mod tests {
         weekly_auto_run_config: WeeklyAutoRunConfig,
         post_break_transition_policy: PostBreakTransitionPolicy,
     ) {
+        sync_auto_run_policies_with_feature_for_test(
+            state,
+            true,
+            weekly_auto_run_config,
+            post_break_transition_policy,
+        )
+        .await;
+    }
+
+    async fn sync_auto_run_policies_with_feature_for_test(
+        state: &AppState,
+        auto_run_feature_enabled: bool,
+        weekly_auto_run_config: WeeklyAutoRunConfig,
+        post_break_transition_policy: PostBreakTransitionPolicy,
+    ) {
         let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
 
         sync_automation_policies_with_runtime_effects(
             state,
-            true,
+            auto_run_feature_enabled,
             weekly_auto_run_config,
             post_break_transition_policy,
             &mut runtime_effect_shell,
@@ -1332,6 +1363,39 @@ mod tests {
     async fn complete_work_session_reason(state: &AppState) -> SessionTransitionReason {
         let mut timer = state.timer_manager.lock().await;
         timer.complete_work_session_transition().transition_reason
+    }
+
+    fn assert_daytime_monday_window(full_state: &FullStatePayload) {
+        let active_window = full_state
+            .active_window_summary
+            .as_ref()
+            .expect("Monday daytime window should be active");
+
+        assert_eq!(active_window.weekday_key, "mon");
+        assert_eq!(active_window.start_time, "09:00");
+        assert_eq!(active_window.end_time, "18:00");
+        assert!(!active_window.crosses_midnight);
+    }
+
+    async fn build_prompting_state(
+        now_local: chrono::DateTime<Local>,
+        weekly_auto_run_config: WeeklyAutoRunConfig,
+    ) -> AppState {
+        let state = build_test_state_at(now_local).await;
+        sync_auto_run_policies_for_test(
+            &state,
+            weekly_auto_run_config,
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+
+        let full_state = get_full_state_contract(&state)
+            .await
+            .expect("full state should be available");
+        assert!(full_state.should_prompt_start_on_boot);
+        assert!(full_state.active_window_summary.is_some());
+
+        state
     }
 
     #[test]
@@ -1453,6 +1517,249 @@ mod tests {
             (true, Some(BootPromptRuntimeState::AwaitingDecision), false)
         );
         assert_eq!(second_result, (false, None, false));
+    }
+
+    #[tokio::test]
+    async fn get_full_state_prompts_on_first_idle_sync_inside_enabled_window() {
+        let state = build_test_state_at(local_datetime(2025, 1, 6, 10, 0, 0)).await;
+        sync_auto_run_policies_for_test(
+            &state,
+            make_enabled_daytime_monday_config(),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+
+        let full_state = get_full_state_contract(&state)
+            .await
+            .expect("full state should be available");
+
+        assert_eq!(full_state.status, TimerStatus::Idle);
+        assert!(full_state.should_prompt_start_on_boot);
+        assert_daytime_monday_window(&full_state);
+    }
+
+    #[tokio::test]
+    async fn get_full_state_hides_active_window_when_auto_run_is_disabled() {
+        let state = build_test_state_at(local_datetime(2025, 1, 6, 10, 0, 0)).await;
+        sync_auto_run_policies_with_feature_for_test(
+            &state,
+            false,
+            make_enabled_daytime_monday_config(),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+
+        let full_state = get_full_state_contract(&state)
+            .await
+            .expect("full state should be available");
+
+        assert_eq!(full_state.status, TimerStatus::Idle);
+        assert!(!full_state.should_prompt_start_on_boot);
+        assert!(full_state.active_window_summary.is_none());
+    }
+
+    #[tokio::test]
+    async fn get_full_state_prompts_only_on_first_full_sync() {
+        let state = build_test_state_at(local_datetime(2025, 1, 6, 10, 0, 0)).await;
+        sync_auto_run_policies_for_test(
+            &state,
+            make_enabled_daytime_monday_config(),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+
+        let first_full_state = get_full_state_contract(&state)
+            .await
+            .expect("first full state should be available");
+        let second_full_state = get_full_state_contract(&state)
+            .await
+            .expect("second full state should be available");
+
+        assert!(first_full_state.should_prompt_start_on_boot);
+        assert_daytime_monday_window(&first_full_state);
+        assert!(!second_full_state.should_prompt_start_on_boot);
+        assert_daytime_monday_window(&second_full_state);
+    }
+
+    #[tokio::test]
+    async fn get_full_state_does_not_prompt_when_timer_is_already_running() {
+        let state = build_test_state_at(local_datetime(2025, 1, 6, 10, 0, 0)).await;
+        sync_auto_run_policies_for_test(
+            &state,
+            make_enabled_daytime_monday_config(),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+        {
+            let mut timer = state.timer_manager.lock().await;
+            timer
+                .start_work_with_source(
+                    TimerSettings::default(),
+                    TimerStartSource::ManualInsideWindow,
+                )
+                .expect("work session should start");
+        }
+
+        let full_state = get_full_state_contract(&state)
+            .await
+            .expect("full state should be available");
+
+        assert_eq!(full_state.status, TimerStatus::Working);
+        assert!(!full_state.should_prompt_start_on_boot);
+        assert_daytime_monday_window(&full_state);
+    }
+
+    #[tokio::test]
+    async fn scheduler_does_not_auto_start_while_boot_prompt_is_waiting() {
+        let state = build_prompting_state(
+            local_datetime(2025, 1, 6, 9, 0, 5),
+            make_enabled_daytime_monday_config(),
+        )
+        .await;
+        let mut scheduler_runtime =
+            SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50));
+
+        scheduler_runtime
+            .run_tick(&state, local_datetime(2025, 1, 6, 9, 0, 10))
+            .await;
+
+        let full_state = state.timer_manager.lock().await.get_full_state();
+        assert_eq!(full_state.status, TimerStatus::Idle);
+        assert_eq!(full_state.session_type, SessionType::Work);
+    }
+
+    #[tokio::test]
+    async fn resolve_boot_prompt_later_keeps_timer_idle() {
+        let state = build_prompting_state(
+            local_datetime(2025, 1, 6, 10, 0, 0),
+            make_enabled_daytime_monday_config(),
+        )
+        .await;
+        let mut runtime_effect_shell = RecordingRuntimeEffectShell::default();
+
+        let result =
+            resolve_boot_auto_start_prompt_contract(&state, false, &mut runtime_effect_shell)
+                .await
+                .expect("boot prompt should resolve later");
+
+        let full_state = state.timer_manager.lock().await.get_full_state();
+        assert_eq!(result, BootPromptRuntimeState::ResolvedLater);
+        assert_eq!(full_state.status, TimerStatus::Idle);
+        assert_eq!(full_state.session_type, SessionType::Work);
+        assert!(runtime_effect_shell.events().is_empty());
+    }
+
+    #[tokio::test]
+    async fn resolved_later_allows_next_scheduled_start_boundary() {
+        let state = build_prompting_state(
+            local_datetime(2025, 1, 6, 10, 0, 0),
+            monday_and_tuesday_config("09:00", "18:00"),
+        )
+        .await;
+        let mut runtime_effect_shell = RecordingRuntimeEffectShell::default();
+        let mut scheduler_runtime =
+            SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 10, 0, 0));
+
+        let result =
+            resolve_boot_auto_start_prompt_contract(&state, false, &mut runtime_effect_shell)
+                .await
+                .expect("boot prompt should resolve later");
+        scheduler_runtime
+            .run_tick(&state, local_datetime(2025, 1, 7, 9, 0, 10))
+            .await;
+
+        let full_state = state.timer_manager.lock().await.get_full_state();
+        assert_eq!(result, BootPromptRuntimeState::ResolvedLater);
+        assert_eq!(full_state.status, TimerStatus::Working);
+        assert_eq!(full_state.session_type, SessionType::Work);
+        assert_eq!(
+            full_state.remaining_seconds,
+            full_state.settings.work_duration_secs.get()
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_boot_prompt_start_begins_work_when_prompt_is_active() {
+        let state = build_prompting_state(
+            local_datetime(2025, 1, 6, 10, 0, 0),
+            make_enabled_daytime_monday_config(),
+        )
+        .await;
+        let mut runtime_effect_shell = RecordingRuntimeEffectShell::default();
+
+        let result =
+            resolve_boot_auto_start_prompt_contract(&state, true, &mut runtime_effect_shell)
+                .await
+                .expect("boot prompt should start work");
+
+        let full_state = state.timer_manager.lock().await.get_full_state();
+        assert_eq!(result, BootPromptRuntimeState::ResolvedStart);
+        assert_eq!(full_state.status, TimerStatus::Working);
+        assert_eq!(full_state.session_type, SessionType::Work);
+        assert_eq!(
+            full_state.remaining_seconds,
+            full_state.settings.work_duration_secs.get()
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_boot_prompt_resolution_does_not_replace_running_session() {
+        for start_now in [true, false] {
+            let state = build_prompting_state(
+                local_datetime(2025, 1, 6, 10, 0, 0),
+                make_enabled_daytime_monday_config(),
+            )
+            .await;
+            {
+                let mut timer = state.timer_manager.lock().await;
+                timer
+                    .start_work_with_source(
+                        TimerSettings::default(),
+                        TimerStartSource::ManualOutsideWindow,
+                    )
+                    .expect("work session should start through another path");
+            }
+            let before = state.timer_manager.lock().await.get_full_state();
+            let mut runtime_effect_shell = RecordingRuntimeEffectShell::default();
+
+            let result = resolve_boot_auto_start_prompt_contract(
+                &state,
+                start_now,
+                &mut runtime_effect_shell,
+            )
+            .await
+            .expect("stale boot prompt should resolve safely");
+
+            let after = state.timer_manager.lock().await.get_full_state();
+            assert_eq!(result, BootPromptRuntimeState::NotApplicable);
+            assert_eq!(after.status, TimerStatus::Working);
+            assert_eq!(after.session_type, before.session_type);
+            assert_eq!(after.current_cycle, before.current_cycle);
+            assert_eq!(after.remaining_seconds, before.remaining_seconds);
+            assert!(runtime_effect_shell.events().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn boot_prompt_resolution_without_active_prompt_does_not_start_work() {
+        for start_now in [true, false] {
+            let state = build_test_state_at(local_datetime(2025, 1, 6, 10, 0, 0)).await;
+            let mut runtime_effect_shell = RecordingRuntimeEffectShell::default();
+
+            let result = resolve_boot_auto_start_prompt_contract(
+                &state,
+                start_now,
+                &mut runtime_effect_shell,
+            )
+            .await
+            .expect("missing boot prompt should resolve safely");
+
+            let full_state = state.timer_manager.lock().await.get_full_state();
+            assert_eq!(result, BootPromptRuntimeState::NotApplicable);
+            assert_eq!(full_state.status, TimerStatus::Idle);
+            assert_eq!(full_state.session_type, SessionType::Work);
+            assert!(runtime_effect_shell.events().is_empty());
+        }
     }
 
     #[test]

@@ -1142,6 +1142,34 @@ mod tests {
     }
 
     #[test]
+    fn test_boot_prompt_runtime_state_serializes_as_ipc_contract_values() {
+        let cases = [
+            (
+                BootPromptRuntimeState::AwaitingDecision,
+                json!("awaiting_decision"),
+            ),
+            (
+                BootPromptRuntimeState::ResolvedStart,
+                json!("resolved_start"),
+            ),
+            (
+                BootPromptRuntimeState::ResolvedLater,
+                json!("resolved_later"),
+            ),
+            (
+                BootPromptRuntimeState::NotApplicable,
+                json!("not_applicable"),
+            ),
+        ];
+
+        for (runtime_state, expected) in cases {
+            let serialized =
+                serde_json::to_value(runtime_state).expect("runtime state should serialize");
+            assert_eq!(serialized, expected);
+        }
+    }
+
+    #[test]
     fn test_enum_fields_deserialize_with_serde_default() {
         #[derive(Debug, Deserialize)]
         struct EnumDefaultsWrapper {
