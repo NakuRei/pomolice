@@ -1,6 +1,7 @@
 // Window State Manager
 // Manages window state and fullscreen mode without global statics
 
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 use tauri::{
@@ -10,8 +11,56 @@ use tauri::{
 
 use crate::error::{PomoliceError, Result};
 
-#[derive(Clone)]
+const UNRESTORABLE_MAIN_WINDOW_MIN_X: i32 = -30000;
+const DEFAULT_RESTORE_WIDTH: f64 = 800.0;
+const DEFAULT_RESTORE_HEIGHT: f64 = 600.0;
+const BREAK_OVERLAY_LABEL_PREFIX: &str = "break-overlay-";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WindowState {
+    position: PhysicalPosition<i32>,
+    size: PhysicalSize<u32>,
+}
+
+impl WindowState {
+    pub(crate) fn from_restorable_main_window_geometry(
+        position: PhysicalPosition<i32>,
+        size: PhysicalSize<u32>,
+    ) -> Option<Self> {
+        if position.x > UNRESTORABLE_MAIN_WINDOW_MIN_X && size.width > 0 {
+            return Some(Self { position, size });
+        }
+
+        None
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum MainWindowRestorePlan {
+    Saved(WindowState),
+    DefaultCentered { width: f64, height: f64 },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MonitorSnapshot {
+    name: Option<String>,
+    position: PhysicalPosition<i32>,
+    size: PhysicalSize<u32>,
+}
+
+impl MonitorSnapshot {
+    fn from_monitor(monitor: &Monitor) -> Self {
+        Self {
+            name: monitor.name().map(std::string::ToString::to_string),
+            position: *monitor.position(),
+            size: *monitor.size(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BreakOverlayWindowPlan {
+    label: String,
     position: PhysicalPosition<i32>,
     size: PhysicalSize<u32>,
 }
@@ -78,18 +127,24 @@ impl WindowStateManager {
             .outer_size()
             .map_err(|e| PomoliceError::WindowControl(format!("Failed to get size: {e}")))?;
 
-        if current_position.x > -30000 && current_size.width > 0 {
-            return Ok(Some(WindowState {
-                position: current_position,
-                size: current_size,
-            }));
-        }
-
-        Ok(None)
+        Ok(WindowState::from_restorable_main_window_geometry(
+            current_position,
+            current_size,
+        ))
     }
 
     pub(crate) fn set_saved_state(&mut self, saved_state: Option<WindowState>) {
         self.saved_state = saved_state;
+    }
+
+    pub(crate) fn main_window_restore_plan(&self) -> MainWindowRestorePlan {
+        match &self.saved_state {
+            Some(state) => MainWindowRestorePlan::Saved(state.clone()),
+            None => MainWindowRestorePlan::DefaultCentered {
+                width: DEFAULT_RESTORE_WIDTH,
+                height: DEFAULT_RESTORE_HEIGHT,
+            },
+        }
     }
 
     async fn configure_main_window_for_break<R: Runtime>(
@@ -181,53 +236,86 @@ impl WindowStateManager {
         let monitors = main_window
             .available_monitors()
             .map_err(|e| PomoliceError::WindowControl(format!("Failed to get monitors: {e}")))?;
+        let monitor_snapshots: Vec<MonitorSnapshot> =
+            monitors.iter().map(MonitorSnapshot::from_monitor).collect();
+        let main_monitor_snapshot = main_monitor.map(MonitorSnapshot::from_monitor);
+        let existing_overlay_labels: BTreeSet<String> = app
+            .webview_windows()
+            .keys()
+            .filter(|label| label.starts_with(BREAK_OVERLAY_LABEL_PREFIX))
+            .cloned()
+            .collect();
+        let overlay_window_plans = Self::build_break_overlay_window_plans(
+            main_monitor_snapshot.as_ref(),
+            &monitor_snapshots,
+            &existing_overlay_labels,
+        );
 
-        for (index, monitor) in monitors.iter().enumerate() {
-            if Self::should_skip_overlay_monitor(main_monitor, monitor) {
-                continue;
-            }
-
-            let window_label = format!("break-overlay-{index}");
-            if app.get_webview_window(&window_label).is_some() {
-                continue;
-            }
-
-            Self::create_overlay_window(app, &window_label, monitor)?;
+        for overlay_window_plan in overlay_window_plans {
+            Self::create_overlay_window(app, &overlay_window_plan)?;
         }
 
         Ok(())
     }
 
-    fn should_skip_overlay_monitor(main_monitor: Option<&Monitor>, monitor: &Monitor) -> bool {
+    fn build_break_overlay_window_plans(
+        main_monitor: Option<&MonitorSnapshot>,
+        monitors: &[MonitorSnapshot],
+        existing_overlay_labels: &BTreeSet<String>,
+    ) -> Vec<BreakOverlayWindowPlan> {
+        monitors
+            .iter()
+            .enumerate()
+            .filter_map(|(index, monitor)| {
+                let label = format!("{BREAK_OVERLAY_LABEL_PREFIX}{index}");
+
+                if Self::is_confirmed_main_monitor(main_monitor, monitor)
+                    || existing_overlay_labels.contains(&label)
+                {
+                    return None;
+                }
+
+                Some(BreakOverlayWindowPlan {
+                    label,
+                    position: monitor.position,
+                    size: monitor.size,
+                })
+            })
+            .collect()
+    }
+
+    fn is_confirmed_main_monitor(
+        main_monitor: Option<&MonitorSnapshot>,
+        monitor: &MonitorSnapshot,
+    ) -> bool {
         let Some(main_monitor) = main_monitor else {
             return false;
         };
-        let Some(main_name) = main_monitor.name() else {
-            return false;
-        };
-        let Some(monitor_name) = monitor.name() else {
-            return false;
-        };
 
-        main_name == monitor_name
+        matches!(
+            (&main_monitor.name, &monitor.name),
+            (Some(main_name), Some(monitor_name)) if main_name == monitor_name
+        )
     }
 
     fn create_overlay_window<R: Runtime>(
         app: &AppHandle<R>,
-        window_label: &str,
-        monitor: &Monitor,
+        overlay_window_plan: &BreakOverlayWindowPlan,
     ) -> Result<()> {
-        let position = monitor.position();
-        let size = monitor.size();
-
         WebviewWindowBuilder::new(
             app,
-            window_label,
+            &overlay_window_plan.label,
             WebviewUrl::App("break-overlay.html".into()),
         )
         .title("Break Overlay")
-        .position(f64::from(position.x), f64::from(position.y))
-        .inner_size(f64::from(size.width), f64::from(size.height))
+        .position(
+            f64::from(overlay_window_plan.position.x),
+            f64::from(overlay_window_plan.position.y),
+        )
+        .inner_size(
+            f64::from(overlay_window_plan.size.width),
+            f64::from(overlay_window_plan.size.height),
+        )
         .fullscreen(true)
         .always_on_top(true)
         .visible_on_all_workspaces(true)
@@ -248,7 +336,7 @@ impl WindowStateManager {
         // Close all overlay windows
         let windows = app.webview_windows();
         for (label, window) in &windows {
-            if label.starts_with("break-overlay-") {
+            if label.starts_with(BREAK_OVERLAY_LABEL_PREFIX) {
                 window.close().map_err(|e| {
                     PomoliceError::WindowControl(format!("Failed to close overlay: {e}"))
                 })?;
@@ -280,33 +368,31 @@ impl WindowStateManager {
             PomoliceError::WindowControl(format!("Failed to enable resizable: {e}"))
         })?;
 
-        // Restore window to previous position and size
-        if let Some(state) = &self.saved_state {
-            main_window
-                .set_size(tauri::Size::Physical(state.size))
-                .map_err(|e| {
-                    PomoliceError::WindowControl(format!("Failed to restore size: {e}"))
-                })?;
+        match self.main_window_restore_plan() {
+            MainWindowRestorePlan::Saved(state) => {
+                main_window
+                    .set_size(tauri::Size::Physical(state.size))
+                    .map_err(|e| {
+                        PomoliceError::WindowControl(format!("Failed to restore size: {e}"))
+                    })?;
 
-            main_window
-                .set_position(tauri::Position::Physical(state.position))
-                .map_err(|e| {
-                    PomoliceError::WindowControl(format!("Failed to restore position: {e}"))
-                })?;
-        } else {
-            // Fallback: restore to default size and center
-            main_window
-                .set_size(tauri::Size::Logical(tauri::LogicalSize {
-                    width: 800.0,
-                    height: 600.0,
-                }))
-                .map_err(|e| {
-                    PomoliceError::WindowControl(format!("Failed to restore size: {e}"))
-                })?;
+                main_window
+                    .set_position(tauri::Position::Physical(state.position))
+                    .map_err(|e| {
+                        PomoliceError::WindowControl(format!("Failed to restore position: {e}"))
+                    })?;
+            }
+            MainWindowRestorePlan::DefaultCentered { width, height } => {
+                main_window
+                    .set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }))
+                    .map_err(|e| {
+                        PomoliceError::WindowControl(format!("Failed to restore size: {e}"))
+                    })?;
 
-            main_window
-                .center()
-                .map_err(|e| PomoliceError::WindowControl(format!("Failed to center: {e}")))?;
+                main_window
+                    .center()
+                    .map_err(|e| PomoliceError::WindowControl(format!("Failed to center: {e}")))?;
+            }
         }
 
         Self::restore_main_window_visibility(
@@ -337,6 +423,40 @@ impl Default for WindowStateManager {
 mod tests {
     use super::*;
 
+    fn physical_position(x: i32, y: i32) -> PhysicalPosition<i32> {
+        PhysicalPosition { x, y }
+    }
+
+    fn physical_size(width: u32, height: u32) -> PhysicalSize<u32> {
+        PhysicalSize { width, height }
+    }
+
+    fn restorable_window_state() -> WindowState {
+        WindowState::from_restorable_main_window_geometry(
+            physical_position(120, 80),
+            physical_size(1024, 768),
+        )
+        .expect("window geometry should be restorable")
+    }
+
+    fn monitor_snapshot(
+        name: Option<&str>,
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+    ) -> MonitorSnapshot {
+        MonitorSnapshot {
+            name: name.map(str::to_string),
+            position: physical_position(x, y),
+            size: physical_size(width, height),
+        }
+    }
+
+    fn no_existing_overlay_labels() -> BTreeSet<String> {
+        BTreeSet::new()
+    }
+
     #[test]
     fn test_window_state_manager_initialization() {
         let manager = WindowStateManager::new();
@@ -347,6 +467,144 @@ mod tests {
     fn test_window_state_manager_default() {
         let manager = WindowStateManager::default();
         assert!(manager.saved_state.is_none());
+    }
+
+    #[test]
+    fn test_restorable_main_window_geometry_is_saved() {
+        let position = physical_position(40, 60);
+        let size = physical_size(1280, 720);
+
+        let saved_state = WindowState::from_restorable_main_window_geometry(position, size);
+
+        assert_eq!(saved_state, Some(WindowState { position, size }));
+    }
+
+    #[test]
+    fn test_unrestorable_offscreen_main_window_geometry_is_not_saved() {
+        let saved_state = WindowState::from_restorable_main_window_geometry(
+            physical_position(-32000, 60),
+            physical_size(1280, 720),
+        );
+
+        assert_eq!(saved_state, None);
+    }
+
+    #[test]
+    fn test_zero_width_main_window_geometry_is_not_saved() {
+        let saved_state = WindowState::from_restorable_main_window_geometry(
+            physical_position(40, 60),
+            physical_size(0, 720),
+        );
+
+        assert_eq!(saved_state, None);
+    }
+
+    #[test]
+    fn test_saved_main_window_state_selects_saved_restore_plan() {
+        let saved_state = restorable_window_state();
+        let mut manager = WindowStateManager::new();
+
+        manager.set_saved_state(Some(saved_state.clone()));
+
+        assert_eq!(
+            manager.main_window_restore_plan(),
+            MainWindowRestorePlan::Saved(saved_state)
+        );
+    }
+
+    #[test]
+    fn test_missing_main_window_state_selects_default_centered_restore_plan() {
+        let manager = WindowStateManager::new();
+
+        assert_eq!(
+            manager.main_window_restore_plan(),
+            MainWindowRestorePlan::DefaultCentered {
+                width: 800.0,
+                height: 600.0,
+            }
+        );
+    }
+
+    #[test]
+    fn test_overlay_plan_skips_confirmed_main_monitor() {
+        let main_monitor = monitor_snapshot(Some("built-in"), 0, 0, 1920, 1080);
+        let external_monitor = monitor_snapshot(Some("external"), 1920, 0, 1920, 1080);
+        let monitors = vec![main_monitor.clone(), external_monitor.clone()];
+
+        let overlay_window_plans = WindowStateManager::build_break_overlay_window_plans(
+            Some(&main_monitor),
+            &monitors,
+            &no_existing_overlay_labels(),
+        );
+
+        assert_eq!(
+            overlay_window_plans,
+            vec![BreakOverlayWindowPlan {
+                label: "break-overlay-1".to_string(),
+                position: external_monitor.position,
+                size: external_monitor.size,
+            }]
+        );
+    }
+
+    #[test]
+    fn test_overlay_plan_keeps_monitor_when_identity_is_unknown() {
+        let main_monitor = monitor_snapshot(None, 0, 0, 1920, 1080);
+        let candidate_monitor = monitor_snapshot(None, 1920, 0, 1920, 1080);
+        let monitors = vec![candidate_monitor.clone()];
+
+        let overlay_window_plans = WindowStateManager::build_break_overlay_window_plans(
+            Some(&main_monitor),
+            &monitors,
+            &no_existing_overlay_labels(),
+        );
+
+        assert_eq!(
+            overlay_window_plans,
+            vec![BreakOverlayWindowPlan {
+                label: "break-overlay-0".to_string(),
+                position: candidate_monitor.position,
+                size: candidate_monitor.size,
+            }]
+        );
+    }
+
+    #[test]
+    fn test_overlay_plan_targets_non_main_monitor_geometry() {
+        let main_monitor = monitor_snapshot(Some("built-in"), 0, 0, 1920, 1080);
+        let external_monitor = monitor_snapshot(Some("external"), -1280, 120, 1280, 1024);
+        let monitors = vec![main_monitor.clone(), external_monitor.clone()];
+
+        let overlay_window_plans = WindowStateManager::build_break_overlay_window_plans(
+            Some(&main_monitor),
+            &monitors,
+            &no_existing_overlay_labels(),
+        );
+
+        assert_eq!(
+            overlay_window_plans,
+            vec![BreakOverlayWindowPlan {
+                label: "break-overlay-1".to_string(),
+                position: physical_position(-1280, 120),
+                size: physical_size(1280, 1024),
+            }]
+        );
+    }
+
+    #[test]
+    fn test_overlay_plan_does_not_duplicate_existing_overlay_label() {
+        let main_monitor = monitor_snapshot(Some("built-in"), 0, 0, 1920, 1080);
+        let external_monitor = monitor_snapshot(Some("external"), 1920, 0, 1920, 1080);
+        let monitors = vec![main_monitor.clone(), external_monitor];
+        let existing_overlay_labels = BTreeSet::from(["break-overlay-1".to_string()]);
+
+        let overlay_window_plans = WindowStateManager::build_break_overlay_window_plans(
+            Some(&main_monitor),
+            &monitors,
+            &existing_overlay_labels,
+        );
+
+        assert_eq!(overlay_window_plans, Vec::<BreakOverlayWindowPlan>::new());
     }
 
     #[test]

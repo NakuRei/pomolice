@@ -673,7 +673,7 @@ mod emit_order_tests {
     use crate::managers::clock::testing::FixedClock;
     use crate::managers::clock::Clock;
     use crate::managers::persistence::PersistenceManager;
-    use crate::managers::window::{WindowState, WindowStateManager};
+    use crate::managers::window::{MainWindowRestorePlan, WindowState, WindowStateManager};
     use crate::state::AppState;
     use crate::types::{
         PostBreakTransitionPolicy, SessionTransitionOutcome, SessionType, TimerSettings,
@@ -685,6 +685,7 @@ mod emit_order_tests {
     use std::sync::atomic::AtomicBool as StdAtomicBool;
     use std::sync::{Arc, Mutex as StdMutex};
     use std::time::Duration as StdDuration;
+    use tauri::{PhysicalPosition, PhysicalSize};
 
     #[derive(Default)]
     struct RecordingSessionPipelineRuntimeEffects {
@@ -707,9 +708,11 @@ mod emit_order_tests {
 
     struct RecordingBreakLockRuntimeEffects {
         lock_state: RecordedBreakLockState,
+        captured_window_state: Option<WindowState>,
         capture_error: Option<PomoliceError>,
         enter_error: Option<PomoliceError>,
         release_error: Option<PomoliceError>,
+        released_restore_plans: Vec<MainWindowRestorePlan>,
         emitted_event_names: Vec<&'static str>,
     }
 
@@ -717,9 +720,11 @@ mod emit_order_tests {
         fn default() -> Self {
             Self {
                 lock_state: RecordedBreakLockState::Unlocked,
+                captured_window_state: None,
                 capture_error: None,
                 enter_error: None,
                 release_error: None,
+                released_restore_plans: Vec::new(),
                 emitted_event_names: Vec::new(),
             }
         }
@@ -737,6 +742,11 @@ mod emit_order_tests {
             self.release_error = Some(PomoliceError::WindowControl(message.to_string()));
             self
         }
+
+        fn with_captured_window_state(mut self, window_state: WindowState) -> Self {
+            self.captured_window_state = Some(window_state);
+            self
+        }
     }
 
     impl BreakLockRuntimeEffects for RecordingBreakLockRuntimeEffects {
@@ -749,7 +759,7 @@ mod emit_order_tests {
                     return Err(error);
                 }
 
-                Ok(None)
+                Ok(self.captured_window_state.clone())
             })
         }
 
@@ -769,12 +779,14 @@ mod emit_order_tests {
 
         fn release_fullscreen_break_lock(
             &mut self,
-            _window_manager: &mut WindowStateManager,
+            window_manager: &mut WindowStateManager,
         ) -> crate::error::Result<()> {
             if let Some(error) = self.release_error.take() {
                 return Err(error);
             }
 
+            self.released_restore_plans
+                .push(window_manager.main_window_restore_plan());
             self.lock_state = RecordedBreakLockState::Unlocked;
             Ok(())
         }
@@ -914,6 +926,17 @@ mod emit_order_tests {
             PostBreakTransitionPolicy::RequireManualContinue,
         )
         .expect("timer settings should be valid")
+    }
+
+    fn restorable_window_state_for_tests() -> WindowState {
+        WindowState::from_restorable_main_window_geometry(
+            PhysicalPosition { x: 120, y: 80 },
+            PhysicalSize {
+                width: 1024,
+                height: 768,
+            },
+        )
+        .expect("window geometry should be restorable")
     }
 
     async fn complete_work_session_with_recorded_effects(
@@ -1193,6 +1216,37 @@ mod emit_order_tests {
     }
 
     #[tokio::test]
+    async fn test_failed_break_entry_release_uses_captured_window_state() {
+        let state = build_test_state_without_persistence_path().await;
+        replace_timer_state(
+            &state,
+            TimerState {
+                status: TimerStatus::OnBreak,
+                session_type: SessionType::ShortBreak,
+                remaining_seconds: 1,
+                ..TimerState::default()
+            },
+        )
+        .await;
+        let captured_window_state = restorable_window_state_for_tests();
+        let mut effects =
+            RecordingBreakLockRuntimeEffects::with_enter_error("simulated enter failure")
+                .with_captured_window_state(captured_window_state.clone());
+
+        let result = enter_break_mode_with_effects(&state, &mut effects).await;
+
+        assert!(matches!(
+            result,
+            Err(("enter_fullscreen_all_monitors", PomoliceError::WindowControl(message)))
+                if message == "simulated enter failure"
+        ));
+        assert_eq!(
+            effects.released_restore_plans,
+            [MainWindowRestorePlan::Saved(captured_window_state)]
+        );
+    }
+
+    #[tokio::test]
     async fn test_failed_break_entry_keeps_original_error_when_lock_release_fails() {
         let state = build_test_state_without_persistence_path().await;
         let mut effects =
@@ -1281,6 +1335,36 @@ mod emit_order_tests {
 
         let timer = state.timer_manager.lock().await;
         assert!(!timer.get_state().is_fullscreen_break);
+    }
+
+    #[tokio::test]
+    async fn test_break_exit_uses_window_state_captured_on_break_entry() {
+        let state = build_test_state_without_persistence_path().await;
+        replace_timer_state(
+            &state,
+            TimerState {
+                status: TimerStatus::OnBreak,
+                session_type: SessionType::ShortBreak,
+                remaining_seconds: 1,
+                ..TimerState::default()
+            },
+        )
+        .await;
+        let captured_window_state = restorable_window_state_for_tests();
+        let mut effects = RecordingBreakLockRuntimeEffects::default()
+            .with_captured_window_state(captured_window_state.clone());
+
+        enter_break_mode_with_effects(&state, &mut effects)
+            .await
+            .expect("break entry should succeed");
+        exit_break_mode_with_effects(&state, &mut effects)
+            .await
+            .expect("break exit should succeed");
+
+        assert_eq!(
+            effects.released_restore_plans,
+            [MainWindowRestorePlan::Saved(captured_window_state)]
+        );
     }
 }
 
