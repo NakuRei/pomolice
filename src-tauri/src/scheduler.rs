@@ -1137,6 +1137,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn end_boundary_duplicate_evaluation_emits_stop_pending_once() {
+        let state = build_test_state_without_persistence_path().await;
+        close_start_boundary_gate(&state);
+        start_work_with_schedule_source(&state, true, TimerStartSource::ManualInsideWindow).await;
+
+        let mut first_runtime_state = runtime_state_at(
+            local_datetime(2025, 1, 6, 17, 59, 50),
+            state.config_revision.load(Ordering::Acquire),
+        );
+        let mut replay_runtime_state = runtime_state_at(
+            local_datetime(2025, 1, 6, 17, 59, 50),
+            state.config_revision.load(Ordering::Acquire),
+        );
+        let mut effects = RecordingSchedulerRuntimeEffects::default();
+        let crossed_end_boundary = local_datetime(2025, 1, 6, 18, 0, 10);
+
+        run_scheduler_tick_with_effects(
+            &state,
+            &mut first_runtime_state,
+            crossed_end_boundary,
+            &mut effects,
+        )
+        .await;
+        run_scheduler_tick_with_effects(
+            &state,
+            &mut replay_runtime_state,
+            crossed_end_boundary,
+            &mut effects,
+        )
+        .await;
+
+        assert_eq!(effects.auto_run_stop_pending_count, 1);
+        assert_no_work_start_effects(&effects);
+        {
+            let timer = state.timer_manager.lock().await;
+            assert_eq!(
+                timer.get_state().scheduled_stop_state,
+                ScheduledStopState::Pending
+            );
+        }
+        assert_eq!(
+            complete_work_session(&state).await,
+            SessionTransitionReason::ScheduledStopExecuted
+        );
+    }
+
+    #[tokio::test]
     async fn end_boundary_does_not_emit_stop_pending_when_tick_time_does_not_advance() {
         let state = build_test_state_without_persistence_path().await;
         start_work_with_schedule_source(&state, true, TimerStartSource::ManualInsideWindow).await;

@@ -761,8 +761,7 @@ impl SessionTransitionOutcome {
 }
 
 /// Unique boundary identifier used to deduplicate processed schedule boundaries.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
-#[serde(transparent)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub(crate) struct BoundaryOccurrenceId(String);
 
 impl BoundaryOccurrenceId {
@@ -959,6 +958,15 @@ mod tests {
         .expect("slot should be valid")
     }
 
+    fn disabled_slot(start_time: &str, end_time: &str) -> DayAutoRunSlot {
+        DayAutoRunSlot::try_new(
+            false,
+            HhMm::try_from(start_time.to_string()).expect("start time should be valid"),
+            HhMm::try_from(end_time.to_string()).expect("end time should be valid"),
+        )
+        .expect("slot should be valid")
+    }
+
     #[test]
     fn test_hh_mm_accepts_valid_zero_padded_time() {
         let value: HhMm = serde_json::from_str(r#""08:05""#).expect("HH:MM should deserialize");
@@ -1058,6 +1066,61 @@ mod tests {
                 secondary_weekday: "tue",
             })
         ));
+    }
+
+    #[test]
+    fn test_weekly_auto_run_config_rejects_sunday_overnight_overlap_with_monday() {
+        let result = WeeklyAutoRunConfig::try_new(
+            enabled_slot("01:00", "05:00"),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            enabled_slot("22:00", "02:00"),
+        );
+
+        let Err(ScheduleValidationError::Overlap {
+            primary_weekday,
+            secondary_weekday,
+        }) = result
+        else {
+            panic!("Sunday overnight and Monday early morning should overlap");
+        };
+        assert!(matches!(
+            (primary_weekday, secondary_weekday),
+            ("sun", "mon") | ("mon", "sun")
+        ));
+    }
+
+    #[test]
+    fn test_weekly_auto_run_config_allows_sunday_overnight_adjacent_to_monday() {
+        let result = WeeklyAutoRunConfig::try_new(
+            enabled_slot("02:00", "05:00"),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            enabled_slot("22:00", "02:00"),
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_weekly_auto_run_config_ignores_disabled_monday_during_sunday_wrap_overlap_check() {
+        let result = WeeklyAutoRunConfig::try_new(
+            disabled_slot("01:00", "05:00"),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            enabled_slot("22:00", "02:00"),
+        );
+
+        assert!(result.is_ok());
     }
 
     #[test]

@@ -158,29 +158,67 @@ impl BreakLockRuntimeEffects for AppHandleBreakLockRuntimeEffects<'_> {
     }
 }
 
+trait TimerTickRuntimeEffects {
+    fn emit_timer_tick(&mut self, tick_payload: &types::TimerTickPayload);
+    fn update_tray(&mut self, tick_payload: &types::TimerTickPayload);
+    fn complete_session_after_tick<'a>(
+        &'a mut self,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+}
+
+struct AppHandleTimerTickRuntimeEffects<'a> {
+    app: &'a AppHandle,
+}
+
+impl TimerTickRuntimeEffects for AppHandleTimerTickRuntimeEffects<'_> {
+    fn emit_timer_tick(&mut self, tick_payload: &types::TimerTickPayload) {
+        let _ = self.app.emit("timer_tick", tick_payload);
+    }
+
+    fn update_tray(&mut self, tick_payload: &types::TimerTickPayload) {
+        tray::update_tray_icon(self.app, tick_payload);
+    }
+
+    fn complete_session_after_tick<'a>(
+        &'a mut self,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            lib_handle_session_complete(self.app.clone()).await;
+        })
+    }
+}
+
 fn lib_handle_timer_tick_future(app: AppHandle) -> TimerTickFuture {
     Box::pin(async move {
         let state_handle = app.state::<state::AppState>();
+        let mut effects = AppHandleTimerTickRuntimeEffects { app: &app };
 
-        let (should_complete_session, tick_payload) = {
-            let mut timer = state_handle.timer_manager.lock().await;
-
-            if timer.status() == types::TimerStatus::Idle {
-                return;
-            }
-
-            let (completed, payload) = timer.tick();
-
-            (completed, payload)
-        };
-
-        let _ = app.emit("timer_tick", &tick_payload);
-        tray::update_tray_icon(&app, &tick_payload);
-
-        if should_complete_session {
-            lib_handle_session_complete(app).await;
-        }
+        handle_timer_tick_with_effects(&state_handle, &mut effects).await;
     })
+}
+
+async fn handle_timer_tick_with_effects(
+    state_handle: &state::AppState,
+    effects: &mut (impl TimerTickRuntimeEffects + Send),
+) {
+    let (should_complete_session, tick_payload) = {
+        let mut timer = state_handle.timer_manager.lock().await;
+
+        if timer.status() == types::TimerStatus::Idle {
+            return;
+        }
+
+        let (completed, payload) = timer.tick();
+
+        (completed, payload)
+    };
+
+    effects.emit_timer_tick(&tick_payload);
+    effects.update_tray(&tick_payload);
+
+    if should_complete_session {
+        effects.complete_session_after_tick().await;
+    }
 }
 
 trait InputPenaltyRuntimeEffects {
@@ -666,8 +704,9 @@ pub(crate) async fn lib_handle_external_break_exit(app: AppHandle) {
 mod emit_order_tests {
     use super::{
         apply_session_completion_runtime_effects, emit_session_completion_events_with_effects,
-        enter_break_mode_with_effects, exit_break_mode_with_effects, BreakLockRuntimeEffects,
-        SessionPipelineRuntimeEffects,
+        enter_break_mode_with_effects, exit_break_mode_with_effects,
+        handle_timer_tick_with_effects, BreakLockRuntimeEffects, SessionPipelineRuntimeEffects,
+        TimerTickRuntimeEffects,
     };
     use crate::error::PomoliceError;
     use crate::managers::clock::testing::FixedClock;
@@ -692,6 +731,18 @@ mod emit_order_tests {
         emitted_event_names: Vec<&'static str>,
         emitted_events: Vec<RecordedPipelineEvent>,
         tray_update_count: usize,
+    }
+
+    #[derive(Debug, Default, PartialEq, Eq)]
+    struct TimerTickEffectArtifact {
+        timer_tick_emissions: usize,
+        tray_updates: usize,
+        session_completions: usize,
+    }
+
+    #[derive(Default)]
+    struct RecordingTimerTickRuntimeEffects {
+        artifact: TimerTickEffectArtifact,
     }
 
     struct RecordedPipelineEvent {
@@ -831,6 +882,24 @@ mod emit_order_tests {
         }
     }
 
+    impl TimerTickRuntimeEffects for RecordingTimerTickRuntimeEffects {
+        fn emit_timer_tick(&mut self, _tick_payload: &TimerTickPayload) {
+            self.artifact.timer_tick_emissions += 1;
+        }
+
+        fn update_tray(&mut self, _tick_payload: &TimerTickPayload) {
+            self.artifact.tray_updates += 1;
+        }
+
+        fn complete_session_after_tick<'a>(
+            &'a mut self,
+        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+            Box::pin(async move {
+                self.artifact.session_completions += 1;
+            })
+        }
+    }
+
     fn create_utc_datetime(
         year: i32,
         month: u32,
@@ -910,6 +979,40 @@ mod emit_order_tests {
     async fn replace_timer_state(app_state: &AppState, timer_state: TimerState) {
         let mut timer = app_state.timer_manager.lock().await;
         let _ = timer.apply_persisted_state(timer_state);
+    }
+
+    #[tokio::test]
+    async fn test_idle_tick_with_zero_remaining_has_no_observable_effects() {
+        let state = build_test_state_without_persistence_path().await;
+        replace_timer_state(
+            &state,
+            TimerState {
+                status: TimerStatus::Idle,
+                session_type: SessionType::Work,
+                remaining_seconds: 0,
+                current_cycle: 3,
+                completed_pomodoros: 8,
+                break_interaction_count: 5,
+                is_fullscreen_break: false,
+                ..TimerState::default()
+            },
+        )
+        .await;
+
+        let mut effects = RecordingTimerTickRuntimeEffects::default();
+        handle_timer_tick_with_effects(&state, &mut effects).await;
+
+        assert_eq!(effects.artifact, TimerTickEffectArtifact::default());
+
+        let timer = state.timer_manager.lock().await;
+        let timer_state = timer.get_state();
+        assert_eq!(timer_state.status, TimerStatus::Idle);
+        assert_eq!(timer_state.session_type, SessionType::Work);
+        assert_eq!(timer_state.remaining_seconds, 0);
+        assert_eq!(timer_state.current_cycle, 3);
+        assert_eq!(timer_state.completed_pomodoros, 8);
+        assert_eq!(timer_state.break_interaction_count, 5);
+        assert!(!timer_state.is_fullscreen_break);
     }
 
     fn timer_settings(
@@ -1501,5 +1604,33 @@ mod tests {
         apply_input_penalty_with_effects(&app_state, &mut effects).await;
 
         assert_eq!(effects.artifact(), &InputPenaltyEffectArtifact::default());
+    }
+
+    #[tokio::test]
+    async fn test_working_input_penalty_has_no_observable_effects() {
+        let app_state = build_test_state_without_persistence_path().await;
+        replace_timer_state(
+            &app_state,
+            TimerState {
+                status: TimerStatus::Working,
+                session_type: SessionType::Work,
+                remaining_seconds: 123,
+                break_interaction_count: 7,
+                ..TimerState::default()
+            },
+        )
+        .await;
+
+        let mut effects = RecordingInputPenaltyRuntimeEffects::default();
+        apply_input_penalty_with_effects(&app_state, &mut effects).await;
+
+        assert_eq!(effects.artifact(), &InputPenaltyEffectArtifact::default());
+
+        let timer = app_state.timer_manager.lock().await;
+        let timer_state = timer.get_state();
+        assert_eq!(timer_state.status, TimerStatus::Working);
+        assert_eq!(timer_state.session_type, SessionType::Work);
+        assert_eq!(timer_state.remaining_seconds, 123);
+        assert_eq!(timer_state.break_interaction_count, 7);
     }
 }
