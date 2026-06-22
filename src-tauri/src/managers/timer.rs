@@ -1220,17 +1220,20 @@ mod tests {
         assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::Pending);
     }
 
-    #[tokio::test]
-    async fn test_complete_break_session_transition_auto_start_keeps_task_handles_untouched() {
+    #[test]
+    fn test_break_auto_start_progresses_on_next_work_tick() {
         let mut mgr = make_manager();
+        let work_duration_secs = 1800;
         mgr.state.status = TimerStatus::OnBreak;
         mgr.state.session_type = SessionType::ShortBreak;
+        mgr.state.current_cycle = 2;
+        mgr.state.completed_pomodoros = 5;
+        mgr.state.remaining_seconds = 0;
+        mgr.state.settings = make_settings(work_duration_secs, 300, 900, 4);
         mgr.state.settings.post_break_transition_policy =
             PostBreakTransitionPolicy::StartNextWorkAutomatically;
-        mgr.cancel_token = Some(CancellationToken::new());
-        mgr.timer_task = Some(tokio::spawn(async {
-            tokio::time::sleep(Duration::from_secs(60)).await;
-        }));
+        mgr.state.post_break_decision_pending = true;
+        mgr.state.is_fullscreen_break = true;
 
         let payload = mgr.complete_break_session_transition();
 
@@ -1238,18 +1241,25 @@ mod tests {
             payload.transition_reason,
             crate::types::SessionTransitionReason::BreakAutoStarted
         );
-        assert!(mgr.cancel_token.is_some());
-        assert!(!mgr
-            .cancel_token
-            .as_ref()
-            .expect("cancel token should remain")
-            .is_cancelled());
-        assert!(mgr.timer_task.is_some());
+        assert_eq!(payload.completed_session_type, SessionType::ShortBreak);
+        assert_eq!(payload.next_status, TimerStatus::Working);
+        assert_eq!(payload.next_session_type, SessionType::Work);
+        assert!(!payload.requires_manual_continue_decision);
+        assert_eq!(mgr.state.status, TimerStatus::Working);
+        assert_eq!(mgr.state.session_type, SessionType::Work);
+        assert_eq!(mgr.state.remaining_seconds, work_duration_secs);
+        assert_eq!(mgr.state.current_cycle, 3);
+        assert_eq!(mgr.state.completed_pomodoros, 5);
+        assert!(!mgr.state.post_break_decision_pending);
+        assert!(!mgr.state.is_fullscreen_break);
 
-        if let Some(handle) = mgr.timer_task.take() {
-            handle.abort();
-            let _ = handle.await;
-        }
+        let (should_complete, tick_payload) = mgr.tick();
+
+        assert!(!should_complete);
+        assert_eq!(tick_payload.status, TimerStatus::Working);
+        assert_eq!(tick_payload.session_type, SessionType::Work);
+        assert_eq!(tick_payload.remaining_seconds, work_duration_secs - 1);
+        assert_eq!(mgr.state.remaining_seconds, work_duration_secs - 1);
     }
 
     #[test]
