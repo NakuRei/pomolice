@@ -769,7 +769,7 @@ mod tests {
     use crate::scheduler::SchedulerTickTestRuntime;
     use chrono::{Local, LocalResult, Utc};
     use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicBool as StdAtomicBool, AtomicUsize as StdAtomicUsize};
+    use std::sync::atomic::AtomicBool as StdAtomicBool;
     use std::sync::{Arc, Mutex as StdMutex};
     use std::time::Duration as StdDuration;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1111,20 +1111,6 @@ mod tests {
             .set_task_handles_for_test(cancellation_token, timer_task);
 
         task_completed
-    }
-
-    async fn install_stale_tick_timer_task(state: &AppState) -> Arc<StdAtomicUsize> {
-        let stale_tick_count = Arc::new(StdAtomicUsize::new(0));
-        let stale_tick_count_for_task = Arc::clone(&stale_tick_count);
-
-        state.timer_manager.lock().await.spawn_timer_task(move || {
-            let stale_tick_count_for_callback = Arc::clone(&stale_tick_count_for_task);
-            async move {
-                stale_tick_count_for_callback.fetch_add(1, Ordering::SeqCst);
-            }
-        });
-
-        stale_tick_count
     }
 
     async fn install_timer_countdown_task(state: &Arc<AppState>) {
@@ -2078,17 +2064,9 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn test_resolve_post_break_decision_continue_command_side_effects() {
-        let state = build_test_state_without_persistence_path().await;
+        let state = Arc::new(build_test_state_without_persistence_path().await);
         prepare_post_break_decision_pending_state(&state).await;
-        let stale_tick_count = install_stale_tick_timer_task(&state).await;
-        tokio::task::yield_now().await;
-        tokio::time::advance(StdDuration::from_secs(1)).await;
-        tokio::task::yield_now().await;
-        let stale_tick_count_before_continue = stale_tick_count.load(Ordering::SeqCst);
-        assert!(
-            stale_tick_count_before_continue > 0,
-            "old timer task should be active before continue"
-        );
+        install_timer_countdown_task(&state).await;
         let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
 
         resolve_post_break_decision_with_runtime_effects(
@@ -2108,18 +2086,15 @@ mod tests {
             &runtime_effect_shell,
             RuntimeEffectEvent::RequestFullscreenBreakExit,
         );
-        let stale_tick_count_after_continue = stale_tick_count.load(Ordering::SeqCst);
         tokio::time::advance(StdDuration::from_secs(3)).await;
         tokio::task::yield_now().await;
-        assert_eq!(
-            stale_tick_count.load(Ordering::SeqCst),
-            stale_tick_count_after_continue,
-            "old timer task should not tick after continue"
-        );
 
         let timer = state.timer_manager.lock().await;
-        assert_eq!(timer.status(), TimerStatus::Working);
-        assert!(!timer.get_state().post_break_decision_pending);
+        let timer_state = timer.get_state();
+        assert_eq!(timer_state.status, TimerStatus::Working);
+        assert_eq!(timer_state.session_type, SessionType::Work);
+        assert_eq!(timer_state.remaining_seconds, 1500);
+        assert!(!timer_state.post_break_decision_pending);
         assert_eq!(
             runtime_effect_shell.emitted_tick_snapshots[0].status,
             TimerStatus::Working

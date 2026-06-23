@@ -1015,6 +1015,39 @@ mod emit_order_tests {
         assert!(!timer_state.is_fullscreen_break);
     }
 
+    #[tokio::test]
+    async fn test_work_tick_at_boundary_emits_tick_and_requests_session_completion() {
+        let state = build_test_state_without_persistence_path().await;
+        replace_timer_state(
+            &state,
+            TimerState {
+                status: TimerStatus::Working,
+                session_type: SessionType::Work,
+                remaining_seconds: 1,
+                ..TimerState::default()
+            },
+        )
+        .await;
+
+        let mut effects = RecordingTimerTickRuntimeEffects::default();
+        handle_timer_tick_with_effects(&state, &mut effects).await;
+
+        assert_eq!(
+            effects.artifact,
+            TimerTickEffectArtifact {
+                timer_tick_emissions: 1,
+                tray_updates: 1,
+                session_completions: 1,
+            }
+        );
+
+        let timer = state.timer_manager.lock().await;
+        let timer_state = timer.get_state();
+        assert_eq!(timer_state.status, TimerStatus::Working);
+        assert_eq!(timer_state.session_type, SessionType::Work);
+        assert_eq!(timer_state.remaining_seconds, 0);
+    }
+
     fn timer_settings(
         work_duration_secs: u64,
         short_break_duration_secs: u64,

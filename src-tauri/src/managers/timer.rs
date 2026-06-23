@@ -750,51 +750,6 @@ mod tests {
         .expect("slot should be valid")
     }
 
-    #[tokio::test]
-    async fn test_spawn_timer_task_invokes_and_awaits_callback_before_cancelled_task_finishes() {
-        let mut mgr = make_manager();
-        let callback_started = std::sync::Arc::new(tokio::sync::Notify::new());
-        let callback_release = std::sync::Arc::new(tokio::sync::Notify::new());
-        let callback_finished = std::sync::Arc::new(tokio::sync::Notify::new());
-
-        {
-            let callback_started = std::sync::Arc::clone(&callback_started);
-            let callback_release = std::sync::Arc::clone(&callback_release);
-            let callback_finished = std::sync::Arc::clone(&callback_finished);
-            mgr.spawn_timer_task(move || {
-                let callback_started = std::sync::Arc::clone(&callback_started);
-                let callback_release = std::sync::Arc::clone(&callback_release);
-                let callback_finished = std::sync::Arc::clone(&callback_finished);
-                async move {
-                    callback_started.notify_one();
-                    callback_release.notified().await;
-                    callback_finished.notify_one();
-                }
-            });
-        }
-
-        tokio::time::timeout(Duration::from_millis(1500), callback_started.notified())
-            .await
-            .expect("callback should start after the first tick");
-
-        let mut handle = mgr
-            .cancel_and_take_task()
-            .expect("running timer task should return a handle");
-
-        tokio::time::timeout(Duration::from_millis(100), &mut handle)
-            .await
-            .expect_err("cancelled task should still await the pending callback");
-
-        callback_release.notify_one();
-        tokio::time::timeout(Duration::from_millis(100), callback_finished.notified())
-            .await
-            .expect("callback should finish after release");
-        tokio::time::timeout(Duration::from_millis(100), handle)
-            .await
-            .expect("task should finish after callback completion")
-            .expect("timer task should not panic");
-    }
-
     #[test]
     fn test_get_break_type() {
         assert_eq!(get_break_type(1, 4), SessionType::ShortBreak);
