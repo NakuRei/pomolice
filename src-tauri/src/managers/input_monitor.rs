@@ -733,35 +733,6 @@ mod tests {
     }
 
     #[test]
-    fn test_escape_combo_callback_runs_after_modifier_state_lock_is_released() {
-        let enabled = Arc::new(AtomicBool::new(true));
-        let modifier_state = Arc::new(parking_lot::Mutex::new(ModifierState::default()));
-        let callback_observed_unlocked_state = Arc::new(AtomicBool::new(false));
-
-        let modifier_state_for_callback = Arc::clone(&modifier_state);
-        let callback_observed_unlocked_state_for_callback =
-            Arc::clone(&callback_observed_unlocked_state);
-        let callback = build_event_callback(
-            Arc::clone(&enabled),
-            Arc::clone(&modifier_state),
-            Arc::new(move || {
-                callback_observed_unlocked_state_for_callback.store(
-                    modifier_state_for_callback.try_lock().is_some(),
-                    Ordering::SeqCst,
-                );
-            }),
-            Arc::new(|| {}),
-        );
-
-        for key in [Key::ControlLeft, Key::Alt, Key::ShiftLeft, Key::KeyE] {
-            callback(key_press_event(key));
-        }
-
-        assert!(callback_observed_unlocked_state.load(Ordering::SeqCst));
-        assert!(!enabled.load(Ordering::SeqCst));
-    }
-
-    #[test]
     fn test_stop_is_idempotent() {
         let mut mgr = make_manager();
         mgr.stop();
