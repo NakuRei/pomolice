@@ -777,7 +777,6 @@ mod tests {
     use crate::types::{DayAutoRunSlot, HhMm, SessionTransitionReason, SessionType, TimerState};
     use chrono::TimeZone;
     use serde_json::json;
-    use tokio_util::sync::CancellationToken;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum RuntimeEffectEvent {
@@ -848,6 +847,34 @@ mod tests {
 
         fn before_persist(&mut self) {
             self.events.push(RuntimeEffectEvent::Persist);
+        }
+    }
+
+    struct ActiveCountdownRuntimeEffectShell {
+        state: Arc<AppState>,
+    }
+
+    impl ActiveCountdownRuntimeEffectShell {
+        fn new(state: Arc<AppState>) -> Self {
+            Self { state }
+        }
+    }
+
+    impl StartRuntimeEffectShell for ActiveCountdownRuntimeEffectShell {
+        fn emit_tick(&mut self, _tick_payload: &TimerTickPayload) {}
+
+        fn update_tray(&mut self, _tick_payload: &TimerTickPayload) {}
+
+        fn emit_work_started(&mut self, _work_duration: u64) {}
+
+        fn spawn_timer_task<'a>(
+            &'a mut self,
+            _state: &'a AppState,
+        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+            let state = Arc::clone(&self.state);
+            Box::pin(async move {
+                install_timer_countdown_task(&state).await;
+            })
         }
     }
 
@@ -1092,25 +1119,6 @@ mod tests {
         timer.set_fullscreen_break(true);
         assert_eq!(timer.status(), TimerStatus::OnBreak);
         assert!(timer.get_state().is_fullscreen_break);
-    }
-
-    async fn install_cancellable_timer_task(state: &AppState) -> Arc<StdAtomicBool> {
-        let task_completed = Arc::new(StdAtomicBool::new(false));
-        let task_completed_for_task = Arc::clone(&task_completed);
-        let cancellation_token = CancellationToken::new();
-        let task_token = cancellation_token.clone();
-        let timer_task = tokio::spawn(async move {
-            task_token.cancelled().await;
-            task_completed_for_task.store(true, Ordering::Release);
-        });
-
-        state
-            .timer_manager
-            .lock()
-            .await
-            .set_task_handles_for_test(cancellation_token, timer_task);
-
-        task_completed
     }
 
     async fn install_timer_countdown_task(state: &Arc<AppState>) {
@@ -2194,7 +2202,6 @@ mod tests {
     async fn test_emergency_stop_command_side_effects() {
         let fullscreen_state = build_test_state_without_persistence_path().await;
         prepare_fullscreen_break_state(&fullscreen_state).await;
-        let old_task_completed = install_cancellable_timer_task(&fullscreen_state).await;
         let mut fullscreen_runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
 
         emergency_stop_with_runtime_effects(
@@ -2225,7 +2232,6 @@ mod tests {
             &fullscreen_runtime_effect_shell,
             RuntimeEffectEvent::SpawnTimerTask,
         );
-        assert!(old_task_completed.load(Ordering::Acquire));
 
         {
             let fullscreen_timer = fullscreen_state.timer_manager.lock().await;
@@ -2280,6 +2286,72 @@ mod tests {
             &non_fullscreen_runtime_effect_shell,
             RuntimeEffectEvent::RequestFullscreenBreakExit,
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_emergency_stop_prevents_previous_countdown_from_affecting_next_work_session() {
+        let state = Arc::new(build_test_state_without_persistence_path().await);
+        prepare_fullscreen_break_state(&state).await;
+        install_timer_countdown_task(&state).await;
+
+        tokio::task::yield_now().await;
+        tokio::time::advance(StdDuration::from_secs(1)).await;
+        tokio::task::yield_now().await;
+
+        {
+            let timer = state.timer_manager.lock().await;
+            let timer_state = timer.get_state();
+            assert_eq!(timer_state.status, TimerStatus::OnBreak);
+            assert_eq!(timer_state.remaining_seconds, 299);
+            assert!(timer_state.is_fullscreen_break);
+        }
+
+        let mut stop_runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+        emergency_stop_with_runtime_effects(&state, &mut stop_runtime_effect_shell)
+            .await
+            .expect("emergency stop should succeed");
+
+        {
+            let timer = state.timer_manager.lock().await;
+            let timer_state = timer.get_state();
+            assert_eq!(timer_state.status, TimerStatus::Idle);
+            assert!(!timer_state.is_fullscreen_break);
+        }
+
+        let mut start_runtime_effect_shell =
+            ActiveCountdownRuntimeEffectShell::new(Arc::clone(&state));
+        start_work_for_tests(
+            &state,
+            timer_settings(
+                1500,
+                300,
+                900,
+                4,
+                PostBreakTransitionPolicy::RequireManualContinue,
+            ),
+            TimerStartSource::ScheduledAutoStart,
+            &mut start_runtime_effect_shell,
+        )
+        .await
+        .expect("new work session should start");
+
+        {
+            let timer = state.timer_manager.lock().await;
+            let timer_state = timer.get_state();
+            assert_eq!(timer_state.status, TimerStatus::Working);
+            assert_eq!(timer_state.session_type, SessionType::Work);
+            assert_eq!(timer_state.remaining_seconds, 1500);
+        }
+
+        tokio::task::yield_now().await;
+        tokio::time::advance(StdDuration::from_secs(1)).await;
+        tokio::task::yield_now().await;
+
+        let timer = state.timer_manager.lock().await;
+        let timer_state = timer.get_state();
+        assert_eq!(timer_state.status, TimerStatus::Working);
+        assert_eq!(timer_state.session_type, SessionType::Work);
+        assert_eq!(timer_state.remaining_seconds, 1499);
     }
 
     #[tokio::test]

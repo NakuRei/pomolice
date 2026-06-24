@@ -635,16 +635,6 @@ impl TimerStateManager {
         self.timer_task.take()
     }
 
-    #[cfg(test)]
-    pub(crate) fn set_task_handles_for_test(
-        &mut self,
-        cancel_token: CancellationToken,
-        timer_task: tokio::task::JoinHandle<()>,
-    ) {
-        self.cancel_token = Some(cancel_token);
-        self.timer_task = Some(timer_task);
-    }
-
     /// Spawn a new timer task.
     ///
     /// Must be called **after** the old task has been awaited (outside the lock).
