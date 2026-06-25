@@ -902,39 +902,4 @@ mod tests {
             ]
         );
     }
-
-    #[test]
-    fn test_weekly_auto_run_config_try_new_rejects_adjacent_overlap() {
-        let result = WeeklyAutoRunConfig::try_new(
-            DayAutoRunSlot::try_new(
-                true,
-                HhMm::try_from("22:00".to_string()).expect("start time should be valid"),
-                HhMm::try_from("02:00".to_string()).expect("end time should be valid"),
-            )
-            .expect("slot should be valid"),
-            DayAutoRunSlot::try_new(
-                true,
-                HhMm::try_from("01:00".to_string()).expect("start time should be valid"),
-                HhMm::try_from("05:00".to_string()).expect("end time should be valid"),
-            )
-            .expect("slot should be valid"),
-            DayAutoRunSlot::default(),
-            DayAutoRunSlot::default(),
-            DayAutoRunSlot::default(),
-            DayAutoRunSlot::default(),
-            DayAutoRunSlot::default(),
-        );
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_find_first_overlapping_weekday_pair_returns_none_when_non_overlapping() {
-        let mut config = WeeklyAutoRunConfig::default();
-        update_weekday_slot(&mut config, "mon", true, "09:00", "12:00");
-        update_weekday_slot(&mut config, "tue", true, "13:00", "18:00");
-
-        let overlap_pair = config.find_first_overlapping_weekday_pair();
-        assert!(overlap_pair.is_none());
-    }
 }

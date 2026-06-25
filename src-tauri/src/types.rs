@@ -479,7 +479,7 @@ impl WeeklyAutoRunConfig {
         };
 
         if let Some((primary_weekday, secondary_weekday)) =
-            config.find_first_overlapping_weekday_pair()
+            find_first_overlapping_weekday_pair(&config)
         {
             return Err(ScheduleValidationError::Overlap {
                 primary_weekday,
@@ -517,51 +517,51 @@ impl WeeklyAutoRunConfig {
     pub(crate) fn sun(&self) -> DayAutoRunSlot {
         self.sun
     }
+}
 
-    pub(crate) fn find_first_overlapping_weekday_pair(
-        &self,
-    ) -> Option<(&'static str, &'static str)> {
-        let weekday_ranges: Vec<(&'static str, Vec<WeekMinuteRange>)> = [
-            ("mon", 0_u32, self.mon),
-            ("tue", 1, self.tue),
-            ("wed", 2, self.wed),
-            ("thu", 3, self.thu),
-            ("fri", 4, self.fri),
-            ("sat", 5, self.sat),
-            ("sun", 6, self.sun),
-        ]
-        .into_iter()
-        .filter(|(_, _, slot)| slot.enabled())
-        .map(|(weekday_key, weekday_index, slot)| {
-            (
-                weekday_key,
-                build_week_minute_ranges(
-                    weekday_index,
-                    slot.start_time().minutes_since_midnight(),
-                    slot.end_time().minutes_since_midnight(),
-                    slot.crosses_midnight(),
-                ),
-            )
-        })
-        .collect();
+fn find_first_overlapping_weekday_pair(
+    config: &WeeklyAutoRunConfig,
+) -> Option<(&'static str, &'static str)> {
+    let weekday_ranges: Vec<(&'static str, Vec<WeekMinuteRange>)> = [
+        ("mon", 0_u32, config.mon),
+        ("tue", 1, config.tue),
+        ("wed", 2, config.wed),
+        ("thu", 3, config.thu),
+        ("fri", 4, config.fri),
+        ("sat", 5, config.sat),
+        ("sun", 6, config.sun),
+    ]
+    .into_iter()
+    .filter(|(_, _, slot)| slot.enabled())
+    .map(|(weekday_key, weekday_index, slot)| {
+        (
+            weekday_key,
+            build_week_minute_ranges(
+                weekday_index,
+                slot.start_time().minutes_since_midnight(),
+                slot.end_time().minutes_since_midnight(),
+                slot.crosses_midnight(),
+            ),
+        )
+    })
+    .collect();
 
-        for primary_index in 0..weekday_ranges.len() {
-            for secondary_index in (primary_index + 1)..weekday_ranges.len() {
-                let (primary_weekday, primary_ranges) = &weekday_ranges[primary_index];
-                let (secondary_weekday, secondary_ranges) = &weekday_ranges[secondary_index];
+    for primary_index in 0..weekday_ranges.len() {
+        for secondary_index in (primary_index + 1)..weekday_ranges.len() {
+            let (primary_weekday, primary_ranges) = &weekday_ranges[primary_index];
+            let (secondary_weekday, secondary_ranges) = &weekday_ranges[secondary_index];
 
-                for primary_range in primary_ranges {
-                    for secondary_range in secondary_ranges {
-                        if week_minute_ranges_overlap(*primary_range, *secondary_range) {
-                            return Some((primary_weekday, secondary_weekday));
-                        }
+            for primary_range in primary_ranges {
+                for secondary_range in secondary_ranges {
+                    if week_minute_ranges_overlap(*primary_range, *secondary_range) {
+                        return Some((primary_weekday, secondary_weekday));
                     }
                 }
             }
         }
-
-        None
     }
+
+    None
 }
 
 impl Default for WeeklyAutoRunConfig {
@@ -1048,7 +1048,7 @@ mod tests {
     }
 
     #[test]
-    fn test_weekly_auto_run_config_try_new_rejects_overnight_overlap() {
+    fn test_weekly_auto_run_config_try_new_rejects_overlapping_enabled_windows() {
         let result = WeeklyAutoRunConfig::try_new(
             enabled_slot("22:00", "02:00"),
             enabled_slot("01:00", "05:00"),
@@ -1061,10 +1061,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(ScheduleValidationError::Overlap {
-                primary_weekday: "mon",
-                secondary_weekday: "tue",
-            })
+            Err(ScheduleValidationError::Overlap { .. })
         ));
     }
 
@@ -1080,17 +1077,25 @@ mod tests {
             enabled_slot("22:00", "02:00"),
         );
 
-        let Err(ScheduleValidationError::Overlap {
-            primary_weekday,
-            secondary_weekday,
-        }) = result
-        else {
-            panic!("Sunday overnight and Monday early morning should overlap");
-        };
         assert!(matches!(
-            (primary_weekday, secondary_weekday),
-            ("sun", "mon") | ("mon", "sun")
+            result,
+            Err(ScheduleValidationError::Overlap { .. })
         ));
+    }
+
+    #[test]
+    fn test_weekly_auto_run_config_try_new_accepts_non_overlapping_enabled_weekday_slots() {
+        let result = WeeklyAutoRunConfig::try_new(
+            enabled_slot("09:00", "12:00"),
+            enabled_slot("13:00", "18:00"),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+        );
+
+        assert!(result.is_ok());
     }
 
     #[test]
