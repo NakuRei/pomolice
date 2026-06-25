@@ -68,7 +68,7 @@ where
     }
 }
 
-pub(crate) fn extract_invoke_error_message(error: &InvokeError) -> String {
+fn extract_invoke_error_message(error: &InvokeError) -> String {
     match &error.0 {
         serde_json::Value::String(message) => message.clone(),
         value => value.to_string(),
