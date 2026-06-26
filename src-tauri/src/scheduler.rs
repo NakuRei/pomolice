@@ -26,8 +26,34 @@ use crate::types::{
 const SCHEDULER_INTERVAL_SECONDS: u64 = 1;
 const PROCESSED_BOUNDARY_RETENTION_DAYS: i64 = 8;
 
+#[derive(Default)]
+struct ProcessedBoundaryOccurrences {
+    occurrences: HashSet<BoundaryOccurrenceId>,
+}
+
+impl ProcessedBoundaryOccurrences {
+    fn record_if_first_seen(&mut self, boundary: &BoundaryOccurrenceId) -> bool {
+        self.occurrences.insert(boundary.clone())
+    }
+
+    fn clear_for_schedule_topology_change(&mut self) {
+        self.occurrences.clear();
+    }
+
+    fn discard_stale_or_invalid(&mut self, now_local: DateTime<Local>) {
+        let oldest_epoch_to_keep =
+            (now_local - ChronoDuration::days(PROCESSED_BOUNDARY_RETENTION_DAYS)).timestamp();
+
+        self.occurrences.retain(|boundary_id| {
+            boundary_id
+                .epoch_seconds()
+                .is_some_and(|epoch_seconds| epoch_seconds >= oldest_epoch_to_keep)
+        });
+    }
+}
+
 struct SchedulerRuntimeState {
-    processed_boundary_occurrences: HashSet<BoundaryOccurrenceId>,
+    processed_boundaries: ProcessedBoundaryOccurrences,
     last_checked_local: DateTime<Local>,
     start_boundaries_blocked_until_idle: bool,
     last_seen_config_revision: u64,
@@ -119,7 +145,7 @@ impl SchedulerTickTestRuntime {
     fn new(previous_local: DateTime<Local>, last_seen_config_revision: u64) -> Self {
         Self {
             runtime_state: SchedulerRuntimeState {
-                processed_boundary_occurrences: HashSet::new(),
+                processed_boundaries: ProcessedBoundaryOccurrences::default(),
                 last_checked_local: previous_local,
                 start_boundaries_blocked_until_idle: false,
                 last_seen_config_revision,
@@ -242,7 +268,7 @@ async fn run_app_scheduler_loop(
 
     let state_handle = scheduler_app.state::<state::AppState>();
     let mut runtime_state = SchedulerRuntimeState {
-        processed_boundary_occurrences: HashSet::new(),
+        processed_boundaries: ProcessedBoundaryOccurrences::default(),
         last_checked_local: initial_previous_local,
         start_boundaries_blocked_until_idle,
         last_seen_config_revision: state_handle.config_revision.load(Ordering::Acquire),
@@ -342,7 +368,9 @@ async fn run_scheduler_tick_with_effects(
         .await;
     }
 
-    trim_old_processed_boundaries(&mut runtime_state.processed_boundary_occurrences, now_local);
+    runtime_state
+        .processed_boundaries
+        .discard_stale_or_invalid(now_local);
     runtime_state.last_checked_local = now_local;
 }
 
@@ -386,7 +414,9 @@ fn build_scheduler_tick_plan(
     let mut skip_start_boundaries_this_tick = false;
 
     let end_boundary_previous_local = if config_changed {
-        runtime_state.processed_boundary_occurrences.clear();
+        runtime_state
+            .processed_boundaries
+            .clear_for_schedule_topology_change();
         runtime_state.last_checked_local = now_local;
         runtime_state.last_seen_config_revision = config_revision;
         skip_start_boundaries_this_tick = true;
@@ -453,7 +483,10 @@ async fn process_crossed_end_boundaries_with_effects(
         collect_crossed_end_boundaries(previous_local, now_local, weekly_auto_run_config);
 
     for end_boundary in crossed_end_boundaries {
-        if !record_processed_boundary_occurrence(runtime_state, &end_boundary) {
+        if !runtime_state
+            .processed_boundaries
+            .record_if_first_seen(&end_boundary)
+        {
             continue;
         }
 
@@ -487,7 +520,10 @@ async fn process_crossed_start_boundaries_with_effects(
     );
 
     for start_boundary in crossed_start_boundaries {
-        if !record_processed_boundary_occurrence(runtime_state, &start_boundary) {
+        if !runtime_state
+            .processed_boundaries
+            .record_if_first_seen(&start_boundary)
+        {
             continue;
         }
 
@@ -511,29 +547,6 @@ async fn process_crossed_start_boundaries_with_effects(
             );
         }
     }
-}
-
-fn record_processed_boundary_occurrence(
-    runtime_state: &mut SchedulerRuntimeState,
-    boundary: &BoundaryOccurrenceId,
-) -> bool {
-    runtime_state
-        .processed_boundary_occurrences
-        .insert(boundary.clone())
-}
-
-pub(crate) fn trim_old_processed_boundaries(
-    processed_boundary_occurrences: &mut HashSet<BoundaryOccurrenceId>,
-    now_local: DateTime<Local>,
-) {
-    let oldest_epoch_to_keep =
-        (now_local - ChronoDuration::days(PROCESSED_BOUNDARY_RETENTION_DAYS)).timestamp();
-
-    processed_boundary_occurrences.retain(|boundary_id| {
-        boundary_id
-            .epoch_seconds()
-            .is_some_and(|epoch_seconds| epoch_seconds >= oldest_epoch_to_keep)
-    });
 }
 
 async fn mark_scheduled_stop_pending_with_effects(
@@ -1014,7 +1027,7 @@ mod tests {
         last_seen_config_revision: u64,
     ) -> SchedulerRuntimeState {
         SchedulerRuntimeState {
-            processed_boundary_occurrences: HashSet::new(),
+            processed_boundaries: ProcessedBoundaryOccurrences::default(),
             last_checked_local: previous_local,
             start_boundaries_blocked_until_idle: false,
             last_seen_config_revision,
@@ -1026,7 +1039,7 @@ mod tests {
         last_seen_config_revision: u64,
     ) -> SchedulerRuntimeState {
         SchedulerRuntimeState {
-            processed_boundary_occurrences: HashSet::new(),
+            processed_boundaries: ProcessedBoundaryOccurrences::default(),
             last_checked_local: previous_local,
             start_boundaries_blocked_until_idle: true,
             last_seen_config_revision,
@@ -1046,6 +1059,16 @@ mod tests {
         )
         .await;
 
+        let mut timer = state.timer_manager.lock().await;
+        timer
+            .start_work_with_source(TimerSettings::default(), timer_start_source)
+            .expect("work session should start");
+    }
+
+    async fn start_work_with_existing_schedule_source(
+        state: &state::AppState,
+        timer_start_source: TimerStartSource,
+    ) {
         let mut timer = state.timer_manager.lock().await;
         timer
             .start_work_with_source(TimerSettings::default(), timer_start_source)
@@ -1076,6 +1099,40 @@ mod tests {
     async fn complete_work_session(state: &state::AppState) -> SessionTransitionReason {
         let mut timer = state.timer_manager.lock().await;
         timer.complete_work_session_transition().transition_reason
+    }
+
+    async fn complete_break_session(state: &state::AppState) -> SessionTransitionReason {
+        let mut timer = state.timer_manager.lock().await;
+        timer.complete_break_session_transition().transition_reason
+    }
+
+    fn boundary_id(
+        slot_key: &str,
+        boundary_type: &str,
+        epoch_seconds: i64,
+    ) -> BoundaryOccurrenceId {
+        BoundaryOccurrenceId::for_schedule_boundary(slot_key, boundary_type, epoch_seconds)
+    }
+
+    #[test]
+    fn stale_or_invalid_boundary_occurrences_become_eligible_again() {
+        let now_local = local_datetime(2025, 1, 10, 12, 0, 0);
+        let stale_epoch = (now_local - ChronoDuration::days(10)).timestamp();
+        let recent_epoch = (now_local - ChronoDuration::days(2)).timestamp();
+        let stale_boundary = boundary_id("mon", "start", stale_epoch);
+        let recent_boundary = boundary_id("tue", "end", recent_epoch);
+        let invalid_boundary = BoundaryOccurrenceId::from_raw_for_tests("invalid");
+        let mut processed_boundaries = ProcessedBoundaryOccurrences::default();
+
+        assert!(processed_boundaries.record_if_first_seen(&stale_boundary));
+        assert!(processed_boundaries.record_if_first_seen(&recent_boundary));
+        assert!(processed_boundaries.record_if_first_seen(&invalid_boundary));
+
+        processed_boundaries.discard_stale_or_invalid(now_local);
+
+        assert!(processed_boundaries.record_if_first_seen(&stale_boundary));
+        assert!(processed_boundaries.record_if_first_seen(&invalid_boundary));
+        assert!(!processed_boundaries.record_if_first_seen(&recent_boundary));
     }
 
     #[tokio::test]
@@ -1137,16 +1194,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn end_boundary_duplicate_evaluation_emits_stop_pending_once() {
+    async fn replayed_end_boundary_does_not_mark_new_work_session_pending() {
         let state = build_test_state_without_persistence_path().await;
         close_start_boundary_gate(&state);
         start_work_with_schedule_source(&state, true, TimerStartSource::ManualInsideWindow).await;
 
-        let mut first_runtime_state = runtime_state_at(
-            local_datetime(2025, 1, 6, 17, 59, 50),
-            state.config_revision.load(Ordering::Acquire),
-        );
-        let mut replay_runtime_state = runtime_state_at(
+        let mut runtime_state = runtime_state_at(
             local_datetime(2025, 1, 6, 17, 59, 50),
             state.config_revision.load(Ordering::Acquire),
         );
@@ -1155,31 +1208,48 @@ mod tests {
 
         run_scheduler_tick_with_effects(
             &state,
-            &mut first_runtime_state,
-            crossed_end_boundary,
-            &mut effects,
-        )
-        .await;
-        run_scheduler_tick_with_effects(
-            &state,
-            &mut replay_runtime_state,
+            &mut runtime_state,
             crossed_end_boundary,
             &mut effects,
         )
         .await;
 
         assert_eq!(effects.auto_run_stop_pending_count, 1);
-        assert_no_work_start_effects(&effects);
-        {
-            let timer = state.timer_manager.lock().await;
-            assert_eq!(
-                timer.get_state().scheduled_stop_state,
-                ScheduledStopState::Pending
-            );
-        }
+        assert_eq!(
+            effects.persist_triggers,
+            [PERSISTENCE_WRITE_TRIGGER_SCHEDULER_STOP_PENDING]
+        );
         assert_eq!(
             complete_work_session(&state).await,
             SessionTransitionReason::ScheduledStopExecuted
+        );
+
+        start_work_with_existing_schedule_source(&state, TimerStartSource::ScheduledAutoStart)
+            .await;
+        run_scheduler_tick_with_effects(
+            &state,
+            &mut runtime_state,
+            local_datetime(2025, 1, 6, 17, 59, 50),
+            &mut effects,
+        )
+        .await;
+        run_scheduler_tick_with_effects(
+            &state,
+            &mut runtime_state,
+            crossed_end_boundary,
+            &mut effects,
+        )
+        .await;
+
+        assert_eq!(effects.auto_run_stop_pending_count, 1);
+        assert_eq!(
+            effects.persist_triggers,
+            [PERSISTENCE_WRITE_TRIGGER_SCHEDULER_STOP_PENDING]
+        );
+        assert_no_work_start_effects(&effects);
+        assert_eq!(
+            complete_work_session(&state).await,
+            SessionTransitionReason::WorkToBreak
         );
     }
 
@@ -1320,6 +1390,75 @@ mod tests {
             !effects.work_started_durations.is_empty(),
             "an arriving start boundary should auto-start work when the gate is open"
         );
+    }
+
+    #[tokio::test]
+    async fn replayed_start_boundary_does_not_start_work_again_after_returning_idle() {
+        let state = build_test_state_without_persistence_path().await;
+        open_start_boundary_gate(&state);
+        apply_schedule(
+            &state,
+            weekly_config_with_monday_daytime(),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+
+        let mut runtime_state = runtime_state_at(
+            local_datetime(2025, 1, 6, 8, 59, 50),
+            state.config_revision.load(Ordering::Acquire),
+        );
+        let mut effects = RecordingSchedulerRuntimeEffects::default();
+        let crossed_start_boundary = local_datetime(2025, 1, 6, 9, 0, 10);
+
+        run_scheduler_tick_with_effects(
+            &state,
+            &mut runtime_state,
+            crossed_start_boundary,
+            &mut effects,
+        )
+        .await;
+
+        assert_eq!(effects.work_started_durations, [1500]);
+        assert_eq!(effects.timer_tick_payloads.len(), 1);
+        assert_eq!(effects.tray_update_payloads.len(), 1);
+        assert_eq!(effects.timer_task_spawn_count, 1);
+        assert_eq!(
+            effects.persist_triggers,
+            [PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START]
+        );
+        assert_eq!(
+            complete_work_session(&state).await,
+            SessionTransitionReason::WorkToBreak
+        );
+        assert_eq!(
+            complete_break_session(&state).await,
+            SessionTransitionReason::BreakWaitingDecision
+        );
+
+        run_scheduler_tick_with_effects(
+            &state,
+            &mut runtime_state,
+            local_datetime(2025, 1, 6, 8, 59, 50),
+            &mut effects,
+        )
+        .await;
+        run_scheduler_tick_with_effects(
+            &state,
+            &mut runtime_state,
+            crossed_start_boundary,
+            &mut effects,
+        )
+        .await;
+
+        assert_eq!(effects.work_started_durations, [1500]);
+        assert_eq!(effects.timer_tick_payloads.len(), 1);
+        assert_eq!(effects.tray_update_payloads.len(), 1);
+        assert_eq!(effects.timer_task_spawn_count, 1);
+        assert_eq!(
+            effects.persist_triggers,
+            [PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START]
+        );
+        assert_eq!(state.timer_manager.lock().await.status(), TimerStatus::Idle);
     }
 
     #[tokio::test]

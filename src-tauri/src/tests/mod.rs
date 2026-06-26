@@ -21,69 +21,6 @@ mod logging_config_test;
 mod logging_event_test;
 
 #[cfg(test)]
-mod scheduler_boundary_runtime_tests {
-    use std::collections::HashSet;
-
-    use chrono::{Local, TimeZone};
-
-    use crate::trim_old_processed_boundaries;
-    use crate::types::BoundaryOccurrenceId;
-
-    fn boundary_id(
-        slot_key: &str,
-        boundary_type: &str,
-        epoch_seconds: i64,
-    ) -> BoundaryOccurrenceId {
-        BoundaryOccurrenceId::for_schedule_boundary(slot_key, boundary_type, epoch_seconds)
-    }
-
-    #[test]
-    fn test_processed_boundary_set_rejects_duplicate_boundary_occurrence_ids() {
-        let mut processed = HashSet::new();
-        let boundary = boundary_id("mon", "start", 1_736_154_000);
-
-        assert!(processed.insert(boundary.clone()));
-        assert!(!processed.insert(boundary));
-        assert_eq!(processed.len(), 1);
-    }
-
-    #[test]
-    fn test_boundary_occurrence_id_exposes_epoch_seconds() {
-        let valid = boundary_id("mon", "end", 1_736_154_400);
-        let invalid = BoundaryOccurrenceId::from_raw_for_tests("invalid-boundary-id");
-
-        assert_eq!(valid.epoch_seconds(), Some(1_736_154_400));
-        assert_eq!(invalid.epoch_seconds(), None);
-    }
-
-    #[test]
-    fn test_trim_old_processed_boundaries_keeps_recent_and_removes_stale_or_invalid() {
-        let now_local = Local
-            .with_ymd_and_hms(2025, 1, 10, 12, 0, 0)
-            .single()
-            .expect("local datetime should be valid");
-        let stale_epoch = (now_local - chrono::Duration::days(10)).timestamp();
-        let recent_epoch = (now_local - chrono::Duration::days(2)).timestamp();
-
-        let stale_boundary = boundary_id("mon", "start", stale_epoch);
-        let recent_boundary = boundary_id("tue", "end", recent_epoch);
-        let invalid_boundary = BoundaryOccurrenceId::from_raw_for_tests("invalid");
-
-        let mut processed = HashSet::from([
-            stale_boundary.clone(),
-            recent_boundary.clone(),
-            invalid_boundary,
-        ]);
-
-        trim_old_processed_boundaries(&mut processed, now_local);
-
-        assert!(processed.contains(&recent_boundary));
-        assert!(!processed.contains(&stale_boundary));
-        assert_eq!(processed.len(), 1);
-    }
-}
-
-#[cfg(test)]
 mod scheduler_config_revision_scope_tests {
     use crate::commands::timer::did_scheduler_topology_change;
     use crate::types::{DayAutoRunSlot, HhMm, WeeklyAutoRunConfig};

@@ -22,8 +22,6 @@ use crate::logging_event::{
     log_persistence_write_failure, PERSISTENCE_WRITE_TRIGGER_RUN_EVENT_EXIT,
 };
 pub use scheduler::lib_start_scheduler_task;
-#[cfg(test)]
-pub(crate) use scheduler::trim_old_processed_boundaries;
 fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
         if window.label() == "main" {
