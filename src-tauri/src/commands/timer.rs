@@ -1359,6 +1359,29 @@ mod tests {
         timer.complete_work_session_transition().transition_reason
     }
 
+    async fn complete_initial_full_state_sync_outside_schedule_window(state: &AppState) {
+        let full_state = get_full_state_contract(state)
+            .await
+            .expect("full state should be available");
+
+        assert!(!full_state.should_prompt_start_on_boot);
+    }
+
+    async fn assert_scheduled_auto_start_state(state: &AppState) {
+        let timer = state.timer_manager.lock().await;
+        let full_state = timer.get_full_state();
+
+        assert_eq!(full_state.status, TimerStatus::Working);
+        assert_eq!(
+            timer.get_state().timer_start_source,
+            Some(TimerStartSource::ScheduledAutoStart)
+        );
+        assert_eq!(
+            full_state.remaining_seconds,
+            full_state.settings.work_duration_secs.get()
+        );
+    }
+
     fn assert_daytime_monday_window(full_state: &FullStatePayload) {
         let active_window = full_state
             .active_window_summary
@@ -1975,6 +1998,99 @@ mod tests {
         let changed = did_scheduler_topology_change(true, &previous_config, true, &next_config);
 
         assert!(changed);
+    }
+
+    #[tokio::test]
+    async fn topology_change_does_not_replay_past_start_boundary() {
+        let state = build_test_state_at(local_datetime(2025, 1, 6, 8, 0, 0)).await;
+        sync_auto_run_policies_for_test(
+            &state,
+            make_enabled_daytime_monday_config(),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+        complete_initial_full_state_sync_outside_schedule_window(&state).await;
+
+        let mut scheduler_runtime =
+            SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50));
+
+        sync_auto_run_policies_for_test(
+            &state,
+            monday_and_tuesday_config("09:00", "18:00"),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+        scheduler_runtime
+            .run_tick(&state, local_datetime(2025, 1, 6, 10, 0, 0))
+            .await;
+        scheduler_runtime
+            .run_tick(&state, local_datetime(2025, 1, 6, 10, 0, 30))
+            .await;
+
+        let timer = state.timer_manager.lock().await;
+        let full_state = timer.get_full_state();
+        assert_eq!(full_state.status, TimerStatus::Idle);
+        assert_ne!(
+            timer.get_state().timer_start_source,
+            Some(TimerStartSource::ScheduledAutoStart)
+        );
+    }
+
+    #[tokio::test]
+    async fn topology_change_keeps_future_start_boundary_active() {
+        let state = build_test_state_at(local_datetime(2025, 1, 6, 8, 0, 0)).await;
+        sync_auto_run_policies_for_test(
+            &state,
+            make_enabled_daytime_monday_config(),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+        complete_initial_full_state_sync_outside_schedule_window(&state).await;
+
+        let mut scheduler_runtime =
+            SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50));
+
+        sync_auto_run_policies_for_test(
+            &state,
+            monday_and_tuesday_config("09:00", "18:00"),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+        scheduler_runtime
+            .run_tick(&state, local_datetime(2025, 1, 6, 10, 0, 0))
+            .await;
+        scheduler_runtime
+            .run_tick(&state, local_datetime(2025, 1, 7, 9, 0, 10))
+            .await;
+
+        assert_scheduled_auto_start_state(&state).await;
+    }
+
+    #[tokio::test]
+    async fn policy_only_change_does_not_suppress_arriving_start_boundary() {
+        let state = build_test_state_at(local_datetime(2025, 1, 6, 8, 0, 0)).await;
+        sync_auto_run_policies_for_test(
+            &state,
+            make_enabled_daytime_monday_config(),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+        complete_initial_full_state_sync_outside_schedule_window(&state).await;
+
+        let mut scheduler_runtime =
+            SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50));
+
+        sync_auto_run_policies_for_test(
+            &state,
+            make_enabled_daytime_monday_config(),
+            PostBreakTransitionPolicy::StartNextWorkAutomatically,
+        )
+        .await;
+        scheduler_runtime
+            .run_tick(&state, local_datetime(2025, 1, 6, 9, 0, 10))
+            .await;
+
+        assert_scheduled_auto_start_state(&state).await;
     }
 
     #[tokio::test]
