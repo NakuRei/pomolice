@@ -28,6 +28,13 @@ enum TrayIconContent {
     RemainingMinutes { minutes: u32, status: TimerStatus },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TrayIconSource {
+    EmbeddedIdleAppIcon,
+    GeneratedIdleFallback,
+    GeneratedRemainingMinutes { minutes: u32, status: TimerStatus },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct TrayStatusPresentation {
     glyph_mode: TrayGlyphMode,
@@ -47,18 +54,11 @@ struct TrayIconPixels {
     height: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct DecodedPngImage {
-    rgba: Vec<u8>,
-    width: u32,
-    height: u32,
-}
-
 /// Tracks whether the "minimized to tray" notification has been shown.
 /// Once shown, it is never shown again for the lifetime of the process.
 static TRAY_NOTIFICATION_SHOWN: AtomicBool = AtomicBool::new(false);
 
-static IDLE_APP_ICON: OnceLock<DecodedPngImage> = OnceLock::new();
+static IDLE_APP_ICON: OnceLock<TrayIconPixels> = OnceLock::new();
 
 /// Guards against phantom menu events on Windows.
 ///
@@ -213,25 +213,44 @@ fn tray_icon_content(status: TimerStatus, remaining_seconds: u64) -> TrayIconCon
 }
 
 fn render_icon_content(icon_content: TrayIconContent) -> TrayIconPixels {
+    let embedded_idle_icon = idle_app_icon();
+    let icon_source = select_tray_icon_source(icon_content, embedded_idle_icon.is_some());
+    render_tray_icon_source(icon_source, embedded_idle_icon)
+}
+
+fn select_tray_icon_source(
+    icon_content: TrayIconContent,
+    embedded_idle_icon_available: bool,
+) -> TrayIconSource {
     match icon_content {
-        TrayIconContent::IdleAppIcon => {
-            if let Some(icon) = idle_app_icon() {
+        TrayIconContent::IdleAppIcon if embedded_idle_icon_available => {
+            TrayIconSource::EmbeddedIdleAppIcon
+        }
+        TrayIconContent::IdleAppIcon => TrayIconSource::GeneratedIdleFallback,
+        TrayIconContent::RemainingMinutes { minutes, status } => {
+            TrayIconSource::GeneratedRemainingMinutes { minutes, status }
+        }
+    }
+}
+
+fn render_tray_icon_source(
+    icon_source: TrayIconSource,
+    embedded_idle_icon: Option<&TrayIconPixels>,
+) -> TrayIconPixels {
+    match icon_source {
+        TrayIconSource::EmbeddedIdleAppIcon => {
+            if let Some(icon) = embedded_idle_icon {
                 TrayIconPixels {
                     rgba: icon.rgba.clone(),
                     width: icon.width,
                     height: icon.height,
                 }
             } else {
-                log_warn_event(BackendLogEvent::AppTrayIdleAppIconMissing, &[]);
-                let size = tray_icon_renderer::icon_size();
-                TrayIconPixels {
-                    rgba: tray_icon_renderer::render_idle_icon(),
-                    width: size,
-                    height: size,
-                }
+                render_generated_idle_fallback_icon()
             }
         }
-        TrayIconContent::RemainingMinutes { minutes, status } => {
+        TrayIconSource::GeneratedIdleFallback => render_generated_idle_fallback_icon(),
+        TrayIconSource::GeneratedRemainingMinutes { minutes, status } => {
             let size = tray_icon_renderer::icon_size();
             TrayIconPixels {
                 rgba: tray_icon_renderer::render_tray_icon(minutes, status),
@@ -242,17 +261,27 @@ fn render_icon_content(icon_content: TrayIconContent) -> TrayIconPixels {
     }
 }
 
+fn render_generated_idle_fallback_icon() -> TrayIconPixels {
+    log_warn_event(BackendLogEvent::AppTrayIdleAppIconMissing, &[]);
+    let size = tray_icon_renderer::icon_size();
+    TrayIconPixels {
+        rgba: tray_icon_renderer::render_idle_icon(),
+        width: size,
+        height: size,
+    }
+}
+
 fn tray_icon_minutes(remaining_seconds: u64) -> u32 {
     let remaining_minutes = remaining_seconds.div_ceil(60); // Round up
     u32::try_from(remaining_minutes).unwrap_or(u32::MAX)
 }
 
-fn idle_app_icon() -> Option<&'static DecodedPngImage> {
+fn idle_app_icon() -> Option<&'static TrayIconPixels> {
     IDLE_APP_ICON.get()
 }
 
 fn decode_idle_app_icon(
-) -> std::result::Result<DecodedPngImage, Box<dyn std::error::Error + Send + Sync>> {
+) -> std::result::Result<TrayIconPixels, Box<dyn std::error::Error + Send + Sync>> {
     let decoder = png::Decoder::new(Cursor::new(&include_bytes!("../icons/32x32.png")[..]));
     let mut reader = decoder.read_info()?;
 
@@ -265,7 +294,7 @@ fn decode_idle_app_icon(
         rgba.extend(row.data());
     }
 
-    Ok(DecodedPngImage {
+    Ok(TrayIconPixels {
         rgba,
         width: reader.info().width,
         height: reader.info().height,
@@ -296,20 +325,46 @@ fn compose_tooltip_text(presentation: TrayStatusPresentation, remaining_seconds:
 mod tests {
     use super::*;
 
-    fn ensure_idle_app_icon_initialized() {
-        let _ = IDLE_APP_ICON.set(
-            decode_idle_app_icon().expect("embedded idle app icon PNG must be decodable in tests"),
+    #[test]
+    fn test_idle_icon_content_selects_embedded_app_icon_when_available() {
+        assert_eq!(
+            select_tray_icon_source(TrayIconContent::IdleAppIcon, true),
+            TrayIconSource::EmbeddedIdleAppIcon
         );
     }
 
     #[test]
-    fn test_render_icon_content_idle_uses_app_icon() {
-        ensure_idle_app_icon_initialized();
-        let icon = render_icon_content(TrayIconContent::IdleAppIcon);
-        let expected = idle_app_icon().expect("idle app icon should be initialized");
-        assert_eq!(icon.rgba.as_slice(), expected.rgba.as_slice());
-        assert_eq!(icon.width, expected.width);
-        assert_eq!(icon.height, expected.height);
+    fn test_idle_icon_content_selects_generated_fallback_when_app_icon_missing() {
+        assert_eq!(
+            select_tray_icon_source(TrayIconContent::IdleAppIcon, false),
+            TrayIconSource::GeneratedIdleFallback
+        );
+    }
+
+    #[test]
+    fn test_remaining_minutes_content_selects_generated_minutes_icon() {
+        assert_eq!(
+            select_tray_icon_source(
+                TrayIconContent::RemainingMinutes {
+                    minutes: 5,
+                    status: TimerStatus::Working
+                },
+                true
+            ),
+            TrayIconSource::GeneratedRemainingMinutes {
+                minutes: 5,
+                status: TimerStatus::Working
+            }
+        );
+    }
+
+    #[test]
+    fn test_decode_idle_app_icon_returns_valid_rgba_pixels() {
+        let icon = decode_idle_app_icon().expect("embedded idle app icon must decode");
+
+        assert!(icon.width > 0);
+        assert!(icon.height > 0);
+        assert_eq!(icon.rgba.len(), (icon.width * icon.height * 4) as usize);
     }
 
     #[test]
