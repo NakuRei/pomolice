@@ -43,6 +43,7 @@ function getAudioInstance(index: number): MockAudio {
 async function playPreviewAtVolumePercent(
   volumePercent: number,
 ): Promise<MockAudio> {
+  const audioInstanceCountBeforePreview = audioInstances.length;
   vi.mocked(resolveResource).mockResolvedValueOnce("C:\\sounds\\work.wav");
 
   const { playNotificationSoundPreview } = await import("./notifications");
@@ -53,11 +54,11 @@ async function playPreviewAtVolumePercent(
   });
 
   expect(result).toEqual({ status: "played" });
-  expect(audioInstances).toHaveLength(1);
-  return getAudioInstance(0);
+  expect(audioInstances).toHaveLength(audioInstanceCountBeforePreview + 1);
+  return getAudioInstance(audioInstanceCountBeforePreview);
 }
 
-describe("notification volume gain", () => {
+describe("notification volume gain", { concurrent: false }, () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
