@@ -766,60 +766,6 @@ mod tests {
         state.cancel_and_wait_scheduler_task().await;
     }
 
-    #[test]
-    fn test_boot_prompt_gate_allows_resolved_start_after_prompt_check_completed() {
-        assert!(boot_prompt_gate_allows_start_boundary_evaluation(
-            true,
-            false,
-            BootPromptRuntimeState::ResolvedStart,
-        ));
-    }
-
-    #[test]
-    fn test_boot_prompt_gate_allows_resolved_later_after_prompt_check_completed() {
-        assert!(boot_prompt_gate_allows_start_boundary_evaluation(
-            true,
-            false,
-            BootPromptRuntimeState::ResolvedLater,
-        ));
-    }
-
-    #[test]
-    fn test_boot_prompt_gate_allows_not_applicable_after_prompt_check_completed() {
-        assert!(boot_prompt_gate_allows_start_boundary_evaluation(
-            true,
-            false,
-            BootPromptRuntimeState::NotApplicable,
-        ));
-    }
-
-    #[test]
-    fn test_boot_prompt_gate_blocks_when_auto_start_boundary_disabled() {
-        assert!(!boot_prompt_gate_allows_start_boundary_evaluation(
-            false,
-            false,
-            BootPromptRuntimeState::ResolvedStart,
-        ));
-    }
-
-    #[test]
-    fn test_boot_prompt_gate_blocks_while_prompt_check_pending() {
-        assert!(!boot_prompt_gate_allows_start_boundary_evaluation(
-            true,
-            true,
-            BootPromptRuntimeState::ResolvedStart,
-        ));
-    }
-
-    #[test]
-    fn test_boot_prompt_gate_blocks_awaiting_decision() {
-        assert!(!boot_prompt_gate_allows_start_boundary_evaluation(
-            true,
-            false,
-            BootPromptRuntimeState::AwaitingDecision,
-        ));
-    }
-
     fn scheduler_boundary_id() -> BoundaryOccurrenceId {
         BoundaryOccurrenceId::for_schedule_boundary("mon", "start", 1_738_562_400)
     }

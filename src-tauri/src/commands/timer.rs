@@ -1553,6 +1553,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn scheduler_waits_for_initial_full_state_before_start_boundary() {
+        let state = build_test_state_at(local_datetime(2025, 1, 6, 9, 0, 5)).await;
+        sync_auto_run_policies_for_test(
+            &state,
+            make_enabled_daytime_monday_config(),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+        let mut scheduler_runtime =
+            SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50));
+
+        scheduler_runtime
+            .run_tick(&state, local_datetime(2025, 1, 6, 9, 0, 10))
+            .await;
+
+        assert_no_work_session_started_from_boundary(&state).await;
+        let full_state = get_full_state_contract(&state)
+            .await
+            .expect("initial full state should still be available");
+        assert!(full_state.should_prompt_start_on_boot);
+        assert_daytime_monday_window(&full_state);
+    }
+
+    #[tokio::test]
     async fn pending_boot_prompt_prevents_scheduled_work_start_after_follow_up_full_sync() {
         let state = build_prompting_state(
             local_datetime(2025, 1, 6, 9, 0, 5),
@@ -1717,6 +1741,38 @@ mod tests {
             full_state.remaining_seconds,
             full_state.settings.work_duration_secs.get()
         );
+    }
+
+    #[tokio::test]
+    async fn resolved_start_allows_next_scheduled_start_boundary() {
+        let state = build_prompting_state(
+            local_datetime(2025, 1, 6, 10, 0, 0),
+            monday_and_tuesday_config("09:00", "18:00"),
+        )
+        .await;
+        let mut start_runtime_effect_shell = RecordingRuntimeEffectShell::default();
+
+        let result =
+            resolve_boot_auto_start_prompt_contract(&state, true, &mut start_runtime_effect_shell)
+                .await
+                .expect("boot prompt should start work");
+
+        assert_eq!(result, BootPromptRuntimeState::ResolvedStart);
+        assert_work_session_started_from_boundary(&state).await;
+
+        let mut stop_runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+        emergency_stop_with_runtime_effects(&state, &mut stop_runtime_effect_shell)
+            .await
+            .expect("emergency stop should succeed");
+        assert_no_work_session_started_from_boundary(&state).await;
+
+        let mut scheduler_runtime =
+            SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 7, 8, 59, 50));
+        scheduler_runtime
+            .run_tick(&state, local_datetime(2025, 1, 7, 9, 0, 10))
+            .await;
+
+        assert_work_session_started_from_boundary(&state).await;
     }
 
     #[tokio::test]
