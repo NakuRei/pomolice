@@ -611,26 +611,6 @@ async fn start_work_for_tests(
     apply_start_runtime_effects(state, runtime_effect_shell, start_sequence, |_| {}).await
 }
 
-fn evaluate_initial_boot_prompt_decision(
-    is_first_get_full_state: bool,
-    timer_status: TimerStatus,
-    is_inside_schedule_window: bool,
-) -> (bool, Option<BootPromptRuntimeState>, bool) {
-    if !is_first_get_full_state {
-        return (false, None, false);
-    }
-
-    if timer_status != TimerStatus::Idle {
-        return (false, Some(BootPromptRuntimeState::NotApplicable), true);
-    }
-
-    if is_inside_schedule_window {
-        return (true, Some(BootPromptRuntimeState::AwaitingDecision), false);
-    }
-
-    (false, Some(BootPromptRuntimeState::NotApplicable), true)
-}
-
 async fn get_full_state_contract(state: &AppState) -> Result<FullStatePayload> {
     let now_local = state.clock.now_local();
     let is_first_get_full_state = state
@@ -657,23 +637,25 @@ async fn get_full_state_contract(state: &AppState) -> Result<FullStatePayload> {
     full_state_payload.active_window_summary =
         active_window.as_ref().map(to_active_window_summary_payload);
 
-    let (should_prompt_start_on_boot, runtime_state_transition, should_enable_auto_start) =
-        evaluate_initial_boot_prompt_decision(
-            is_first_get_full_state,
-            timer_status,
-            active_window.is_some(),
-        );
+    let should_prompt_start_on_boot =
+        is_first_get_full_state && timer_status == TimerStatus::Idle && active_window.is_some();
 
-    if let Some(next_runtime_state) = runtime_state_transition {
+    if is_first_get_full_state {
+        let next_runtime_state = if should_prompt_start_on_boot {
+            BootPromptRuntimeState::AwaitingDecision
+        } else {
+            BootPromptRuntimeState::NotApplicable
+        };
+
         if let Ok(mut boot_prompt_runtime_state) = state.boot_prompt_runtime_state.lock() {
             *boot_prompt_runtime_state = next_runtime_state;
         }
-    }
 
-    if should_enable_auto_start {
-        state
-            .auto_start_boundary_enabled
-            .store(true, Ordering::Release);
+        if !should_prompt_start_on_boot {
+            state
+                .auto_start_boundary_enabled
+                .store(true, Ordering::Release);
+        }
     }
 
     full_state_payload.should_prompt_start_on_boot = should_prompt_start_on_boot;
@@ -1480,52 +1462,6 @@ mod tests {
         assert_eq!(source, TimerStartSource::ManualOutsideWindow);
     }
 
-    #[test]
-    fn test_evaluate_initial_boot_prompt_decision_returns_awaiting_on_first_idle_inside_window() {
-        let result = evaluate_initial_boot_prompt_decision(true, TimerStatus::Idle, true);
-        assert_eq!(
-            result,
-            (true, Some(BootPromptRuntimeState::AwaitingDecision), false)
-        );
-    }
-
-    #[test]
-    fn test_evaluate_initial_boot_prompt_decision_returns_not_applicable_on_first_non_idle() {
-        let result = evaluate_initial_boot_prompt_decision(true, TimerStatus::Working, true);
-        assert_eq!(
-            result,
-            (false, Some(BootPromptRuntimeState::NotApplicable), true)
-        );
-    }
-
-    #[test]
-    fn test_evaluate_initial_boot_prompt_decision_returns_not_applicable_on_first_idle_outside_window(
-    ) {
-        let result = evaluate_initial_boot_prompt_decision(true, TimerStatus::Idle, false);
-        assert_eq!(
-            result,
-            (false, Some(BootPromptRuntimeState::NotApplicable), true)
-        );
-    }
-
-    #[test]
-    fn test_evaluate_initial_boot_prompt_decision_returns_no_transition_after_first_call() {
-        let result = evaluate_initial_boot_prompt_decision(false, TimerStatus::Idle, true);
-        assert_eq!(result, (false, None, false));
-    }
-
-    #[test]
-    fn test_evaluate_initial_boot_prompt_decision_prompts_only_on_first_call() {
-        let first_result = evaluate_initial_boot_prompt_decision(true, TimerStatus::Idle, true);
-        let second_result = evaluate_initial_boot_prompt_decision(false, TimerStatus::Idle, true);
-
-        assert_eq!(
-            first_result,
-            (true, Some(BootPromptRuntimeState::AwaitingDecision), false)
-        );
-        assert_eq!(second_result, (false, None, false));
-    }
-
     #[tokio::test]
     async fn get_full_state_prompts_on_first_idle_sync_inside_enabled_window() {
         let state = build_test_state_at(local_datetime(2025, 1, 6, 10, 0, 0)).await;
@@ -1614,6 +1550,80 @@ mod tests {
         assert_eq!(full_state.status, TimerStatus::Working);
         assert!(!full_state.should_prompt_start_on_boot);
         assert_daytime_monday_window(&full_state);
+    }
+
+    #[tokio::test]
+    async fn pending_boot_prompt_prevents_scheduled_work_start_after_follow_up_full_sync() {
+        let state = build_prompting_state(
+            local_datetime(2025, 1, 6, 9, 0, 5),
+            make_enabled_daytime_monday_config(),
+        )
+        .await;
+        let second_full_state = get_full_state_contract(&state)
+            .await
+            .expect("second full state should be available");
+        let mut scheduler_runtime =
+            SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50));
+
+        scheduler_runtime
+            .run_tick(&state, local_datetime(2025, 1, 6, 9, 0, 10))
+            .await;
+
+        assert!(!second_full_state.should_prompt_start_on_boot);
+        assert_no_work_session_started_from_boundary(&state).await;
+    }
+
+    #[tokio::test]
+    async fn initial_sync_outside_schedule_window_allows_future_scheduled_work_start() {
+        let state = build_test_state_at(local_datetime(2025, 1, 6, 8, 0, 0)).await;
+        sync_auto_run_policies_for_test(
+            &state,
+            make_enabled_daytime_monday_config(),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+        let full_state = get_full_state_contract(&state)
+            .await
+            .expect("full state should be available");
+        let mut scheduler_runtime =
+            SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50));
+
+        scheduler_runtime
+            .run_tick(&state, local_datetime(2025, 1, 6, 9, 0, 10))
+            .await;
+
+        assert!(!full_state.should_prompt_start_on_boot);
+        assert!(full_state.active_window_summary.is_none());
+        assert_work_session_started_from_boundary(&state).await;
+    }
+
+    #[tokio::test]
+    async fn initial_sync_while_working_allows_future_scheduled_work_start_after_stop() {
+        let state = build_test_state_at(local_datetime(2025, 1, 6, 10, 0, 0)).await;
+        sync_auto_run_policies_for_test(
+            &state,
+            monday_and_tuesday_config("09:00", "18:00"),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+        start_auto_run_eligible_work_session(&state).await;
+        let full_state = get_full_state_contract(&state)
+            .await
+            .expect("full state should be available");
+        let mut stop_runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+        emergency_stop_with_runtime_effects(&state, &mut stop_runtime_effect_shell)
+            .await
+            .expect("emergency stop should succeed");
+        let mut scheduler_runtime =
+            SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 7, 8, 59, 50));
+
+        scheduler_runtime
+            .run_tick(&state, local_datetime(2025, 1, 7, 9, 0, 10))
+            .await;
+
+        assert_eq!(full_state.status, TimerStatus::Working);
+        assert!(!full_state.should_prompt_start_on_boot);
+        assert_work_session_started_from_boundary(&state).await;
     }
 
     #[tokio::test]
