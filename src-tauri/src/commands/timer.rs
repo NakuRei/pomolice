@@ -356,16 +356,13 @@ async fn sync_automation_policies_with_runtime_effects<S>(
 where
     S: TimerCommandRuntimeEffectShell,
 {
-    let (tick_payload, should_bump_config_revision) = {
+    let (tick_payload, auto_run_boundary_scope_changed) = {
         let mut timer = state.timer_manager.lock().await;
         let previous_auto_run_feature_enabled = timer.get_state().auto_run_feature_enabled;
         let previous_weekly_auto_run_config = timer.get_state().weekly_auto_run_config.clone();
-        let should_bump_config_revision = did_scheduler_topology_change(
-            previous_auto_run_feature_enabled,
-            &previous_weekly_auto_run_config,
-            auto_run_feature_enabled,
-            &weekly_auto_run_config,
-        );
+        let auto_run_boundary_scope_changed = previous_auto_run_feature_enabled
+            != auto_run_feature_enabled
+            || previous_weekly_auto_run_config != weekly_auto_run_config;
 
         let tick_payload = timer.sync_automation_policies(
             auto_run_feature_enabled,
@@ -373,11 +370,11 @@ where
             post_break_transition_policy,
         );
 
-        (tick_payload, should_bump_config_revision)
+        (tick_payload, auto_run_boundary_scope_changed)
     };
 
-    if should_bump_config_revision {
-        state.config_revision.fetch_add(1, Ordering::AcqRel);
+    if auto_run_boundary_scope_changed {
+        state.notify_auto_run_boundary_scope_changed();
     }
 
     emit_tick_and_update_tray(runtime_effect_shell, &tick_payload);
@@ -402,16 +399,6 @@ where
     runtime_effect_shell.before_persist();
     state.persist_current_state_async().await?;
     Ok(())
-}
-
-pub(crate) fn did_scheduler_topology_change(
-    previous_auto_run_feature_enabled: bool,
-    previous_weekly_auto_run_config: &WeeklyAutoRunConfig,
-    next_auto_run_feature_enabled: bool,
-    next_weekly_auto_run_config: &WeeklyAutoRunConfig,
-) -> bool {
-    previous_auto_run_feature_enabled != next_auto_run_feature_enabled
-        || previous_weekly_auto_run_config != next_weekly_auto_run_config
 }
 
 fn authorize_main_window_label(window_label: &str) -> Result<()> {
@@ -1367,19 +1354,22 @@ mod tests {
         assert!(!full_state.should_prompt_start_on_boot);
     }
 
-    async fn assert_scheduled_auto_start_state(state: &AppState) {
+    async fn assert_work_session_started_from_boundary(state: &AppState) {
         let timer = state.timer_manager.lock().await;
         let full_state = timer.get_full_state();
 
         assert_eq!(full_state.status, TimerStatus::Working);
         assert_eq!(
-            timer.get_state().timer_start_source,
-            Some(TimerStartSource::ScheduledAutoStart)
-        );
-        assert_eq!(
             full_state.remaining_seconds,
             full_state.settings.work_duration_secs.get()
         );
+    }
+
+    async fn assert_no_work_session_started_from_boundary(state: &AppState) {
+        let timer = state.timer_manager.lock().await;
+        let full_state = timer.get_full_state();
+
+        assert_eq!(full_state.status, TimerStatus::Idle);
     }
 
     fn assert_daytime_monday_window(full_state: &FullStatePayload) {
@@ -1970,34 +1960,66 @@ mod tests {
         assert!(full_state.remaining_seconds < remaining_after_rejection);
     }
 
-    #[test]
-    fn test_did_scheduler_topology_change_returns_false_when_schedule_fields_are_identical() {
-        let previous_config = make_enabled_daytime_monday_config();
-        let next_config = previous_config.clone();
+    #[tokio::test]
+    async fn feature_enable_does_not_replay_past_start_boundary() {
+        let state = build_test_state_at(local_datetime(2025, 1, 6, 8, 0, 0)).await;
+        sync_auto_run_policies_with_feature_for_test(
+            &state,
+            false,
+            monday_and_tuesday_config("09:00", "18:00"),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+        complete_initial_full_state_sync_outside_schedule_window(&state).await;
 
-        let changed = did_scheduler_topology_change(true, &previous_config, true, &next_config);
+        let mut scheduler_runtime =
+            SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50));
 
-        assert!(!changed);
+        sync_auto_run_policies_for_test(
+            &state,
+            monday_and_tuesday_config("09:00", "18:00"),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+        scheduler_runtime
+            .run_tick(&state, local_datetime(2025, 1, 6, 10, 0, 10))
+            .await;
+        scheduler_runtime
+            .run_tick(&state, local_datetime(2025, 1, 6, 10, 0, 30))
+            .await;
+
+        assert_no_work_session_started_from_boundary(&state).await;
     }
 
-    #[test]
-    fn test_did_scheduler_topology_change_returns_true_when_auto_run_feature_enabled_changes() {
-        let previous_config = make_enabled_daytime_monday_config();
-        let next_config = previous_config.clone();
+    #[tokio::test]
+    async fn feature_enable_keeps_future_start_boundary_active() {
+        let state = build_test_state_at(local_datetime(2025, 1, 6, 8, 0, 0)).await;
+        sync_auto_run_policies_with_feature_for_test(
+            &state,
+            false,
+            monday_and_tuesday_config("09:00", "18:00"),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+        complete_initial_full_state_sync_outside_schedule_window(&state).await;
 
-        let changed = did_scheduler_topology_change(false, &previous_config, true, &next_config);
+        let mut scheduler_runtime =
+            SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50));
 
-        assert!(changed);
-    }
+        sync_auto_run_policies_for_test(
+            &state,
+            monday_and_tuesday_config("09:00", "18:00"),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+        scheduler_runtime
+            .run_tick(&state, local_datetime(2025, 1, 6, 10, 0, 10))
+            .await;
+        scheduler_runtime
+            .run_tick(&state, local_datetime(2025, 1, 7, 9, 0, 10))
+            .await;
 
-    #[test]
-    fn test_did_scheduler_topology_change_returns_true_when_weekly_auto_run_config_changes() {
-        let previous_config = make_enabled_daytime_monday_config();
-        let next_config = monday_config("10:00", "18:00");
-
-        let changed = did_scheduler_topology_change(true, &previous_config, true, &next_config);
-
-        assert!(changed);
+        assert_work_session_started_from_boundary(&state).await;
     }
 
     #[tokio::test]
@@ -2027,13 +2049,7 @@ mod tests {
             .run_tick(&state, local_datetime(2025, 1, 6, 10, 0, 30))
             .await;
 
-        let timer = state.timer_manager.lock().await;
-        let full_state = timer.get_full_state();
-        assert_eq!(full_state.status, TimerStatus::Idle);
-        assert_ne!(
-            timer.get_state().timer_start_source,
-            Some(TimerStartSource::ScheduledAutoStart)
-        );
+        assert_no_work_session_started_from_boundary(&state).await;
     }
 
     #[tokio::test]
@@ -2063,7 +2079,7 @@ mod tests {
             .run_tick(&state, local_datetime(2025, 1, 7, 9, 0, 10))
             .await;
 
-        assert_scheduled_auto_start_state(&state).await;
+        assert_work_session_started_from_boundary(&state).await;
     }
 
     #[tokio::test]
@@ -2090,7 +2106,7 @@ mod tests {
             .run_tick(&state, local_datetime(2025, 1, 6, 9, 0, 10))
             .await;
 
-        assert_scheduled_auto_start_state(&state).await;
+        assert_work_session_started_from_boundary(&state).await;
     }
 
     #[tokio::test]

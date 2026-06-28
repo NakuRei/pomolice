@@ -56,7 +56,7 @@ struct SchedulerRuntimeState {
     processed_boundaries: ProcessedBoundaryOccurrences,
     last_checked_local: DateTime<Local>,
     start_boundaries_blocked_until_idle: bool,
-    last_seen_config_revision: u64,
+    last_seen_auto_run_boundary_generation: u64,
 }
 
 struct SchedulerTimerSnapshot {
@@ -136,19 +136,16 @@ impl SchedulerTickTestRuntime {
         state_handle: &state::AppState,
         previous_local: DateTime<Local>,
     ) -> Self {
-        Self::new(
-            previous_local,
-            state_handle.config_revision.load(Ordering::Acquire),
-        )
+        Self::new(previous_local, state_handle.auto_run_boundary_generation())
     }
 
-    fn new(previous_local: DateTime<Local>, last_seen_config_revision: u64) -> Self {
+    fn new(previous_local: DateTime<Local>, last_seen_auto_run_boundary_generation: u64) -> Self {
         Self {
             runtime_state: SchedulerRuntimeState {
                 processed_boundaries: ProcessedBoundaryOccurrences::default(),
                 last_checked_local: previous_local,
                 start_boundaries_blocked_until_idle: false,
-                last_seen_config_revision,
+                last_seen_auto_run_boundary_generation,
             },
         }
     }
@@ -271,7 +268,7 @@ async fn run_app_scheduler_loop(
         processed_boundaries: ProcessedBoundaryOccurrences::default(),
         last_checked_local: initial_previous_local,
         start_boundaries_blocked_until_idle,
-        last_seen_config_revision: state_handle.config_revision.load(Ordering::Acquire),
+        last_seen_auto_run_boundary_generation: state_handle.auto_run_boundary_generation(),
     };
 
     log_info_event(
@@ -409,20 +406,21 @@ fn build_scheduler_tick_plan(
     auto_run_feature_enabled: bool,
     resumed_start_boundary_evaluation: bool,
 ) -> SchedulerTickPlan {
-    let config_revision = state_handle.config_revision.load(Ordering::Acquire);
-    let config_changed = config_revision != runtime_state.last_seen_config_revision;
+    let auto_run_boundary_generation = state_handle.auto_run_boundary_generation();
+    let auto_run_boundary_scope_changed =
+        auto_run_boundary_generation != runtime_state.last_seen_auto_run_boundary_generation;
     let mut skip_start_boundaries_this_tick = false;
 
-    let end_boundary_previous_local = if config_changed {
+    let end_boundary_previous_local = if auto_run_boundary_scope_changed {
         runtime_state
             .processed_boundaries
             .clear_for_schedule_topology_change();
         runtime_state.last_checked_local = now_local;
-        runtime_state.last_seen_config_revision = config_revision;
+        runtime_state.last_seen_auto_run_boundary_generation = auto_run_boundary_generation;
         skip_start_boundaries_this_tick = true;
         log_info_event(
             BackendLogEvent::SchedulerConfigRevisionChanged,
-            &[("config_revision", config_revision.to_string())],
+            &[("config_revision", auto_run_boundary_generation.to_string())],
         );
         now_local - ChronoDuration::seconds(1)
     } else {
@@ -1024,25 +1022,25 @@ mod tests {
 
     fn runtime_state_at(
         previous_local: DateTime<Local>,
-        last_seen_config_revision: u64,
+        last_seen_auto_run_boundary_generation: u64,
     ) -> SchedulerRuntimeState {
         SchedulerRuntimeState {
             processed_boundaries: ProcessedBoundaryOccurrences::default(),
             last_checked_local: previous_local,
             start_boundaries_blocked_until_idle: false,
-            last_seen_config_revision,
+            last_seen_auto_run_boundary_generation,
         }
     }
 
     fn runtime_state_blocking_start_boundaries_at(
         previous_local: DateTime<Local>,
-        last_seen_config_revision: u64,
+        last_seen_auto_run_boundary_generation: u64,
     ) -> SchedulerRuntimeState {
         SchedulerRuntimeState {
             processed_boundaries: ProcessedBoundaryOccurrences::default(),
             last_checked_local: previous_local,
             start_boundaries_blocked_until_idle: true,
-            last_seen_config_revision,
+            last_seen_auto_run_boundary_generation,
         }
     }
 
@@ -1143,7 +1141,7 @@ mod tests {
 
         let mut runtime_state = runtime_state_at(
             local_datetime(2025, 1, 6, 17, 59, 50),
-            state.config_revision.load(Ordering::Acquire),
+            state.auto_run_boundary_generation(),
         );
         let mut effects = RecordingSchedulerRuntimeEffects::default();
 
@@ -1170,7 +1168,7 @@ mod tests {
 
         let mut runtime_state = runtime_state_at(
             local_datetime(2025, 1, 6, 17, 59, 50),
-            state.config_revision.load(Ordering::Acquire),
+            state.auto_run_boundary_generation(),
         );
         let mut effects = RecordingSchedulerRuntimeEffects::default();
 
@@ -1201,7 +1199,7 @@ mod tests {
 
         let mut runtime_state = runtime_state_at(
             local_datetime(2025, 1, 6, 17, 59, 50),
-            state.config_revision.load(Ordering::Acquire),
+            state.auto_run_boundary_generation(),
         );
         let mut effects = RecordingSchedulerRuntimeEffects::default();
         let crossed_end_boundary = local_datetime(2025, 1, 6, 18, 0, 10);
@@ -1260,7 +1258,7 @@ mod tests {
 
         let mut runtime_state = runtime_state_at(
             local_datetime(2025, 1, 6, 18, 0, 0),
-            state.config_revision.load(Ordering::Acquire),
+            state.auto_run_boundary_generation(),
         );
         let mut effects = RecordingSchedulerRuntimeEffects::default();
 
@@ -1287,7 +1285,7 @@ mod tests {
 
         let mut runtime_state = runtime_state_at(
             local_datetime(2025, 1, 6, 17, 59, 50),
-            state.config_revision.load(Ordering::Acquire),
+            state.auto_run_boundary_generation(),
         );
         let mut effects = RecordingSchedulerRuntimeEffects::default();
 
@@ -1314,7 +1312,7 @@ mod tests {
 
         let mut runtime_state = runtime_state_at(
             local_datetime(2025, 1, 6, 17, 59, 50),
-            state.config_revision.load(Ordering::Acquire),
+            state.auto_run_boundary_generation(),
         );
         let mut effects = RecordingSchedulerRuntimeEffects::default();
 
@@ -1341,7 +1339,7 @@ mod tests {
 
         let mut runtime_state = runtime_state_at(
             local_datetime(2025, 1, 6, 17, 59, 50),
-            state.config_revision.load(Ordering::Acquire),
+            state.auto_run_boundary_generation(),
         );
         let mut effects = RecordingSchedulerRuntimeEffects::default();
 
@@ -1374,7 +1372,7 @@ mod tests {
 
         let mut runtime_state = runtime_state_at(
             local_datetime(2025, 1, 6, 8, 59, 50),
-            state.config_revision.load(Ordering::Acquire),
+            state.auto_run_boundary_generation(),
         );
         let mut effects = RecordingSchedulerRuntimeEffects::default();
 
@@ -1405,7 +1403,7 @@ mod tests {
 
         let mut runtime_state = runtime_state_at(
             local_datetime(2025, 1, 6, 8, 59, 50),
-            state.config_revision.load(Ordering::Acquire),
+            state.auto_run_boundary_generation(),
         );
         let mut effects = RecordingSchedulerRuntimeEffects::default();
         let crossed_start_boundary = local_datetime(2025, 1, 6, 9, 0, 10);
@@ -1474,7 +1472,7 @@ mod tests {
 
         let mut runtime_state = runtime_state_blocking_start_boundaries_at(
             local_datetime(2025, 1, 6, 8, 59, 50),
-            state.config_revision.load(Ordering::Acquire),
+            state.auto_run_boundary_generation(),
         );
         let mut effects = RecordingSchedulerRuntimeEffects::default();
 

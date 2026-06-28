@@ -237,7 +237,7 @@ pub(crate) struct AppState {
     pub boot_prompt_check_pending: AtomicBool,
     pub auto_start_boundary_enabled: AtomicBool,
     restored_running_saved_at_local: StdMutex<Option<DateTime<Local>>>,
-    pub config_revision: AtomicU64,
+    config_revision: AtomicU64,
     ordered_save_lane: OrderedSaveLane,
     #[cfg(test)]
     runtime_save_snapshot_ready_hook: Option<RuntimeSaveSnapshotReadyHook>,
@@ -298,6 +298,14 @@ impl AppState {
             runtime_save_snapshot_ready_hook: None,
             break_mode_transition_permit: Arc::new(Semaphore::new(1)),
         }
+    }
+
+    pub(crate) fn notify_auto_run_boundary_scope_changed(&self) {
+        self.config_revision.fetch_add(1, Ordering::AcqRel);
+    }
+
+    pub(crate) fn auto_run_boundary_generation(&self) -> u64 {
+        self.config_revision.load(Ordering::Acquire)
     }
 
     #[cfg(test)]
