@@ -78,13 +78,8 @@ function isWindowsPlatform(): boolean {
 }
 
 /**
- * Convert the persisted notification volume percentage into audio gain.
- *
- * Conversion rules:
- * - `0%` always returns `0` for complete silence.
- * - `1-100%` are interpreted as positions on a dB curve, not linear gain.
- * - `db = minDb * (1 - percent / 100)`
- * - `gain = 10 ** (db / 20)`
+ * Convert notification volume percent into an Audio gain, preserving silence
+ * at 0% and maximum gain at 100%.
  */
 function convertNotificationVolumePercentToGain(volumePercent: number): number {
   const clampedVolumePercent = Math.max(0, Math.min(100, volumePercent));

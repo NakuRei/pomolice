@@ -2,6 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { resolveResource } from "@tauri-apps/api/path";
 import { FRONTEND_LOG_EVENT_IDS } from "@/logging/logEvents";
+import {
+  getMockHtmlAudioInstance,
+  getMockHtmlAudioInstanceCount,
+  installMockHtmlAudio,
+  queueMockHtmlAudioPlayError,
+  resetMockHtmlAudio,
+} from "@/test/mockHtmlAudio";
 
 const mockNotificationsLogger = {
   trace: vi.fn(),
@@ -29,47 +36,12 @@ vi.mock("@/logging/logger", () => ({
   createLogger: (): typeof mockNotificationsLogger => mockNotificationsLogger,
 }));
 
-const audioInstances: MockAudio[] = [];
-let queuedPlayError: Error | null = null;
-
-class MockAudio {
-  public src: string;
-  public volume = 1;
-  public currentTime = 0;
-  public pause = vi.fn();
-  public play = vi.fn(() => {
-    if (queuedPlayError) {
-      const error = queuedPlayError;
-      queuedPlayError = null;
-      return Promise.reject(error);
-    }
-
-    return Promise.resolve();
-  });
-
-  public constructor(src: string) {
-    this.src = src;
-    audioInstances.push(this);
-  }
-}
-
-function getAudioInstance(index: number): MockAudio {
-  const audioInstance = audioInstances[index];
-  expect(audioInstance).toBeDefined();
-  if (audioInstance === undefined) {
-    throw new Error(`Expected audio instance at index ${String(index)}`);
-  }
-
-  return audioInstance;
-}
-
 describe("playNotificationSoundPreview()", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
-    audioInstances.length = 0;
-    queuedPlayError = null;
-    globalThis.Audio = MockAudio as unknown as typeof Audio;
+    resetMockHtmlAudio();
+    installMockHtmlAudio();
   });
 
   it("should play preview sound", async () => {
@@ -85,8 +57,8 @@ describe("playNotificationSoundPreview()", () => {
     expect(result).toEqual({ status: "played" });
     expect(resolveResource).toHaveBeenCalledWith("resources/sounds/work.wav");
     expect(convertFileSrc).toHaveBeenCalledWith("C:/sounds/work.wav");
-    expect(audioInstances).toHaveLength(1);
-    const previewAudio = getAudioInstance(0);
+    expect(getMockHtmlAudioInstanceCount()).toBe(1);
+    const previewAudio = getMockHtmlAudioInstance(0);
     expect(previewAudio.play).toHaveBeenCalledTimes(1);
   });
 
@@ -100,7 +72,7 @@ describe("playNotificationSoundPreview()", () => {
 
     expect(result).toEqual({ status: "muted" });
     expect(resolveResource).not.toHaveBeenCalled();
-    expect(audioInstances).toHaveLength(0);
+    expect(getMockHtmlAudioInstanceCount()).toBe(0);
   });
 
   it("should return unavailable when resource resolution fails", async () => {
@@ -114,7 +86,7 @@ describe("playNotificationSoundPreview()", () => {
     });
 
     expect(result).toEqual({ status: "unavailable" });
-    expect(audioInstances).toHaveLength(0);
+    expect(getMockHtmlAudioInstanceCount()).toBe(0);
     expect(mockNotificationsLogger.warn).toHaveBeenCalledWith(
       FRONTEND_LOG_EVENT_IDS.notificationSoundPathResolutionFailed,
       expect.objectContaining({
@@ -141,9 +113,9 @@ describe("playNotificationSoundPreview()", () => {
       muted: false,
     });
 
-    expect(audioInstances).toHaveLength(2);
-    const firstPreviewAudio = getAudioInstance(0);
-    const secondPreviewAudio = getAudioInstance(1);
+    expect(getMockHtmlAudioInstanceCount()).toBe(2);
+    const firstPreviewAudio = getMockHtmlAudioInstance(0);
+    const secondPreviewAudio = getMockHtmlAudioInstance(1);
     expect(firstPreviewAudio.pause).toHaveBeenCalledTimes(1);
     expect(firstPreviewAudio.currentTime).toBe(0);
     expect(secondPreviewAudio.play).toHaveBeenCalledTimes(1);
@@ -151,7 +123,7 @@ describe("playNotificationSoundPreview()", () => {
 
   it("should return error when audio playback fails", async () => {
     vi.mocked(resolveResource).mockResolvedValueOnce("C:\\sounds\\work.wav");
-    queuedPlayError = new Error("autoplay blocked");
+    queueMockHtmlAudioPlayError(new Error("autoplay blocked"));
 
     const { playNotificationSoundPreview } = await import("./notifications");
     const result = await playNotificationSoundPreview({
