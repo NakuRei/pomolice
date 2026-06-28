@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import { useTimerStore } from "@/store/timerStore";
 import { DialogActionRow } from "../shared/DialogActionRow";
 import { Button } from "../shared/Button";
@@ -23,6 +23,7 @@ export function ContinueDialog(): React.ReactElement | null {
   const resolvePostBreakDecision = useTimerStore(
     (state) => state.resolvePostBreakDecision,
   );
+  const titleId = useId();
   const continueButtonReference = useRef<HTMLButtonElement>(null);
 
   const handleContinue = (): void => {
@@ -70,11 +71,8 @@ export function ContinueDialog(): React.ReactElement | null {
 
   return (
     <DialogOverlay testId="continue-dialog">
-      <DialogPanel labelledBy="continue-dialog-title">
-        <h2
-          id="continue-dialog-title"
-          className="mb-4 text-2xl font-bold text-text"
-        >
+      <DialogPanel labelledBy={titleId}>
+        <h2 id={titleId} className="mb-4 text-2xl font-bold text-text">
           1サイクル完了しました！
         </h2>
         <p className="mb-2 text-text-muted">

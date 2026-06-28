@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import { WEEKDAY_LABELS_BY_KEY } from "../constants/weekdayLabels";
 import { useTimerStore } from "../store/timerStore";
 import { Button } from "./shared/Button";
@@ -17,6 +17,7 @@ export function AutoStartConfirmDialog(): React.ReactElement | null {
   const resolveBootAutoStartPrompt = useTimerStore(
     (state) => state.resolveBootAutoStartPrompt,
   );
+  const titleId = useId();
   const startButtonRef = useRef<HTMLButtonElement>(null);
 
   const isVisible = shouldPromptStartOnBoot && activeWindowSummary !== null;
@@ -58,14 +59,8 @@ export function AutoStartConfirmDialog(): React.ReactElement | null {
 
   return (
     <DialogOverlay testId="auto-start-confirm-dialog-overlay">
-      <DialogPanel
-        labelledBy="auto-start-confirm-dialog-title"
-        testId="auto-start-confirm-dialog"
-      >
-        <h2
-          id="auto-start-confirm-dialog-title"
-          className="mb-4 text-2xl font-bold text-text"
-        >
+      <DialogPanel labelledBy={titleId} testId="auto-start-confirm-dialog">
+        <h2 id={titleId} className="mb-4 text-2xl font-bold text-text">
           作業を開始しますか？
         </h2>
         <p className="mb-2 text-text-muted">

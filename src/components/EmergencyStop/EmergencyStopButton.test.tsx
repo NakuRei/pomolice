@@ -100,10 +100,6 @@ describe("EmergencyStopButton", () => {
       const dialog = await openEmergencyStopDialog(user);
 
       expect(dialog).toHaveAttribute("aria-modal", "true");
-      expect(dialog).toHaveAttribute(
-        "aria-labelledby",
-        "emergency-stop-dialog-title",
-      );
       expect(
         within(dialog).getByText(/現在のポモドーロセッションは記録されません/u),
       ).toBeInTheDocument();

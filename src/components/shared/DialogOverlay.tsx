@@ -180,13 +180,6 @@ function trapFocusWithinDialog(
 
 /**
  * Shared overlay shell for confirmation dialogs.
- *
- * Usage example:
- * ```tsx
- * <DialogOverlay testId="confirm-overlay">
- *   <DialogPanel labelledBy="confirm-title">...</DialogPanel>
- * </DialogOverlay>
- * ```
  */
 export function DialogOverlay({
   children,

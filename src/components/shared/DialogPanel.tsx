@@ -53,13 +53,6 @@ function buildPanelClassName(className: string): string {
 
 /**
  * Accessible confirmation dialog panel with the shared surface-card appearance.
- *
- * Usage example:
- * ```tsx
- * <DialogPanel labelledBy="confirm-title" testId="confirm-dialog">
- *   <h2 id="confirm-title">Confirm action</h2>
- * </DialogPanel>
- * ```
  */
 export function DialogPanel({
   children,

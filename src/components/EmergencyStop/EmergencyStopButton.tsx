@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useTimerStore, TimerStatus } from "@/store/timerStore";
 import { Button } from "../shared/Button";
 import { DialogActionRow } from "../shared/DialogActionRow";
@@ -19,6 +19,7 @@ export function EmergencyStopButton(): React.ReactElement | null {
   const status = useTimerStore((state) => state.status);
   const emergencyStop = useTimerStore((state) => state.emergencyStop);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const titleId = useId();
   const cancelButtonReference = useRef<HTMLButtonElement>(null);
 
   const isWorking = status === TimerStatus.WORKING;
@@ -87,11 +88,8 @@ export function EmergencyStopButton(): React.ReactElement | null {
 
       {showConfirmDialog && (
         <DialogOverlay testId="emergency-stop-dialog">
-          <DialogPanel labelledBy="emergency-stop-dialog-title" className="p-6">
-            <h2
-              id="emergency-stop-dialog-title"
-              className="mb-4 text-xl font-bold text-text"
-            >
+          <DialogPanel labelledBy={titleId} className="p-6">
+            <h2 id={titleId} className="mb-4 text-xl font-bold text-text">
               緊急停止しますか？
             </h2>
             <p className="mb-4 text-text-muted">

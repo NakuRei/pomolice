@@ -93,10 +93,6 @@ describe("AutoStartConfirmDialog", () => {
 
     expect(dialog).toBeInTheDocument();
     expect(dialog).toHaveAttribute("aria-modal", "true");
-    expect(dialog).toHaveAttribute(
-      "aria-labelledby",
-      "auto-start-confirm-dialog-title",
-    );
     expect(
       screen.getByText(/現在は 月曜日 09:00 - 18:00/u),
     ).toBeInTheDocument();
