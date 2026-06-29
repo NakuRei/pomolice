@@ -734,7 +734,7 @@ mod tests {
     use super::*;
     use crate::managers::clock::testing::FixedClock;
     use crate::managers::clock::Clock;
-    use crate::managers::persistence::PersistenceManager;
+    use crate::managers::persistence::{PersistenceLoadOutcome, PersistenceManager};
     use crate::scheduler::SchedulerTickTestRuntime;
     use chrono::{Local, LocalResult, Utc};
     use std::path::{Path, PathBuf};
@@ -746,16 +746,6 @@ mod tests {
     use crate::types::{DayAutoRunSlot, HhMm, SessionTransitionReason, SessionType, TimerState};
     use chrono::TimeZone;
     use serde_json::json;
-
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    enum RuntimeEffectEvent {
-        EmitTick,
-        UpdateTray,
-        EmitWorkStarted,
-        SpawnTimerTask,
-        RequestFullscreenBreakExit,
-        Persist,
-    }
 
     #[derive(Clone, Debug, PartialEq)]
     struct TimerTickSnapshot {
@@ -784,38 +774,31 @@ mod tests {
 
     #[derive(Default)]
     struct RecordingRuntimeEffectShell {
-        events: Vec<RuntimeEffectEvent>,
-    }
-
-    impl RecordingRuntimeEffectShell {
-        fn events(&self) -> &[RuntimeEffectEvent] {
-            &self.events
-        }
+        emitted_tick_snapshots: Vec<TimerTickSnapshot>,
+        tray_tick_snapshots: Vec<TimerTickSnapshot>,
+        work_started_durations: Vec<u64>,
     }
 
     impl StartRuntimeEffectShell for RecordingRuntimeEffectShell {
-        fn emit_tick(&mut self, _tick_payload: &TimerTickPayload) {
-            self.events.push(RuntimeEffectEvent::EmitTick);
+        fn emit_tick(&mut self, tick_payload: &TimerTickPayload) {
+            self.emitted_tick_snapshots
+                .push(TimerTickSnapshot::from(tick_payload));
         }
 
-        fn update_tray(&mut self, _tick_payload: &TimerTickPayload) {
-            self.events.push(RuntimeEffectEvent::UpdateTray);
+        fn update_tray(&mut self, tick_payload: &TimerTickPayload) {
+            self.tray_tick_snapshots
+                .push(TimerTickSnapshot::from(tick_payload));
         }
 
-        fn emit_work_started(&mut self, _work_duration: u64) {
-            self.events.push(RuntimeEffectEvent::EmitWorkStarted);
+        fn emit_work_started(&mut self, work_duration: u64) {
+            self.work_started_durations.push(work_duration);
         }
 
         fn spawn_timer_task<'a>(
             &'a mut self,
             _state: &'a AppState,
         ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-            self.events.push(RuntimeEffectEvent::SpawnTimerTask);
             Box::pin(async {})
-        }
-
-        fn before_persist(&mut self) {
-            self.events.push(RuntimeEffectEvent::Persist);
         }
     }
 
@@ -849,26 +832,18 @@ mod tests {
 
     #[derive(Default)]
     struct RecordingCommandRuntimeEffectShell {
-        events: Vec<RuntimeEffectEvent>,
         emitted_tick_snapshots: Vec<TimerTickSnapshot>,
         tray_tick_snapshots: Vec<TimerTickSnapshot>,
-    }
-
-    impl RecordingCommandRuntimeEffectShell {
-        fn events(&self) -> &[RuntimeEffectEvent] {
-            &self.events
-        }
+        fullscreen_break_exit_requests: usize,
     }
 
     impl TimerCommandRuntimeEffectShell for RecordingCommandRuntimeEffectShell {
         fn emit_tick(&mut self, tick_payload: &TimerTickPayload) {
-            self.events.push(RuntimeEffectEvent::EmitTick);
             self.emitted_tick_snapshots
                 .push(TimerTickSnapshot::from(tick_payload));
         }
 
         fn update_tray(&mut self, tick_payload: &TimerTickPayload) {
-            self.events.push(RuntimeEffectEvent::UpdateTray);
             self.tray_tick_snapshots
                 .push(TimerTickSnapshot::from(tick_payload));
         }
@@ -877,17 +852,11 @@ mod tests {
             &'a mut self,
             _state: &'a AppState,
         ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-            self.events.push(RuntimeEffectEvent::SpawnTimerTask);
             Box::pin(async {})
         }
 
         fn request_fullscreen_break_exit(&mut self) {
-            self.events
-                .push(RuntimeEffectEvent::RequestFullscreenBreakExit);
-        }
-
-        fn before_persist(&mut self) {
-            self.events.push(RuntimeEffectEvent::Persist);
+            self.fullscreen_break_exit_requests += 1;
         }
     }
 
@@ -1106,38 +1075,71 @@ mod tests {
         });
     }
 
-    fn assert_tick_emit_and_tray_match(runtime_effect_shell: &RecordingCommandRuntimeEffectShell) {
-        assert_eq!(runtime_effect_shell.emitted_tick_snapshots.len(), 1);
-        assert_eq!(runtime_effect_shell.tray_tick_snapshots.len(), 1);
+    fn assert_single_published_timer_state<'a>(
+        emitted_tick_snapshots: &'a [TimerTickSnapshot],
+        tray_tick_snapshots: &[TimerTickSnapshot],
+        expected_status: TimerStatus,
+        expected_session_type: SessionType,
+    ) -> &'a TimerTickSnapshot {
+        assert_eq!(emitted_tick_snapshots.len(), 1);
+        assert_eq!(tray_tick_snapshots.len(), 1);
+        assert_eq!(emitted_tick_snapshots, tray_tick_snapshots);
+        let published = &emitted_tick_snapshots[0];
+        assert_eq!(published.status, expected_status);
+        assert_eq!(published.session_type, expected_session_type);
+        published
+    }
+
+    fn assert_single_published_command_timer_state(
+        runtime_effect_shell: &RecordingCommandRuntimeEffectShell,
+        expected_status: TimerStatus,
+        expected_session_type: SessionType,
+    ) -> &TimerTickSnapshot {
+        assert_single_published_timer_state(
+            &runtime_effect_shell.emitted_tick_snapshots,
+            &runtime_effect_shell.tray_tick_snapshots,
+            expected_status,
+            expected_session_type,
+        )
+    }
+
+    fn assert_single_published_start_timer_state(
+        runtime_effect_shell: &RecordingRuntimeEffectShell,
+        expected_status: TimerStatus,
+        expected_session_type: SessionType,
+    ) -> &TimerTickSnapshot {
+        assert_single_published_timer_state(
+            &runtime_effect_shell.emitted_tick_snapshots,
+            &runtime_effect_shell.tray_tick_snapshots,
+            expected_status,
+            expected_session_type,
+        )
+    }
+
+    fn assert_no_start_runtime_effects(runtime_effect_shell: &RecordingRuntimeEffectShell) {
+        assert!(runtime_effect_shell.emitted_tick_snapshots.is_empty());
+        assert!(runtime_effect_shell.tray_tick_snapshots.is_empty());
+        assert!(runtime_effect_shell.work_started_durations.is_empty());
+    }
+
+    fn assert_start_work_started_duration(
+        runtime_effect_shell: &RecordingRuntimeEffectShell,
+        expected_work_duration: u64,
+    ) {
         assert_eq!(
-            runtime_effect_shell.emitted_tick_snapshots,
-            runtime_effect_shell.tray_tick_snapshots
+            runtime_effect_shell.work_started_durations,
+            [expected_work_duration]
         );
     }
 
-    fn event_count(
-        runtime_effect_shell: &RecordingCommandRuntimeEffectShell,
-        event: RuntimeEffectEvent,
-    ) -> usize {
-        runtime_effect_shell
-            .events()
-            .iter()
-            .filter(|recorded| **recorded == event)
-            .count()
-    }
-
-    fn assert_event_once(
-        runtime_effect_shell: &RecordingCommandRuntimeEffectShell,
-        event: RuntimeEffectEvent,
-    ) {
-        assert_eq!(event_count(runtime_effect_shell, event), 1);
-    }
-
-    fn assert_event_absent(
-        runtime_effect_shell: &RecordingCommandRuntimeEffectShell,
-        event: RuntimeEffectEvent,
-    ) {
-        assert_eq!(event_count(runtime_effect_shell, event), 0);
+    fn persisted_timer_state(state: &AppState) -> TimerState {
+        match state.persistence.load_state_sync() {
+            PersistenceLoadOutcome::Restored { timer_state, .. } => timer_state,
+            PersistenceLoadOutcome::NoState => panic!("expected restored timer state"),
+            PersistenceLoadOutcome::UnsupportedSchemaFallback => {
+                panic!("expected restored timer state")
+            }
+        }
     }
 
     fn assert_persistence_save_error(result: &Result<()>) {
@@ -1687,7 +1689,7 @@ mod tests {
         assert_eq!(result, BootPromptRuntimeState::ResolvedLater);
         assert_eq!(full_state.status, TimerStatus::Idle);
         assert_eq!(full_state.session_type, SessionType::Work);
-        assert!(runtime_effect_shell.events().is_empty());
+        assert_no_start_runtime_effects(&runtime_effect_shell);
     }
 
     #[tokio::test]
@@ -1809,7 +1811,7 @@ mod tests {
             assert_eq!(after.session_type, before.session_type);
             assert_eq!(after.current_cycle, before.current_cycle);
             assert_eq!(after.remaining_seconds, before.remaining_seconds);
-            assert!(runtime_effect_shell.events().is_empty());
+            assert_no_start_runtime_effects(&runtime_effect_shell);
         }
     }
 
@@ -1831,7 +1833,7 @@ mod tests {
             assert_eq!(result, BootPromptRuntimeState::NotApplicable);
             assert_eq!(full_state.status, TimerStatus::Idle);
             assert_eq!(full_state.session_type, SessionType::Work);
-            assert!(runtime_effect_shell.events().is_empty());
+            assert_no_start_runtime_effects(&runtime_effect_shell);
         }
     }
 
@@ -2269,7 +2271,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn test_resolve_post_break_decision_continue_command_side_effects() {
+    async fn continue_post_break_decision_publishes_work_state() {
         let state = Arc::new(build_test_state_without_persistence_path().await);
         prepare_post_break_decision_pending_state(&state).await;
         install_timer_countdown_task(&state).await;
@@ -2283,15 +2285,12 @@ mod tests {
         .await
         .expect("continue decision should succeed");
 
-        assert_tick_emit_and_tray_match(&runtime_effect_shell);
-        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::EmitTick);
-        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::UpdateTray);
-        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::SpawnTimerTask);
-        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::Persist);
-        assert_event_absent(
+        let published = assert_single_published_command_timer_state(
             &runtime_effect_shell,
-            RuntimeEffectEvent::RequestFullscreenBreakExit,
+            TimerStatus::Working,
+            SessionType::Work,
         );
+        assert_eq!(runtime_effect_shell.fullscreen_break_exit_requests, 0);
         tokio::time::advance(StdDuration::from_secs(3)).await;
         tokio::task::yield_now().await;
 
@@ -2301,10 +2300,7 @@ mod tests {
         assert_eq!(timer_state.session_type, SessionType::Work);
         assert_eq!(timer_state.remaining_seconds, 1500);
         assert!(!timer_state.post_break_decision_pending);
-        assert_eq!(
-            runtime_effect_shell.emitted_tick_snapshots[0].status,
-            TimerStatus::Working
-        );
+        assert_eq!(published.remaining_seconds, 1500);
     }
 
     #[tokio::test]
@@ -2321,11 +2317,11 @@ mod tests {
         .await
         .expect("restored continue decision should succeed");
 
-        assert_tick_emit_and_tray_match(&runtime_effect_shell);
-        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::EmitTick);
-        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::UpdateTray);
-        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::SpawnTimerTask);
-        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::Persist);
+        let published = assert_single_published_command_timer_state(
+            &runtime_effect_shell,
+            TimerStatus::Working,
+            SessionType::Work,
+        );
 
         let timer = state.timer_manager.lock().await;
         let timer_state = timer.get_state();
@@ -2333,6 +2329,7 @@ mod tests {
         assert_eq!(timer_state.session_type, SessionType::Work);
         assert_eq!(timer_state.remaining_seconds, 1500);
         assert!(!timer_state.post_break_decision_pending);
+        assert_eq!(published.remaining_seconds, 1500);
     }
 
     #[tokio::test]
@@ -2349,11 +2346,11 @@ mod tests {
         .await
         .expect("restored stop decision should succeed");
 
-        assert_tick_emit_and_tray_match(&runtime_effect_shell);
-        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::EmitTick);
-        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::UpdateTray);
-        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::Persist);
-        assert_event_absent(&runtime_effect_shell, RuntimeEffectEvent::SpawnTimerTask);
+        let published = assert_single_published_command_timer_state(
+            &runtime_effect_shell,
+            TimerStatus::Idle,
+            SessionType::Work,
+        );
 
         let timer = state.timer_manager.lock().await;
         let timer_state = timer.get_state();
@@ -2361,10 +2358,11 @@ mod tests {
         assert_eq!(timer_state.session_type, SessionType::Work);
         assert_eq!(timer_state.remaining_seconds, 1500);
         assert!(!timer_state.post_break_decision_pending);
+        assert_eq!(published.remaining_seconds, 1500);
     }
 
     #[tokio::test]
-    async fn test_resolve_post_break_decision_stop_command_side_effects() {
+    async fn stop_post_break_decision_publishes_idle_state() {
         let state = build_test_state_without_persistence_path().await;
         prepare_post_break_decision_pending_state(&state).await;
         let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
@@ -2377,27 +2375,21 @@ mod tests {
         .await
         .expect("stop decision should succeed");
 
-        assert_tick_emit_and_tray_match(&runtime_effect_shell);
-        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::EmitTick);
-        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::UpdateTray);
-        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::Persist);
-        assert_event_absent(&runtime_effect_shell, RuntimeEffectEvent::SpawnTimerTask);
-        assert_event_absent(
+        let published = assert_single_published_command_timer_state(
             &runtime_effect_shell,
-            RuntimeEffectEvent::RequestFullscreenBreakExit,
+            TimerStatus::Idle,
+            SessionType::Work,
         );
+        assert_eq!(runtime_effect_shell.fullscreen_break_exit_requests, 0);
 
         let timer = state.timer_manager.lock().await;
         assert_eq!(timer.status(), TimerStatus::Idle);
         assert!(!timer.get_state().post_break_decision_pending);
-        assert_eq!(
-            runtime_effect_shell.emitted_tick_snapshots[0].status,
-            TimerStatus::Idle
-        );
+        assert_eq!(published.status, TimerStatus::Idle);
     }
 
     #[tokio::test]
-    async fn test_emergency_stop_command_side_effects() {
+    async fn emergency_stop_publishes_idle_state_and_requests_break_exit_when_fullscreen() {
         let fullscreen_state = build_test_state_without_persistence_path().await;
         prepare_fullscreen_break_state(&fullscreen_state).await;
         let mut fullscreen_runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
@@ -2409,26 +2401,14 @@ mod tests {
         .await
         .expect("emergency stop should succeed");
 
-        assert_tick_emit_and_tray_match(&fullscreen_runtime_effect_shell);
-        assert_event_once(
+        let fullscreen_published = assert_single_published_command_timer_state(
             &fullscreen_runtime_effect_shell,
-            RuntimeEffectEvent::EmitTick,
+            TimerStatus::Idle,
+            SessionType::Work,
         );
-        assert_event_once(
-            &fullscreen_runtime_effect_shell,
-            RuntimeEffectEvent::UpdateTray,
-        );
-        assert_event_once(
-            &fullscreen_runtime_effect_shell,
-            RuntimeEffectEvent::RequestFullscreenBreakExit,
-        );
-        assert_event_once(
-            &fullscreen_runtime_effect_shell,
-            RuntimeEffectEvent::Persist,
-        );
-        assert_event_absent(
-            &fullscreen_runtime_effect_shell,
-            RuntimeEffectEvent::SpawnTimerTask,
+        assert_eq!(
+            fullscreen_runtime_effect_shell.fullscreen_break_exit_requests,
+            1
         );
 
         {
@@ -2436,11 +2416,8 @@ mod tests {
             assert_eq!(fullscreen_timer.status(), TimerStatus::Idle);
             assert!(!fullscreen_timer.get_state().is_fullscreen_break);
         }
-        assert_eq!(
-            fullscreen_runtime_effect_shell.emitted_tick_snapshots[0].status,
-            TimerStatus::Idle
-        );
-        assert!(!fullscreen_runtime_effect_shell.emitted_tick_snapshots[0].is_fullscreen_break);
+        assert_eq!(fullscreen_published.status, TimerStatus::Idle);
+        assert!(!fullscreen_published.is_fullscreen_break);
 
         let non_fullscreen_state = build_test_state_without_persistence_path().await;
         {
@@ -2467,22 +2444,14 @@ mod tests {
         .await
         .expect("emergency stop should succeed");
 
-        assert_tick_emit_and_tray_match(&non_fullscreen_runtime_effect_shell);
-        assert_event_once(
+        assert_single_published_command_timer_state(
             &non_fullscreen_runtime_effect_shell,
-            RuntimeEffectEvent::EmitTick,
+            TimerStatus::Idle,
+            SessionType::Work,
         );
-        assert_event_once(
-            &non_fullscreen_runtime_effect_shell,
-            RuntimeEffectEvent::UpdateTray,
-        );
-        assert_event_once(
-            &non_fullscreen_runtime_effect_shell,
-            RuntimeEffectEvent::Persist,
-        );
-        assert_event_absent(
-            &non_fullscreen_runtime_effect_shell,
-            RuntimeEffectEvent::RequestFullscreenBreakExit,
+        assert_eq!(
+            non_fullscreen_runtime_effect_shell.fullscreen_break_exit_requests,
+            0
         );
     }
 
@@ -2553,7 +2522,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sync_timer_duration_settings_command_side_effects() {
+    async fn duration_sync_publishes_updated_idle_timer_state() {
         let state = build_test_state_without_persistence_path().await;
         let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
         let expected_work_duration_secs = command_work_duration_secs();
@@ -2569,15 +2538,12 @@ mod tests {
         .await
         .expect("duration settings sync should succeed");
 
-        assert_tick_emit_and_tray_match(&runtime_effect_shell);
-        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::EmitTick);
-        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::UpdateTray);
-        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::Persist);
-        assert_event_absent(&runtime_effect_shell, RuntimeEffectEvent::SpawnTimerTask);
-        assert_event_absent(
+        let published = assert_single_published_command_timer_state(
             &runtime_effect_shell,
-            RuntimeEffectEvent::RequestFullscreenBreakExit,
+            TimerStatus::Idle,
+            SessionType::Work,
         );
+        assert_eq!(runtime_effect_shell.fullscreen_break_exit_requests, 0);
 
         let timer = state.timer_manager.lock().await;
         assert_eq!(timer.status(), TimerStatus::Idle);
@@ -2586,13 +2552,13 @@ mod tests {
             expected_work_duration_secs
         );
         assert_eq!(
-            runtime_effect_shell.emitted_tick_snapshots[0].remaining_seconds,
+            published.remaining_seconds,
             expected_work_duration_secs.get()
         );
     }
 
     #[tokio::test]
-    async fn test_sync_automation_policies_command_side_effects() {
+    async fn automation_policy_sync_publishes_updated_policy_state() {
         let state = build_test_state_without_persistence_path().await;
         let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
 
@@ -2606,15 +2572,12 @@ mod tests {
         .await
         .expect("automation policy sync should succeed");
 
-        assert_tick_emit_and_tray_match(&runtime_effect_shell);
-        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::EmitTick);
-        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::UpdateTray);
-        assert_event_once(&runtime_effect_shell, RuntimeEffectEvent::Persist);
-        assert_event_absent(&runtime_effect_shell, RuntimeEffectEvent::SpawnTimerTask);
-        assert_event_absent(
+        assert_single_published_command_timer_state(
             &runtime_effect_shell,
-            RuntimeEffectEvent::RequestFullscreenBreakExit,
+            TimerStatus::Idle,
+            SessionType::Work,
         );
+        assert_eq!(runtime_effect_shell.fullscreen_break_exit_requests, 0);
 
         let timer = state.timer_manager.lock().await;
         assert_eq!(
@@ -2624,7 +2587,216 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_command_timer_side_effects_preserve_persistence_failure_policy() {
+    async fn start_work_persists_started_work_state() {
+        let temp_dir = create_temp_dir("start-work-persists-started-work");
+        let state = build_test_state_with_persistence_dir(temp_dir.clone()).await;
+        let settings = timer_settings(
+            1500,
+            300,
+            900,
+            4,
+            PostBreakTransitionPolicy::RequireManualContinue,
+        );
+        let mut runtime_effect_shell = RecordingRuntimeEffectShell::default();
+
+        start_work_for_tests(
+            &state,
+            settings,
+            TimerStartSource::ManualOutsideWindow,
+            &mut runtime_effect_shell,
+        )
+        .await
+        .expect("work session should start");
+
+        assert_single_published_start_timer_state(
+            &runtime_effect_shell,
+            TimerStatus::Working,
+            SessionType::Work,
+        );
+        assert_start_work_started_duration(&runtime_effect_shell, 1500);
+
+        let persisted = persisted_timer_state(&state);
+        assert_eq!(persisted.status, TimerStatus::Working);
+        assert_eq!(persisted.session_type, SessionType::Work);
+        assert_eq!(persisted.remaining_seconds, 1500);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn continue_post_break_decision_persists_next_work_state() {
+        let temp_dir = create_temp_dir("continue-post-break-persists-work");
+        let state = build_test_state_with_persistence_dir(temp_dir.clone()).await;
+        prepare_post_break_decision_pending_state(&state).await;
+        let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+
+        resolve_post_break_decision_with_runtime_effects(
+            &state,
+            PostBreakDecisionAction::Continue,
+            &mut runtime_effect_shell,
+        )
+        .await
+        .expect("continue decision should succeed");
+
+        assert_single_published_command_timer_state(
+            &runtime_effect_shell,
+            TimerStatus::Working,
+            SessionType::Work,
+        );
+
+        let persisted = persisted_timer_state(&state);
+        assert_eq!(persisted.status, TimerStatus::Working);
+        assert_eq!(persisted.session_type, SessionType::Work);
+        assert_eq!(persisted.remaining_seconds, 1500);
+        assert!(!persisted.post_break_decision_pending);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn stop_post_break_decision_persists_idle_state() {
+        let temp_dir = create_temp_dir("stop-post-break-persists-idle");
+        let state = build_test_state_with_persistence_dir(temp_dir.clone()).await;
+        prepare_post_break_decision_pending_state(&state).await;
+        let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+
+        resolve_post_break_decision_with_runtime_effects(
+            &state,
+            PostBreakDecisionAction::StopCycle,
+            &mut runtime_effect_shell,
+        )
+        .await
+        .expect("stop decision should succeed");
+
+        assert_single_published_command_timer_state(
+            &runtime_effect_shell,
+            TimerStatus::Idle,
+            SessionType::Work,
+        );
+
+        let persisted = persisted_timer_state(&state);
+        assert_eq!(persisted.status, TimerStatus::Idle);
+        assert_eq!(persisted.session_type, SessionType::Work);
+        assert!(!persisted.post_break_decision_pending);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn emergency_stop_persists_idle_state() {
+        let temp_dir = create_temp_dir("emergency-stop-persists-idle");
+        let state = build_test_state_with_persistence_dir(temp_dir.clone()).await;
+        prepare_fullscreen_break_state(&state).await;
+        let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+
+        emergency_stop_with_runtime_effects(&state, &mut runtime_effect_shell)
+            .await
+            .expect("emergency stop should succeed");
+
+        assert_single_published_command_timer_state(
+            &runtime_effect_shell,
+            TimerStatus::Idle,
+            SessionType::Work,
+        );
+        assert_eq!(runtime_effect_shell.fullscreen_break_exit_requests, 1);
+
+        let persisted = persisted_timer_state(&state);
+        assert_eq!(persisted.status, TimerStatus::Idle);
+        assert!(!persisted.is_fullscreen_break);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn duration_sync_persists_updated_settings() {
+        let temp_dir = create_temp_dir("duration-sync-persists-settings");
+        let state = build_test_state_with_persistence_dir(temp_dir.clone()).await;
+        let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+        let expected_work_duration_secs = command_work_duration_secs();
+        let expected_short_break_duration_secs = command_short_break_duration_secs();
+        let expected_long_break_duration_secs = command_long_break_duration_secs();
+        let expected_long_break_interval = command_long_break_interval();
+
+        sync_timer_duration_settings_with_runtime_effects(
+            &state,
+            expected_work_duration_secs,
+            expected_short_break_duration_secs,
+            expected_long_break_duration_secs,
+            expected_long_break_interval,
+            &mut runtime_effect_shell,
+        )
+        .await
+        .expect("duration settings sync should succeed");
+
+        assert_single_published_command_timer_state(
+            &runtime_effect_shell,
+            TimerStatus::Idle,
+            SessionType::Work,
+        );
+
+        let persisted = persisted_timer_state(&state);
+        assert_eq!(persisted.status, TimerStatus::Idle);
+        assert_eq!(
+            persisted.remaining_seconds,
+            expected_work_duration_secs.get()
+        );
+        assert_eq!(
+            persisted.settings.work_duration_secs,
+            expected_work_duration_secs
+        );
+        assert_eq!(
+            persisted.settings.short_break_duration_secs,
+            expected_short_break_duration_secs
+        );
+        assert_eq!(
+            persisted.settings.long_break_duration_secs,
+            expected_long_break_duration_secs
+        );
+        assert_eq!(
+            persisted.settings.long_break_interval,
+            expected_long_break_interval
+        );
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn automation_policy_sync_persists_updated_policy() {
+        let temp_dir = create_temp_dir("automation-policy-sync-persists-policy");
+        let state = build_test_state_with_persistence_dir(temp_dir.clone()).await;
+        let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+        let expected_weekly_config = make_enabled_daytime_monday_config();
+
+        sync_automation_policies_with_runtime_effects(
+            &state,
+            true,
+            expected_weekly_config.clone(),
+            PostBreakTransitionPolicy::StartNextWorkAutomatically,
+            &mut runtime_effect_shell,
+        )
+        .await
+        .expect("automation policy sync should succeed");
+
+        assert_single_published_command_timer_state(
+            &runtime_effect_shell,
+            TimerStatus::Idle,
+            SessionType::Work,
+        );
+
+        let persisted = persisted_timer_state(&state);
+        assert!(persisted.auto_run_feature_enabled);
+        assert_eq!(persisted.weekly_auto_run_config, expected_weekly_config);
+        assert_eq!(
+            persisted.settings.post_break_transition_policy,
+            PostBreakTransitionPolicy::StartNextWorkAutomatically
+        );
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn continue_post_break_decision_returns_persistence_error_without_rolling_back_work_start(
+    ) {
         let continue_state = build_test_state_with_injected_persistence_error().await;
         prepare_post_break_decision_pending_state(&continue_state).await;
         let mut continue_runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
@@ -2637,13 +2809,27 @@ mod tests {
         .await;
 
         assert_persistence_save_error(&continue_result);
-        assert_tick_emit_and_tray_match(&continue_runtime_effect_shell);
-        assert_event_once(
+        let published = assert_single_published_command_timer_state(
             &continue_runtime_effect_shell,
-            RuntimeEffectEvent::SpawnTimerTask,
+            TimerStatus::Working,
+            SessionType::Work,
         );
-        assert_event_once(&continue_runtime_effect_shell, RuntimeEffectEvent::Persist);
+        assert_eq!(published.remaining_seconds, 1500);
 
+        let timer_state = continue_state
+            .timer_manager
+            .lock()
+            .await
+            .get_state()
+            .clone();
+        assert_eq!(timer_state.status, TimerStatus::Working);
+        assert_eq!(timer_state.session_type, SessionType::Work);
+        assert_eq!(timer_state.remaining_seconds, 1500);
+        assert!(!timer_state.post_break_decision_pending);
+    }
+
+    #[tokio::test]
+    async fn emergency_stop_returns_persistence_error_without_rolling_back_idle_state() {
         let emergency_state = build_test_state_with_injected_persistence_error().await;
         prepare_fullscreen_break_state(&emergency_state).await;
         let mut emergency_runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
@@ -2655,19 +2841,36 @@ mod tests {
         .await;
 
         assert_persistence_save_error(&emergency_result);
-        assert_tick_emit_and_tray_match(&emergency_runtime_effect_shell);
-        assert_event_once(
+        let published = assert_single_published_command_timer_state(
             &emergency_runtime_effect_shell,
-            RuntimeEffectEvent::RequestFullscreenBreakExit,
+            TimerStatus::Idle,
+            SessionType::Work,
         );
-        assert_event_once(&emergency_runtime_effect_shell, RuntimeEffectEvent::Persist);
+        assert_eq!(
+            emergency_runtime_effect_shell.fullscreen_break_exit_requests,
+            1
+        );
+        assert!(!published.is_fullscreen_break);
 
+        let timer_state = emergency_state
+            .timer_manager
+            .lock()
+            .await
+            .get_state()
+            .clone();
+        assert_eq!(timer_state.status, TimerStatus::Idle);
+        assert!(!timer_state.is_fullscreen_break);
+    }
+
+    #[tokio::test]
+    async fn duration_sync_returns_persistence_error_without_rolling_back_settings() {
         let duration_state = build_test_state_with_injected_persistence_error().await;
         let mut duration_runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+        let expected_work_duration_secs = command_work_duration_secs();
 
         let duration_result = sync_timer_duration_settings_with_runtime_effects(
             &duration_state,
-            command_work_duration_secs(),
+            expected_work_duration_secs,
             command_short_break_duration_secs(),
             command_long_break_duration_secs(),
             command_long_break_interval(),
@@ -2676,26 +2879,65 @@ mod tests {
         .await;
 
         assert_persistence_save_error(&duration_result);
-        assert_tick_emit_and_tray_match(&duration_runtime_effect_shell);
-        assert_event_once(&duration_runtime_effect_shell, RuntimeEffectEvent::Persist);
+        let published = assert_single_published_command_timer_state(
+            &duration_runtime_effect_shell,
+            TimerStatus::Idle,
+            SessionType::Work,
+        );
+        assert_eq!(
+            published.remaining_seconds,
+            expected_work_duration_secs.get()
+        );
 
+        let timer_state = duration_state
+            .timer_manager
+            .lock()
+            .await
+            .get_state()
+            .clone();
+        assert_eq!(
+            timer_state.settings.work_duration_secs,
+            expected_work_duration_secs
+        );
+        assert_eq!(
+            timer_state.remaining_seconds,
+            expected_work_duration_secs.get()
+        );
+    }
+
+    #[tokio::test]
+    async fn automation_policy_sync_returns_persistence_error_without_rolling_back_policy() {
         let automation_state = build_test_state_with_injected_persistence_error().await;
         let mut automation_runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+        let expected_weekly_config = WeeklyAutoRunConfig::default();
 
         let automation_result = sync_automation_policies_with_runtime_effects(
             &automation_state,
             false,
-            WeeklyAutoRunConfig::default(),
+            expected_weekly_config.clone(),
             PostBreakTransitionPolicy::StartNextWorkAutomatically,
             &mut automation_runtime_effect_shell,
         )
         .await;
 
         assert_persistence_save_error(&automation_result);
-        assert_tick_emit_and_tray_match(&automation_runtime_effect_shell);
-        assert_event_once(
+        assert_single_published_command_timer_state(
             &automation_runtime_effect_shell,
-            RuntimeEffectEvent::Persist,
+            TimerStatus::Idle,
+            SessionType::Work,
+        );
+
+        let timer_state = automation_state
+            .timer_manager
+            .lock()
+            .await
+            .get_state()
+            .clone();
+        assert!(!timer_state.auto_run_feature_enabled);
+        assert_eq!(timer_state.weekly_auto_run_config, expected_weekly_config);
+        assert_eq!(
+            timer_state.settings.post_break_transition_policy,
+            PostBreakTransitionPolicy::StartNextWorkAutomatically
         );
     }
 
@@ -2898,13 +3140,11 @@ mod tests {
             BootPromptRuntimeState::ResolvedStart
         );
         assert!(state.auto_start_boundary_enabled.load(Ordering::Acquire));
-        assert!(runtime_effect_shell
-            .events()
-            .contains(&RuntimeEffectEvent::EmitWorkStarted));
+        assert_start_work_started_duration(&runtime_effect_shell, 1500);
     }
 
     #[tokio::test]
-    async fn test_boot_prompt_start_persistence_failure_records_runtime_effects() {
+    async fn boot_prompt_start_persistence_failure_publishes_started_work_state() {
         let temp_dir = create_temp_dir("boot-prompt-ordering-save-fails");
         let invalid_app_data_path = temp_dir.join("app-data-file");
         std::fs::write(&invalid_app_data_path, "not a directory")
@@ -2933,21 +3173,13 @@ mod tests {
         .await;
 
         assert!(matches!(result, Err(PomoliceError::PersistenceSave(_))));
-        assert!(runtime_effect_shell
-            .events()
-            .contains(&RuntimeEffectEvent::EmitTick));
-        assert!(runtime_effect_shell
-            .events()
-            .contains(&RuntimeEffectEvent::UpdateTray));
-        assert!(runtime_effect_shell
-            .events()
-            .contains(&RuntimeEffectEvent::EmitWorkStarted));
-        assert!(runtime_effect_shell
-            .events()
-            .contains(&RuntimeEffectEvent::SpawnTimerTask));
-        assert!(runtime_effect_shell
-            .events()
-            .contains(&RuntimeEffectEvent::Persist));
+        let published = assert_single_published_start_timer_state(
+            &runtime_effect_shell,
+            TimerStatus::Working,
+            SessionType::Work,
+        );
+        assert_eq!(published.remaining_seconds, 1500);
+        assert_start_work_started_duration(&runtime_effect_shell, 1500);
 
         cleanup_temp_dir(&temp_dir);
     }
