@@ -1,21 +1,12 @@
 import { useEffect, useState } from "react";
+import { AppShell } from "./AppShell";
 import { FullscreenBreak } from "./components/BreakScreen/FullscreenBreak";
-import { FullscreenBreakErrorBoundary } from "./components/ErrorBoundary/FullscreenBreakErrorBoundary";
-import { SettingsErrorBoundary } from "./components/ErrorBoundary/SettingsErrorBoundary";
 import { HomeScreen } from "./components/Home/HomeScreen";
-import { SettingsAutoRunPage } from "./components/Settings/SettingsAutoRunPage";
-import { SettingsNotificationPage } from "./components/Settings/SettingsNotificationPage";
-import { SettingsScreenLayout } from "./components/Settings/SettingsScreenLayout";
-import { SettingsTopPage } from "./components/Settings/SettingsTopPage";
-import { SettingsTimerPage } from "./components/Settings/SettingsTimerPage";
+import { SettingsScreenContent } from "./components/Settings/SettingsScreenContent";
 import { useTimerSync } from "./hooks/useTimerSync";
 import { useSettingsStore } from "./store/settingsStore";
 import { useTimerStore } from "./store/timerStore";
-import {
-  SETTINGS_SCREEN_VALUES,
-  type AppScreen,
-  type SettingsScreen,
-} from "./types/appScreen";
+import type { AppScreen, SettingsScreen } from "./types/appScreen";
 
 const ESCAPE_BACK_TARGET_BY_SCREEN: Partial<Record<AppScreen, AppScreen>> = {
   settingsTop: "home",
@@ -23,73 +14,6 @@ const ESCAPE_BACK_TARGET_BY_SCREEN: Partial<Record<AppScreen, AppScreen>> = {
   settingsAutoRun: "settingsTop",
   settingsNotification: "settingsTop",
 };
-
-function isSettingsScreen(screen: AppScreen): screen is SettingsScreen {
-  return SETTINGS_SCREEN_VALUES.includes(screen as SettingsScreen);
-}
-
-function assertNeverSettingsScreen(screen: never): never {
-  throw new Error(`Unknown settings screen: ${String(screen)}`);
-}
-
-function renderSettingsScreen(
-  currentScreen: SettingsScreen,
-  moveToScreen: (nextScreen: AppScreen) => void,
-): React.ReactElement {
-  switch (currentScreen) {
-    case "settingsTop":
-      return (
-        <SettingsScreenLayout mainTestId="settings-top-main">
-          <SettingsTopPage
-            openHomeScreen={() => {
-              moveToScreen("home");
-            }}
-            openTimerSettings={() => {
-              moveToScreen("settingsTimer");
-            }}
-            openAutoRunSettings={() => {
-              moveToScreen("settingsAutoRun");
-            }}
-            openNotificationSettings={() => {
-              moveToScreen("settingsNotification");
-            }}
-          />
-        </SettingsScreenLayout>
-      );
-    case "settingsTimer":
-      return (
-        <SettingsScreenLayout mainTestId="settings-timer-main">
-          <SettingsTimerPage
-            openSettingsTopScreen={() => {
-              moveToScreen("settingsTop");
-            }}
-          />
-        </SettingsScreenLayout>
-      );
-    case "settingsAutoRun":
-      return (
-        <SettingsScreenLayout mainTestId="settings-auto-run-main">
-          <SettingsAutoRunPage
-            openSettingsTopScreen={() => {
-              moveToScreen("settingsTop");
-            }}
-          />
-        </SettingsScreenLayout>
-      );
-    case "settingsNotification":
-      return (
-        <SettingsScreenLayout mainTestId="settings-notification-main">
-          <SettingsNotificationPage
-            openSettingsTopScreen={() => {
-              moveToScreen("settingsTop");
-            }}
-          />
-        </SettingsScreenLayout>
-      );
-    default:
-      return assertNeverSettingsScreen(currentScreen);
-  }
-}
 
 function App(): React.ReactElement {
   // Initialize timer sync with backend (single source of truth)
@@ -149,38 +73,32 @@ function App(): React.ReactElement {
     };
   }, [currentScreen]);
 
-  // Show fullscreen break overlay when in break mode
-  if (isFullscreenBreak) {
-    return (
-      <FullscreenBreakErrorBoundary>
-        <FullscreenBreak />
-      </FullscreenBreakErrorBoundary>
-    );
-  }
-
-  if (isSettingsScreen(currentScreen)) {
-    return (
-      <SettingsErrorBoundary
-        currentScreen={currentScreen}
-        onBackToHome={() => {
-          moveToScreen("home");
-        }}
-      >
-        {renderSettingsScreen(currentScreen, moveToScreen)}
-      </SettingsErrorBoundary>
-    );
-  }
-
   return (
-    <HomeScreen
-      notificationSoundMuted={notificationSoundMuted}
-      autoRunFeatureEnabled={autoRunFeatureEnabled}
-      isAutoContinueEnabled={isAutoContinueEnabled}
-      requiresManualContinue={requiresManualContinue}
-      onToggleNotificationSoundMuted={toggleNotificationSoundMuted}
-      onOpenSettingsTopScreen={() => {
-        moveToScreen("settingsTop");
+    <AppShell
+      currentScreen={currentScreen}
+      isFullscreenBreak={isFullscreenBreak}
+      onBackToHome={() => {
+        moveToScreen("home");
       }}
+      renderHomeScreen={() => (
+        <HomeScreen
+          notificationSoundMuted={notificationSoundMuted}
+          autoRunFeatureEnabled={autoRunFeatureEnabled}
+          isAutoContinueEnabled={isAutoContinueEnabled}
+          requiresManualContinue={requiresManualContinue}
+          onToggleNotificationSoundMuted={toggleNotificationSoundMuted}
+          onOpenSettingsTopScreen={() => {
+            moveToScreen("settingsTop");
+          }}
+        />
+      )}
+      renderFullscreenBreakScreen={() => <FullscreenBreak />}
+      renderSettingsScreen={(settingsScreen: SettingsScreen) => (
+        <SettingsScreenContent
+          currentScreen={settingsScreen}
+          moveToScreen={moveToScreen}
+        />
+      )}
     />
   );
 }
