@@ -18,16 +18,18 @@ export const motivationalMessages = [
   "短い休憩が長期的なパフォーマンスを向上させます 📈",
 ];
 
-/**
- * Get a random motivational message
- * @returns A random message from the array
- */
-export function getRandomMessage(): string {
-  const index = Math.floor(Math.random() * motivationalMessages.length);
-  const message = motivationalMessages[index];
+export function selectRandomMotivationalMessage(
+  messages: readonly string[],
+): string {
+  const index = Math.floor(Math.random() * messages.length);
+  const message = messages[index];
   if (message === undefined) {
     throw new Error("motivationalMessages must contain at least one message.");
   }
 
   return message;
+}
+
+export function getRandomMessage(): string {
+  return selectRandomMotivationalMessage(motivationalMessages);
 }

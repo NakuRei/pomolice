@@ -1,7 +1,7 @@
 import { useTimerStore, SessionType } from "@/store/timerStore";
 import { useSkipFlowStore } from "@/store/skipFlowStore";
 import { formatTime } from "@/formatters/timeFormatter";
-import { MotivationalMessage } from "./MotivationalMessage";
+import { BreakMotivationalMessage } from "./BreakMotivationalMessage";
 import { BreakStats } from "./BreakStats";
 import { SkipButton } from "./SkipButton";
 import SkipFlowModal from "../SkipFlow/SkipFlowModal";
@@ -87,7 +87,7 @@ export function FullscreenBreak(): React.ReactElement {
       </div>
 
       {/* Motivational message */}
-      <MotivationalMessage />
+      <BreakMotivationalMessage />
 
       {/* Break statistics */}
       <div className="mt-8">

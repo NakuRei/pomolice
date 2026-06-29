@@ -4,9 +4,16 @@ import userEvent from "@testing-library/user-event";
 import { FullscreenBreak } from "./FullscreenBreak";
 import { useTimerStore, SessionType } from "@/store/timerStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
+import { motivationalMessages } from "@/data/motivationalMessages";
 
 function getBreakTimerDisplay(timeText: string): HTMLElement {
   return screen.getByText(timeText);
+}
+
+function getVisibleMotivationalMessages(): string[] {
+  return motivationalMessages.filter(
+    (message) => screen.queryByText(message) !== null,
+  );
 }
 
 async function renderFullscreenBreakWithSkipFlowOpen(): Promise<void> {
@@ -40,6 +47,7 @@ describe("FullscreenBreak", () => {
       expect(
         screen.getByRole("button", { name: "休憩をスキップ" }),
       ).toBeInTheDocument();
+      expect(getVisibleMotivationalMessages()).toHaveLength(1);
     });
 
     it("should display 'long break' for long break", () => {

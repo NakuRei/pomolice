@@ -1,15 +1,10 @@
-import { useState } from "react";
-import { getRandomMessage } from "@/data/motivationalMessages";
+interface MotivationalMessageProps {
+  message: string;
+}
 
-/**
- * MotivationalMessage Component
- *
- * Displays a random motivational message during break time
- * to encourage users to take proper breaks.
- */
-export function MotivationalMessage(): React.ReactElement {
-  const [message] = useState<string>(() => getRandomMessage());
-
+export function MotivationalMessage({
+  message,
+}: MotivationalMessageProps): React.ReactElement {
   return (
     <div className="mb-8 text-center">
       <p className="text-2xl font-medium text-text">{message}</p>
