@@ -92,12 +92,6 @@ export interface InfoMessage {
   ttlMs: number;
 }
 
-type BootPromptRuntimeStateValue =
-  | "awaiting_decision"
-  | "resolved_start"
-  | "resolved_later"
-  | "not_applicable";
-
 /**
  * Timer state interface - display-only state from backend
  * The backend is the single source of truth
@@ -391,10 +385,7 @@ export const useTimerStore = create<TimerStore>()(
 
       resolveBootAutoStartPrompt: async (startNow: boolean): Promise<void> => {
         try {
-          await invoke<BootPromptRuntimeStateValue>(
-            "resolve_boot_auto_start_prompt",
-            { startNow },
-          );
+          await invoke("resolve_boot_auto_start_prompt", { startNow });
           set((state) => {
             state.shouldPromptStartOnBoot = false;
           });

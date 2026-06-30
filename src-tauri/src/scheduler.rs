@@ -2,7 +2,6 @@ use chrono::{DateTime, Duration as ChronoDuration, Local};
 use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::time::MissedTickBehavior;
@@ -20,8 +19,7 @@ use crate::managers::weekly_schedule::{
 use crate::state;
 use crate::tray;
 use crate::types::{
-    BootPromptRuntimeState, BoundaryOccurrenceId, TimerSettings, TimerStatus, WeeklyAutoRunConfig,
-    WorkStartOrigin,
+    BoundaryOccurrenceId, TimerSettings, TimerStatus, WeeklyAutoRunConfig, WorkStartOrigin,
 };
 
 const SCHEDULER_INTERVAL_SECONDS: u64 = 1;
@@ -429,15 +427,7 @@ fn build_scheduler_tick_plan(
     };
 
     let should_evaluate_start_boundaries = auto_run_feature_enabled
-        && boot_prompt_gate_allows_start_boundary_evaluation(
-            state_handle
-                .auto_start_boundary_enabled
-                .load(Ordering::Acquire),
-            state_handle
-                .boot_prompt_check_pending
-                .load(Ordering::Acquire),
-            current_boot_prompt_runtime_state(state_handle),
-        )
+        && state_handle.start_boundaries_allowed_after_startup_prompt()
         && !runtime_state.start_boundaries_blocked_until_idle
         && !resumed_start_boundary_evaluation
         && !skip_start_boundaries_this_tick;
@@ -446,23 +436,6 @@ fn build_scheduler_tick_plan(
         end_boundary_previous_local,
         should_evaluate_start_boundaries,
     }
-}
-
-fn current_boot_prompt_runtime_state(state_handle: &state::AppState) -> BootPromptRuntimeState {
-    match state_handle.boot_prompt_runtime_state.lock() {
-        Ok(guard) => *guard,
-        Err(_) => BootPromptRuntimeState::NotApplicable,
-    }
-}
-
-fn boot_prompt_gate_allows_start_boundary_evaluation(
-    auto_start_boundary_enabled: bool,
-    boot_prompt_check_pending: bool,
-    boot_prompt_runtime_state: BootPromptRuntimeState,
-) -> bool {
-    auto_start_boundary_enabled
-        && !boot_prompt_check_pending
-        && boot_prompt_runtime_state != BootPromptRuntimeState::AwaitingDecision
 }
 
 async fn process_crossed_end_boundaries_with_effects(
@@ -929,20 +902,8 @@ mod tests {
         .expect("weekly config should be valid")
     }
 
-    /// Opens the boot-prompt and auto-start gates so that start boundaries are
-    /// actually evaluated during a tick.
-    fn open_start_boundary_gate(state: &state::AppState) {
-        state
-            .auto_start_boundary_enabled
-            .store(true, Ordering::Release);
-        state
-            .boot_prompt_check_pending
-            .store(false, Ordering::Release);
-        *state
-            .boot_prompt_runtime_state
-            .lock()
-            .expect("boot prompt runtime state mutex should not be poisoned") =
-            BootPromptRuntimeState::NotApplicable;
+    fn complete_startup_auto_start_prompt_gate(state: &state::AppState) {
+        state.allow_start_boundaries_after_startup_prompt();
     }
 
     async fn apply_schedule(
@@ -1016,20 +977,6 @@ mod tests {
             .expect("work session should start");
     }
 
-    fn close_start_boundary_gate(state: &state::AppState) {
-        state
-            .auto_start_boundary_enabled
-            .store(false, Ordering::Release);
-        state
-            .boot_prompt_check_pending
-            .store(true, Ordering::Release);
-        *state
-            .boot_prompt_runtime_state
-            .lock()
-            .expect("boot prompt runtime state mutex should not be poisoned") =
-            BootPromptRuntimeState::AwaitingDecision;
-    }
-
     fn assert_no_work_start_effects(effects: &RecordingSchedulerRuntimeEffects) {
         assert!(effects.timer_tick_payloads.is_empty());
         assert!(effects.tray_update_payloads.is_empty());
@@ -1079,7 +1026,6 @@ mod tests {
     #[tokio::test]
     async fn end_boundary_emits_stop_pending_for_auto_run_session() {
         let state = build_test_state_without_persistence_path().await;
-        close_start_boundary_gate(&state);
         start_work_with_schedule_origin(&state, true, WorkStartOrigin::ManualInsideScheduleWindow)
             .await;
 
@@ -1139,7 +1085,6 @@ mod tests {
     #[tokio::test]
     async fn replayed_end_boundary_does_not_mark_new_work_session_pending() {
         let state = build_test_state_without_persistence_path().await;
-        close_start_boundary_gate(&state);
         start_work_with_schedule_origin(&state, true, WorkStartOrigin::ManualInsideScheduleWindow)
             .await;
 
@@ -1312,7 +1257,7 @@ mod tests {
     #[tokio::test]
     async fn arriving_start_boundary_auto_starts_when_gate_is_open() {
         let state = build_test_state_without_persistence_path().await;
-        open_start_boundary_gate(&state);
+        complete_startup_auto_start_prompt_gate(&state);
         apply_schedule(
             &state,
             weekly_config_with_monday_daytime(),
@@ -1343,7 +1288,7 @@ mod tests {
     #[tokio::test]
     async fn replayed_start_boundary_does_not_start_work_again_after_returning_idle() {
         let state = build_test_state_without_persistence_path().await;
-        open_start_boundary_gate(&state);
+        complete_startup_auto_start_prompt_gate(&state);
         apply_schedule(
             &state,
             weekly_config_with_monday_daytime(),
@@ -1412,7 +1357,7 @@ mod tests {
     #[tokio::test]
     async fn restored_running_session_does_not_replay_past_start_boundary_after_returning_idle() {
         let state = build_test_state_without_persistence_path().await;
-        open_start_boundary_gate(&state);
+        complete_startup_auto_start_prompt_gate(&state);
         apply_schedule(
             &state,
             weekly_config_with_monday_and_tuesday_daytime(),

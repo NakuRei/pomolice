@@ -4,7 +4,7 @@
 use chrono::{DateTime, Duration as ChronoDuration, Local, Utc};
 use std::collections::BTreeSet;
 use std::future::Future;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex as StdMutex};
 use tauri::async_runtime::JoinHandle;
 use tokio::sync::{Mutex, Notify, Semaphore};
@@ -17,9 +17,7 @@ use crate::managers::input_monitor::InputMonitorManager;
 use crate::managers::persistence::{PersistenceLoadOutcome, PersistenceManager, SaveError};
 use crate::managers::timer::TimerStateManager;
 use crate::managers::window::WindowStateManager;
-use crate::types::{
-    BootPromptRuntimeState, SessionTransitionOutcome, TimerState, TimerStatus, TimerTickPayload,
-};
+use crate::types::{SessionTransitionOutcome, TimerState, TimerStatus, TimerTickPayload};
 
 /// Lifecycle handles for the weekly scheduler background task.
 #[derive(Default)]
@@ -53,6 +51,13 @@ struct StartupPreparation {
     initial_timer_state: TimerState,
     restored_running_saved_at_local: Option<DateTime<Local>>,
     initialization_outcome: AppInitializationOutcome,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StartupAutoStartGate {
+    WaitingForInitialFullState,
+    WaitingForPromptDecision,
+    StartBoundariesAllowed,
 }
 
 #[cfg(test)]
@@ -233,9 +238,7 @@ pub(crate) struct AppState {
     pub clock: Arc<dyn Clock + Send + Sync>,
     // These runtime fields are synchronous, short-lived bookkeeping and are not held with await.
     pub scheduler_task_state: StdMutex<SchedulerTaskState>,
-    pub boot_prompt_runtime_state: StdMutex<BootPromptRuntimeState>,
-    pub boot_prompt_check_pending: AtomicBool,
-    pub auto_start_boundary_enabled: AtomicBool,
+    startup_auto_start_gate: StdMutex<StartupAutoStartGate>,
     restored_running_saved_at_local: StdMutex<Option<DateTime<Local>>>,
     config_revision: AtomicU64,
     ordered_save_lane: OrderedSaveLane,
@@ -288,9 +291,9 @@ impl AppState {
             persistence,
             clock,
             scheduler_task_state: StdMutex::new(SchedulerTaskState::default()),
-            boot_prompt_runtime_state: StdMutex::new(BootPromptRuntimeState::NotApplicable),
-            boot_prompt_check_pending: AtomicBool::new(true),
-            auto_start_boundary_enabled: AtomicBool::new(false),
+            startup_auto_start_gate: StdMutex::new(
+                StartupAutoStartGate::WaitingForInitialFullState,
+            ),
             restored_running_saved_at_local: StdMutex::new(restored_running_saved_at_local),
             config_revision: AtomicU64::new(0),
             ordered_save_lane: OrderedSaveLane::default(),
@@ -306,6 +309,52 @@ impl AppState {
 
     pub(crate) fn auto_run_boundary_generation(&self) -> u64 {
         self.config_revision.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn record_initial_full_state_auto_start_prompt_decision(
+        &self,
+        should_prompt: bool,
+    ) -> bool {
+        let mut gate = self
+            .startup_auto_start_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        if *gate != StartupAutoStartGate::WaitingForInitialFullState {
+            return false;
+        }
+
+        *gate = if should_prompt {
+            StartupAutoStartGate::WaitingForPromptDecision
+        } else {
+            StartupAutoStartGate::StartBoundariesAllowed
+        };
+
+        should_prompt
+    }
+
+    pub(crate) fn startup_auto_start_prompt_is_waiting(&self) -> bool {
+        let gate = self
+            .startup_auto_start_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *gate == StartupAutoStartGate::WaitingForPromptDecision
+    }
+
+    pub(crate) fn allow_start_boundaries_after_startup_prompt(&self) {
+        let mut gate = self
+            .startup_auto_start_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *gate = StartupAutoStartGate::StartBoundariesAllowed;
+    }
+
+    pub(crate) fn start_boundaries_allowed_after_startup_prompt(&self) -> bool {
+        let gate = self
+            .startup_auto_start_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *gate == StartupAutoStartGate::StartBoundariesAllowed
     }
 
     #[cfg(test)]

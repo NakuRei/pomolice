@@ -785,17 +785,6 @@ impl BoundaryOccurrenceId {
     }
 }
 
-/// Runtime state for the one-time startup confirmation decision.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum BootPromptRuntimeState {
-    AwaitingDecision,
-    ResolvedStart,
-    ResolvedLater,
-    #[default]
-    NotApplicable,
-}
-
 /// Payload sent to frontend on each timer tick
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct TimerTickPayload {
@@ -1203,42 +1192,6 @@ mod tests {
     }
 
     #[test]
-    fn test_boot_prompt_runtime_state_default() {
-        assert_eq!(
-            BootPromptRuntimeState::default(),
-            BootPromptRuntimeState::NotApplicable
-        );
-    }
-
-    #[test]
-    fn test_boot_prompt_runtime_state_serializes_as_ipc_contract_values() {
-        let cases = [
-            (
-                BootPromptRuntimeState::AwaitingDecision,
-                json!("awaiting_decision"),
-            ),
-            (
-                BootPromptRuntimeState::ResolvedStart,
-                json!("resolved_start"),
-            ),
-            (
-                BootPromptRuntimeState::ResolvedLater,
-                json!("resolved_later"),
-            ),
-            (
-                BootPromptRuntimeState::NotApplicable,
-                json!("not_applicable"),
-            ),
-        ];
-
-        for (runtime_state, expected) in cases {
-            let serialized =
-                serde_json::to_value(runtime_state).expect("runtime state should serialize");
-            assert_eq!(serialized, expected);
-        }
-    }
-
-    #[test]
     fn test_enum_fields_deserialize_with_serde_default() {
         #[derive(Debug, Deserialize)]
         struct EnumDefaultsWrapper {
@@ -1246,8 +1199,6 @@ mod tests {
             work_start_origin: WorkStartOrigin,
             #[serde(default)]
             schedule_stop_state: ScheduleStopState,
-            #[serde(default)]
-            boot_prompt_runtime_state: BootPromptRuntimeState,
             #[serde(default)]
             post_break_transition_policy: PostBreakTransitionPolicy,
         }
@@ -1262,10 +1213,6 @@ mod tests {
         assert_eq!(
             wrapper.schedule_stop_state,
             ScheduleStopState::NotControlledBySchedule
-        );
-        assert_eq!(
-            wrapper.boot_prompt_runtime_state,
-            BootPromptRuntimeState::NotApplicable
         );
         assert_eq!(
             wrapper.post_break_transition_policy,
