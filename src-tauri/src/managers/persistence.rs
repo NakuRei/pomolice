@@ -13,8 +13,8 @@ use thiserror::Error;
 use crate::logging_event::{log_error_event, log_info_event, log_warn_event, BackendLogEvent};
 use crate::managers::clock::{Clock, SystemClock};
 use crate::types::{
-    ScheduledStopState, SessionType, TimerSettings, TimerStartSource, TimerState, TimerStatus,
-    WeeklyAutoRunConfig, PERSISTED_STATE_SCHEMA_VERSION_V4,
+    ScheduleStopState, SessionType, TimerSettings, TimerState, TimerStatus, WeeklyAutoRunConfig,
+    PERSISTED_STATE_SCHEMA_VERSION,
 };
 
 #[cfg(test)]
@@ -40,17 +40,12 @@ pub(crate) struct PersistedState {
     pub session_type: SessionType,
     pub current_cycle: u32,
     pub completed_pomodoros: u32,
-    #[serde(default)]
     pub post_break_decision_pending: bool,
     pub settings: TimerSettings,
     pub saved_at: DateTime<Utc>,
-    #[serde(default)]
     pub auto_run_feature_enabled: bool,
     pub weekly_auto_run_config: WeeklyAutoRunConfig,
-    #[serde(default)]
-    pub timer_start_source: Option<TimerStartSource>,
-    #[serde(default)]
-    pub scheduled_stop_state: ScheduledStopState,
+    pub schedule_stop_state: ScheduleStopState,
 }
 
 pub(crate) enum PersistenceLoadOutcome {
@@ -105,8 +100,7 @@ struct RestoredSessionState {
     remaining_seconds: u64,
     current_cycle: u32,
     completed_pomodoros: u32,
-    timer_start_source: Option<TimerStartSource>,
-    scheduled_stop_state: ScheduledStopState,
+    schedule_stop_state: ScheduleStopState,
 }
 
 fn log_restore_normalized(state: &RestoredSessionState) {
@@ -140,8 +134,7 @@ fn normalize_pending_post_break_decision(
     state.status = TimerStatus::Idle;
     state.session_type = SessionType::Work;
     state.remaining_seconds = settings.work_duration_secs.get();
-    state.timer_start_source = None;
-    state.scheduled_stop_state = ScheduledStopState::None;
+    state.schedule_stop_state = ScheduleStopState::NotControlledBySchedule;
 }
 
 fn normalize_restored_break_session(state: &mut RestoredSessionState, settings: &TimerSettings) {
@@ -154,8 +147,7 @@ fn normalize_restored_break_session(state: &mut RestoredSessionState, settings: 
     state.session_type = SessionType::Work;
     state.remaining_seconds = settings.work_duration_secs.get();
     state.completed_pomodoros = state.completed_pomodoros.saturating_sub(1);
-    state.timer_start_source = None;
-    state.scheduled_stop_state = ScheduledStopState::None;
+    state.schedule_stop_state = ScheduleStopState::NotControlledBySchedule;
 }
 
 fn adjusted_remaining_seconds(state: &RestoredSessionState, elapsed_seconds: u64) -> u64 {
@@ -184,13 +176,12 @@ impl PersistedState {
             settings,
             auto_run_feature_enabled,
             weekly_auto_run_config,
-            timer_start_source,
-            scheduled_stop_state,
+            schedule_stop_state,
             ..
         } = state;
 
         Self {
-            schema_version: PERSISTED_STATE_SCHEMA_VERSION_V4,
+            schema_version: PERSISTED_STATE_SCHEMA_VERSION,
             status,
             remaining_seconds,
             session_type,
@@ -201,8 +192,7 @@ impl PersistedState {
             saved_at: clock.now_utc(),
             auto_run_feature_enabled,
             weekly_auto_run_config,
-            timer_start_source,
-            scheduled_stop_state,
+            schedule_stop_state,
         }
     }
 
@@ -227,8 +217,7 @@ impl PersistedState {
             saved_at: _,
             auto_run_feature_enabled,
             weekly_auto_run_config,
-            timer_start_source,
-            scheduled_stop_state,
+            schedule_stop_state,
         } = self;
 
         let mut restored_state = RestoredSessionState {
@@ -237,8 +226,7 @@ impl PersistedState {
             remaining_seconds,
             current_cycle,
             completed_pomodoros,
-            timer_start_source,
-            scheduled_stop_state,
+            schedule_stop_state,
         };
         normalize_pending_post_break_decision(
             &mut restored_state,
@@ -246,13 +234,6 @@ impl PersistedState {
             post_break_decision_pending,
         );
         normalize_restored_break_session(&mut restored_state, &settings);
-
-        let (normalized_timer_start_source, normalized_scheduled_stop_state) =
-            normalize_recovered_session_stop_behavior(
-                restored_state.status,
-                restored_state.timer_start_source,
-                restored_state.scheduled_stop_state,
-            );
 
         TimerState {
             status: restored_state.status,
@@ -265,8 +246,10 @@ impl PersistedState {
             settings,
             auto_run_feature_enabled,
             weekly_auto_run_config,
-            timer_start_source: normalized_timer_start_source,
-            scheduled_stop_state: normalized_scheduled_stop_state,
+            schedule_stop_state: normalized_schedule_stop_state(
+                restored_state.status,
+                restored_state.schedule_stop_state,
+            ),
             post_break_decision_pending,
             is_fullscreen_break: false,
             last_transition: None,
@@ -274,17 +257,13 @@ impl PersistedState {
     }
 }
 
-fn normalize_recovered_session_stop_behavior(
+fn normalized_schedule_stop_state(
     status: TimerStatus,
-    timer_start_source: Option<TimerStartSource>,
-    scheduled_stop_state: ScheduledStopState,
-) -> (Option<TimerStartSource>, ScheduledStopState) {
+    schedule_stop_state: ScheduleStopState,
+) -> ScheduleStopState {
     match status {
-        TimerStatus::Idle => (None, ScheduledStopState::None),
-        TimerStatus::Working | TimerStatus::OnBreak => (
-            Some(timer_start_source.unwrap_or(TimerStartSource::ManualOutsideWindow)),
-            scheduled_stop_state,
-        ),
+        TimerStatus::Idle => ScheduleStopState::NotControlledBySchedule,
+        TimerStatus::Working | TimerStatus::OnBreak => schedule_stop_state,
     }
 }
 
@@ -528,14 +507,14 @@ impl PersistenceManager {
             }
         };
 
-        if envelope.schema_version != PERSISTED_STATE_SCHEMA_VERSION_V4 {
+        if envelope.schema_version != PERSISTED_STATE_SCHEMA_VERSION {
             log_warn_event(
                 BackendLogEvent::StoragePersistenceSchemaVersionUnsupported,
                 &[
                     ("schema_version", envelope.schema_version.to_string()),
                     (
                         "expected_schema_version",
-                        PERSISTED_STATE_SCHEMA_VERSION_V4.to_string(),
+                        PERSISTED_STATE_SCHEMA_VERSION.to_string(),
                     ),
                 ],
             );
@@ -597,8 +576,7 @@ mod tests {
     use super::*;
     use crate::managers::clock::testing::FixedClock;
     use crate::types::{
-        DayAutoRunSlot, HhMm, PostBreakTransitionPolicy, PERSISTED_STATE_SCHEMA_VERSION_V3,
-        PERSISTED_STATE_SCHEMA_VERSION_V4,
+        DayAutoRunSlot, HhMm, PostBreakTransitionPolicy, PERSISTED_STATE_SCHEMA_VERSION,
     };
     use chrono::{Local, TimeZone};
     use serde_json::json;
@@ -711,8 +689,7 @@ mod tests {
             settings: contract_timer_settings(),
             auto_run_feature_enabled: true,
             weekly_auto_run_config: contract_weekly_auto_run_config(),
-            timer_start_source: Some(TimerStartSource::ManualInsideWindow),
-            scheduled_stop_state: ScheduledStopState::Pending,
+            schedule_stop_state: ScheduleStopState::StopAtNextSessionBoundary,
             ..TimerState::default()
         }
     }
@@ -735,8 +712,7 @@ mod tests {
             .expect("alternate contract settings should be valid"),
             auto_run_feature_enabled: false,
             weekly_auto_run_config: WeeklyAutoRunConfig::default(),
-            timer_start_source: Some(TimerStartSource::ScheduledAutoStart),
-            scheduled_stop_state: ScheduledStopState::None,
+            schedule_stop_state: ScheduleStopState::NotControlledBySchedule,
             ..TimerState::default()
         }
     }
@@ -755,7 +731,7 @@ mod tests {
 
     fn contract_persisted_state_json(saved_at_utc: DateTime<Utc>) -> serde_json::Value {
         json!({
-            "schema_version": PERSISTED_STATE_SCHEMA_VERSION_V4,
+            "schema_version": PERSISTED_STATE_SCHEMA_VERSION,
             "status": "working",
             "remaining_seconds": 1234,
             "session_type": "work",
@@ -772,8 +748,7 @@ mod tests {
             "saved_at": saved_at_utc,
             "auto_run_feature_enabled": true,
             "weekly_auto_run_config": contract_weekly_config_json(),
-            "timer_start_source": "manual_inside_window",
-            "scheduled_stop_state": "pending"
+            "schedule_stop_state": "stop_at_next_session_boundary"
         })
     }
 
@@ -802,12 +777,8 @@ mod tests {
             contract_weekly_auto_run_config()
         );
         assert_eq!(
-            timer_state.timer_start_source,
-            Some(TimerStartSource::ManualInsideWindow)
-        );
-        assert_eq!(
-            timer_state.scheduled_stop_state,
-            ScheduledStopState::Pending
+            timer_state.schedule_stop_state,
+            ScheduleStopState::StopAtNextSessionBoundary
         );
     }
 
@@ -832,10 +803,9 @@ mod tests {
             WeeklyAutoRunConfig::default()
         );
         assert_eq!(
-            timer_state.timer_start_source,
-            Some(TimerStartSource::ScheduledAutoStart)
+            timer_state.schedule_stop_state,
+            ScheduleStopState::NotControlledBySchedule
         );
-        assert_eq!(timer_state.scheduled_stop_state, ScheduledStopState::None);
     }
 
     fn base_persisted_state_json(
@@ -860,8 +830,7 @@ mod tests {
             "saved_at": saved_at_utc,
             "auto_run_feature_enabled": true,
             "weekly_auto_run_config": default_weekly_config_json(),
-            "timer_start_source": "manual_inside_window",
-            "scheduled_stop_state": "pending"
+            "schedule_stop_state": "stop_at_next_session_boundary"
         })
     }
 
@@ -870,8 +839,7 @@ mod tests {
             status: TimerStatus::Working,
             remaining_seconds,
             current_cycle,
-            timer_start_source: Some(TimerStartSource::ManualInsideWindow),
-            scheduled_stop_state: ScheduledStopState::Pending,
+            schedule_stop_state: ScheduleStopState::StopAtNextSessionBoundary,
             ..TimerState::default()
         }
     }
@@ -919,8 +887,8 @@ mod tests {
     }
 
     #[test]
-    fn test_save_state_sync_writes_v4_persisted_state_contract() {
-        let temp_dir = create_temp_dir("save-v4-contract");
+    fn test_save_state_sync_writes_persisted_state_contract() {
+        let temp_dir = create_temp_dir("save-contract");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
         let clock = fixed_clock(saved_at_utc);
         let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
@@ -942,8 +910,8 @@ mod tests {
     }
 
     #[test]
-    fn test_load_state_sync_restores_v4_persisted_state_contract() {
-        let temp_dir = create_temp_dir("load-v4-contract");
+    fn test_load_state_sync_restores_persisted_state_contract() {
+        let temp_dir = create_temp_dir("load-contract");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
         let clock = fixed_clock(saved_at_utc);
         let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
@@ -975,69 +943,6 @@ mod tests {
     }
 
     #[test]
-    fn test_load_state_sync_restores_v4_file_missing_backward_compatible_fields() {
-        let temp_dir = create_temp_dir("load-v4-missing-backward-compatible-fields");
-        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
-        let clock = fixed_clock(saved_at_utc);
-        let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
-        let mut persisted_json =
-            base_persisted_state_json(PERSISTED_STATE_SCHEMA_VERSION_V4, saved_at_utc);
-
-        let persisted_object = persisted_json
-            .as_object_mut()
-            .expect("base persisted state json should be an object");
-        persisted_object.remove("post_break_decision_pending");
-        persisted_object.remove("auto_run_feature_enabled");
-        persisted_object.remove("timer_start_source");
-        persisted_object.remove("scheduled_stop_state");
-
-        fs::write(
-            temp_dir.join("timer_state.json"),
-            serde_json::to_string_pretty(&persisted_json).expect("json should serialize"),
-        )
-        .expect("json should be writable");
-
-        match persistence.load_state_sync() {
-            PersistenceLoadOutcome::Restored {
-                timer_state,
-                saved_at_utc: restored_saved_at_utc,
-            } => {
-                assert_eq!(restored_saved_at_utc, saved_at_utc);
-                assert_eq!(timer_state.status, TimerStatus::Working);
-                assert_eq!(timer_state.remaining_seconds, 1200);
-                assert_eq!(timer_state.session_type, SessionType::Work);
-                assert_eq!(timer_state.current_cycle, 2);
-                assert_eq!(timer_state.completed_pomodoros, 1);
-                assert_eq!(timer_state.settings.work_duration_secs.get(), 1500);
-                assert_eq!(timer_state.settings.short_break_duration_secs.get(), 300);
-                assert_eq!(timer_state.settings.long_break_duration_secs.get(), 900);
-                assert_eq!(timer_state.settings.long_break_interval.get(), 4);
-                assert_eq!(
-                    timer_state.settings.post_break_transition_policy,
-                    PostBreakTransitionPolicy::RequireManualContinue
-                );
-                assert_eq!(
-                    timer_state.weekly_auto_run_config,
-                    WeeklyAutoRunConfig::default()
-                );
-                assert!(!timer_state.post_break_decision_pending);
-                assert!(!timer_state.auto_run_feature_enabled);
-                assert_eq!(
-                    timer_state.timer_start_source,
-                    Some(TimerStartSource::ManualOutsideWindow)
-                );
-                assert_eq!(timer_state.scheduled_stop_state, ScheduledStopState::None);
-            }
-            PersistenceLoadOutcome::NoState => panic!("expected restored state, got no state"),
-            PersistenceLoadOutcome::UnsupportedSchemaFallback => {
-                panic!("expected restored state, got unsupported schema fallback")
-            }
-        }
-
-        cleanup_temp_dir(&temp_dir);
-    }
-
-    #[test]
     fn test_load_state_sync_restores_pending_post_break_decision_as_idle_work_preview() {
         let temp_dir = create_temp_dir("load-pending-post-break-decision");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
@@ -1049,8 +954,7 @@ mod tests {
         persisted_json["remaining_seconds"] = json!(123);
         persisted_json["session_type"] = json!("short_break");
         persisted_json["post_break_decision_pending"] = json!(true);
-        persisted_json["timer_start_source"] = json!("manual_inside_window");
-        persisted_json["scheduled_stop_state"] = json!("pending");
+        persisted_json["schedule_stop_state"] = json!("stop_at_next_session_boundary");
 
         write_timer_state_json(&temp_dir, &persisted_json);
 
@@ -1102,8 +1006,10 @@ mod tests {
         );
         assert!(timer_state.auto_run_feature_enabled);
         assert!(!timer_state.post_break_decision_pending);
-        assert_eq!(timer_state.timer_start_source, None);
-        assert_eq!(timer_state.scheduled_stop_state, ScheduledStopState::None);
+        assert_eq!(
+            timer_state.schedule_stop_state,
+            ScheduleStopState::NotControlledBySchedule
+        );
 
         cleanup_temp_dir(&temp_dir);
     }
@@ -1115,7 +1021,7 @@ mod tests {
         let clock = fixed_clock(saved_at_utc);
         let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
         let mut persisted_json =
-            base_persisted_state_json(PERSISTED_STATE_SCHEMA_VERSION_V4, saved_at_utc);
+            base_persisted_state_json(PERSISTED_STATE_SCHEMA_VERSION, saved_at_utc);
         persisted_json["status"] = json!("on_break");
         persisted_json["remaining_seconds"] = json!(240);
         persisted_json["session_type"] = json!("long_break");
@@ -1133,15 +1039,17 @@ mod tests {
             timer_state.settings.work_duration_secs.get()
         );
         assert_eq!(timer_state.completed_pomodoros, 0);
-        assert_eq!(timer_state.timer_start_source, None);
-        assert_eq!(timer_state.scheduled_stop_state, ScheduledStopState::None);
+        assert_eq!(
+            timer_state.schedule_stop_state,
+            ScheduleStopState::NotControlledBySchedule
+        );
 
         cleanup_temp_dir(&temp_dir);
     }
 
     #[test]
     fn test_save_then_load_state_sync_round_trips_all_persisted_fields() {
-        let temp_dir = create_temp_dir("save-load-v4-contract");
+        let temp_dir = create_temp_dir("save-load-contract");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
         let clock = fixed_clock(saved_at_utc);
         let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
@@ -1293,8 +1201,8 @@ mod tests {
     }
 
     #[test]
-    fn test_load_v3_file_returns_unsupported_schema_fallback() {
-        let temp_dir = create_temp_dir("load-v3");
+    fn test_load_mismatched_schema_file_returns_unsupported_schema_fallback() {
+        let temp_dir = create_temp_dir("load-mismatched-schema");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
         let clock = fixed_clock(saved_at_utc);
         let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
@@ -1302,12 +1210,12 @@ mod tests {
         fs::write(
             temp_dir.join("timer_state.json"),
             serde_json::to_string_pretty(&base_persisted_state_json(
-                PERSISTED_STATE_SCHEMA_VERSION_V3,
+                PERSISTED_STATE_SCHEMA_VERSION + 1,
                 saved_at_utc,
             ))
-            .expect("legacy json should serialize"),
+            .expect("mismatched schema json should serialize"),
         )
-        .expect("legacy json should be writable");
+        .expect("mismatched schema json should be writable");
 
         assert!(matches!(
             persistence.load_state_sync(),
@@ -1375,7 +1283,7 @@ mod tests {
         let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
 
         let persisted_json =
-            base_persisted_state_json(PERSISTED_STATE_SCHEMA_VERSION_V4, saved_at_utc);
+            base_persisted_state_json(PERSISTED_STATE_SCHEMA_VERSION, saved_at_utc);
 
         write_timer_state_json(&temp_dir, &persisted_json);
 
@@ -1389,14 +1297,14 @@ mod tests {
     }
 
     #[test]
-    fn test_load_invalid_v4_schedule_data_returns_no_state() {
-        let temp_dir = create_temp_dir("invalid-v4-schedule");
+    fn test_load_invalid_schedule_data_returns_no_state() {
+        let temp_dir = create_temp_dir("invalid-schedule");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
         let clock = fixed_clock(saved_at_utc);
         let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
 
         let mut persisted_json =
-            base_persisted_state_json(PERSISTED_STATE_SCHEMA_VERSION_V4, saved_at_utc);
+            base_persisted_state_json(PERSISTED_STATE_SCHEMA_VERSION, saved_at_utc);
         persisted_json["weekly_auto_run_config"]["mon"]["start_time"] = json!("24:00");
 
         fs::write(
@@ -1414,14 +1322,14 @@ mod tests {
     }
 
     #[test]
-    fn test_load_invalid_v4_duration_data_returns_no_state() {
-        let temp_dir = create_temp_dir("invalid-v4-duration");
+    fn test_load_invalid_duration_data_returns_no_state() {
+        let temp_dir = create_temp_dir("invalid-duration");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
         let clock = fixed_clock(saved_at_utc);
         let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
 
         let mut persisted_json =
-            base_persisted_state_json(PERSISTED_STATE_SCHEMA_VERSION_V4, saved_at_utc);
+            base_persisted_state_json(PERSISTED_STATE_SCHEMA_VERSION, saved_at_utc);
         persisted_json["settings"]["work_duration_secs"] = json!(0);
 
         fs::write(

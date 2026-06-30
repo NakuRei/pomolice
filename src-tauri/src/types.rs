@@ -3,11 +3,8 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[cfg(test)]
-/// Legacy persisted state schema version retained for fallback tests.
-pub(crate) const PERSISTED_STATE_SCHEMA_VERSION_V3: u32 = 3;
 /// Persisted state schema version currently supported by this binary.
-pub(crate) const PERSISTED_STATE_SCHEMA_VERSION_V4: u32 = 4;
+pub(crate) const PERSISTED_STATE_SCHEMA_VERSION: u32 = 1;
 
 /// Timer status representing the current phase
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -640,23 +637,24 @@ fn week_minute_ranges_overlap(left: WeekMinuteRange, right: WeekMinuteRange) -> 
         && right.start_minute_of_week < left.end_minute_of_week
 }
 
-/// Source that started the current work timer.
+/// Origin of a work-session start request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum TimerStartSource {
+pub(crate) enum WorkStartOrigin {
     #[default]
-    ManualOutsideWindow,
-    ManualInsideWindow,
-    ScheduledAutoStart,
+    ManualOutsideScheduleWindow,
+    ManualInsideScheduleWindow,
+    ScheduleStartBoundary,
 }
 
-/// Current state for session-boundary scheduled stop execution.
+/// Current stop behavior for schedule-controlled sessions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum ScheduledStopState {
+pub(crate) enum ScheduleStopState {
     #[default]
-    None,
-    Pending,
+    NotControlledBySchedule,
+    WaitingForScheduleEnd,
+    StopAtNextSessionBoundary,
 }
 
 /// Policy for deciding what happens when a break session finishes.
@@ -874,8 +872,7 @@ pub(crate) struct TimerState {
     pub settings: TimerSettings,
     pub auto_run_feature_enabled: bool,
     pub weekly_auto_run_config: WeeklyAutoRunConfig,
-    pub timer_start_source: Option<TimerStartSource>,
-    pub scheduled_stop_state: ScheduledStopState,
+    pub schedule_stop_state: ScheduleStopState,
     pub post_break_decision_pending: bool,
     pub is_fullscreen_break: bool,
     pub last_transition: Option<std::time::Instant>,
@@ -895,8 +892,7 @@ impl Default for TimerState {
             settings,
             auto_run_feature_enabled: false,
             weekly_auto_run_config: WeeklyAutoRunConfig::default(),
-            timer_start_source: None,
-            scheduled_stop_state: ScheduledStopState::None,
+            schedule_stop_state: ScheduleStopState::NotControlledBySchedule,
             post_break_decision_pending: false,
             is_fullscreen_break: false,
             last_transition: None,
@@ -1145,8 +1141,10 @@ mod tests {
         assert_eq!(state.remaining_seconds, 25 * 60);
         assert!(!state.auto_run_feature_enabled);
         assert_eq!(state.weekly_auto_run_config, WeeklyAutoRunConfig::default());
-        assert!(state.timer_start_source.is_none());
-        assert_eq!(state.scheduled_stop_state, ScheduledStopState::None);
+        assert_eq!(
+            state.schedule_stop_state,
+            ScheduleStopState::NotControlledBySchedule
+        );
     }
 
     #[test]
@@ -1163,16 +1161,19 @@ mod tests {
     }
 
     #[test]
-    fn test_timer_start_source_default() {
+    fn test_work_start_origin_default() {
         assert_eq!(
-            TimerStartSource::default(),
-            TimerStartSource::ManualOutsideWindow
+            WorkStartOrigin::default(),
+            WorkStartOrigin::ManualOutsideScheduleWindow
         );
     }
 
     #[test]
-    fn test_scheduled_stop_state_default() {
-        assert_eq!(ScheduledStopState::default(), ScheduledStopState::None);
+    fn test_schedule_stop_state_default() {
+        assert_eq!(
+            ScheduleStopState::default(),
+            ScheduleStopState::NotControlledBySchedule
+        );
     }
 
     #[test]
@@ -1242,9 +1243,9 @@ mod tests {
         #[derive(Debug, Deserialize)]
         struct EnumDefaultsWrapper {
             #[serde(default)]
-            timer_start_source: TimerStartSource,
+            work_start_origin: WorkStartOrigin,
             #[serde(default)]
-            scheduled_stop_state: ScheduledStopState,
+            schedule_stop_state: ScheduleStopState,
             #[serde(default)]
             boot_prompt_runtime_state: BootPromptRuntimeState,
             #[serde(default)]
@@ -1255,10 +1256,13 @@ mod tests {
             serde_json::from_str("{}").expect("enum defaults wrapper should deserialize");
 
         assert_eq!(
-            wrapper.timer_start_source,
-            TimerStartSource::ManualOutsideWindow
+            wrapper.work_start_origin,
+            WorkStartOrigin::ManualOutsideScheduleWindow
         );
-        assert_eq!(wrapper.scheduled_stop_state, ScheduledStopState::None);
+        assert_eq!(
+            wrapper.schedule_stop_state,
+            ScheduleStopState::NotControlledBySchedule
+        );
         assert_eq!(
             wrapper.boot_prompt_runtime_state,
             BootPromptRuntimeState::NotApplicable

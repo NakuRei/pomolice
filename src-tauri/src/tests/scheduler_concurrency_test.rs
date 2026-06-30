@@ -14,13 +14,13 @@ mod scheduler_concurrency_tests {
     use crate::managers::timer::TimerStateManager;
     use crate::types::{
         PostBreakDecisionAction, PostBreakTransitionPolicy, SessionTransitionReason, SessionType,
-        TimerSettings, TimerStartSource, TimerStatus,
+        TimerSettings, TimerStatus, WorkStartOrigin,
     };
 
-    async fn race_two_start_sources(
-        first_source: TimerStartSource,
-        second_source: TimerStartSource,
-    ) -> (bool, bool, TimerStatus, Option<TimerStartSource>) {
+    async fn race_two_start_origins(
+        first_source: WorkStartOrigin,
+        second_source: WorkStartOrigin,
+    ) -> (bool, bool, TimerStatus) {
         let timer_manager = Arc::new(Mutex::new(TimerStateManager::new(None)));
         let start_barrier = Arc::new(Barrier::new(3));
         let settings = TimerSettings::default();
@@ -31,9 +31,7 @@ mod scheduler_concurrency_tests {
         let left_task = tokio::spawn(async move {
             left_barrier.wait().await;
             let mut timer = left_timer_manager.lock().await;
-            timer
-                .start_work_with_source(left_settings, first_source)
-                .is_ok()
+            timer.start_work(left_settings, first_source).is_ok()
         });
 
         let right_timer_manager = Arc::clone(&timer_manager);
@@ -42,9 +40,7 @@ mod scheduler_concurrency_tests {
         let right_task = tokio::spawn(async move {
             right_barrier.wait().await;
             let mut timer = right_timer_manager.lock().await;
-            timer
-                .start_work_with_source(right_settings, second_source)
-                .is_ok()
+            timer.start_work(right_settings, second_source).is_ok()
         });
 
         start_barrier.wait().await;
@@ -54,12 +50,7 @@ mod scheduler_concurrency_tests {
         let right_succeeded = right_result.expect("right start task should complete");
 
         let timer = timer_manager.lock().await;
-        (
-            left_succeeded,
-            right_succeeded,
-            timer.status(),
-            timer.get_state().timer_start_source,
-        )
+        (left_succeeded, right_succeeded, timer.status())
     }
 
     async fn prepare_break_session_with_auto_continue(
@@ -71,7 +62,7 @@ mod scheduler_concurrency_tests {
             ..TimerSettings::default()
         };
         timer
-            .start_work_with_source(settings, TimerStartSource::ManualInsideWindow)
+            .start_work(settings, WorkStartOrigin::ManualInsideScheduleWindow)
             .expect("initial work session should start");
         let _ = timer.transition_to_break();
     }
@@ -83,7 +74,7 @@ mod scheduler_concurrency_tests {
             ..TimerSettings::default()
         };
         timer
-            .start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+            .start_work(settings, WorkStartOrigin::ManualOutsideScheduleWindow)
             .expect("initial work session should start");
         let _ = timer.transition_to_break();
         let outcome = timer.complete_break_session_transition();
@@ -95,9 +86,9 @@ mod scheduler_concurrency_tests {
 
     #[tokio::test]
     async fn test_manual_start_and_scheduler_start_race_has_single_winner() {
-        let (left_succeeded, right_succeeded, status, start_source) = race_two_start_sources(
-            TimerStartSource::ManualOutsideWindow,
-            TimerStartSource::ScheduledAutoStart,
+        let (left_succeeded, right_succeeded, status) = race_two_start_origins(
+            WorkStartOrigin::ManualOutsideScheduleWindow,
+            WorkStartOrigin::ScheduleStartBoundary,
         )
         .await;
 
@@ -106,14 +97,13 @@ mod scheduler_concurrency_tests {
             "manual start and scheduler auto-start race must not produce two winners"
         );
         assert_eq!(status, TimerStatus::Working);
-        assert!(start_source.is_some());
     }
 
     #[tokio::test]
     async fn test_boot_prompt_start_and_scheduler_start_race_has_single_winner() {
-        let (left_succeeded, right_succeeded, status, start_source) = race_two_start_sources(
-            TimerStartSource::ManualInsideWindow,
-            TimerStartSource::ScheduledAutoStart,
+        let (left_succeeded, right_succeeded, status) = race_two_start_origins(
+            WorkStartOrigin::ManualInsideScheduleWindow,
+            WorkStartOrigin::ScheduleStartBoundary,
         )
         .await;
 
@@ -122,7 +112,6 @@ mod scheduler_concurrency_tests {
             "boot-prompt start and scheduler start race must not produce double start"
         );
         assert_eq!(status, TimerStatus::Working);
-        assert!(start_source.is_some());
     }
 
     #[tokio::test]
@@ -131,9 +120,9 @@ mod scheduler_concurrency_tests {
         {
             let mut timer = timer_manager.lock().await;
             let _ = timer
-                .start_work_with_source(
+                .start_work(
                     TimerSettings::default(),
-                    TimerStartSource::ManualInsideWindow,
+                    WorkStartOrigin::ManualInsideScheduleWindow,
                 )
                 .expect("initial work session should start");
             let _ = timer.sync_automation_policies(
@@ -152,7 +141,7 @@ mod scheduler_concurrency_tests {
             for _ in 0..100 {
                 {
                     let mut timer = pending_timer_manager.lock().await;
-                    let _ = timer.mark_scheduled_stop_pending_if_session_is_eligible();
+                    let _ = timer.apply_schedule_end_boundary_to_current_session();
                 }
                 tokio::task::yield_now().await;
             }
@@ -165,10 +154,7 @@ mod scheduler_concurrency_tests {
             for _ in 0..100 {
                 {
                     let mut timer = completion_timer_manager.lock().await;
-                    if timer.status() == TimerStatus::Working
-                        && timer.get_state().scheduled_stop_state
-                            == crate::types::ScheduledStopState::Pending
-                    {
+                    if timer.status() == TimerStatus::Working {
                         let _ = timer.complete_work_session_transition();
                     }
                 }
@@ -208,9 +194,9 @@ mod scheduler_concurrency_tests {
             scheduler_start_barrier.wait().await;
             let mut timer = scheduler_start_timer_manager.lock().await;
             timer
-                .start_work_with_source(
+                .start_work(
                     TimerSettings::default(),
-                    TimerStartSource::ScheduledAutoStart,
+                    WorkStartOrigin::ScheduleStartBoundary,
                 )
                 .is_ok()
         });
@@ -238,10 +224,6 @@ mod scheduler_concurrency_tests {
         assert_eq!(state.session_type, SessionType::Work);
         assert_eq!(state.current_cycle, 2);
         assert!(!state.post_break_decision_pending);
-        assert_eq!(
-            state.timer_start_source,
-            Some(TimerStartSource::ManualInsideWindow)
-        );
     }
 
     #[tokio::test]
@@ -266,9 +248,9 @@ mod scheduler_concurrency_tests {
             scheduler_start_barrier.wait().await;
             let mut timer = scheduler_start_timer_manager.lock().await;
             timer
-                .start_work_with_source(
+                .start_work(
                     TimerSettings::default(),
-                    TimerStartSource::ScheduledAutoStart,
+                    WorkStartOrigin::ScheduleStartBoundary,
                 )
                 .is_ok()
         });
@@ -294,13 +276,8 @@ mod scheduler_concurrency_tests {
 
         if manual_decision_succeeded {
             assert_eq!(state.current_cycle, 2);
-            assert_eq!(state.timer_start_source, None);
         } else {
             assert_eq!(state.current_cycle, 1);
-            assert_eq!(
-                state.timer_start_source,
-                Some(TimerStartSource::ScheduledAutoStart)
-            );
         }
     }
 }

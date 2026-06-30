@@ -175,7 +175,7 @@ macro_rules! backend_log_event_spec_match {
                 "Work session started",
                 [
                     "duration_secs" => Public,
-                    "timer_start_source" => Public,
+                    "work_start_origin" => Public,
                 ]
             ),
             BackendLogEvent::TimerTransitionCompleted => spec!(
@@ -187,8 +187,7 @@ macro_rules! backend_log_event_spec_match {
                     "transition_reason" => Public,
                     "policy" => Public,
                     "post_break_decision_pending" => Public,
-                    "scheduled_stop_state" => Public,
-                    "timer_start_source" => Public,
+                    "schedule_stop_state" => Public,
                     "action" => Public,
                     "remaining_seconds" => Public,
                     "completed_session_type" => Public,

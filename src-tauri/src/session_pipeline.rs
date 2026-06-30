@@ -20,8 +20,6 @@ struct FinalizedSessionCompletionState {
     tick_payload: types::TimerTickPayload,
     post_break_transition_policy: types::PostBreakTransitionPolicy,
     post_break_decision_pending: bool,
-    scheduled_stop_state: types::ScheduledStopState,
-    timer_start_source: Option<types::TimerStartSource>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -314,8 +312,6 @@ async fn finalized_session_completion_state(
         tick_payload: state.to_tick_payload(),
         post_break_transition_policy: state.settings.post_break_transition_policy,
         post_break_decision_pending: state.post_break_decision_pending,
-        scheduled_stop_state: state.scheduled_stop_state,
-        timer_start_source: state.timer_start_source,
     }
 }
 
@@ -326,8 +322,6 @@ fn log_session_completion_finalized(
     let transition_reason = transition_outcome.transition_reason;
     let post_break_transition_policy = finalized_state.post_break_transition_policy;
     let post_break_decision_pending = finalized_state.post_break_decision_pending;
-    let scheduled_stop_state = finalized_state.scheduled_stop_state;
-    let timer_start_source = finalized_state.timer_start_source;
 
     log_info_event(
         BackendLogEvent::TimerTransitionCompleted,
@@ -342,8 +336,6 @@ fn log_session_completion_finalized(
                 "post_break_decision_pending",
                 post_break_decision_pending.to_string(),
             ),
-            ("scheduled_stop_state", format!("{scheduled_stop_state:?}")),
-            ("timer_start_source", format!("{timer_start_source:?}")),
         ],
     );
 }

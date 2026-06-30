@@ -13,14 +13,15 @@ use crate::logging_event::{
     PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START,
     PERSISTENCE_WRITE_TRIGGER_SCHEDULER_STOP_PENDING,
 };
+use crate::managers::timer::ScheduleEndBoundaryResult;
 use crate::managers::weekly_schedule::{
     collect_crossed_end_boundaries, collect_crossed_start_boundaries,
 };
 use crate::state;
 use crate::tray;
 use crate::types::{
-    BootPromptRuntimeState, BoundaryOccurrenceId, TimerSettings, TimerStartSource, TimerStatus,
-    WeeklyAutoRunConfig,
+    BootPromptRuntimeState, BoundaryOccurrenceId, TimerSettings, TimerStatus, WeeklyAutoRunConfig,
+    WorkStartOrigin,
 };
 
 const SCHEDULER_INTERVAL_SECONDS: u64 = 1;
@@ -553,7 +554,8 @@ async fn mark_scheduled_stop_pending_with_effects(
 ) -> bool {
     let should_persist = {
         let mut timer_manager = state_handle.timer_manager.lock().await;
-        timer_manager.mark_scheduled_stop_pending_if_session_is_eligible()
+        timer_manager.apply_schedule_end_boundary_to_current_session()
+            == ScheduleEndBoundaryResult::StopScheduledAtSessionBoundary
     };
 
     if should_persist {
@@ -584,8 +586,8 @@ async fn start_work_from_scheduler_when_idle_with_effects(
         }
 
         let old_task = timer_manager.cancel_and_take_task();
-        let Ok((payload, duration_secs)) = timer_manager
-            .start_work_with_source(timer_settings, TimerStartSource::ScheduledAutoStart)
+        let Ok((payload, duration_secs)) =
+            timer_manager.start_work(timer_settings, WorkStartOrigin::ScheduleStartBoundary)
         else {
             log_warn_event(
                 BackendLogEvent::SchedulerSkippedAutoStartDueToRejection,
@@ -624,9 +626,8 @@ mod tests {
     use crate::managers::clock::Clock;
     use crate::managers::persistence::PersistenceManager;
     use crate::types::{
-        DayAutoRunSlot, HhMm, PostBreakTransitionPolicy, ScheduledStopState,
-        SessionTransitionReason, SessionType, TimerStartSource, TimerTickPayload,
-        WeeklyAutoRunConfig,
+        DayAutoRunSlot, HhMm, PostBreakTransitionPolicy, SessionTransitionReason, SessionType,
+        TimerTickPayload, WeeklyAutoRunConfig, WorkStartOrigin,
     };
     use chrono::{LocalResult, TimeZone, Utc};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -805,12 +806,7 @@ mod tests {
         );
 
         let timer = state.timer_manager.lock().await;
-        let timer_state = timer.get_state();
         assert_eq!(timer.status(), TimerStatus::Working);
-        assert_eq!(
-            timer_state.timer_start_source,
-            Some(TimerStartSource::ScheduledAutoStart)
-        );
     }
 
     #[tokio::test]
@@ -824,9 +820,9 @@ mod tests {
                 PostBreakTransitionPolicy::RequireManualContinue,
             );
             timer
-                .start_work_with_source(
+                .start_work(
                     TimerSettings::default(),
-                    TimerStartSource::ManualInsideWindow,
+                    WorkStartOrigin::ManualInsideScheduleWindow,
                 )
                 .expect("initial work session should start");
         }
@@ -845,10 +841,11 @@ mod tests {
             [PERSISTENCE_WRITE_TRIGGER_SCHEDULER_STOP_PENDING]
         );
 
-        let timer = state.timer_manager.lock().await;
+        let mut timer = state.timer_manager.lock().await;
+        let payload = timer.complete_work_session_transition();
         assert_eq!(
-            timer.get_state().scheduled_stop_state,
-            ScheduledStopState::Pending
+            payload.transition_reason,
+            SessionTransitionReason::ScheduledStopExecuted
         );
     }
 
@@ -990,10 +987,10 @@ mod tests {
         }
     }
 
-    async fn start_work_with_schedule_source(
+    async fn start_work_with_schedule_origin(
         state: &state::AppState,
         auto_run_feature_enabled: bool,
-        timer_start_source: TimerStartSource,
+        work_start_origin: WorkStartOrigin,
     ) {
         apply_schedule_with_feature_enabled(
             state,
@@ -1005,17 +1002,17 @@ mod tests {
 
         let mut timer = state.timer_manager.lock().await;
         timer
-            .start_work_with_source(TimerSettings::default(), timer_start_source)
+            .start_work(TimerSettings::default(), work_start_origin)
             .expect("work session should start");
     }
 
-    async fn start_work_with_existing_schedule_source(
+    async fn start_work_with_existing_schedule_origin(
         state: &state::AppState,
-        timer_start_source: TimerStartSource,
+        work_start_origin: WorkStartOrigin,
     ) {
         let mut timer = state.timer_manager.lock().await;
         timer
-            .start_work_with_source(TimerSettings::default(), timer_start_source)
+            .start_work(TimerSettings::default(), work_start_origin)
             .expect("work session should start");
     }
 
@@ -1083,7 +1080,8 @@ mod tests {
     async fn end_boundary_emits_stop_pending_for_auto_run_session() {
         let state = build_test_state_without_persistence_path().await;
         close_start_boundary_gate(&state);
-        start_work_with_schedule_source(&state, true, TimerStartSource::ManualInsideWindow).await;
+        start_work_with_schedule_origin(&state, true, WorkStartOrigin::ManualInsideScheduleWindow)
+            .await;
 
         let mut runtime_state = runtime_state_at(
             local_datetime(2025, 1, 6, 17, 59, 50),
@@ -1110,7 +1108,8 @@ mod tests {
     #[tokio::test]
     async fn end_boundary_does_not_emit_stop_pending_after_boundary_window_has_passed() {
         let state = build_test_state_without_persistence_path().await;
-        start_work_with_schedule_source(&state, true, TimerStartSource::ManualInsideWindow).await;
+        start_work_with_schedule_origin(&state, true, WorkStartOrigin::ManualInsideScheduleWindow)
+            .await;
 
         let mut runtime_state = runtime_state_at(
             local_datetime(2025, 1, 6, 17, 59, 50),
@@ -1141,7 +1140,8 @@ mod tests {
     async fn replayed_end_boundary_does_not_mark_new_work_session_pending() {
         let state = build_test_state_without_persistence_path().await;
         close_start_boundary_gate(&state);
-        start_work_with_schedule_source(&state, true, TimerStartSource::ManualInsideWindow).await;
+        start_work_with_schedule_origin(&state, true, WorkStartOrigin::ManualInsideScheduleWindow)
+            .await;
 
         let mut runtime_state = runtime_state_at(
             local_datetime(2025, 1, 6, 17, 59, 50),
@@ -1168,7 +1168,7 @@ mod tests {
             SessionTransitionReason::ScheduledStopExecuted
         );
 
-        start_work_with_existing_schedule_source(&state, TimerStartSource::ScheduledAutoStart)
+        start_work_with_existing_schedule_origin(&state, WorkStartOrigin::ScheduleStartBoundary)
             .await;
         run_scheduler_tick_with_effects(
             &state,
@@ -1200,7 +1200,8 @@ mod tests {
     #[tokio::test]
     async fn end_boundary_does_not_emit_stop_pending_when_tick_time_does_not_advance() {
         let state = build_test_state_without_persistence_path().await;
-        start_work_with_schedule_source(&state, true, TimerStartSource::ManualInsideWindow).await;
+        start_work_with_schedule_origin(&state, true, WorkStartOrigin::ManualInsideScheduleWindow)
+            .await;
 
         let mut runtime_state = runtime_state_at(
             local_datetime(2025, 1, 6, 18, 0, 0),
@@ -1227,7 +1228,8 @@ mod tests {
     #[tokio::test]
     async fn end_boundary_emits_stop_pending_after_large_time_jump_past_scheduled_end() {
         let state = build_test_state_without_persistence_path().await;
-        start_work_with_schedule_source(&state, true, TimerStartSource::ManualInsideWindow).await;
+        start_work_with_schedule_origin(&state, true, WorkStartOrigin::ManualInsideScheduleWindow)
+            .await;
 
         let mut runtime_state = runtime_state_at(
             local_datetime(2025, 1, 6, 17, 59, 50),
@@ -1254,7 +1256,8 @@ mod tests {
     #[tokio::test]
     async fn end_boundary_does_not_emit_stop_pending_when_auto_run_is_disabled() {
         let state = build_test_state_without_persistence_path().await;
-        start_work_with_schedule_source(&state, false, TimerStartSource::ManualInsideWindow).await;
+        start_work_with_schedule_origin(&state, false, WorkStartOrigin::ManualInsideScheduleWindow)
+            .await;
 
         let mut runtime_state = runtime_state_at(
             local_datetime(2025, 1, 6, 17, 59, 50),
@@ -1281,7 +1284,8 @@ mod tests {
     #[tokio::test]
     async fn end_boundary_does_not_emit_stop_pending_for_outside_window_session() {
         let state = build_test_state_without_persistence_path().await;
-        start_work_with_schedule_source(&state, true, TimerStartSource::ManualOutsideWindow).await;
+        start_work_with_schedule_origin(&state, true, WorkStartOrigin::ManualOutsideScheduleWindow)
+            .await;
 
         let mut runtime_state = runtime_state_at(
             local_datetime(2025, 1, 6, 17, 59, 50),
@@ -1434,10 +1438,6 @@ mod tests {
         {
             let timer = state.timer_manager.lock().await;
             assert_eq!(timer.status(), TimerStatus::Idle);
-            assert_ne!(
-                timer.get_state().timer_start_source,
-                Some(TimerStartSource::ScheduledAutoStart)
-            );
         }
 
         run_scheduler_tick_with_effects(
@@ -1451,9 +1451,5 @@ mod tests {
         assert_eq!(effects.work_started_durations, [1500]);
         let timer = state.timer_manager.lock().await;
         assert_eq!(timer.status(), TimerStatus::Working);
-        assert_eq!(
-            timer.get_state().timer_start_source,
-            Some(TimerStartSource::ScheduledAutoStart)
-        );
     }
 }

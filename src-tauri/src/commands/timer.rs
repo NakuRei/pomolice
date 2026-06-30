@@ -15,8 +15,8 @@ use crate::state::AppState;
 use crate::types::{
     ActiveWindowSummaryPayload, BootPromptRuntimeState, FullStatePayload, LongBreakDurationSecs,
     LongBreakIntervalCount, PostBreakDecisionAction, PostBreakTransitionPolicy,
-    ShortBreakDurationSecs, TimerSettings, TimerStartSource, TimerStatus, TimerTickPayload,
-    WeeklyAutoRunConfig, WorkDurationSecs,
+    ShortBreakDurationSecs, TimerSettings, TimerStatus, TimerTickPayload, WeeklyAutoRunConfig,
+    WorkDurationSecs, WorkStartOrigin,
 };
 
 struct StartRuntimeSequence {
@@ -151,11 +151,11 @@ pub(crate) async fn start_work(
             timer_state.weekly_auto_run_config.clone(),
         )
     };
-    let manual_start_source =
-        determine_manual_start_source(now_local, auto_run_feature_enabled, &weekly_auto_run_config);
+    let manual_start_origin =
+        determine_manual_start_origin(now_local, auto_run_feature_enabled, &weekly_auto_run_config);
 
     let app = window.app_handle();
-    start_work_with_runtime_effects(&state, app, settings, manual_start_source).await
+    start_work_with_runtime_effects(&state, app, settings, manual_start_origin).await
 }
 
 /// Resolve manual post-break decision from continue dialog.
@@ -434,17 +434,17 @@ fn to_active_window_summary_payload(active_window: &ActiveWindow) -> ActiveWindo
     }
 }
 
-fn determine_manual_start_source(
+fn determine_manual_start_origin(
     now_local: DateTime<Local>,
     auto_run_feature_enabled: bool,
     weekly_auto_run_config: &WeeklyAutoRunConfig,
-) -> TimerStartSource {
+) -> WorkStartOrigin {
     if auto_run_feature_enabled
         && is_now_inside_schedule_window(now_local, weekly_auto_run_config).is_some()
     {
-        TimerStartSource::ManualInsideWindow
+        WorkStartOrigin::ManualInsideScheduleWindow
     } else {
-        TimerStartSource::ManualOutsideWindow
+        WorkStartOrigin::ManualOutsideScheduleWindow
     }
 }
 
@@ -466,10 +466,10 @@ async fn start_work_with_runtime_effects(
     state: &AppState,
     app: &tauri::AppHandle,
     settings: TimerSettings,
-    manual_start_source: TimerStartSource,
+    manual_start_origin: WorkStartOrigin,
 ) -> Result<()> {
     let start_sequence =
-        prepare_manual_start_sequence(state, settings, manual_start_source).await?;
+        prepare_manual_start_sequence(state, settings, manual_start_origin).await?;
 
     let mut runtime_effect_shell = AppHandleRuntimeEffectShell { app };
     apply_start_runtime_effects(state, &mut runtime_effect_shell, start_sequence, |_| {}).await
@@ -506,8 +506,7 @@ async fn prepare_boot_prompt_start(
         // Boot-prompt resolution must attempt the state transition before cancelling any task.
         // If another path already started a replacement session, InvalidStateTransition degrades
         // to NotApplicable instead of tearing down that already-running task.
-        match timer_manager
-            .start_work_with_source(timer_settings, TimerStartSource::ManualInsideWindow)
+        match timer_manager.start_work(timer_settings, WorkStartOrigin::ManualInsideScheduleWindow)
         {
             Ok((payload, duration)) => Ok(Some(StartRuntimeSequence {
                 old_task: timer_manager.cancel_and_take_task(),
@@ -525,12 +524,11 @@ async fn prepare_boot_prompt_start(
 async fn prepare_manual_start_sequence(
     state: &AppState,
     settings: TimerSettings,
-    manual_start_source: TimerStartSource,
+    manual_start_origin: WorkStartOrigin,
 ) -> Result<StartRuntimeSequence> {
     let start_sequence = {
         let mut timer = state.timer_manager.lock().await;
-        let (tick_payload, work_duration) =
-            timer.start_work_with_source(settings, manual_start_source)?;
+        let (tick_payload, work_duration) = timer.start_work(settings, manual_start_origin)?;
         let old_task = timer.cancel_and_take_task();
         StartRuntimeSequence {
             old_task,
@@ -602,11 +600,11 @@ fn mark_boot_prompt_resolved_later(state: &AppState) {
 async fn start_work_for_tests(
     state: &AppState,
     settings: TimerSettings,
-    manual_start_source: TimerStartSource,
+    manual_start_origin: WorkStartOrigin,
     runtime_effect_shell: &mut impl StartRuntimeEffectShell,
 ) -> Result<()> {
     let start_sequence =
-        prepare_manual_start_sequence(state, settings, manual_start_source).await?;
+        prepare_manual_start_sequence(state, settings, manual_start_origin).await?;
 
     apply_start_runtime_effects(state, runtime_effect_shell, start_sequence, |_| {}).await
 }
@@ -1010,7 +1008,7 @@ mod tests {
             PostBreakTransitionPolicy::RequireManualContinue,
         );
         timer
-            .start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+            .start_work(settings, WorkStartOrigin::ManualOutsideScheduleWindow)
             .expect("work session should start");
         timer.transition_to_break();
         timer.complete_break_session_transition();
@@ -1051,7 +1049,7 @@ mod tests {
             PostBreakTransitionPolicy::RequireManualContinue,
         );
         timer
-            .start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+            .start_work(settings, WorkStartOrigin::ManualOutsideScheduleWindow)
             .expect("work session should start");
         timer.transition_to_break();
         timer.set_fullscreen_break(true);
@@ -1318,9 +1316,9 @@ mod tests {
     async fn start_auto_run_eligible_work_session(state: &AppState) {
         let mut timer = state.timer_manager.lock().await;
         timer
-            .start_work_with_source(
+            .start_work(
                 TimerSettings::default(),
-                TimerStartSource::ManualInsideWindow,
+                WorkStartOrigin::ManualInsideScheduleWindow,
             )
             .expect("eligible work session should start");
     }
@@ -1426,42 +1424,42 @@ mod tests {
     }
 
     #[test]
-    fn test_determine_manual_start_source_returns_inside_when_enabled_and_in_window() {
+    fn test_determine_manual_start_origin_returns_inside_when_enabled_and_in_window() {
         let now_local = Local
             .with_ymd_and_hms(2025, 1, 6, 10, 0, 0)
             .single()
             .expect("local datetime should be valid");
         let weekly_auto_run_config = make_enabled_daytime_monday_config();
 
-        let source = determine_manual_start_source(now_local, true, &weekly_auto_run_config);
+        let origin = determine_manual_start_origin(now_local, true, &weekly_auto_run_config);
 
-        assert_eq!(source, TimerStartSource::ManualInsideWindow);
+        assert_eq!(origin, WorkStartOrigin::ManualInsideScheduleWindow);
     }
 
     #[test]
-    fn test_determine_manual_start_source_returns_outside_when_enabled_and_out_of_window() {
+    fn test_determine_manual_start_origin_returns_outside_when_enabled_and_out_of_window() {
         let now_local = Local
             .with_ymd_and_hms(2025, 1, 6, 8, 0, 0)
             .single()
             .expect("local datetime should be valid");
         let weekly_auto_run_config = make_enabled_daytime_monday_config();
 
-        let source = determine_manual_start_source(now_local, true, &weekly_auto_run_config);
+        let origin = determine_manual_start_origin(now_local, true, &weekly_auto_run_config);
 
-        assert_eq!(source, TimerStartSource::ManualOutsideWindow);
+        assert_eq!(origin, WorkStartOrigin::ManualOutsideScheduleWindow);
     }
 
     #[test]
-    fn test_determine_manual_start_source_returns_outside_when_feature_disabled() {
+    fn test_determine_manual_start_origin_returns_outside_when_feature_disabled() {
         let now_local = Local
             .with_ymd_and_hms(2025, 1, 6, 10, 0, 0)
             .single()
             .expect("local datetime should be valid");
         let weekly_auto_run_config = make_enabled_daytime_monday_config();
 
-        let source = determine_manual_start_source(now_local, false, &weekly_auto_run_config);
+        let origin = determine_manual_start_origin(now_local, false, &weekly_auto_run_config);
 
-        assert_eq!(source, TimerStartSource::ManualOutsideWindow);
+        assert_eq!(origin, WorkStartOrigin::ManualOutsideScheduleWindow);
     }
 
     #[tokio::test]
@@ -1538,9 +1536,9 @@ mod tests {
         {
             let mut timer = state.timer_manager.lock().await;
             timer
-                .start_work_with_source(
+                .start_work(
                     TimerSettings::default(),
-                    TimerStartSource::ManualInsideWindow,
+                    WorkStartOrigin::ManualInsideScheduleWindow,
                 )
                 .expect("work session should start");
         }
@@ -1788,9 +1786,9 @@ mod tests {
             {
                 let mut timer = state.timer_manager.lock().await;
                 timer
-                    .start_work_with_source(
+                    .start_work(
                         TimerSettings::default(),
-                        TimerStartSource::ManualOutsideWindow,
+                        WorkStartOrigin::ManualOutsideScheduleWindow,
                     )
                     .expect("work session should start through another path");
             }
@@ -1944,7 +1942,7 @@ mod tests {
                 4,
                 PostBreakTransitionPolicy::RequireManualContinue,
             ),
-            TimerStartSource::ManualOutsideWindow,
+            WorkStartOrigin::ManualOutsideScheduleWindow,
             &mut first_runtime_effect_shell,
         )
         .await
@@ -1965,7 +1963,7 @@ mod tests {
                 4,
                 PostBreakTransitionPolicy::RequireManualContinue,
             ),
-            TimerStartSource::ManualOutsideWindow,
+            WorkStartOrigin::ManualOutsideScheduleWindow,
             &mut second_runtime_effect_shell,
         )
         .await;
@@ -2002,7 +2000,7 @@ mod tests {
                 4,
                 PostBreakTransitionPolicy::RequireManualContinue,
             ),
-            TimerStartSource::ManualOutsideWindow,
+            WorkStartOrigin::ManualOutsideScheduleWindow,
             &mut runtime_effect_shell,
         )
         .await;
@@ -2423,7 +2421,7 @@ mod tests {
         {
             let mut timer = non_fullscreen_state.timer_manager.lock().await;
             timer
-                .start_work_with_source(
+                .start_work(
                     timer_settings(
                         1500,
                         300,
@@ -2431,7 +2429,7 @@ mod tests {
                         4,
                         PostBreakTransitionPolicy::RequireManualContinue,
                     ),
-                    TimerStartSource::ManualOutsideWindow,
+                    WorkStartOrigin::ManualOutsideScheduleWindow,
                 )
                 .expect("work session should start");
         }
@@ -2496,7 +2494,7 @@ mod tests {
                 4,
                 PostBreakTransitionPolicy::RequireManualContinue,
             ),
-            TimerStartSource::ScheduledAutoStart,
+            WorkStartOrigin::ScheduleStartBoundary,
             &mut start_runtime_effect_shell,
         )
         .await
@@ -2602,7 +2600,7 @@ mod tests {
         start_work_for_tests(
             &state,
             settings,
-            TimerStartSource::ManualOutsideWindow,
+            WorkStartOrigin::ManualOutsideScheduleWindow,
             &mut runtime_effect_shell,
         )
         .await
@@ -3008,7 +3006,7 @@ mod tests {
         let result = start_work_for_tests(
             &state,
             settings,
-            TimerStartSource::ManualOutsideWindow,
+            WorkStartOrigin::ManualOutsideScheduleWindow,
             &mut runtime_effect_shell,
         )
         .await;
@@ -3084,7 +3082,7 @@ mod tests {
         let result = start_work_for_tests(
             &state,
             settings,
-            TimerStartSource::ManualOutsideWindow,
+            WorkStartOrigin::ManualOutsideScheduleWindow,
             &mut runtime_effect_shell,
         )
         .await;

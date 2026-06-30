@@ -16,8 +16,8 @@ mod startup_restore_tests {
     };
     use crate::state::AppState;
     use crate::types::{
-        PostBreakTransitionPolicy, ScheduledStopState, SessionType, TimerSettings,
-        TimerStartSource, TimerState, TimerStatus, TimerTickPayload,
+        PostBreakTransitionPolicy, ScheduleStopState, SessionType, TimerSettings, TimerState,
+        TimerStatus, TimerTickPayload,
     };
 
     #[derive(Default)]
@@ -257,7 +257,6 @@ mod startup_restore_tests {
             TimerState {
                 status: TimerStatus::Working,
                 remaining_seconds: saved_remaining_seconds,
-                timer_start_source: Some(TimerStartSource::ManualInsideWindow),
                 ..TimerState::default()
             },
         );
@@ -301,7 +300,6 @@ mod startup_restore_tests {
                 status: TimerStatus::Working,
                 remaining_seconds: 60,
                 current_cycle: 1,
-                timer_start_source: Some(TimerStartSource::ManualInsideWindow),
                 ..TimerState::default()
             },
         );
@@ -344,9 +342,8 @@ mod startup_restore_tests {
             TimerState {
                 status: TimerStatus::Working,
                 remaining_seconds: 60,
-                scheduled_stop_state: ScheduledStopState::Pending,
+                schedule_stop_state: ScheduleStopState::StopAtNextSessionBoundary,
                 auto_run_feature_enabled: true,
-                timer_start_source: Some(TimerStartSource::ManualInsideWindow),
                 ..TimerState::default()
             },
         );

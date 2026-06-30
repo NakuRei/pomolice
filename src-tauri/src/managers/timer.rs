@@ -8,13 +8,28 @@ use crate::error::{PomoliceError, Result};
 use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
 use crate::types::{
     FullStatePayload, LongBreakDurationSecs, LongBreakIntervalCount, PostBreakDecisionAction,
-    PostBreakTransitionPolicy, ScheduledStopState, SessionCompletedPayload,
+    PostBreakTransitionPolicy, ScheduleStopState, SessionCompletedPayload,
     SessionTransitionOutcome, SessionTransitionReason, SessionType, ShortBreakDurationSecs,
-    TimerSettings, TimerStartSource, TimerState, TimerStatus, TimerTickPayload,
-    WeeklyAutoRunConfig, WorkDurationSecs,
+    TimerSettings, TimerState, TimerStatus, TimerTickPayload, WeeklyAutoRunConfig,
+    WorkDurationSecs, WorkStartOrigin,
 };
 
 const INPUT_PENALTY_DEBOUNCE_DURATION: Duration = Duration::from_millis(100);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ScheduleEndBoundaryResult {
+    StopScheduledAtSessionBoundary,
+    Ignored,
+}
+
+fn schedule_stop_state_for_work_start_origin(origin: WorkStartOrigin) -> ScheduleStopState {
+    match origin {
+        WorkStartOrigin::ManualOutsideScheduleWindow => ScheduleStopState::NotControlledBySchedule,
+        WorkStartOrigin::ManualInsideScheduleWindow | WorkStartOrigin::ScheduleStartBoundary => {
+            ScheduleStopState::WaitingForScheduleEnd
+        }
+    }
+}
 
 /// Manager for timer state and lifecycle
 ///
@@ -71,11 +86,11 @@ impl TimerStateManager {
         &self.state
     }
 
-    /// Start a work session with an explicit session start source.
-    pub(crate) fn start_work_with_source(
+    /// Start a work session with an explicit start request origin.
+    pub(crate) fn start_work(
         &mut self,
         settings: TimerSettings,
-        timer_start_source: TimerStartSource,
+        work_start_origin: WorkStartOrigin,
     ) -> Result<(TimerTickPayload, u64)> {
         if self.state.status != TimerStatus::Idle {
             log_warn_event(
@@ -91,7 +106,7 @@ impl TimerStateManager {
             });
         }
 
-        if timer_start_source != TimerStartSource::ScheduledAutoStart {
+        if work_start_origin != WorkStartOrigin::ScheduleStartBoundary {
             if let Some(remaining_ms) = self.rate_limit_remaining_ms() {
                 log_warn_event(
                     BackendLogEvent::TimerStartRejected,
@@ -114,8 +129,8 @@ impl TimerStateManager {
         self.state.session_type = SessionType::Work;
         self.state.remaining_seconds = work_duration_secs;
         self.state.post_break_decision_pending = false;
-        self.state.timer_start_source = Some(timer_start_source);
-        self.state.scheduled_stop_state = ScheduledStopState::None;
+        self.state.schedule_stop_state =
+            schedule_stop_state_for_work_start_origin(work_start_origin);
 
         // Initialize cycle on first start
         if self.state.current_cycle == 0 {
@@ -131,7 +146,7 @@ impl TimerStateManager {
                     "duration_secs",
                     self.state.settings.work_duration_secs.to_string(),
                 ),
-                ("timer_start_source", format!("{timer_start_source:?}")),
+                ("work_start_origin", format!("{work_start_origin:?}")),
             ],
         );
 
@@ -179,7 +194,7 @@ impl TimerStateManager {
         self.state.remaining_seconds = self.state.settings.work_duration_secs.get();
         self.state.post_break_decision_pending = false;
         self.state.is_fullscreen_break = false;
-        self.state.scheduled_stop_state = ScheduledStopState::None;
+        self.state.schedule_stop_state = ScheduleStopState::NotControlledBySchedule;
         self.state.last_transition = Some(Instant::now());
 
         self.log_manual_decision_snapshot(action);
@@ -202,8 +217,7 @@ impl TimerStateManager {
         self.state.is_fullscreen_break = false;
         self.state.break_interaction_count = 0;
         self.state.last_penalty_time = None;
-        self.state.timer_start_source = None;
-        self.state.scheduled_stop_state = ScheduledStopState::None;
+        self.state.schedule_stop_state = ScheduleStopState::NotControlledBySchedule;
         self.state.last_transition = Some(Instant::now());
 
         // Note: caller must call cancel_and_take_task() inside the lock,
@@ -244,9 +258,8 @@ impl TimerStateManager {
 
     /// Sync automation policies from frontend.
     ///
-    /// This method is allowed in every timer state. It intentionally does not
-    /// recalculate `timer_start_source` and only clears pending scheduled stop
-    /// when the feature is disabled.
+    /// This method is allowed in every timer state. It only clears
+    /// schedule-stop behavior when the feature is disabled.
     pub(crate) fn sync_automation_policies(
         &mut self,
         auto_run_feature_enabled: bool,
@@ -353,7 +366,7 @@ impl TimerStateManager {
     ///
     /// Scheduled stop has higher priority than normal work->break transition.
     pub(crate) fn complete_work_session_transition(&mut self) -> SessionCompletedPayload {
-        if self.state.scheduled_stop_state == ScheduledStopState::Pending {
+        if self.state.schedule_stop_state == ScheduleStopState::StopAtNextSessionBoundary {
             return self.execute_scheduled_stop_transition(SessionType::Work);
         }
 
@@ -367,7 +380,7 @@ impl TimerStateManager {
     pub(crate) fn complete_break_session_transition(&mut self) -> SessionCompletedPayload {
         let completed_session_type = self.state.session_type;
 
-        if self.state.scheduled_stop_state == ScheduledStopState::Pending {
+        if self.state.schedule_stop_state == ScheduleStopState::StopAtNextSessionBoundary {
             return self.execute_scheduled_stop_transition(completed_session_type);
         }
 
@@ -393,8 +406,7 @@ impl TimerStateManager {
         self.state.remaining_seconds = self.state.settings.work_duration_secs.get();
         self.state.post_break_decision_pending = true;
         self.state.is_fullscreen_break = false;
-        self.state.timer_start_source = None;
-        self.state.scheduled_stop_state = ScheduledStopState::None;
+        self.state.schedule_stop_state = ScheduleStopState::NotControlledBySchedule;
         self.state.last_transition = Some(Instant::now());
 
         // If long break completed, reset cycle
@@ -420,15 +432,12 @@ impl TimerStateManager {
         }
         self.state.current_cycle += 1;
 
-        // Auto-start path must commit these fields together.
-        // Keep timer_start_source to preserve scheduled-stop eligibility provenance.
-        // scheduled_stop_state is re-armed on later end-boundary crossings.
+        // Keep schedule control across automatic break-to-work transitions.
         self.state.status = TimerStatus::Working;
         self.state.session_type = SessionType::Work;
         self.state.remaining_seconds = self.state.settings.work_duration_secs.get();
         self.state.post_break_decision_pending = false;
         self.state.is_fullscreen_break = false;
-        self.state.scheduled_stop_state = ScheduledStopState::None;
         self.state.last_transition = Some(Instant::now());
 
         let payload = SessionCompletedPayload::from_transition_outcome(
@@ -458,8 +467,7 @@ impl TimerStateManager {
         self.state.remaining_seconds = self.state.settings.work_duration_secs.get();
         self.state.post_break_decision_pending = false;
         self.state.is_fullscreen_break = false;
-        self.state.timer_start_source = None;
-        self.state.scheduled_stop_state = ScheduledStopState::None;
+        self.state.schedule_stop_state = ScheduleStopState::NotControlledBySchedule;
         self.state.last_transition = Some(Instant::now());
 
         let payload = SessionCompletedPayload::from_transition_outcome(
@@ -491,12 +499,8 @@ impl TimerStateManager {
                     self.state.post_break_decision_pending.to_string(),
                 ),
                 (
-                    "scheduled_stop_state",
-                    format!("{:?}", self.state.scheduled_stop_state),
-                ),
-                (
-                    "timer_start_source",
-                    format!("{:?}", self.state.timer_start_source),
+                    "schedule_stop_state",
+                    format!("{:?}", self.state.schedule_stop_state),
                 ),
             ],
         );
@@ -524,12 +528,8 @@ impl TimerStateManager {
                     self.state.post_break_decision_pending.to_string(),
                 ),
                 (
-                    "scheduled_stop_state",
-                    format!("{:?}", self.state.scheduled_stop_state),
-                ),
-                (
-                    "timer_start_source",
-                    format!("{:?}", self.state.timer_start_source),
+                    "schedule_stop_state",
+                    format!("{:?}", self.state.schedule_stop_state),
                 ),
             ],
         );
@@ -575,41 +575,30 @@ impl TimerStateManager {
         );
 
         if !self.state.auto_run_feature_enabled {
-            self.state.scheduled_stop_state = ScheduledStopState::None;
+            self.state.schedule_stop_state = ScheduleStopState::NotControlledBySchedule;
         }
     }
 
-    /// Marks scheduled stop as pending when the current session is eligible.
-    ///
-    /// Eligibility rules are fixed by start source:
-    /// - `manual_outside_window` does not schedule a stop
-    /// - `manual_inside_window` schedules a stop
-    /// - `scheduled_auto_start` schedules a stop
-    ///
-    /// Returns `true` when the state changed from `none` to `pending`.
-    pub(crate) fn mark_scheduled_stop_pending_if_session_is_eligible(&mut self) -> bool {
+    pub(crate) fn apply_schedule_end_boundary_to_current_session(
+        &mut self,
+    ) -> ScheduleEndBoundaryResult {
         if !matches!(
             self.state.status,
             TimerStatus::Working | TimerStatus::OnBreak
         ) {
-            return false;
+            return ScheduleEndBoundaryResult::Ignored;
         }
 
         if !self.state.auto_run_feature_enabled {
-            return false;
+            return ScheduleEndBoundaryResult::Ignored;
         }
 
-        if self.state.scheduled_stop_state == ScheduledStopState::Pending {
-            return false;
+        if self.state.schedule_stop_state != ScheduleStopState::WaitingForScheduleEnd {
+            return ScheduleEndBoundaryResult::Ignored;
         }
 
-        match self.state.timer_start_source {
-            Some(TimerStartSource::ManualOutsideWindow) | None => false,
-            Some(TimerStartSource::ManualInsideWindow | TimerStartSource::ScheduledAutoStart) => {
-                self.state.scheduled_stop_state = ScheduledStopState::Pending;
-                true
-            }
-        }
+        self.state.schedule_stop_state = ScheduleStopState::StopAtNextSessionBoundary;
+        ScheduleEndBoundaryResult::StopScheduledAtSessionBoundary
     }
 
     /// Cancel the running timer task and extract its `JoinHandle`.
@@ -837,7 +826,7 @@ mod tests {
         let settings = make_settings(1500, 300, 900, 4);
 
         let (payload, duration) = mgr
-            .start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+            .start_work(settings, WorkStartOrigin::ManualOutsideScheduleWindow)
             .unwrap();
 
         assert_eq!(mgr.status(), TimerStatus::Working);
@@ -847,33 +836,47 @@ mod tests {
     }
 
     #[test]
-    fn test_start_work_with_source_sets_timer_start_source() {
+    fn test_manual_inside_window_start_stops_at_schedule_end_boundary() {
         let mut mgr = make_manager();
         let settings = make_settings(1500, 300, 900, 4);
 
         let _ = mgr
-            .start_work_with_source(settings, TimerStartSource::ManualInsideWindow)
+            .start_work(settings, WorkStartOrigin::ManualInsideScheduleWindow)
             .unwrap();
+        mgr.state.auto_run_feature_enabled = true;
 
         assert_eq!(
-            mgr.state.timer_start_source,
-            Some(TimerStartSource::ManualInsideWindow)
+            mgr.apply_schedule_end_boundary_to_current_session(),
+            ScheduleEndBoundaryResult::StopScheduledAtSessionBoundary
         );
+        let payload = mgr.complete_work_session_transition();
+        assert_eq!(
+            payload.transition_reason,
+            crate::types::SessionTransitionReason::ScheduledStopExecuted
+        );
+        assert_eq!(payload.next_status, TimerStatus::Idle);
     }
 
     #[test]
-    fn test_start_work_with_source_sets_manual_outside_window_source() {
+    fn test_manual_outside_window_start_ignores_schedule_end_boundary() {
         let mut mgr = make_manager();
         let settings = make_settings(1500, 300, 900, 4);
 
         let _ = mgr
-            .start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+            .start_work(settings, WorkStartOrigin::ManualOutsideScheduleWindow)
             .unwrap();
+        mgr.state.auto_run_feature_enabled = true;
 
         assert_eq!(
-            mgr.state.timer_start_source,
-            Some(TimerStartSource::ManualOutsideWindow)
+            mgr.apply_schedule_end_boundary_to_current_session(),
+            ScheduleEndBoundaryResult::Ignored
         );
+        let payload = mgr.complete_work_session_transition();
+        assert_eq!(
+            payload.transition_reason,
+            crate::types::SessionTransitionReason::WorkToBreak
+        );
+        assert_eq!(payload.next_status, TimerStatus::OnBreak);
     }
 
     #[test]
@@ -881,12 +884,15 @@ mod tests {
         let mut mgr = make_manager();
         let settings = make_settings(1500, 300, 900, 4);
 
-        mgr.start_work_with_source(settings.clone(), TimerStartSource::ManualOutsideWindow)
-            .unwrap();
+        mgr.start_work(
+            settings.clone(),
+            WorkStartOrigin::ManualOutsideScheduleWindow,
+        )
+        .unwrap();
 
         // Second call must fail
         let err = mgr
-            .start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+            .start_work(settings, WorkStartOrigin::ManualOutsideScheduleWindow)
             .unwrap_err();
         assert!(matches!(err, PomoliceError::InvalidStateTransition { .. }));
     }
@@ -894,20 +900,23 @@ mod tests {
     #[test]
     fn test_start_work_rejects_on_break_for_all_start_sources() {
         for start_source in [
-            TimerStartSource::ManualOutsideWindow,
-            TimerStartSource::ManualInsideWindow,
-            TimerStartSource::ScheduledAutoStart,
+            WorkStartOrigin::ManualOutsideScheduleWindow,
+            WorkStartOrigin::ManualInsideScheduleWindow,
+            WorkStartOrigin::ScheduleStartBoundary,
         ] {
             let mut mgr = make_manager();
             let settings = make_settings(1500, 300, 900, 4);
 
-            mgr.start_work_with_source(settings.clone(), TimerStartSource::ManualOutsideWindow)
-                .expect("initial work session should start");
+            mgr.start_work(
+                settings.clone(),
+                WorkStartOrigin::ManualOutsideScheduleWindow,
+            )
+            .expect("initial work session should start");
             mgr.transition_to_break();
             let before = mgr.get_full_state();
 
             let err = mgr
-                .start_work_with_source(settings, start_source)
+                .start_work(settings, start_source)
                 .expect_err("work must not start during break");
 
             assert!(matches!(
@@ -940,7 +949,7 @@ mod tests {
     fn test_tick_decrements_remaining_seconds() {
         let mut mgr = make_manager();
         let settings = make_settings(5, 300, 900, 4);
-        mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+        mgr.start_work(settings, WorkStartOrigin::ManualOutsideScheduleWindow)
             .unwrap();
 
         let (should_complete, payload) = mgr.tick();
@@ -952,7 +961,7 @@ mod tests {
     fn test_tick_signals_completion_at_zero() {
         let mut mgr = make_manager();
         let settings = make_settings(1, 300, 900, 4);
-        mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+        mgr.start_work(settings, WorkStartOrigin::ManualOutsideScheduleWindow)
             .unwrap();
 
         let (should_complete, _) = mgr.tick();
@@ -963,7 +972,7 @@ mod tests {
     fn test_tick_keeps_completed_work_session_payload_at_zero() {
         let mut mgr = make_manager();
         let settings = make_settings(1, 300, 900, 4);
-        mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+        mgr.start_work(settings, WorkStartOrigin::ManualOutsideScheduleWindow)
             .unwrap();
 
         let (should_complete, payload) = mgr.tick();
@@ -981,7 +990,7 @@ mod tests {
     fn test_tick_keeps_completed_break_session_payload_at_zero() {
         let mut mgr = make_manager();
         let settings = make_settings(1, 1, 900, 4);
-        mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+        mgr.start_work(settings, WorkStartOrigin::ManualOutsideScheduleWindow)
             .unwrap();
         mgr.transition_to_break();
 
@@ -1003,7 +1012,7 @@ mod tests {
     fn test_transition_to_break_emits_work_to_break_contract_fields() {
         let mut mgr = make_manager();
         let settings = make_settings(1500, 300, 900, 4);
-        mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+        mgr.start_work(settings, WorkStartOrigin::ManualOutsideScheduleWindow)
             .unwrap();
 
         let (break_type, payload) = mgr.transition_to_break();
@@ -1028,7 +1037,7 @@ mod tests {
         let mut mgr = make_manager();
         let expected_work_preview_secs = 1800;
         let settings = make_settings(expected_work_preview_secs, 300, 900, 4);
-        mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+        mgr.start_work(settings, WorkStartOrigin::ManualOutsideScheduleWindow)
             .unwrap();
         mgr.transition_to_break();
         mgr.state.remaining_seconds = 0;
@@ -1058,8 +1067,7 @@ mod tests {
         mgr.state.session_type = SessionType::Work;
         mgr.state.completed_pomodoros = 3;
         mgr.state.current_cycle = 2;
-        mgr.state.scheduled_stop_state = ScheduledStopState::Pending;
-        mgr.state.timer_start_source = Some(TimerStartSource::ManualInsideWindow);
+        mgr.state.schedule_stop_state = ScheduleStopState::StopAtNextSessionBoundary;
 
         let payload = mgr.complete_work_session_transition();
 
@@ -1073,7 +1081,10 @@ mod tests {
         assert!(!payload.requires_manual_continue_decision);
         assert_eq!(mgr.state.status, TimerStatus::Idle);
         assert_eq!(mgr.state.completed_pomodoros, 4);
-        assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::None);
+        assert_eq!(
+            mgr.state.schedule_stop_state,
+            ScheduleStopState::NotControlledBySchedule
+        );
     }
 
     #[test]
@@ -1109,7 +1120,6 @@ mod tests {
         mgr.state.status = TimerStatus::OnBreak;
         mgr.state.session_type = SessionType::LongBreak;
         mgr.state.current_cycle = 4;
-        mgr.state.timer_start_source = Some(TimerStartSource::ManualInsideWindow);
         mgr.state.settings = make_settings(expected_work_preview_secs, 300, 900, 4);
         mgr.state.settings.post_break_transition_policy =
             PostBreakTransitionPolicy::StartNextWorkAutomatically;
@@ -1132,19 +1142,15 @@ mod tests {
         assert_eq!(mgr.state.current_cycle, 1);
         assert!(!mgr.state.post_break_decision_pending);
         assert!(!mgr.state.is_fullscreen_break);
-        assert_eq!(
-            mgr.state.timer_start_source,
-            Some(TimerStartSource::ManualInsideWindow)
-        );
     }
 
     #[test]
-    fn test_break_auto_start_keeps_source_eligible_for_scheduled_stop_pending() {
+    fn test_break_auto_start_remains_controlled_by_schedule_end_boundary() {
         let mut mgr = make_manager();
         mgr.state.status = TimerStatus::OnBreak;
         mgr.state.session_type = SessionType::ShortBreak;
         mgr.state.auto_run_feature_enabled = true;
-        mgr.state.timer_start_source = Some(TimerStartSource::ManualInsideWindow);
+        mgr.state.schedule_stop_state = ScheduleStopState::WaitingForScheduleEnd;
         mgr.state.settings.post_break_transition_policy =
             PostBreakTransitionPolicy::StartNextWorkAutomatically;
 
@@ -1155,14 +1161,14 @@ mod tests {
             crate::types::SessionTransitionReason::BreakAutoStarted
         );
         assert_eq!(
-            mgr.state.timer_start_source,
-            Some(TimerStartSource::ManualInsideWindow)
+            mgr.apply_schedule_end_boundary_to_current_session(),
+            ScheduleEndBoundaryResult::StopScheduledAtSessionBoundary
         );
-        assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::None);
-
-        let changed = mgr.mark_scheduled_stop_pending_if_session_is_eligible();
-        assert!(changed);
-        assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::Pending);
+        let payload = mgr.complete_work_session_transition();
+        assert_eq!(
+            payload.transition_reason,
+            crate::types::SessionTransitionReason::ScheduledStopExecuted
+        );
     }
 
     #[test]
@@ -1214,7 +1220,7 @@ mod tests {
         mgr.state.session_type = SessionType::ShortBreak;
         mgr.state.settings.post_break_transition_policy =
             PostBreakTransitionPolicy::StartNextWorkAutomatically;
-        mgr.state.scheduled_stop_state = ScheduledStopState::Pending;
+        mgr.state.schedule_stop_state = ScheduleStopState::StopAtNextSessionBoundary;
 
         let payload = mgr.complete_break_session_transition();
 
@@ -1226,7 +1232,10 @@ mod tests {
         assert_eq!(payload.next_session_type, SessionType::Work);
         assert_eq!(mgr.state.status, TimerStatus::Idle);
         assert!(!mgr.state.post_break_decision_pending);
-        assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::None);
+        assert_eq!(
+            mgr.state.schedule_stop_state,
+            ScheduleStopState::NotControlledBySchedule
+        );
     }
 
     #[test]
@@ -1292,7 +1301,7 @@ mod tests {
     fn test_apply_input_penalty_resets_break_timer() {
         let mut mgr = make_manager();
         let settings = make_settings(1500, 300, 900, 4);
-        mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+        mgr.start_work(settings, WorkStartOrigin::ManualOutsideScheduleWindow)
             .unwrap();
         mgr.transition_to_break();
 
@@ -1310,7 +1319,7 @@ mod tests {
     fn test_apply_input_penalty_ignores_repeated_input_before_debounce_boundary() {
         let mut mgr = make_manager();
         let settings = make_settings(1500, 300, 900, 4);
-        mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+        mgr.start_work(settings, WorkStartOrigin::ManualOutsideScheduleWindow)
             .unwrap();
         mgr.transition_to_break();
 
@@ -1339,7 +1348,7 @@ mod tests {
     fn test_apply_input_penalty_accepts_repeated_input_at_debounce_boundary() {
         let mut mgr = make_manager();
         let settings = make_settings(1500, 300, 900, 4);
-        mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+        mgr.start_work(settings, WorkStartOrigin::ManualOutsideScheduleWindow)
             .unwrap();
         mgr.transition_to_break();
 
@@ -1361,7 +1370,7 @@ mod tests {
     fn test_apply_input_penalty_ignores_timestamp_before_last_penalty() {
         let mut mgr = make_manager();
         let settings = make_settings(1500, 300, 900, 4);
-        mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+        mgr.start_work(settings, WorkStartOrigin::ManualOutsideScheduleWindow)
             .unwrap();
         mgr.transition_to_break();
 
@@ -1382,7 +1391,7 @@ mod tests {
     fn test_emergency_stop_resets_to_idle() {
         let mut mgr = make_manager();
         let settings = make_settings(1500, 300, 900, 4);
-        mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+        mgr.start_work(settings, WorkStartOrigin::ManualOutsideScheduleWindow)
             .unwrap();
 
         let (was_fullscreen, payload) = mgr.emergency_stop();
@@ -1431,9 +1440,14 @@ mod tests {
     #[test]
     fn test_sync_automation_policies_keeps_pending_stop_state_when_feature_remains_enabled() {
         let mut mgr = make_manager();
-        mgr.state.status = TimerStatus::Working;
-        mgr.state.timer_start_source = Some(crate::types::TimerStartSource::ManualInsideWindow);
-        mgr.state.scheduled_stop_state = ScheduledStopState::Pending;
+        let settings = make_settings(1500, 300, 900, 4);
+        mgr.start_work(settings, WorkStartOrigin::ManualInsideScheduleWindow)
+            .expect("work session should start");
+        mgr.state.auto_run_feature_enabled = true;
+        assert_eq!(
+            mgr.apply_schedule_end_boundary_to_current_session(),
+            ScheduleEndBoundaryResult::StopScheduledAtSessionBoundary
+        );
 
         let weekly_auto_run_config = WeeklyAutoRunConfig::try_new(
             DayAutoRunSlot::default(),
@@ -1455,18 +1469,24 @@ mod tests {
         assert_eq!(payload.status, TimerStatus::Working);
         assert!(mgr.state.auto_run_feature_enabled);
         assert_eq!(mgr.state.weekly_auto_run_config, weekly_auto_run_config);
-        assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::Pending);
+        let completion = mgr.complete_work_session_transition();
         assert_eq!(
-            mgr.state.timer_start_source,
-            Some(crate::types::TimerStartSource::ManualInsideWindow)
+            completion.transition_reason,
+            crate::types::SessionTransitionReason::ScheduledStopExecuted
         );
     }
 
     #[test]
     fn test_sync_automation_policies_clears_pending_stop_state_when_feature_is_disabled() {
         let mut mgr = make_manager();
-        mgr.state.status = TimerStatus::OnBreak;
-        mgr.state.scheduled_stop_state = ScheduledStopState::Pending;
+        let settings = make_settings(1500, 300, 900, 4);
+        mgr.start_work(settings, WorkStartOrigin::ManualInsideScheduleWindow)
+            .expect("work session should start");
+        mgr.state.auto_run_feature_enabled = true;
+        assert_eq!(
+            mgr.apply_schedule_end_boundary_to_current_session(),
+            ScheduleEndBoundaryResult::StopScheduledAtSessionBoundary
+        );
 
         let payload = mgr.sync_automation_policies(
             false,
@@ -1474,87 +1494,113 @@ mod tests {
             PostBreakTransitionPolicy::RequireManualContinue,
         );
 
-        assert_eq!(payload.status, TimerStatus::OnBreak);
-        assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::None);
+        assert_eq!(payload.status, TimerStatus::Working);
+        let completion = mgr.complete_work_session_transition();
+        assert_eq!(
+            completion.transition_reason,
+            crate::types::SessionTransitionReason::WorkToBreak
+        );
     }
 
     #[test]
-    fn test_manual_inside_window_start_sets_scheduled_stop_pending() {
+    fn test_manual_inside_window_start_accepts_schedule_end_boundary() {
         let mut mgr = make_manager();
-        mgr.state.status = TimerStatus::Working;
+        let settings = make_settings(1500, 300, 900, 4);
+        mgr.start_work(settings, WorkStartOrigin::ManualInsideScheduleWindow)
+            .expect("work session should start");
         mgr.state.auto_run_feature_enabled = true;
-        mgr.state.timer_start_source = Some(TimerStartSource::ManualInsideWindow);
-        mgr.state.scheduled_stop_state = ScheduledStopState::None;
 
-        let changed = mgr.mark_scheduled_stop_pending_if_session_is_eligible();
-
-        assert!(changed);
-        assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::Pending);
+        assert_eq!(
+            mgr.apply_schedule_end_boundary_to_current_session(),
+            ScheduleEndBoundaryResult::StopScheduledAtSessionBoundary
+        );
+        let payload = mgr.complete_work_session_transition();
+        assert_eq!(
+            payload.transition_reason,
+            crate::types::SessionTransitionReason::ScheduledStopExecuted
+        );
     }
 
     #[test]
-    fn test_scheduled_auto_start_sets_scheduled_stop_pending() {
+    fn test_scheduled_auto_start_accepts_schedule_end_boundary() {
         let mut mgr = make_manager();
-        mgr.state.status = TimerStatus::Working;
+        let settings = make_settings(1500, 300, 900, 4);
+        mgr.start_work(settings, WorkStartOrigin::ScheduleStartBoundary)
+            .expect("work session should start");
         mgr.state.auto_run_feature_enabled = true;
-        mgr.state.timer_start_source = Some(TimerStartSource::ScheduledAutoStart);
-        mgr.state.scheduled_stop_state = ScheduledStopState::None;
 
-        let changed = mgr.mark_scheduled_stop_pending_if_session_is_eligible();
-
-        assert!(changed);
-        assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::Pending);
+        assert_eq!(
+            mgr.apply_schedule_end_boundary_to_current_session(),
+            ScheduleEndBoundaryResult::StopScheduledAtSessionBoundary
+        );
+        let payload = mgr.complete_work_session_transition();
+        assert_eq!(
+            payload.transition_reason,
+            crate::types::SessionTransitionReason::ScheduledStopExecuted
+        );
     }
 
     #[test]
-    fn test_manual_outside_window_start_does_not_set_scheduled_stop_pending() {
+    fn test_manual_outside_window_start_ignores_schedule_end_boundary_after_start() {
         let mut mgr = make_manager();
-        mgr.state.status = TimerStatus::Working;
+        let settings = make_settings(1500, 300, 900, 4);
+        mgr.start_work(settings, WorkStartOrigin::ManualOutsideScheduleWindow)
+            .expect("work session should start");
         mgr.state.auto_run_feature_enabled = true;
-        mgr.state.timer_start_source = Some(TimerStartSource::ManualOutsideWindow);
-        mgr.state.scheduled_stop_state = ScheduledStopState::None;
 
-        let changed = mgr.mark_scheduled_stop_pending_if_session_is_eligible();
-
-        assert!(!changed);
-        assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::None);
+        assert_eq!(
+            mgr.apply_schedule_end_boundary_to_current_session(),
+            ScheduleEndBoundaryResult::Ignored
+        );
+        let payload = mgr.complete_work_session_transition();
+        assert_eq!(
+            payload.transition_reason,
+            crate::types::SessionTransitionReason::WorkToBreak
+        );
     }
 
     #[test]
-    fn test_mark_scheduled_stop_pending_does_not_change_when_idle() {
+    fn test_schedule_end_boundary_is_ignored_when_idle() {
         let mut mgr = make_manager();
         mgr.state.status = TimerStatus::Idle;
         mgr.state.auto_run_feature_enabled = true;
-        mgr.state.timer_start_source = Some(TimerStartSource::ManualInsideWindow);
-        mgr.state.scheduled_stop_state = ScheduledStopState::None;
 
-        let changed = mgr.mark_scheduled_stop_pending_if_session_is_eligible();
-
-        assert!(!changed);
-        assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::None);
+        assert_eq!(
+            mgr.apply_schedule_end_boundary_to_current_session(),
+            ScheduleEndBoundaryResult::Ignored
+        );
     }
 
     #[test]
-    fn test_mark_scheduled_stop_pending_keeps_pending_when_called_repeatedly() {
+    fn test_schedule_end_boundary_is_idempotent_before_session_completion() {
         let mut mgr = make_manager();
-        mgr.state.status = TimerStatus::OnBreak;
+        let settings = make_settings(1500, 300, 900, 4);
+        mgr.start_work(settings, WorkStartOrigin::ManualInsideScheduleWindow)
+            .expect("work session should start");
         mgr.state.auto_run_feature_enabled = true;
-        mgr.state.timer_start_source = Some(TimerStartSource::ManualInsideWindow);
-        mgr.state.scheduled_stop_state = ScheduledStopState::Pending;
 
-        let changed = mgr.mark_scheduled_stop_pending_if_session_is_eligible();
-
-        assert!(!changed);
-        assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::Pending);
+        assert_eq!(
+            mgr.apply_schedule_end_boundary_to_current_session(),
+            ScheduleEndBoundaryResult::StopScheduledAtSessionBoundary
+        );
+        assert_eq!(
+            mgr.apply_schedule_end_boundary_to_current_session(),
+            ScheduleEndBoundaryResult::Ignored
+        );
+        let payload = mgr.complete_work_session_transition();
+        assert_eq!(
+            payload.transition_reason,
+            crate::types::SessionTransitionReason::ScheduledStopExecuted
+        );
     }
 
     #[test]
-    fn test_mark_scheduled_stop_pending_uses_timer_start_source_after_auto_run_config_change() {
+    fn test_schedule_end_boundary_remains_effective_after_auto_run_config_change() {
         let mut mgr = make_manager();
-        mgr.state.status = TimerStatus::Working;
+        let settings = make_settings(1500, 300, 900, 4);
+        mgr.start_work(settings, WorkStartOrigin::ManualInsideScheduleWindow)
+            .expect("work session should start");
         mgr.state.auto_run_feature_enabled = true;
-        mgr.state.timer_start_source = Some(TimerStartSource::ManualInsideWindow);
-        mgr.state.scheduled_stop_state = ScheduledStopState::None;
 
         let weekly_auto_run_config = WeeklyAutoRunConfig::try_new(
             DayAutoRunSlot::default(),
@@ -1572,10 +1618,15 @@ mod tests {
             PostBreakTransitionPolicy::RequireManualContinue,
         );
 
-        let changed = mgr.mark_scheduled_stop_pending_if_session_is_eligible();
-
-        assert!(changed);
-        assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::Pending);
+        assert_eq!(
+            mgr.apply_schedule_end_boundary_to_current_session(),
+            ScheduleEndBoundaryResult::StopScheduledAtSessionBoundary
+        );
+        let payload = mgr.complete_work_session_transition();
+        assert_eq!(
+            payload.transition_reason,
+            crate::types::SessionTransitionReason::ScheduledStopExecuted
+        );
     }
 
     #[test]
@@ -1588,8 +1639,7 @@ mod tests {
         mgr.state.current_cycle = 2;
         mgr.state.completed_pomodoros = 3;
         mgr.state.post_break_decision_pending = false;
-        mgr.state.timer_start_source = Some(TimerStartSource::ManualInsideWindow);
-        mgr.state.scheduled_stop_state = ScheduledStopState::Pending;
+        mgr.state.schedule_stop_state = ScheduleStopState::StopAtNextSessionBoundary;
         mgr.state.settings = make_settings(expected_work_preview_secs, 300, 900, 4);
 
         let payload = mgr.complete_work_session_transition();
@@ -1608,8 +1658,10 @@ mod tests {
         assert_eq!(mgr.state.remaining_seconds, expected_work_preview_secs);
         assert_eq!(mgr.state.completed_pomodoros, 4);
         assert!(!mgr.state.post_break_decision_pending);
-        assert_eq!(mgr.state.timer_start_source, None);
-        assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::None);
+        assert_eq!(
+            mgr.state.schedule_stop_state,
+            ScheduleStopState::NotControlledBySchedule
+        );
     }
 
     #[test]
@@ -1619,8 +1671,7 @@ mod tests {
         mgr.state.session_type = SessionType::LongBreak;
         mgr.state.current_cycle = 4;
         mgr.state.post_break_decision_pending = false;
-        mgr.state.timer_start_source = Some(TimerStartSource::ScheduledAutoStart);
-        mgr.state.scheduled_stop_state = ScheduledStopState::Pending;
+        mgr.state.schedule_stop_state = ScheduleStopState::StopAtNextSessionBoundary;
 
         let payload = mgr.complete_break_session_transition();
 
@@ -1636,8 +1687,10 @@ mod tests {
         assert_eq!(mgr.state.status, TimerStatus::Idle);
         assert_eq!(mgr.state.session_type, SessionType::Work);
         assert_eq!(mgr.state.current_cycle, 0);
-        assert_eq!(mgr.state.timer_start_source, None);
-        assert_eq!(mgr.state.scheduled_stop_state, ScheduledStopState::None);
+        assert_eq!(
+            mgr.state.schedule_stop_state,
+            ScheduleStopState::NotControlledBySchedule
+        );
     }
 
     #[test]
@@ -1673,7 +1726,7 @@ mod tests {
     fn test_rate_limit_remaining_ms_returns_some_immediately_after_transition() {
         let mut mgr = make_manager();
         let settings = make_settings(1500, 300, 900, 4);
-        mgr.start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+        mgr.start_work(settings, WorkStartOrigin::ManualOutsideScheduleWindow)
             .unwrap();
 
         // Called immediately after start_work sets last_transition
@@ -1700,8 +1753,11 @@ mod tests {
     fn test_start_work_rate_limited_returns_accurate_remaining_ms() {
         let mut mgr = make_manager();
         let settings = make_settings(1500, 300, 900, 4);
-        mgr.start_work_with_source(settings.clone(), TimerStartSource::ManualOutsideWindow)
-            .unwrap();
+        mgr.start_work(
+            settings.clone(),
+            WorkStartOrigin::ManualOutsideScheduleWindow,
+        )
+        .unwrap();
 
         // Immediately call emergency_stop to reset to Idle, preserving last_transition timing
         mgr.state.status = TimerStatus::Idle;
@@ -1710,7 +1766,7 @@ mod tests {
         // remaining_ms reflects actual elapsed time: close to 300ms when called immediately,
         // so we assert it is in (0, 300] rather than strictly < 300.
         let err = mgr
-            .start_work_with_source(settings, TimerStartSource::ManualOutsideWindow)
+            .start_work(settings, WorkStartOrigin::ManualOutsideScheduleWindow)
             .unwrap_err();
         match err {
             PomoliceError::RateLimited { remaining_ms } => {
@@ -1728,13 +1784,16 @@ mod tests {
     fn test_start_work_with_scheduled_auto_start_skips_rate_limit() {
         let mut mgr = make_manager();
         let settings = make_settings(1500, 300, 900, 4);
-        mgr.start_work_with_source(settings.clone(), TimerStartSource::ManualOutsideWindow)
-            .unwrap();
+        mgr.start_work(
+            settings.clone(),
+            WorkStartOrigin::ManualOutsideScheduleWindow,
+        )
+        .unwrap();
 
         // Simulate returning to idle immediately while keeping last_transition fresh.
         mgr.state.status = TimerStatus::Idle;
 
-        let result = mgr.start_work_with_source(settings, TimerStartSource::ScheduledAutoStart);
+        let result = mgr.start_work(settings, WorkStartOrigin::ScheduleStartBoundary);
         assert!(result.is_ok());
     }
 }

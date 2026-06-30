@@ -607,9 +607,7 @@ impl Drop for AppState {
 mod tests {
     use super::*;
     use crate::managers::clock::testing::FixedClock;
-    use crate::types::{
-        ScheduledStopState, SessionType, TimerStartSource, PERSISTED_STATE_SCHEMA_VERSION_V3,
-    };
+    use crate::types::{ScheduleStopState, SessionType, PERSISTED_STATE_SCHEMA_VERSION};
     use chrono::TimeZone;
     use serde_json::json;
     use std::path::{Path, PathBuf};
@@ -874,7 +872,6 @@ mod tests {
             TimerState {
                 status: TimerStatus::Working,
                 remaining_seconds: 900,
-                timer_start_source: Some(TimerStartSource::ManualInsideWindow),
                 ..TimerState::default()
             },
         );
@@ -916,8 +913,7 @@ mod tests {
                 remaining_seconds: 123,
                 session_type: SessionType::ShortBreak,
                 post_break_decision_pending: true,
-                timer_start_source: Some(TimerStartSource::ManualInsideWindow),
-                scheduled_stop_state: ScheduledStopState::Pending,
+                schedule_stop_state: ScheduleStopState::StopAtNextSessionBoundary,
                 ..TimerState::default()
             },
         );
@@ -956,7 +952,6 @@ mod tests {
                 status: TimerStatus::Working,
                 remaining_seconds: 60,
                 current_cycle: 1,
-                timer_start_source: Some(TimerStartSource::ManualInsideWindow),
                 ..TimerState::default()
             },
         );
@@ -993,9 +988,8 @@ mod tests {
             TimerState {
                 status: TimerStatus::Working,
                 remaining_seconds: 60,
-                scheduled_stop_state: ScheduledStopState::Pending,
+                schedule_stop_state: ScheduleStopState::StopAtNextSessionBoundary,
                 auto_run_feature_enabled: true,
-                timer_start_source: Some(TimerStartSource::ManualInsideWindow),
                 ..TimerState::default()
             },
         );
@@ -1043,7 +1037,7 @@ mod tests {
         std::fs::write(
             temp_dir.join("timer_state.json"),
             serde_json::to_string_pretty(&json!({
-                "schema_version": PERSISTED_STATE_SCHEMA_VERSION_V3,
+                "schema_version": PERSISTED_STATE_SCHEMA_VERSION + 1,
                 "status": "working",
                 "remaining_seconds": 1200,
                 "session_type": "work",
@@ -1068,8 +1062,7 @@ mod tests {
                     "sat": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
                     "sun": { "enabled": false, "start_time": "09:00", "end_time": "18:00" }
                 },
-                "timer_start_source": "manual_inside_window",
-                "scheduled_stop_state": "pending"
+                "schedule_stop_state": "stop_at_next_session_boundary"
             }))
             .expect("legacy json should serialize"),
         )
