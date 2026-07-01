@@ -3,7 +3,7 @@
  * These messages encourage users to take proper breaks
  */
 
-export const motivationalMessages = [
+export const breakMotivationalMessages = [
   "目を休めましょう 👀",
   "少し立ち上がって歩きましょう 🚶",
   "深呼吸をしてリラックス 🌬️",
@@ -18,18 +18,20 @@ export const motivationalMessages = [
   "短い休憩が長期的なパフォーマンスを向上させます 📈",
 ];
 
-export function selectRandomMotivationalMessage(
+function selectRandomBreakMotivationalMessage(
   messages: readonly string[],
 ): string {
   const index = Math.floor(Math.random() * messages.length);
   const message = messages[index];
   if (message === undefined) {
-    throw new Error("motivationalMessages must contain at least one message.");
+    throw new Error(
+      "breakMotivationalMessages must contain at least one message.",
+    );
   }
 
   return message;
 }
 
-export function getRandomMessage(): string {
-  return selectRandomMotivationalMessage(motivationalMessages);
+export function getRandomBreakMotivationalMessage(): string {
+  return selectRandomBreakMotivationalMessage(breakMotivationalMessages);
 }

@@ -1,24 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
-  getRandomMessage,
-  motivationalMessages,
-  selectRandomMotivationalMessage,
+  breakMotivationalMessages,
+  getRandomBreakMotivationalMessage,
 } from "./motivationalMessages";
 
-describe("selectRandomMotivationalMessage", () => {
-  it("returns one message from the given catalog", () => {
-    const catalog = ["first", "second"] as const;
-
-    expect(catalog).toContain(selectRandomMotivationalMessage(catalog));
-  });
-
-  it("rejects an empty catalog", () => {
-    expect(() => selectRandomMotivationalMessage([])).toThrow();
-  });
-});
-
-describe("getRandomMessage", () => {
+describe("getRandomBreakMotivationalMessage", () => {
   it("returns one configured motivational message", () => {
-    expect(motivationalMessages).toContain(getRandomMessage());
+    expect(breakMotivationalMessages).toContain(
+      getRandomBreakMotivationalMessage(),
+    );
   });
 });

@@ -4,16 +4,28 @@ import userEvent from "@testing-library/user-event";
 import { FullscreenBreak } from "./FullscreenBreak";
 import { useTimerStore, SessionType } from "@/store/timerStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
-import { motivationalMessages } from "@/data/motivationalMessages";
+import { breakMotivationalMessages } from "@/data/motivationalMessages";
 
 function getBreakTimerDisplay(timeText: string): HTMLElement {
   return screen.getByText(timeText);
 }
 
-function getVisibleMotivationalMessages(): string[] {
-  return motivationalMessages.filter(
+function getVisibleBreakMotivationalMessages(): string[] {
+  return breakMotivationalMessages.filter(
     (message) => screen.queryByText(message) !== null,
   );
+}
+
+function getVisibleBreakMotivationalMessage(): string {
+  const visibleMessages = getVisibleBreakMotivationalMessages();
+  expect(visibleMessages).toHaveLength(1);
+
+  const visibleMessage = visibleMessages[0];
+  if (visibleMessage === undefined) {
+    throw new Error("Expected one break motivational message to be visible.");
+  }
+
+  return visibleMessage;
 }
 
 async function renderFullscreenBreakWithSkipFlowOpen(): Promise<void> {
@@ -47,7 +59,7 @@ describe("FullscreenBreak", () => {
       expect(
         screen.getByRole("button", { name: "休憩をスキップ" }),
       ).toBeInTheDocument();
-      expect(getVisibleMotivationalMessages()).toHaveLength(1);
+      getVisibleBreakMotivationalMessage();
     });
 
     it("should display 'long break' for long break", () => {
@@ -56,6 +68,19 @@ describe("FullscreenBreak", () => {
       render(<FullscreenBreak />);
 
       expect(screen.getByText("長い休憩")).toBeInTheDocument();
+    });
+
+    it("should keep the initially visible motivational message when timer rerenders", () => {
+      const { rerender } = render(<FullscreenBreak />);
+
+      const initialMessage = getVisibleBreakMotivationalMessage();
+
+      act(() => {
+        useTimerStore.setState({ remainingSeconds: 299 });
+      });
+      rerender(<FullscreenBreak />);
+
+      expect(getVisibleBreakMotivationalMessage()).toBe(initialMessage);
     });
   });
 

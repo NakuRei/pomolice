@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { useTimerStore, SessionType } from "@/store/timerStore";
 import { useSkipFlowStore } from "@/store/skipFlowStore";
 import { formatTime } from "@/formatters/timeFormatter";
-import { BreakMotivationalMessage } from "./BreakMotivationalMessage";
+import { getRandomBreakMotivationalMessage } from "@/data/motivationalMessages";
 import { BreakStats } from "./BreakStats";
+import { MotivationalMessage } from "./MotivationalMessage";
 import { SkipButton } from "./SkipButton";
 import SkipFlowModal from "../SkipFlow/SkipFlowModal";
 
@@ -28,6 +30,9 @@ export function FullscreenBreak(): React.ReactElement {
   const startSkipFlow = useSkipFlowStore((state) => state.startSkipFlow);
   const resetSkipFlow = useSkipFlowStore((state) => state.resetSkipFlow);
   const emergencyStop = useTimerStore((state) => state.emergencyStop);
+  const [motivationalMessage] = useState<string>(() =>
+    getRandomBreakMotivationalMessage(),
+  );
 
   const formattedTime = formatTime(remainingSeconds);
 
@@ -87,7 +92,7 @@ export function FullscreenBreak(): React.ReactElement {
       </div>
 
       {/* Motivational message */}
-      <BreakMotivationalMessage />
+      <MotivationalMessage message={motivationalMessage} />
 
       {/* Break statistics */}
       <div className="mt-8">
