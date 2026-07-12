@@ -10,8 +10,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
+use crate::external_adapters::clock::{Clock, SystemClock};
 use crate::logging_event::{log_error_event, log_info_event, log_warn_event, BackendLogEvent};
-use crate::managers::clock::{Clock, SystemClock};
+use crate::timer_state_transition::{
+    restore_saved_timer_session, RestoreNormalizationSnapshot, SavedTimerSession,
+};
 use crate::types::{
     ScheduleStopState, SessionType, TimerSettings, TimerState, TimerStatus, WeeklyAutoRunConfig,
     PERSISTED_STATE_SCHEMA_VERSION,
@@ -94,74 +97,19 @@ pub(crate) enum SaveError {
     },
 }
 
-struct RestoredSessionState {
-    status: TimerStatus,
-    session_type: SessionType,
-    remaining_seconds: u64,
-    current_cycle: u32,
-    completed_pomodoros: u32,
-    schedule_stop_state: ScheduleStopState,
-}
-
-fn log_restore_normalized(state: &RestoredSessionState) {
+fn log_restore_normalized(snapshot: &RestoreNormalizationSnapshot) {
     log_warn_event(
         BackendLogEvent::StoragePersistenceRestoreNormalized,
         &[
-            ("status", format!("{:?}", state.status)),
-            ("session_type", format!("{:?}", state.session_type)),
-            ("remaining_seconds", state.remaining_seconds.to_string()),
-            ("completed_pomodoros", state.completed_pomodoros.to_string()),
+            ("status", format!("{:?}", snapshot.status)),
+            ("session_type", format!("{:?}", snapshot.session_type)),
+            ("remaining_seconds", snapshot.remaining_seconds.to_string()),
+            (
+                "completed_pomodoros",
+                snapshot.completed_pomodoros.to_string(),
+            ),
         ],
     );
-}
-
-fn normalize_pending_post_break_decision(
-    state: &mut RestoredSessionState,
-    settings: &TimerSettings,
-    post_break_decision_pending: bool,
-) {
-    if !post_break_decision_pending {
-        return;
-    }
-
-    if state.status != TimerStatus::Idle
-        || state.session_type != SessionType::Work
-        || state.remaining_seconds != settings.work_duration_secs.get()
-    {
-        log_restore_normalized(state);
-    }
-
-    state.status = TimerStatus::Idle;
-    state.session_type = SessionType::Work;
-    state.remaining_seconds = settings.work_duration_secs.get();
-    state.schedule_stop_state = ScheduleStopState::NotControlledBySchedule;
-}
-
-fn normalize_restored_break_session(state: &mut RestoredSessionState, settings: &TimerSettings) {
-    if state.status != TimerStatus::OnBreak {
-        return;
-    }
-
-    log_restore_normalized(state);
-    state.status = TimerStatus::Idle;
-    state.session_type = SessionType::Work;
-    state.remaining_seconds = settings.work_duration_secs.get();
-    state.completed_pomodoros = state.completed_pomodoros.saturating_sub(1);
-    state.schedule_stop_state = ScheduleStopState::NotControlledBySchedule;
-}
-
-fn adjusted_remaining_seconds(state: &RestoredSessionState, elapsed_seconds: u64) -> u64 {
-    debug_assert_ne!(
-        state.status,
-        TimerStatus::OnBreak,
-        "OnBreak should be normalized before elapsed subtraction"
-    );
-
-    if state.status == TimerStatus::Working {
-        state.remaining_seconds.saturating_sub(elapsed_seconds)
-    } else {
-        state.remaining_seconds
-    }
 }
 
 impl PersistedState {
@@ -220,50 +168,27 @@ impl PersistedState {
             schedule_stop_state,
         } = self;
 
-        let mut restored_state = RestoredSessionState {
-            status,
-            session_type,
-            remaining_seconds,
-            current_cycle,
-            completed_pomodoros,
-            schedule_stop_state,
-        };
-        normalize_pending_post_break_decision(
-            &mut restored_state,
-            &settings,
-            post_break_decision_pending,
+        let restored_session = restore_saved_timer_session(
+            SavedTimerSession {
+                status,
+                session_type,
+                remaining_seconds,
+                current_cycle,
+                completed_pomodoros,
+                post_break_decision_pending,
+                settings,
+                auto_run_feature_enabled,
+                weekly_auto_run_config,
+                schedule_stop_state,
+            },
+            elapsed_seconds,
         );
-        normalize_restored_break_session(&mut restored_state, &settings);
 
-        TimerState {
-            status: restored_state.status,
-            remaining_seconds: adjusted_remaining_seconds(&restored_state, elapsed_seconds),
-            session_type: restored_state.session_type,
-            current_cycle: restored_state.current_cycle,
-            completed_pomodoros: restored_state.completed_pomodoros,
-            break_interaction_count: 0,
-            last_penalty_time: None,
-            settings,
-            auto_run_feature_enabled,
-            weekly_auto_run_config,
-            schedule_stop_state: normalized_schedule_stop_state(
-                restored_state.status,
-                restored_state.schedule_stop_state,
-            ),
-            post_break_decision_pending,
-            is_fullscreen_break: false,
-            last_transition: None,
+        if let Some(snapshot) = &restored_session.pending_decision_normalization {
+            log_restore_normalized(snapshot);
         }
-    }
-}
 
-fn normalized_schedule_stop_state(
-    status: TimerStatus,
-    schedule_stop_state: ScheduleStopState,
-) -> ScheduleStopState {
-    match status {
-        TimerStatus::Idle => ScheduleStopState::NotControlledBySchedule,
-        TimerStatus::Working | TimerStatus::OnBreak => schedule_stop_state,
+        restored_session.timer_state
     }
 }
 
@@ -574,7 +499,7 @@ impl Default for PersistenceManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::managers::clock::testing::FixedClock;
+    use crate::external_adapters::clock::testing::FixedClock;
     use crate::types::{
         DayAutoRunSlot, HhMm, PostBreakTransitionPolicy, PERSISTED_STATE_SCHEMA_VERSION,
     };
@@ -973,8 +898,8 @@ mod tests {
     }
 
     #[test]
-    fn test_load_state_sync_restores_saved_break_session_as_idle_work_session() {
-        let temp_dir = create_temp_dir("load-saved-break-as-idle-work");
+    fn test_load_state_sync_restores_saved_break_session_as_enforced_break() {
+        let temp_dir = create_temp_dir("load-saved-break-as-enforced-break");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
         let restored_at_utc = create_utc_datetime(2025, 2, 1, 9, 3, 0);
         let clock = fixed_clock(restored_at_utc);
@@ -991,14 +916,11 @@ mod tests {
         let (timer_state, restored_saved_at_utc) = restore_timer_state(&persistence);
 
         assert_eq!(restored_saved_at_utc, saved_at_utc);
-        assert_eq!(timer_state.status, TimerStatus::Idle);
-        assert_eq!(timer_state.session_type, SessionType::Work);
-        assert_eq!(
-            timer_state.remaining_seconds,
-            timer_state.settings.work_duration_secs.get()
-        );
+        assert_eq!(timer_state.status, TimerStatus::OnBreak);
+        assert_eq!(timer_state.session_type, SessionType::ShortBreak);
+        assert_eq!(timer_state.remaining_seconds, 123);
         assert_eq!(timer_state.current_cycle, 4);
-        assert_eq!(timer_state.completed_pomodoros, 2);
+        assert_eq!(timer_state.completed_pomodoros, 3);
         assert_timer_settings_match_contract(&timer_state.settings);
         assert_eq!(
             timer_state.weekly_auto_run_config,
@@ -1008,7 +930,58 @@ mod tests {
         assert!(!timer_state.post_break_decision_pending);
         assert_eq!(
             timer_state.schedule_stop_state,
-            ScheduleStopState::NotControlledBySchedule
+            ScheduleStopState::StopAtNextSessionBoundary
+        );
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_load_state_sync_bounds_saved_break_remaining_to_configured_break_duration() {
+        let temp_dir = create_temp_dir("load-bounded-break-remaining");
+        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
+        let restored_at_utc = create_utc_datetime(2025, 2, 1, 9, 3, 0);
+        let clock = fixed_clock(restored_at_utc);
+        let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
+        let mut persisted_json = contract_persisted_state_json(saved_at_utc);
+        persisted_json["status"] = json!("on_break");
+        persisted_json["session_type"] = json!("short_break");
+        persisted_json["remaining_seconds"] = json!(10_000_000_000_u64);
+
+        write_timer_state_json(&temp_dir, &persisted_json);
+
+        let (timer_state, _) = restore_timer_state(&persistence);
+
+        assert_eq!(timer_state.status, TimerStatus::OnBreak);
+        assert_eq!(timer_state.session_type, SessionType::ShortBreak);
+        assert_eq!(
+            timer_state.remaining_seconds,
+            timer_state.settings.short_break_duration_secs.get()
+        );
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_load_state_sync_bounds_saved_working_remaining_to_configured_work_duration() {
+        let temp_dir = create_temp_dir("load-bounded-working-remaining");
+        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
+        let restored_at_utc = create_utc_datetime(2025, 2, 1, 9, 3, 0);
+        let elapsed_seconds = 3 * 60;
+        let clock = fixed_clock(restored_at_utc);
+        let persistence = PersistenceManager::new(clock, Some(temp_dir.clone()));
+        let mut persisted_json = contract_persisted_state_json(saved_at_utc);
+        persisted_json["remaining_seconds"] = json!(10_000_000_000_u64);
+
+        write_timer_state_json(&temp_dir, &persisted_json);
+
+        let (timer_state, _) = restore_timer_state(&persistence);
+
+        assert_eq!(timer_state.status, TimerStatus::Working);
+        assert_eq!(timer_state.session_type, SessionType::Work);
+        assert_eq!(
+            timer_state.remaining_seconds,
+            timer_state.settings.work_duration_secs.get() - elapsed_seconds
         );
 
         cleanup_temp_dir(&temp_dir);
@@ -1032,16 +1005,13 @@ mod tests {
         let (timer_state, restored_saved_at_utc) = restore_timer_state(&persistence);
 
         assert_eq!(restored_saved_at_utc, saved_at_utc);
-        assert_eq!(timer_state.status, TimerStatus::Idle);
-        assert_eq!(timer_state.session_type, SessionType::Work);
-        assert_eq!(
-            timer_state.remaining_seconds,
-            timer_state.settings.work_duration_secs.get()
-        );
+        assert_eq!(timer_state.status, TimerStatus::OnBreak);
+        assert_eq!(timer_state.session_type, SessionType::LongBreak);
+        assert_eq!(timer_state.remaining_seconds, 240);
         assert_eq!(timer_state.completed_pomodoros, 0);
         assert_eq!(
             timer_state.schedule_stop_state,
-            ScheduleStopState::NotControlledBySchedule
+            ScheduleStopState::StopAtNextSessionBoundary
         );
 
         cleanup_temp_dir(&temp_dir);

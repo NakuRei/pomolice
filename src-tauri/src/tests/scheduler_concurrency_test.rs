@@ -11,7 +11,7 @@ mod scheduler_concurrency_tests {
 
     use tokio::sync::{Barrier, Mutex};
 
-    use crate::managers::timer::TimerStateManager;
+    use crate::timer_state_transition::TimerStateManager;
     use crate::types::{
         PostBreakDecisionAction, PostBreakTransitionPolicy, SessionTransitionReason, SessionType,
         TimerSettings, TimerStatus, WorkStartOrigin,

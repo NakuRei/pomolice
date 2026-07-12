@@ -3,17 +3,17 @@ use std::pin::Pin;
 
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::app_handle_timer_effects;
+use crate::error::{PomoliceError, Result};
 use crate::logging_event::{
     log_error_event, log_info_event, log_persistence_write_failure, BackendLogEvent,
     PERSISTENCE_WRITE_TRIGGER_INPUT_PENALTY, PERSISTENCE_WRITE_TRIGGER_SESSION_COMPLETION,
 };
-use crate::managers::input_monitor::InputMonitorManager;
-use crate::managers::window::{WindowState, WindowStateManager};
 use crate::state;
-use crate::tray;
 use crate::types;
 
-type BreakModeTransitionResult = Result<(), (&'static str, crate::error::PomoliceError)>;
+type BreakModeTransitionResult =
+    std::result::Result<(), (&'static str, crate::error::PomoliceError)>;
 type TimerTickFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
 struct FinalizedSessionCompletionState {
@@ -72,7 +72,7 @@ impl SessionPipelineRuntimeEffects for AppHandleSessionPipelineRuntimeEffects<'_
     }
 
     fn update_tray(&mut self, tick_payload: &types::TimerTickPayload) {
-        tray::update_tray_icon(self.app, tick_payload);
+        app_handle_timer_effects::update_tray_icon(self.app, tick_payload);
     }
 
     fn enter_break_mode<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
@@ -104,17 +104,267 @@ impl SessionPipelineRuntimeEffects for AppHandleSessionPipelineRuntimeEffects<'_
     }
 }
 
+pub(crate) trait TimerCommandRuntimeEffectShell {
+    fn emit_tick(&mut self, tick_payload: &types::TimerTickPayload);
+    fn update_tray(&mut self, tick_payload: &types::TimerTickPayload);
+    fn spawn_timer_task<'a>(
+        &'a mut self,
+        state_handle: &'a state::AppState,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+    fn request_fullscreen_break_exit(&mut self);
+}
+
+struct AppHandleTimerCommandRuntimeEffectShell<'a> {
+    app: &'a AppHandle,
+}
+
+impl TimerCommandRuntimeEffectShell for AppHandleTimerCommandRuntimeEffectShell<'_> {
+    fn emit_tick(&mut self, tick_payload: &types::TimerTickPayload) {
+        app_handle_timer_effects::emit_timer_tick(self.app, tick_payload);
+    }
+
+    fn update_tray(&mut self, tick_payload: &types::TimerTickPayload) {
+        app_handle_timer_effects::update_tray_icon(self.app, tick_payload);
+    }
+
+    fn spawn_timer_task<'a>(
+        &'a mut self,
+        _state_handle: &'a state::AppState,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            spawn_timer_task(self.app).await;
+        })
+    }
+
+    fn request_fullscreen_break_exit(&mut self) {
+        let app_handle = self.app.clone();
+        tauri::async_runtime::spawn(async move {
+            lib_handle_external_break_exit(app_handle).await;
+        });
+    }
+}
+
+pub(crate) async fn resolve_post_break_decision_from_command(
+    app: &AppHandle,
+    state_handle: &state::AppState,
+    action: types::PostBreakDecisionAction,
+) -> Result<()> {
+    let mut effects = AppHandleTimerCommandRuntimeEffectShell { app };
+    resolve_post_break_decision_with_runtime_effects(state_handle, action, &mut effects).await
+}
+
+pub(crate) async fn emergency_stop_from_command(
+    app: &AppHandle,
+    state_handle: &state::AppState,
+) -> Result<()> {
+    let mut effects = AppHandleTimerCommandRuntimeEffectShell { app };
+    emergency_stop_with_runtime_effects(state_handle, &mut effects).await
+}
+
+pub(crate) async fn sync_timer_duration_settings_from_command(
+    app: &AppHandle,
+    state_handle: &state::AppState,
+    work_duration_secs: types::WorkDurationSecs,
+    short_break_duration_secs: types::ShortBreakDurationSecs,
+    long_break_duration_secs: types::LongBreakDurationSecs,
+    long_break_interval: types::LongBreakIntervalCount,
+) -> Result<()> {
+    let mut effects = AppHandleTimerCommandRuntimeEffectShell { app };
+    sync_timer_duration_settings_with_runtime_effects(
+        state_handle,
+        work_duration_secs,
+        short_break_duration_secs,
+        long_break_duration_secs,
+        long_break_interval,
+        &mut effects,
+    )
+    .await
+}
+
+pub(crate) async fn sync_automation_policies_from_command(
+    app: &AppHandle,
+    state_handle: &state::AppState,
+    auto_run_feature_enabled: bool,
+    weekly_auto_run_config: types::WeeklyAutoRunConfig,
+    post_break_transition_policy: types::PostBreakTransitionPolicy,
+) -> Result<()> {
+    let mut effects = AppHandleTimerCommandRuntimeEffectShell { app };
+    sync_automation_policies_with_runtime_effects(
+        state_handle,
+        auto_run_feature_enabled,
+        weekly_auto_run_config,
+        post_break_transition_policy,
+        &mut effects,
+    )
+    .await
+}
+
+pub(crate) fn validate_post_break_decision_command_state(
+    timer_status: types::TimerStatus,
+    post_break_decision_pending: bool,
+) -> Result<()> {
+    if timer_status == types::TimerStatus::Idle && post_break_decision_pending {
+        return Ok(());
+    }
+
+    Err(PomoliceError::InvalidStateTransition {
+        action: "resolve post-break decision".to_string(),
+        current_state: timer_status,
+    })
+}
+
+pub(crate) async fn resolve_post_break_decision_with_runtime_effects<S>(
+    state_handle: &state::AppState,
+    action: types::PostBreakDecisionAction,
+    runtime_effect_shell: &mut S,
+) -> Result<()>
+where
+    S: TimerCommandRuntimeEffectShell,
+{
+    let (old_task, tick_payload, should_spawn_timer_task) = {
+        let mut timer = state_handle.timer_manager.lock().await;
+        validate_post_break_decision_command_state(
+            timer.status(),
+            timer.get_state().post_break_decision_pending,
+        )?;
+        let tick_payload = timer.resolve_post_break_decision(action)?;
+        let should_spawn_timer_task = action == types::PostBreakDecisionAction::Continue;
+        let old_task = if should_spawn_timer_task {
+            timer.cancel_and_take_task()
+        } else {
+            None
+        };
+        (old_task, tick_payload, should_spawn_timer_task)
+    };
+
+    emit_tick_and_update_tray(runtime_effect_shell, &tick_payload);
+
+    if let Some(handle) = old_task {
+        let _ = handle.await;
+    }
+
+    if should_spawn_timer_task {
+        runtime_effect_shell.spawn_timer_task(state_handle).await;
+    }
+
+    persist_current_state_after_command_effects(state_handle).await
+}
+
+pub(crate) async fn emergency_stop_with_runtime_effects<S>(
+    state_handle: &state::AppState,
+    runtime_effect_shell: &mut S,
+) -> Result<()>
+where
+    S: TimerCommandRuntimeEffectShell,
+{
+    let (was_fullscreen_break, tick_payload, old_task) = {
+        let mut timer = state_handle.timer_manager.lock().await;
+        let old = timer.cancel_and_take_task();
+        let (was_fullscreen, payload) = timer.emergency_stop();
+        (was_fullscreen, payload, old)
+    };
+
+    emit_tick_and_update_tray(runtime_effect_shell, &tick_payload);
+
+    if let Some(handle) = old_task {
+        let _ = handle.await;
+    }
+
+    if was_fullscreen_break {
+        runtime_effect_shell.request_fullscreen_break_exit();
+    }
+
+    persist_current_state_after_command_effects(state_handle).await
+}
+
+pub(crate) async fn sync_timer_duration_settings_with_runtime_effects<S>(
+    state_handle: &state::AppState,
+    work_duration_secs: types::WorkDurationSecs,
+    short_break_duration_secs: types::ShortBreakDurationSecs,
+    long_break_duration_secs: types::LongBreakDurationSecs,
+    long_break_interval: types::LongBreakIntervalCount,
+    runtime_effect_shell: &mut S,
+) -> Result<()>
+where
+    S: TimerCommandRuntimeEffectShell,
+{
+    let tick_payload = {
+        let mut timer = state_handle.timer_manager.lock().await;
+        timer.sync_timer_duration_settings(
+            work_duration_secs,
+            short_break_duration_secs,
+            long_break_duration_secs,
+            long_break_interval,
+        )?
+    };
+
+    emit_tick_and_update_tray(runtime_effect_shell, &tick_payload);
+    persist_current_state_after_command_effects(state_handle).await
+}
+
+pub(crate) async fn sync_automation_policies_with_runtime_effects<S>(
+    state_handle: &state::AppState,
+    auto_run_feature_enabled: bool,
+    weekly_auto_run_config: types::WeeklyAutoRunConfig,
+    post_break_transition_policy: types::PostBreakTransitionPolicy,
+    runtime_effect_shell: &mut S,
+) -> Result<()>
+where
+    S: TimerCommandRuntimeEffectShell,
+{
+    let (tick_payload, auto_run_boundary_scope_changed) = {
+        let mut timer = state_handle.timer_manager.lock().await;
+        let previous_auto_run_feature_enabled = timer.get_state().auto_run_feature_enabled;
+        let previous_weekly_auto_run_config = timer.get_state().weekly_auto_run_config.clone();
+        let auto_run_boundary_scope_changed = previous_auto_run_feature_enabled
+            != auto_run_feature_enabled
+            || previous_weekly_auto_run_config != weekly_auto_run_config;
+
+        let tick_payload = timer.sync_automation_policies(
+            auto_run_feature_enabled,
+            weekly_auto_run_config,
+            post_break_transition_policy,
+        );
+
+        (tick_payload, auto_run_boundary_scope_changed)
+    };
+
+    if auto_run_boundary_scope_changed {
+        state_handle.notify_auto_run_boundary_scope_changed();
+    }
+
+    emit_tick_and_update_tray(runtime_effect_shell, &tick_payload);
+    persist_current_state_after_command_effects(state_handle).await
+}
+
+fn emit_tick_and_update_tray<S>(
+    runtime_effect_shell: &mut S,
+    tick_payload: &types::TimerTickPayload,
+) where
+    S: TimerCommandRuntimeEffectShell,
+{
+    runtime_effect_shell.emit_tick(tick_payload);
+    runtime_effect_shell.update_tray(tick_payload);
+}
+
+async fn persist_current_state_after_command_effects(state_handle: &state::AppState) -> Result<()> {
+    state_handle.persist_current_state_async().await?;
+    Ok(())
+}
+
 trait BreakLockRuntimeEffects {
     fn capture_main_window_state_for_break<'a>(
         &'a mut self,
-    ) -> Pin<Box<dyn Future<Output = crate::error::Result<Option<WindowState>>> + Send + 'a>>;
+        state_handle: &'a state::AppState,
+    ) -> Pin<Box<dyn Future<Output = crate::error::Result<()>> + Send + 'a>>;
     fn enter_fullscreen_break_lock<'a>(
         &'a mut self,
+        state_handle: &'a state::AppState,
     ) -> Pin<Box<dyn Future<Output = crate::error::Result<()>> + Send + 'a>>;
-    fn release_fullscreen_break_lock(
-        &mut self,
-        window_manager: &mut WindowStateManager,
-    ) -> crate::error::Result<()>;
+    fn release_fullscreen_break_lock<'a>(
+        &'a mut self,
+        state_handle: &'a state::AppState,
+    ) -> Pin<Box<dyn Future<Output = crate::error::Result<()>> + Send + 'a>>;
     fn emit_break_started(&mut self);
     fn emit_break_completed(&mut self);
 }
@@ -126,25 +376,31 @@ struct AppHandleBreakLockRuntimeEffects<'a> {
 impl BreakLockRuntimeEffects for AppHandleBreakLockRuntimeEffects<'_> {
     fn capture_main_window_state_for_break<'a>(
         &'a mut self,
-    ) -> Pin<Box<dyn Future<Output = crate::error::Result<Option<WindowState>>> + Send + 'a>> {
-        Box::pin(
-            async move { WindowStateManager::capture_main_window_state_for_break(self.app).await },
-        )
+        state_handle: &'a state::AppState,
+    ) -> Pin<Box<dyn Future<Output = crate::error::Result<()>> + Send + 'a>> {
+        Box::pin(async move {
+            state_handle
+                .capture_main_window_state_for_break(self.app)
+                .await
+        })
     }
 
     fn enter_fullscreen_break_lock<'a>(
         &'a mut self,
+        state_handle: &'a state::AppState,
     ) -> Pin<Box<dyn Future<Output = crate::error::Result<()>> + Send + 'a>> {
         Box::pin(async move {
-            WindowStateManager::enter_fullscreen_all_monitors(self.app.clone()).await
+            state_handle
+                .enter_fullscreen_break_lock(self.app.clone())
+                .await
         })
     }
 
-    fn release_fullscreen_break_lock(
-        &mut self,
-        window_manager: &mut WindowStateManager,
-    ) -> crate::error::Result<()> {
-        window_manager.exit_fullscreen_all_monitors(self.app)
+    fn release_fullscreen_break_lock<'a>(
+        &'a mut self,
+        state_handle: &'a state::AppState,
+    ) -> Pin<Box<dyn Future<Output = crate::error::Result<()>> + Send + 'a>> {
+        Box::pin(async move { state_handle.release_fullscreen_break_lock(self.app).await })
     }
 
     fn emit_break_started(&mut self) {
@@ -170,11 +426,11 @@ struct AppHandleTimerTickRuntimeEffects<'a> {
 
 impl TimerTickRuntimeEffects for AppHandleTimerTickRuntimeEffects<'_> {
     fn emit_timer_tick(&mut self, tick_payload: &types::TimerTickPayload) {
-        let _ = self.app.emit("timer_tick", tick_payload);
+        app_handle_timer_effects::emit_timer_tick(self.app, tick_payload);
     }
 
     fn update_tray(&mut self, tick_payload: &types::TimerTickPayload) {
-        tray::update_tray_icon(self.app, tick_payload);
+        app_handle_timer_effects::update_tray_icon(self.app, tick_payload);
     }
 
     fn complete_session_after_tick<'a>(
@@ -238,11 +494,11 @@ impl InputPenaltyRuntimeEffects for AppHandleInputPenaltyRuntimeEffects<'_> {
     }
 
     fn emit_timer_tick(&mut self, tick_payload: &types::TimerTickPayload) {
-        let _ = self.app.emit("timer_tick", tick_payload);
+        app_handle_timer_effects::emit_timer_tick(self.app, tick_payload);
     }
 
     fn update_tray(&mut self, tick_payload: &types::TimerTickPayload) {
-        tray::update_tray_icon(self.app, tick_payload);
+        app_handle_timer_effects::update_tray_icon(self.app, tick_payload);
     }
 }
 
@@ -407,21 +663,15 @@ fn log_break_mode_failure(
     log_error_event(event, &[("step", step.to_string())], Some(error));
 }
 
-async fn start_input_monitor_for_break(state_handle: &state::AppState) -> InputMonitorManager {
-    let mut input_monitor = state_handle.input_monitor.lock().await;
-    input_monitor.start();
-    input_monitor.clone()
-}
-
 async fn rollback_break_enter_failure(
     state_handle: &state::AppState,
-    input_monitor: &InputMonitorManager,
     effects: &mut (impl BreakLockRuntimeEffects + Send),
 ) {
-    input_monitor.rollback_break_enter_failure();
+    state_handle
+        .rollback_input_monitor_break_enter_failure()
+        .await;
 
-    let mut window_manager = state_handle.window_manager.lock().await;
-    if let Err(error) = effects.release_fullscreen_break_lock(&mut window_manager) {
+    if let Err(error) = effects.release_fullscreen_break_lock(state_handle).await {
         log_break_mode_failure(
             BackendLogEvent::SessionFullscreenBreakEnterFailed,
             "rollback_exit_fullscreen_all_monitors",
@@ -510,7 +760,18 @@ pub(crate) async fn apply_startup_restore_with_effects(
                 return;
             };
 
-            emit_startup_resume_events_with_effects(effects, &tick_payload);
+            if tick_payload.status == types::TimerStatus::OnBreak {
+                effects.enter_break_mode().await;
+            }
+
+            // Re-read the state after break-mode entry so the resume payload
+            // reports the engaged fullscreen-break flag, like the session
+            // completion pipeline does.
+            let resume_tick_payload = {
+                let timer = state_handle.timer_manager.lock().await;
+                timer.get_state().to_tick_payload()
+            };
+            emit_startup_resume_events_with_effects(effects, &resume_tick_payload);
             effects.restart_timer_task().await;
         }
         state::StartupRestoreAction::FinalizeExpiredRestoredWork(transition_outcome) => {
@@ -557,23 +818,20 @@ async fn enter_break_mode_with_effects(
 ) -> BreakModeTransitionResult {
     state_handle
         .run_break_mode_transition(async {
-            let input_monitor = start_input_monitor_for_break(state_handle).await;
+            state_handle.start_input_monitor_for_break().await;
 
-            let saved_state = effects
-                .capture_main_window_state_for_break()
+            if let Err(error) = effects
+                .capture_main_window_state_for_break(state_handle)
                 .await
-                .map_err(|error| {
-                    input_monitor.rollback_break_enter_failure();
-                    ("capture_main_window_state_for_break", error)
-                })?;
-
             {
-                let mut window_manager = state_handle.window_manager.lock().await;
-                window_manager.set_saved_state(saved_state);
+                state_handle
+                    .rollback_input_monitor_break_enter_failure()
+                    .await;
+                return Err(("capture_main_window_state_for_break", error));
             }
 
-            if let Err(error) = effects.enter_fullscreen_break_lock().await {
-                rollback_break_enter_failure(state_handle, &input_monitor, effects).await;
+            if let Err(error) = effects.enter_fullscreen_break_lock(state_handle).await {
+                rollback_break_enter_failure(state_handle, effects).await;
                 return Err(("enter_fullscreen_all_monitors", error));
             }
 
@@ -614,18 +872,13 @@ async fn exit_break_mode_with_effects(
 ) -> BreakModeTransitionResult {
     state_handle
         .run_break_mode_transition(async {
-            {
-                let mut input_monitor = state_handle.input_monitor.lock().await;
-                input_monitor.stop();
-            }
+            state_handle.stop_input_monitor_for_break().await;
 
-            {
-                let mut window_manager = state_handle.window_manager.lock().await;
-                effects
-                    .release_fullscreen_break_lock(&mut window_manager)
-                    .map_err(|error| ("exit_fullscreen_all_monitors", error))?;
-                log_info_event(BackendLogEvent::SessionFullscreenBreakExited, &[]);
-            }
+            effects
+                .release_fullscreen_break_lock(state_handle)
+                .await
+                .map_err(|error| ("exit_fullscreen_all_monitors", error))?;
+            log_info_event(BackendLogEvent::SessionFullscreenBreakExited, &[]);
 
             {
                 let mut timer = state_handle.timer_manager.lock().await;
@@ -649,20 +902,14 @@ pub(crate) async fn lib_handle_escape_combo(app: AppHandle) {
 
     state_handle
         .run_break_mode_transition(async {
-            {
-                let mut input_monitor = state_handle.input_monitor.lock().await;
-                input_monitor.stop();
-            }
+            state_handle.stop_input_monitor_for_break().await;
 
-            {
-                let mut window_manager = state_handle.window_manager.lock().await;
-                if let Err(error) = window_manager.exit_fullscreen_all_monitors(&app) {
-                    log_break_mode_failure(
-                        BackendLogEvent::SessionFullscreenBreakExitFailed,
-                        "escape_combo_exit_fullscreen_all_monitors",
-                        &error,
-                    );
-                }
+            if let Err(error) = state_handle.release_fullscreen_break_lock(&app).await {
+                log_break_mode_failure(
+                    BackendLogEvent::SessionFullscreenBreakExitFailed,
+                    "escape_combo_exit_fullscreen_all_monitors",
+                    &error,
+                );
             }
         })
         .await;
@@ -673,20 +920,14 @@ pub(crate) async fn lib_handle_external_break_exit(app: AppHandle) {
 
     state_handle
         .run_break_mode_transition(async {
-            {
-                let mut input_monitor = state_handle.input_monitor.lock().await;
-                input_monitor.stop();
-            }
+            state_handle.stop_input_monitor_for_break().await;
 
-            {
-                let mut window_manager = state_handle.window_manager.lock().await;
-                if let Err(error) = window_manager.exit_fullscreen_all_monitors(&app) {
-                    log_break_mode_failure(
-                        BackendLogEvent::SessionFullscreenBreakExitFailed,
-                        "external_break_exit_fullscreen_all_monitors",
-                        &error,
-                    );
-                }
+            if let Err(error) = state_handle.release_fullscreen_break_lock(&app).await {
+                log_break_mode_failure(
+                    BackendLogEvent::SessionFullscreenBreakExitFailed,
+                    "external_break_exit_fullscreen_all_monitors",
+                    &error,
+                );
             }
         })
         .await;
@@ -701,11 +942,11 @@ mod emit_order_tests {
         TimerTickRuntimeEffects,
     };
     use crate::error::PomoliceError;
-    use crate::managers::clock::testing::FixedClock;
-    use crate::managers::clock::Clock;
-    use crate::managers::persistence::PersistenceManager;
-    use crate::managers::window::{MainWindowRestorePlan, WindowState, WindowStateManager};
-    use crate::state::AppState;
+    use crate::external_adapters::clock::testing::FixedClock;
+    use crate::external_adapters::clock::Clock;
+    use crate::external_adapters::persistence::PersistenceManager;
+    use crate::external_adapters::window_lock::{MainWindowRestorePlan, WindowState};
+    use crate::state::{self, AppState};
     use crate::types::{
         PostBreakTransitionPolicy, SessionTransitionOutcome, SessionType, TimerSettings,
         TimerState, TimerStatus, TimerTickPayload,
@@ -795,19 +1036,22 @@ mod emit_order_tests {
     impl BreakLockRuntimeEffects for RecordingBreakLockRuntimeEffects {
         fn capture_main_window_state_for_break<'a>(
             &'a mut self,
-        ) -> Pin<Box<dyn Future<Output = crate::error::Result<Option<WindowState>>> + Send + 'a>>
-        {
+            state_handle: &'a state::AppState,
+        ) -> Pin<Box<dyn Future<Output = crate::error::Result<()>> + Send + 'a>> {
             Box::pin(async move {
                 if let Some(error) = self.capture_error.take() {
                     return Err(error);
                 }
 
-                Ok(self.captured_window_state.clone())
+                let mut window_manager = state_handle.window_manager.lock().await;
+                window_manager.set_saved_state(self.captured_window_state.clone());
+                Ok(())
             })
         }
 
         fn enter_fullscreen_break_lock<'a>(
             &'a mut self,
+            _state_handle: &'a state::AppState,
         ) -> Pin<Box<dyn Future<Output = crate::error::Result<()>> + Send + 'a>> {
             Box::pin(async move {
                 if let Some(error) = self.enter_error.take() {
@@ -820,18 +1064,21 @@ mod emit_order_tests {
             })
         }
 
-        fn release_fullscreen_break_lock(
-            &mut self,
-            window_manager: &mut WindowStateManager,
-        ) -> crate::error::Result<()> {
-            if let Some(error) = self.release_error.take() {
-                return Err(error);
-            }
+        fn release_fullscreen_break_lock<'a>(
+            &'a mut self,
+            state_handle: &'a state::AppState,
+        ) -> Pin<Box<dyn Future<Output = crate::error::Result<()>> + Send + 'a>> {
+            Box::pin(async move {
+                if let Some(error) = self.release_error.take() {
+                    return Err(error);
+                }
 
-            self.released_restore_plans
-                .push(window_manager.main_window_restore_plan());
-            self.lock_state = RecordedBreakLockState::Unlocked;
-            Ok(())
+                let window_manager = state_handle.window_manager.lock().await;
+                self.released_restore_plans
+                    .push(window_manager.main_window_restore_plan());
+                self.lock_state = RecordedBreakLockState::Unlocked;
+                Ok(())
+            })
         }
 
         fn emit_break_started(&mut self) {
@@ -1499,10 +1746,10 @@ mod emit_order_tests {
 #[cfg(test)]
 mod tests {
     use super::{apply_input_penalty_with_effects, InputPenaltyRuntimeEffects};
+    use crate::external_adapters::clock::testing::FixedClock;
+    use crate::external_adapters::clock::Clock;
+    use crate::external_adapters::persistence::PersistenceManager;
     use crate::logging_event::PERSISTENCE_WRITE_TRIGGER_INPUT_PENALTY;
-    use crate::managers::clock::testing::FixedClock;
-    use crate::managers::clock::Clock;
-    use crate::managers::persistence::PersistenceManager;
     use crate::state::AppState;
     use crate::types::{SessionType, TimerState, TimerStatus, TimerTickPayload};
     use chrono::{Local, TimeZone, Utc};

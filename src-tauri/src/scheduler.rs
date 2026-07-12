@@ -8,19 +8,14 @@ use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 
 use crate::logging_event::{
-    log_info_event, log_persistence_write_failure, log_warn_event, BackendLogEvent,
-    PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START,
+    log_info_event, log_persistence_write_failure, BackendLogEvent,
     PERSISTENCE_WRITE_TRIGGER_SCHEDULER_STOP_PENDING,
 };
-use crate::managers::timer::ScheduleEndBoundaryResult;
-use crate::managers::weekly_schedule::{
-    collect_crossed_end_boundaries, collect_crossed_start_boundaries,
-};
+use crate::schedule_boundary::{collect_crossed_end_boundaries, collect_crossed_start_boundaries};
 use crate::state;
-use crate::tray;
-use crate::types::{
-    BoundaryOccurrenceId, TimerSettings, TimerStatus, WeeklyAutoRunConfig, WorkStartOrigin,
-};
+use crate::timer_state_transition::ScheduleEndBoundaryResult;
+use crate::types::{BoundaryOccurrenceId, TimerSettings, TimerStatus, WeeklyAutoRunConfig};
+use crate::work_start::{self, StartWorkAttempt, StartWorkRuntimeEffects};
 
 const SCHEDULER_INTERVAL_SECONDS: u64 = 1;
 const PROCESSED_BOUNDARY_RETENTION_DAYS: i64 = 8;
@@ -71,11 +66,7 @@ struct SchedulerTickPlan {
 }
 
 trait SchedulerRuntimeEffects {
-    fn emit_timer_tick(&mut self, tick_payload: &crate::types::TimerTickPayload);
-    fn update_tray(&mut self, tick_payload: &crate::types::TimerTickPayload);
-    fn emit_work_started(&mut self, work_duration_secs: u64);
     fn emit_auto_run_stop_pending(&mut self);
-    fn spawn_timer_task<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
     fn persist_current_state_with_trigger<'a>(
         &'a mut self,
         trigger: &'static str,
@@ -87,12 +78,29 @@ struct AppHandleSchedulerRuntimeEffects<'a> {
 }
 
 impl SchedulerRuntimeEffects for AppHandleSchedulerRuntimeEffects<'_> {
+    fn emit_auto_run_stop_pending(&mut self) {
+        let _ = self
+            .app
+            .emit("auto_run_stop_pending", serde_json::json!({}));
+    }
+
+    fn persist_current_state_with_trigger<'a>(
+        &'a mut self,
+        trigger: &'static str,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            persist_current_state_with_trigger(self.app, trigger).await;
+        })
+    }
+}
+
+impl StartWorkRuntimeEffects for AppHandleSchedulerRuntimeEffects<'_> {
     fn emit_timer_tick(&mut self, tick_payload: &crate::types::TimerTickPayload) {
         let _ = self.app.emit("timer_tick", tick_payload);
     }
 
     fn update_tray(&mut self, tick_payload: &crate::types::TimerTickPayload) {
-        tray::update_tray_icon(self.app, tick_payload);
+        state::update_tray_icon(self.app, tick_payload);
     }
 
     fn emit_work_started(&mut self, work_duration_secs: u64) {
@@ -102,24 +110,12 @@ impl SchedulerRuntimeEffects for AppHandleSchedulerRuntimeEffects<'_> {
         );
     }
 
-    fn emit_auto_run_stop_pending(&mut self) {
-        let _ = self
-            .app
-            .emit("auto_run_stop_pending", serde_json::json!({}));
-    }
-
-    fn spawn_timer_task<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            crate::session_pipeline::spawn_timer_task(self.app).await;
-        })
-    }
-
-    fn persist_current_state_with_trigger<'a>(
+    fn spawn_timer_task<'a>(
         &'a mut self,
-        trigger: &'static str,
+        _state: &'a state::AppState,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
-            persist_current_state_with_trigger(self.app, trigger).await;
+            crate::session_pipeline::spawn_timer_task(self.app).await;
         })
     }
 }
@@ -170,21 +166,27 @@ struct NoopSchedulerRuntimeEffects;
 
 #[cfg(test)]
 impl SchedulerRuntimeEffects for NoopSchedulerRuntimeEffects {
+    fn emit_auto_run_stop_pending(&mut self) {}
+
+    fn persist_current_state_with_trigger<'a>(
+        &'a mut self,
+        _trigger: &'static str,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async {})
+    }
+}
+
+#[cfg(test)]
+impl StartWorkRuntimeEffects for NoopSchedulerRuntimeEffects {
     fn emit_timer_tick(&mut self, _tick_payload: &crate::types::TimerTickPayload) {}
 
     fn update_tray(&mut self, _tick_payload: &crate::types::TimerTickPayload) {}
 
     fn emit_work_started(&mut self, _work_duration_secs: u64) {}
 
-    fn emit_auto_run_stop_pending(&mut self) {}
-
-    fn spawn_timer_task<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async {})
-    }
-
-    fn persist_current_state_with_trigger<'a>(
+    fn spawn_timer_task<'a>(
         &'a mut self,
-        _trigger: &'static str,
+        _state: &'a state::AppState,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async {})
     }
@@ -321,12 +323,14 @@ async fn lib_run_scheduler_tick(app: AppHandle, runtime_state: &mut SchedulerRun
     run_scheduler_tick_with_effects(&state_handle, runtime_state, now_local, &mut effects).await;
 }
 
-async fn run_scheduler_tick_with_effects(
+async fn run_scheduler_tick_with_effects<S>(
     state_handle: &state::AppState,
     runtime_state: &mut SchedulerRuntimeState,
     now_local: DateTime<Local>,
-    effects: &mut impl SchedulerRuntimeEffects,
-) {
+    effects: &mut S,
+) where
+    S: SchedulerRuntimeEffects + StartWorkRuntimeEffects,
+{
     let previous_local = runtime_state.last_checked_local;
 
     let timer_snapshot = load_scheduler_timer_snapshot(state_handle).await;
@@ -477,14 +481,16 @@ async fn process_crossed_end_boundaries_with_effects(
     }
 }
 
-async fn process_crossed_start_boundaries_with_effects(
+async fn process_crossed_start_boundaries_with_effects<S>(
     state_handle: &state::AppState,
     runtime_state: &mut SchedulerRuntimeState,
     timer_snapshot: &SchedulerTimerSnapshot,
     previous_local: DateTime<Local>,
     now_local: DateTime<Local>,
-    effects: &mut impl SchedulerRuntimeEffects,
-) {
+    effects: &mut S,
+) where
+    S: SchedulerRuntimeEffects + StartWorkRuntimeEffects,
+{
     let crossed_start_boundaries = collect_crossed_start_boundaries(
         previous_local,
         now_local,
@@ -541,67 +547,45 @@ async fn mark_scheduled_stop_pending_with_effects(
     should_persist
 }
 
-async fn start_work_from_scheduler_when_idle_with_effects(
+async fn start_work_from_scheduler_when_idle_with_effects<S>(
     state_handle: &state::AppState,
     timer_status_at_tick_start: TimerStatus,
     timer_settings: TimerSettings,
     start_boundary: &BoundaryOccurrenceId,
-    effects: &mut impl SchedulerRuntimeEffects,
-) -> bool {
-    if timer_status_at_tick_start != TimerStatus::Idle {
-        return false;
-    }
-
-    let (old_timer_task, tick_payload, work_duration_secs) = {
-        let mut timer_manager = state_handle.timer_manager.lock().await;
-        if timer_manager.status() != TimerStatus::Idle {
-            return false;
-        }
-
-        let old_task = timer_manager.cancel_and_take_task();
-        let Ok((payload, duration_secs)) =
-            timer_manager.start_work(timer_settings, WorkStartOrigin::ScheduleStartBoundary)
-        else {
-            log_warn_event(
-                BackendLogEvent::SchedulerSkippedAutoStartDueToRejection,
-                &[("boundary_id", start_boundary.as_str().to_string())],
-            );
-            return false;
-        };
-        (old_task, payload, duration_secs)
-    };
-
-    effects.emit_timer_tick(&tick_payload);
-    effects.update_tray(&tick_payload);
-    effects.emit_work_started(work_duration_secs);
-
-    if let Some(join_handle) = old_timer_task {
-        let _ = join_handle.await;
-    }
-
-    effects.spawn_timer_task().await;
-
-    effects
-        .persist_current_state_with_trigger(PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START)
-        .await;
-
-    true
+    effects: &mut S,
+) -> bool
+where
+    S: SchedulerRuntimeEffects + StartWorkRuntimeEffects,
+{
+    matches!(
+        work_start::start_scheduler_work_with_boundary_context(
+            state_handle,
+            timer_status_at_tick_start,
+            timer_settings,
+            Some(start_boundary.as_str()),
+            effects,
+        )
+        .await,
+        Ok(StartWorkAttempt::Accepted)
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::Result;
+    use crate::external_adapters::clock::testing::FixedClock;
+    use crate::external_adapters::clock::Clock;
+    use crate::external_adapters::persistence::PersistenceManager;
     use crate::logging_event::{
         log_persistence_write_failure, PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START,
         PERSISTENCE_WRITE_TRIGGER_SCHEDULER_STOP_PENDING,
     };
-    use crate::managers::clock::testing::FixedClock;
-    use crate::managers::clock::Clock;
-    use crate::managers::persistence::PersistenceManager;
     use crate::types::{
         DayAutoRunSlot, HhMm, PostBreakTransitionPolicy, SessionTransitionReason, SessionType,
         TimerTickPayload, WeeklyAutoRunConfig, WorkStartOrigin,
     };
+    use crate::work_start::StartWorkPersistencePolicy;
     use chrono::{LocalResult, TimeZone, Utc};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
@@ -635,7 +619,32 @@ mod tests {
         logged_persistence_failure_count: usize,
     }
 
+    impl RecordingSchedulerRuntimeEffects {
+        fn record_persistence_attempt(&mut self, trigger: &'static str) {
+            self.persist_triggers.push(trigger);
+            if self.simulate_persistence_failure {
+                self.logged_persistence_failure_count += 1;
+                let error = std::io::Error::other("simulated scheduler persistence failure");
+                log_persistence_write_failure(trigger, &error);
+            }
+        }
+    }
+
     impl SchedulerRuntimeEffects for RecordingSchedulerRuntimeEffects {
+        fn emit_auto_run_stop_pending(&mut self) {
+            self.auto_run_stop_pending_count += 1;
+        }
+
+        fn persist_current_state_with_trigger<'a>(
+            &'a mut self,
+            trigger: &'static str,
+        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+            self.record_persistence_attempt(trigger);
+            Box::pin(async {})
+        }
+    }
+
+    impl StartWorkRuntimeEffects for RecordingSchedulerRuntimeEffects {
         fn emit_timer_tick(&mut self, tick_payload: &TimerTickPayload) {
             self.timer_tick_payloads
                 .push(RecordedTickPayload::from_payload(tick_payload));
@@ -650,26 +659,25 @@ mod tests {
             self.work_started_durations.push(work_duration_secs);
         }
 
-        fn emit_auto_run_stop_pending(&mut self) {
-            self.auto_run_stop_pending_count += 1;
-        }
-
-        fn spawn_timer_task<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        fn spawn_timer_task<'a>(
+            &'a mut self,
+            _state: &'a state::AppState,
+        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
             self.timer_task_spawn_count += 1;
             Box::pin(async {})
         }
 
-        fn persist_current_state_with_trigger<'a>(
+        fn persist_current_state<'a>(
             &'a mut self,
-            trigger: &'static str,
-        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-            self.persist_triggers.push(trigger);
-            if self.simulate_persistence_failure {
-                self.logged_persistence_failure_count += 1;
-                let error = std::io::Error::other("simulated scheduler persistence failure");
-                log_persistence_write_failure(trigger, &error);
-            }
-            Box::pin(async {})
+            _state: &'a state::AppState,
+            policy: StartWorkPersistencePolicy,
+        ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+            let StartWorkPersistencePolicy::LogAndContinue { trigger } = policy else {
+                return Box::pin(async { Ok(()) });
+            };
+
+            self.record_persistence_attempt(trigger);
+            Box::pin(async { Ok(()) })
         }
     }
 

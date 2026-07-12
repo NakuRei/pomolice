@@ -1,6 +1,6 @@
 use tauri::ipc::{CommandArg, CommandItem, InvokeError};
 
-use crate::error::public_command_argument_rejection_error;
+use crate::commands::error_response::public_command_argument_rejection_error;
 use crate::logging_event::{log_warn_event, BackendLogEvent};
 
 pub(crate) struct CommandInputRejectionContext {

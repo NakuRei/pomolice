@@ -1,111 +1,17 @@
 // Timer commands using dependency injection
 
-use std::future::Future;
-use std::pin::Pin;
-
-use chrono::{DateTime, Local};
-use tauri::{Emitter, Manager, State, WebviewWindow};
+use tauri::{Manager, State, WebviewWindow};
 
 use crate::commands::input_rejection::ObservedCommandArg;
 use crate::error::{PomoliceError, Result};
 use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
-use crate::managers::weekly_schedule::{is_now_inside_schedule_window, ActiveWindow};
+use crate::schedule_boundary::{is_now_inside_schedule_window, ActiveWindow};
 use crate::state::AppState;
 use crate::types::{
     ActiveWindowSummaryPayload, FullStatePayload, LongBreakDurationSecs, LongBreakIntervalCount,
     PostBreakDecisionAction, PostBreakTransitionPolicy, ShortBreakDurationSecs, TimerSettings,
-    TimerStatus, TimerTickPayload, WeeklyAutoRunConfig, WorkDurationSecs, WorkStartOrigin,
+    TimerStatus, WeeklyAutoRunConfig, WorkDurationSecs,
 };
-
-struct StartRuntimeSequence {
-    old_task: Option<tokio::task::JoinHandle<()>>,
-    tick_payload: TimerTickPayload,
-    work_duration: u64,
-}
-
-type BootPromptStartAttempt = Option<StartRuntimeSequence>;
-
-trait StartRuntimeEffectShell {
-    fn emit_tick(&mut self, tick_payload: &TimerTickPayload);
-    fn update_tray(&mut self, tick_payload: &TimerTickPayload);
-    fn emit_work_started(&mut self, work_duration: u64);
-    fn spawn_timer_task<'a>(
-        &'a mut self,
-        state: &'a AppState,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
-    fn before_persist(&mut self) {}
-}
-
-struct AppHandleRuntimeEffectShell<'a> {
-    app: &'a tauri::AppHandle,
-}
-
-impl StartRuntimeEffectShell for AppHandleRuntimeEffectShell<'_> {
-    fn emit_tick(&mut self, tick_payload: &TimerTickPayload) {
-        let _ = self.app.emit("timer_tick", tick_payload);
-    }
-
-    fn update_tray(&mut self, tick_payload: &TimerTickPayload) {
-        crate::tray::update_tray_icon(self.app, tick_payload);
-    }
-
-    fn emit_work_started(&mut self, work_duration: u64) {
-        let _ = self.app.emit(
-            "work_started",
-            serde_json::json!({ "duration": work_duration }),
-        );
-    }
-
-    fn spawn_timer_task<'a>(
-        &'a mut self,
-        _state: &'a AppState,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            crate::session_pipeline::spawn_timer_task(self.app).await;
-        })
-    }
-}
-
-trait TimerCommandRuntimeEffectShell {
-    fn emit_tick(&mut self, tick_payload: &TimerTickPayload);
-    fn update_tray(&mut self, tick_payload: &TimerTickPayload);
-    fn spawn_timer_task<'a>(
-        &'a mut self,
-        state: &'a AppState,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
-    fn request_fullscreen_break_exit(&mut self);
-    fn before_persist(&mut self) {}
-}
-
-struct AppHandleTimerCommandRuntimeEffectShell<'a> {
-    app: &'a tauri::AppHandle,
-}
-
-impl TimerCommandRuntimeEffectShell for AppHandleTimerCommandRuntimeEffectShell<'_> {
-    fn emit_tick(&mut self, tick_payload: &TimerTickPayload) {
-        let _ = self.app.emit("timer_tick", tick_payload);
-    }
-
-    fn update_tray(&mut self, tick_payload: &TimerTickPayload) {
-        crate::tray::update_tray_icon(self.app, tick_payload);
-    }
-
-    fn spawn_timer_task<'a>(
-        &'a mut self,
-        _state: &'a AppState,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            crate::session_pipeline::spawn_timer_task(self.app).await;
-        })
-    }
-
-    fn request_fullscreen_break_exit(&mut self) {
-        let app_handle = self.app.clone();
-        tauri::async_runtime::spawn(async move {
-            crate::session_pipeline::lib_handle_external_break_exit(app_handle).await;
-        });
-    }
-}
 
 /// Start a work session with settings
 #[tauri::command]
@@ -139,21 +45,8 @@ pub(crate) async fn start_work(
         long_break_interval,
         post_break_transition_policy,
     );
-    let now_local = state.clock.now_local();
-
-    let (auto_run_feature_enabled, weekly_auto_run_config) = {
-        let timer = state.timer_manager.lock().await;
-        let timer_state = timer.get_state();
-        (
-            timer_state.auto_run_feature_enabled,
-            timer_state.weekly_auto_run_config.clone(),
-        )
-    };
-    let manual_start_origin =
-        determine_manual_start_origin(now_local, auto_run_feature_enabled, &weekly_auto_run_config);
-
     let app = window.app_handle();
-    start_work_with_runtime_effects(&state, app, settings, manual_start_origin).await
+    crate::work_start::start_manual_work_from_command(&state, app, settings).await
 }
 
 /// Resolve manual post-break decision from continue dialog.
@@ -169,49 +62,7 @@ pub(crate) async fn resolve_post_break_decision(
     let action = action.into_inner();
 
     let app = window.app_handle();
-    let mut runtime_effect_shell = AppHandleTimerCommandRuntimeEffectShell { app };
-    resolve_post_break_decision_with_runtime_effects(&state, action, &mut runtime_effect_shell)
-        .await
-}
-
-async fn resolve_post_break_decision_with_runtime_effects<S>(
-    state: &AppState,
-    action: PostBreakDecisionAction,
-    runtime_effect_shell: &mut S,
-) -> Result<()>
-where
-    S: TimerCommandRuntimeEffectShell,
-{
-    let (old_task, tick_payload, should_spawn_timer_task) = {
-        let mut timer = state.timer_manager.lock().await;
-        validate_post_break_decision_command_state(
-            timer.status(),
-            timer.get_state().post_break_decision_pending,
-        )?;
-        let tick_payload = timer.resolve_post_break_decision(action)?;
-        let should_spawn_timer_task = action == PostBreakDecisionAction::Continue;
-        let old_task = if should_spawn_timer_task {
-            // Take/cancel under lock, but never await under lock.
-            timer.cancel_and_take_task()
-        } else {
-            None
-        };
-        (old_task, tick_payload, should_spawn_timer_task)
-    };
-
-    emit_tick_and_update_tray(runtime_effect_shell, &tick_payload);
-
-    if let Some(handle) = old_task {
-        // Await outside the lock to avoid lock-held await deadlocks.
-        let _ = handle.await;
-    }
-
-    if should_spawn_timer_task {
-        // Continue action always starts a fresh timer task.
-        runtime_effect_shell.spawn_timer_task(state).await;
-    }
-
-    persist_current_state_after_command_effects(state, runtime_effect_shell).await
+    crate::session_pipeline::resolve_post_break_decision_from_command(app, &state, action).await
 }
 
 /// Emergency stop - reset all state
@@ -230,38 +81,7 @@ pub(crate) async fn emergency_stop(
     authorize_main_window(&window, "emergency_stop")?;
 
     let app = window.app_handle();
-    let mut runtime_effect_shell = AppHandleTimerCommandRuntimeEffectShell { app };
-    emergency_stop_with_runtime_effects(&state, &mut runtime_effect_shell).await
-}
-
-async fn emergency_stop_with_runtime_effects<S>(
-    state: &AppState,
-    runtime_effect_shell: &mut S,
-) -> Result<()>
-where
-    S: TimerCommandRuntimeEffectShell,
-{
-    let (was_fullscreen_break, tick_payload, old_task) = {
-        let mut timer = state.timer_manager.lock().await;
-        // Take/cancel under the lock, but never await under the lock.
-        let old = timer.cancel_and_take_task();
-        let (was_fullscreen, payload) = timer.emergency_stop();
-        (was_fullscreen, payload, old)
-    };
-
-    emit_tick_and_update_tray(runtime_effect_shell, &tick_payload);
-
-    if let Some(handle) = old_task {
-        // Await outside the lock to avoid lock-held await deadlocks.
-        let _ = handle.await;
-    }
-
-    // Exit fullscreen if needed
-    if was_fullscreen_break {
-        runtime_effect_shell.request_fullscreen_break_exit();
-    }
-
-    persist_current_state_after_command_effects(state, runtime_effect_shell).await
+    crate::session_pipeline::emergency_stop_from_command(app, &state).await
 }
 
 /// Sync timer duration settings from frontend (idle only)
@@ -281,41 +101,15 @@ pub(crate) async fn sync_timer_duration_settings(
     let long_break_interval = long_break_interval.into_inner();
 
     let app = window.app_handle();
-    let mut runtime_effect_shell = AppHandleTimerCommandRuntimeEffectShell { app };
-    sync_timer_duration_settings_with_runtime_effects(
+    crate::session_pipeline::sync_timer_duration_settings_from_command(
+        app,
         &state,
         work_duration_secs,
         short_break_duration_secs,
         long_break_duration_secs,
         long_break_interval,
-        &mut runtime_effect_shell,
     )
     .await
-}
-
-async fn sync_timer_duration_settings_with_runtime_effects<S>(
-    state: &AppState,
-    work_duration_secs: WorkDurationSecs,
-    short_break_duration_secs: ShortBreakDurationSecs,
-    long_break_duration_secs: LongBreakDurationSecs,
-    long_break_interval: LongBreakIntervalCount,
-    runtime_effect_shell: &mut S,
-) -> Result<()>
-where
-    S: TimerCommandRuntimeEffectShell,
-{
-    let tick_payload = {
-        let mut timer = state.timer_manager.lock().await;
-        timer.sync_timer_duration_settings(
-            work_duration_secs,
-            short_break_duration_secs,
-            long_break_duration_secs,
-            long_break_interval,
-        )?
-    };
-
-    emit_tick_and_update_tray(runtime_effect_shell, &tick_payload);
-    persist_current_state_after_command_effects(state, runtime_effect_shell).await
 }
 
 /// Sync automation policies from frontend
@@ -333,70 +127,14 @@ pub(crate) async fn sync_automation_policies(
     let post_break_transition_policy = post_break_transition_policy.into_inner();
 
     let app = window.app_handle();
-    let mut runtime_effect_shell = AppHandleTimerCommandRuntimeEffectShell { app };
-    sync_automation_policies_with_runtime_effects(
+    crate::session_pipeline::sync_automation_policies_from_command(
+        app,
         &state,
         auto_run_feature_enabled,
         weekly_auto_run_config,
         post_break_transition_policy,
-        &mut runtime_effect_shell,
     )
     .await
-}
-
-async fn sync_automation_policies_with_runtime_effects<S>(
-    state: &AppState,
-    auto_run_feature_enabled: bool,
-    weekly_auto_run_config: WeeklyAutoRunConfig,
-    post_break_transition_policy: PostBreakTransitionPolicy,
-    runtime_effect_shell: &mut S,
-) -> Result<()>
-where
-    S: TimerCommandRuntimeEffectShell,
-{
-    let (tick_payload, auto_run_boundary_scope_changed) = {
-        let mut timer = state.timer_manager.lock().await;
-        let previous_auto_run_feature_enabled = timer.get_state().auto_run_feature_enabled;
-        let previous_weekly_auto_run_config = timer.get_state().weekly_auto_run_config.clone();
-        let auto_run_boundary_scope_changed = previous_auto_run_feature_enabled
-            != auto_run_feature_enabled
-            || previous_weekly_auto_run_config != weekly_auto_run_config;
-
-        let tick_payload = timer.sync_automation_policies(
-            auto_run_feature_enabled,
-            weekly_auto_run_config,
-            post_break_transition_policy,
-        );
-
-        (tick_payload, auto_run_boundary_scope_changed)
-    };
-
-    if auto_run_boundary_scope_changed {
-        state.notify_auto_run_boundary_scope_changed();
-    }
-
-    emit_tick_and_update_tray(runtime_effect_shell, &tick_payload);
-    persist_current_state_after_command_effects(state, runtime_effect_shell).await
-}
-
-fn emit_tick_and_update_tray<S>(runtime_effect_shell: &mut S, tick_payload: &TimerTickPayload)
-where
-    S: TimerCommandRuntimeEffectShell,
-{
-    runtime_effect_shell.emit_tick(tick_payload);
-    runtime_effect_shell.update_tray(tick_payload);
-}
-
-async fn persist_current_state_after_command_effects<S>(
-    state: &AppState,
-    runtime_effect_shell: &mut S,
-) -> Result<()>
-where
-    S: TimerCommandRuntimeEffectShell,
-{
-    runtime_effect_shell.before_persist();
-    state.persist_current_state_async().await?;
-    Ok(())
 }
 
 fn authorize_main_window_label(window_label: &str) -> Result<()> {
@@ -432,151 +170,34 @@ fn to_active_window_summary_payload(active_window: &ActiveWindow) -> ActiveWindo
     }
 }
 
-fn determine_manual_start_origin(
-    now_local: DateTime<Local>,
-    auto_run_feature_enabled: bool,
-    weekly_auto_run_config: &WeeklyAutoRunConfig,
-) -> WorkStartOrigin {
-    if auto_run_feature_enabled
-        && is_now_inside_schedule_window(now_local, weekly_auto_run_config).is_some()
-    {
-        WorkStartOrigin::ManualInsideScheduleWindow
-    } else {
-        WorkStartOrigin::ManualOutsideScheduleWindow
-    }
-}
-
-fn validate_post_break_decision_command_state(
-    timer_status: TimerStatus,
-    post_break_decision_pending: bool,
-) -> Result<()> {
-    if timer_status == TimerStatus::Idle && post_break_decision_pending {
-        return Ok(());
-    }
-
-    Err(PomoliceError::InvalidStateTransition {
-        action: "resolve post-break decision".to_string(),
-        current_state: timer_status,
-    })
-}
-
-async fn start_work_with_runtime_effects(
-    state: &AppState,
-    app: &tauri::AppHandle,
-    settings: TimerSettings,
-    manual_start_origin: WorkStartOrigin,
-) -> Result<()> {
-    let start_sequence =
-        prepare_manual_start_sequence(state, settings, manual_start_origin).await?;
-
-    let mut runtime_effect_shell = AppHandleRuntimeEffectShell { app };
-    apply_start_runtime_effects(state, &mut runtime_effect_shell, start_sequence, |_| {}).await
-}
-
-async fn resolve_boot_auto_start_prompt_start_contract(
-    state: &AppState,
-    timer_settings: TimerSettings,
-    runtime_effect_shell: &mut impl StartRuntimeEffectShell,
-) -> Result<()> {
-    let start_attempt = prepare_boot_prompt_start(state, timer_settings).await?;
-
-    let Some(start_sequence) = start_attempt else {
-        state.allow_start_boundaries_after_startup_prompt();
-        return Ok(());
-    };
-
-    apply_start_runtime_effects(
-        state,
-        runtime_effect_shell,
-        start_sequence,
-        AppState::allow_start_boundaries_after_startup_prompt,
-    )
-    .await
-}
-
-async fn prepare_boot_prompt_start(
-    state: &AppState,
-    timer_settings: TimerSettings,
-) -> Result<BootPromptStartAttempt> {
-    let start_attempt = {
-        let mut timer_manager = state.timer_manager.lock().await;
-        // Boot-prompt resolution must attempt the state transition before cancelling any task.
-        // If another path already started a replacement session, InvalidStateTransition degrades
-        // to NotApplicable instead of tearing down that already-running task.
-        match timer_manager.start_work(timer_settings, WorkStartOrigin::ManualInsideScheduleWindow)
-        {
-            Ok((payload, duration)) => Ok(Some(StartRuntimeSequence {
-                old_task: timer_manager.cancel_and_take_task(),
-                tick_payload: payload,
-                work_duration: duration,
-            })),
-            Err(PomoliceError::InvalidStateTransition { .. }) => Ok(None),
-            Err(err) => Err(err),
-        }
-    }?;
-
-    Ok(start_attempt)
-}
-
-async fn prepare_manual_start_sequence(
-    state: &AppState,
-    settings: TimerSettings,
-    manual_start_origin: WorkStartOrigin,
-) -> Result<StartRuntimeSequence> {
-    let start_sequence = {
-        let mut timer = state.timer_manager.lock().await;
-        let (tick_payload, work_duration) = timer.start_work(settings, manual_start_origin)?;
-        let old_task = timer.cancel_and_take_task();
-        StartRuntimeSequence {
-            old_task,
-            tick_payload,
-            work_duration,
-        }
-    };
-
-    Ok(start_sequence)
-}
-
-async fn apply_start_runtime_effects<S, F>(
-    state: &AppState,
-    runtime_effect_shell: &mut S,
-    start_sequence: StartRuntimeSequence,
-    before_persist: F,
-) -> Result<()>
-where
-    S: StartRuntimeEffectShell,
-    F: FnOnce(&AppState),
-{
-    runtime_effect_shell.emit_tick(&start_sequence.tick_payload);
-    runtime_effect_shell.update_tray(&start_sequence.tick_payload);
-    runtime_effect_shell.emit_work_started(start_sequence.work_duration);
-
-    // Await the old task outside the lock so the old tick loop cannot overlap
-    // with the replacement session after runtime effects have been emitted.
-    if let Some(handle) = start_sequence.old_task {
-        let _ = handle.await;
-    }
-
-    runtime_effect_shell.spawn_timer_task(state).await;
-    before_persist(state);
-    runtime_effect_shell.before_persist();
-    state.persist_current_state_async().await?;
-    Ok(())
-}
-
 #[cfg(test)]
 async fn start_work_for_tests(
     state: &AppState,
     settings: TimerSettings,
-    manual_start_origin: WorkStartOrigin,
-    runtime_effect_shell: &mut impl StartRuntimeEffectShell,
+    manual_start_origin: crate::types::WorkStartOrigin,
+    runtime_effect_shell: &mut impl crate::work_start::StartWorkRuntimeEffects,
 ) -> Result<()> {
-    let start_sequence =
-        prepare_manual_start_sequence(state, settings, manual_start_origin).await?;
-
-    apply_start_runtime_effects(state, runtime_effect_shell, start_sequence, |_| {}).await
+    crate::work_start::start_manual_work(
+        state,
+        settings,
+        manual_start_origin,
+        runtime_effect_shell,
+    )
+    .await?;
+    Ok(())
 }
 
+#[cfg(test)]
+async fn start_work_after_authorizing_window_label_for_tests(
+    window_label: &str,
+    state: &AppState,
+    settings: TimerSettings,
+    manual_start_origin: crate::types::WorkStartOrigin,
+    runtime_effect_shell: &mut impl crate::work_start::StartWorkRuntimeEffects,
+) -> Result<()> {
+    authorize_main_window_label(window_label)?;
+    start_work_for_tests(state, settings, manual_start_origin, runtime_effect_shell).await
+}
 async fn get_full_state_contract(state: &AppState) -> Result<FullStatePayload> {
     let now_local = state.clock.now_local();
 
@@ -619,42 +240,6 @@ pub(crate) async fn get_full_state(
     get_full_state_contract(&state).await
 }
 
-async fn resolve_boot_auto_start_prompt_contract(
-    state: &AppState,
-    start_now: bool,
-    runtime_effect_shell: &mut impl StartRuntimeEffectShell,
-) -> Result<()> {
-    let prompt_is_waiting = state.startup_auto_start_prompt_is_waiting();
-    let can_resolve_prompt = {
-        let timer_manager = state.timer_manager.lock().await;
-        timer_manager.status() == TimerStatus::Idle && prompt_is_waiting
-    };
-
-    if !can_resolve_prompt {
-        if prompt_is_waiting {
-            state.allow_start_boundaries_after_startup_prompt();
-        }
-        return Ok(());
-    }
-
-    let timer_settings = {
-        let timer_manager = state.timer_manager.lock().await;
-        timer_manager.get_state().settings.clone()
-    };
-
-    if start_now {
-        return resolve_boot_auto_start_prompt_start_contract(
-            state,
-            timer_settings,
-            runtime_effect_shell,
-        )
-        .await;
-    }
-
-    state.allow_start_boundaries_after_startup_prompt();
-    Ok(())
-}
-
 /// Resolve startup auto-start confirmation prompt.
 #[tauri::command]
 pub(crate) async fn resolve_boot_auto_start_prompt(
@@ -666,25 +251,40 @@ pub(crate) async fn resolve_boot_auto_start_prompt(
     let start_now = start_now.into_inner();
 
     let app = window.app_handle();
-    let mut runtime_effect_shell = AppHandleRuntimeEffectShell { app };
-    resolve_boot_auto_start_prompt_contract(&state, start_now, &mut runtime_effect_shell).await
+    crate::work_start::resolve_boot_auto_start_prompt_from_command(&state, app, start_now).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::managers::clock::testing::FixedClock;
-    use crate::managers::clock::Clock;
-    use crate::managers::persistence::{PersistenceLoadOutcome, PersistenceManager};
+    use crate::external_adapters::clock::testing::FixedClock;
+    use crate::external_adapters::clock::Clock;
+    use crate::external_adapters::persistence::{PersistenceLoadOutcome, PersistenceManager};
     use crate::scheduler::SchedulerTickTestRuntime;
+    use crate::session_pipeline::{
+        emergency_stop_with_runtime_effects, resolve_post_break_decision_with_runtime_effects,
+        sync_automation_policies_with_runtime_effects,
+        sync_timer_duration_settings_with_runtime_effects,
+        validate_post_break_decision_command_state, TimerCommandRuntimeEffectShell,
+    };
+    use crate::work_start::{
+        determine_manual_start_origin,
+        resolve_boot_auto_start_prompt_with_effects as resolve_boot_auto_start_prompt_contract,
+        StartWorkRuntimeEffects,
+    };
     use chrono::{Local, LocalResult, Utc};
+    use std::future::Future;
     use std::path::{Path, PathBuf};
+    use std::pin::Pin;
     use std::sync::atomic::{AtomicBool as StdAtomicBool, Ordering};
     use std::sync::{Arc, Mutex as StdMutex};
     use std::time::Duration as StdDuration;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use crate::types::{DayAutoRunSlot, HhMm, SessionTransitionReason, SessionType, TimerState};
+    use crate::types::{
+        DayAutoRunSlot, HhMm, SessionTransitionReason, SessionType, TimerState, TimerTickPayload,
+        WorkStartOrigin,
+    };
     use chrono::TimeZone;
     use serde_json::json;
 
@@ -720,8 +320,8 @@ mod tests {
         work_started_durations: Vec<u64>,
     }
 
-    impl StartRuntimeEffectShell for RecordingRuntimeEffectShell {
-        fn emit_tick(&mut self, tick_payload: &TimerTickPayload) {
+    impl StartWorkRuntimeEffects for RecordingRuntimeEffectShell {
+        fn emit_timer_tick(&mut self, tick_payload: &TimerTickPayload) {
             self.emitted_tick_snapshots
                 .push(TimerTickSnapshot::from(tick_payload));
         }
@@ -753,8 +353,8 @@ mod tests {
         }
     }
 
-    impl StartRuntimeEffectShell for ActiveCountdownRuntimeEffectShell {
-        fn emit_tick(&mut self, _tick_payload: &TimerTickPayload) {}
+    impl StartWorkRuntimeEffects for ActiveCountdownRuntimeEffectShell {
+        fn emit_timer_tick(&mut self, _tick_payload: &TimerTickPayload) {}
 
         fn update_tray(&mut self, _tick_payload: &TimerTickPayload) {}
 
@@ -885,10 +485,12 @@ mod tests {
         let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
         let persistence = PersistenceManager::new(as_clock_trait(&clock), Some(PathBuf::from(".")))
             .with_injected_save_error_hook(Arc::new(|| {
-                Some(crate::managers::persistence::SaveError::Serialize {
-                    source: serde_json::from_str::<serde_json::Value>("{")
-                        .expect_err("invalid JSON should fail to parse"),
-                })
+                Some(
+                    crate::external_adapters::persistence::SaveError::Serialize {
+                        source: serde_json::from_str::<serde_json::Value>("{")
+                            .expect_err("invalid JSON should fail to parse"),
+                    },
+                )
             }));
         let (app_state, _) =
             AppState::build_startup_state_for_tests(as_clock_trait(&clock), persistence).await;
@@ -1341,10 +943,12 @@ mod tests {
         let persistence = PersistenceManager::new(as_clock_trait(&clock), Some(app_data_dir))
             .with_injected_save_error_hook(Arc::new(move || {
                 if fail_saves_for_hook.load(Ordering::Acquire) {
-                    Some(crate::managers::persistence::SaveError::Serialize {
-                        source: serde_json::from_str::<serde_json::Value>("{")
-                            .expect_err("invalid JSON should fail to parse"),
-                    })
+                    Some(
+                        crate::external_adapters::persistence::SaveError::Serialize {
+                            source: serde_json::from_str::<serde_json::Value>("{")
+                                .expect_err("invalid JSON should fail to parse"),
+                        },
+                    )
                 } else {
                     None
                 }
@@ -1393,17 +997,26 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn test_unauthorized_window_returns_public_command_error() {
-        let result = authorize_main_window_label("C:\\Users\\nak\\secret\\settings");
+    #[tokio::test]
+    async fn test_unauthorized_window_returns_public_command_error() {
+        let state = build_test_state_without_persistence_path().await;
+        let mut runtime_effect_shell = RecordingRuntimeEffectShell::default();
+        let result = start_work_after_authorizing_window_label_for_tests(
+            "C:\\Users\\nak\\secret\\settings",
+            &state,
+            TimerSettings::default(),
+            WorkStartOrigin::ManualOutsideScheduleWindow,
+            &mut runtime_effect_shell,
+        )
+        .await;
 
         assert_command_result_public_error(
             result,
             "unauthorized_window",
             &["C:\\Users\\nak", "secret", "settings"],
         );
+        assert_no_start_runtime_effects(&runtime_effect_shell);
     }
-
     #[test]
     fn test_determine_manual_start_origin_returns_inside_when_enabled_and_in_window() {
         let now_local = Local
@@ -1963,6 +1576,7 @@ mod tests {
         .await;
 
         assert_command_result_public_error(result, "rate_limited", &["please wait", "ms"]);
+        assert_no_start_runtime_effects(&second_runtime_effect_shell);
     }
 
     #[tokio::test(start_paused = true)]

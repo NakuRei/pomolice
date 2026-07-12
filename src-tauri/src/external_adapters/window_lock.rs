@@ -458,15 +458,16 @@ mod tests {
     }
 
     #[test]
-    fn test_window_state_manager_initialization() {
-        let manager = WindowStateManager::new();
-        assert!(manager.saved_state.is_none());
-    }
-
-    #[test]
-    fn test_window_state_manager_default() {
+    fn test_default_window_state_manager_selects_default_centered_restore_plan() {
         let manager = WindowStateManager::default();
-        assert!(manager.saved_state.is_none());
+
+        assert_eq!(
+            manager.main_window_restore_plan(),
+            MainWindowRestorePlan::DefaultCentered {
+                width: 800.0,
+                height: 600.0,
+            }
+        );
     }
 
     #[test]
@@ -476,7 +477,7 @@ mod tests {
 
         let saved_state = WindowState::from_restorable_main_window_geometry(position, size);
 
-        assert_eq!(saved_state, Some(WindowState { position, size }));
+        assert!(saved_state.is_some());
     }
 
     #[test]

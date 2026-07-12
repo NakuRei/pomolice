@@ -282,7 +282,7 @@ fn idle_app_icon() -> Option<&'static TrayIconPixels> {
 
 fn decode_idle_app_icon(
 ) -> std::result::Result<TrayIconPixels, Box<dyn std::error::Error + Send + Sync>> {
-    let decoder = png::Decoder::new(Cursor::new(&include_bytes!("../icons/32x32.png")[..]));
+    let decoder = png::Decoder::new(Cursor::new(&include_bytes!("../../icons/32x32.png")[..]));
     let mut reader = decoder.read_info()?;
 
     if reader.output_color_type().0 != png::ColorType::Rgba {

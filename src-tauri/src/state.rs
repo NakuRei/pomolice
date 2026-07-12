@@ -10,14 +10,20 @@ use tauri::async_runtime::JoinHandle;
 use tokio::sync::{Mutex, Notify, Semaphore};
 use tokio_util::sync::CancellationToken;
 
-use crate::error::{PomoliceError, Result as AppResult};
+use crate::error::{PersistenceFailure, PomoliceError, Result as AppResult};
+use crate::external_adapters::clock::Clock;
+use crate::external_adapters::input_monitor::InputMonitorManager;
+use crate::external_adapters::persistence::{
+    PersistenceLoadOutcome, PersistenceManager, SaveError,
+};
+use crate::external_adapters::window_lock::WindowStateManager;
 use crate::logging_event::{log_error_event, log_info_event, BackendLogEvent};
-use crate::managers::clock::Clock;
-use crate::managers::input_monitor::InputMonitorManager;
-use crate::managers::persistence::{PersistenceLoadOutcome, PersistenceManager, SaveError};
-use crate::managers::timer::TimerStateManager;
-use crate::managers::window::WindowStateManager;
+use crate::timer_state_transition::TimerStateManager;
 use crate::types::{SessionTransitionOutcome, TimerState, TimerStatus, TimerTickPayload};
+
+pub(crate) fn update_tray_icon(app: &tauri::AppHandle, payload: &TimerTickPayload) {
+    crate::external_adapters::tray_icon::update_tray_icon(app, payload);
+}
 
 /// Lifecycle handles for the weekly scheduler background task.
 #[derive(Default)]
@@ -400,7 +406,7 @@ impl AppState {
             return self
                 .persistence
                 .save_state_sync(timer_state)
-                .map_err(PomoliceError::from);
+                .map_err(persistence_save_failure);
         }
 
         let ticket = self.ordered_save_lane.issue_ticket();
@@ -422,7 +428,7 @@ impl AppState {
         .await;
 
         match save_result {
-            Ok(save_result) => save_result.map_err(PomoliceError::from),
+            Ok(save_result) => save_result.map_err(persistence_save_failure),
             Err(join_error) => {
                 log_error_event(
                     BackendLogEvent::StoragePersistenceWriteFailed,
@@ -472,6 +478,46 @@ impl AppState {
         };
 
         transition.await
+    }
+
+    pub(crate) async fn start_input_monitor_for_break(&self) {
+        let mut input_monitor = self.input_monitor.lock().await;
+        input_monitor.start();
+    }
+
+    pub(crate) async fn rollback_input_monitor_break_enter_failure(&self) {
+        let input_monitor = self.input_monitor.lock().await;
+        input_monitor.rollback_break_enter_failure();
+    }
+
+    pub(crate) async fn stop_input_monitor_for_break(&self) {
+        let mut input_monitor = self.input_monitor.lock().await;
+        input_monitor.stop();
+    }
+
+    pub(crate) async fn capture_main_window_state_for_break(
+        &self,
+        app: &tauri::AppHandle,
+    ) -> crate::error::Result<()> {
+        let saved_state = WindowStateManager::capture_main_window_state_for_break(app).await?;
+        let mut window_manager = self.window_manager.lock().await;
+        window_manager.set_saved_state(saved_state);
+        Ok(())
+    }
+
+    pub(crate) async fn enter_fullscreen_break_lock(
+        &self,
+        app: tauri::AppHandle,
+    ) -> crate::error::Result<()> {
+        WindowStateManager::enter_fullscreen_all_monitors(app).await
+    }
+
+    pub(crate) async fn release_fullscreen_break_lock(
+        &self,
+        app: &tauri::AppHandle,
+    ) -> crate::error::Result<()> {
+        let mut window_manager = self.window_manager.lock().await;
+        window_manager.exit_fullscreen_all_monitors(app)
     }
 
     pub(crate) fn restored_running_saved_at_local(&self) -> Option<DateTime<Local>> {
@@ -592,6 +638,10 @@ impl AppState {
     }
 }
 
+fn persistence_save_failure(error: SaveError) -> PomoliceError {
+    PomoliceError::PersistenceSave(PersistenceFailure::from_error(error))
+}
+
 impl StartupPreparation {
     fn idle(restore_status: AppRestoreStatus) -> Self {
         Self {
@@ -655,7 +705,7 @@ impl Drop for AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::managers::clock::testing::FixedClock;
+    use crate::external_adapters::clock::testing::FixedClock;
     use crate::types::{ScheduleStopState, SessionType, PERSISTED_STATE_SCHEMA_VERSION};
     use chrono::TimeZone;
     use serde_json::json;
@@ -1361,7 +1411,7 @@ mod tests {
         let first_result = app_state.persist_current_state_async().await;
         assert!(matches!(
             first_result,
-            Err(PomoliceError::PersistenceSave(SaveError::Write { .. }))
+            Err(PomoliceError::PersistenceSave(_))
         ));
 
         {

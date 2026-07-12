@@ -8,9 +8,9 @@ mod startup_restore_tests {
 
     use chrono::{DateTime, Local, TimeZone, Utc};
 
-    use crate::managers::clock::testing::FixedClock;
-    use crate::managers::clock::Clock;
-    use crate::managers::persistence::PersistenceManager;
+    use crate::external_adapters::clock::testing::FixedClock;
+    use crate::external_adapters::clock::Clock;
+    use crate::external_adapters::persistence::PersistenceManager;
     use crate::session_pipeline::{
         apply_startup_restore_with_effects, SessionPipelineRuntimeEffects,
     };
@@ -139,17 +139,11 @@ mod startup_restore_tests {
         assert_eq!(effects.restart_timer_task_count, 0);
     }
 
-    fn assert_emitted_event_set(
+    fn assert_emitted_event_order(
         effects: &RecordingStartupRestoreRuntimeEffects,
         expected_event_names: &[&'static str],
     ) {
-        assert_eq!(
-            effects.emitted_event_names.len(),
-            expected_event_names.len()
-        );
-        for expected_event_name in expected_event_names {
-            assert!(effects.emitted_event_names.contains(expected_event_name));
-        }
+        assert_eq!(effects.emitted_event_names.as_slice(), expected_event_names);
     }
 
     #[tokio::test]
@@ -286,6 +280,51 @@ mod startup_restore_tests {
     }
 
     #[tokio::test]
+    async fn test_startup_with_saved_break_restores_enforcement_and_restarts_timer() {
+        let temp_dir = create_temp_dir("saved-break");
+        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
+        let restore_at_utc = create_utc_datetime(2025, 2, 1, 9, 2, 0);
+        let save_clock = fixed_clock(saved_at_utc);
+        let restore_clock = fixed_clock(restore_at_utc);
+        let saved_remaining_seconds = 4 * 60;
+
+        save_state_to_dir(
+            &save_clock,
+            &temp_dir,
+            TimerState {
+                status: TimerStatus::OnBreak,
+                session_type: SessionType::ShortBreak,
+                remaining_seconds: saved_remaining_seconds,
+                current_cycle: 2,
+                completed_pomodoros: 1,
+                ..TimerState::default()
+            },
+        );
+
+        let (app_state, effects) =
+            run_startup_restore_from_dir(Arc::clone(&restore_clock), &temp_dir).await;
+
+        let timer_state = current_timer_state(&app_state).await;
+        assert_eq!(timer_state.status, TimerStatus::OnBreak);
+        assert_eq!(timer_state.session_type, SessionType::ShortBreak);
+        assert_eq!(timer_state.remaining_seconds, saved_remaining_seconds);
+        assert_eq!(timer_state.current_cycle, 2);
+        assert_eq!(timer_state.completed_pomodoros, 1);
+        assert_eq!(
+            app_state.restored_running_saved_at_local(),
+            Some(saved_at_utc.with_timezone(&Local))
+        );
+        assert_eq!(effects.emitted_event_names, ["timer_tick"]);
+        assert_eq!(effects.tray_update_count, 1);
+        assert_eq!(effects.break_enter_count, 1);
+        assert_eq!(effects.break_exit_count, 0);
+        assert_eq!(effects.persist_count, 0);
+        assert_eq!(effects.restart_timer_task_count, 1);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[tokio::test]
     async fn test_startup_with_expired_work_enters_break_persists_and_restarts_break_timer() {
         let temp_dir = create_temp_dir("expired-work");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
@@ -318,7 +357,7 @@ mod startup_restore_tests {
             app_state.restored_running_saved_at_local(),
             Some(saved_at_utc.with_timezone(&Local))
         );
-        assert_emitted_event_set(&effects, &["session_completed", "timer_tick"]);
+        assert_emitted_event_order(&effects, &["session_completed", "timer_tick"]);
         assert_eq!(effects.tray_update_count, 1);
         assert_eq!(effects.break_enter_count, 1);
         assert_eq!(effects.break_exit_count, 0);
@@ -359,7 +398,7 @@ mod startup_restore_tests {
             timer_state.settings.work_duration_secs.get()
         );
         assert!(app_state.restored_running_saved_at_local().is_none());
-        assert_emitted_event_set(
+        assert_emitted_event_order(
             &effects,
             &["session_completed", "auto_run_stopped", "timer_tick"],
         );

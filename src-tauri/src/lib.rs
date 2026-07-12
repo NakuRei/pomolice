@@ -4,18 +4,20 @@ use tauri_plugin_notification::NotificationExt;
 
 type RunResult = std::result::Result<(), Box<dyn std::error::Error>>;
 
+mod app_handle_timer_effects;
 mod commands;
 mod error;
+mod external_adapters;
 mod log_redaction;
-mod logging;
 mod logging_event;
-mod managers;
+mod schedule_boundary;
 mod scheduler;
 mod session_pipeline;
 mod state;
-mod tray;
+mod timer_state_transition;
 mod tray_icon_renderer;
 mod types;
+mod work_start;
 
 pub use crate::logging_event::{log_error_event, log_info_event, log_warn_event, BackendLogEvent};
 use crate::logging_event::{
@@ -28,7 +30,7 @@ fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
             api.prevent_close();
             let _ = window.hide();
 
-            if tray::should_show_tray_notification() {
+            if external_adapters::tray_icon::should_show_tray_notification() {
                 log_info_event(
                     BackendLogEvent::AppWindowHiddenToTray,
                     &[("first_notification", "true".to_string())],
@@ -55,8 +57,10 @@ pub fn run() -> RunResult {
         clippy::exit,
         reason = "Tauri's generate_context!() codegen calls process::exit() if generated context creation panics"
     )]
+    let tauri_context = tauri::generate_context!();
+
     let app = tauri::Builder::default()
-        .plugin(logging::build_log_plugin())
+        .plugin(external_adapters::logging::build_log_plugin())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let app_for_escape = app.handle().clone();
@@ -73,11 +77,13 @@ pub fn run() -> RunResult {
                     session_pipeline::lib_handle_input_detected(app).await;
                 });
             };
-            let clock: Arc<dyn managers::clock::Clock + Send + Sync> =
-                Arc::new(managers::clock::SystemClock);
+            let clock: Arc<dyn external_adapters::clock::Clock + Send + Sync> =
+                Arc::new(external_adapters::clock::SystemClock);
             let app_data_dir = app.handle().path().app_data_dir().ok();
-            let persistence =
-                managers::persistence::PersistenceManager::new(Arc::clone(&clock), app_data_dir);
+            let persistence = external_adapters::persistence::PersistenceManager::new(
+                Arc::clone(&clock),
+                app_data_dir,
+            );
             let (app_state, initialization_outcome) =
                 async_runtime::block_on(state::AppState::build_startup_state_with_handlers(
                     clock,
@@ -90,7 +96,7 @@ pub fn run() -> RunResult {
 
             app.manage(app_state);
 
-            if let Err(e) = tray::setup_tray(app.handle()) {
+            if let Err(e) = external_adapters::tray_icon::setup_tray(app.handle()) {
                 log_error_event(
                     BackendLogEvent::AppTraySetupFailed,
                     &[("error_message", e.to_string())],
@@ -135,7 +141,7 @@ pub fn run() -> RunResult {
             commands::timer::get_full_state,
             commands::timer::resolve_boot_auto_start_prompt,
         ])
-        .build(tauri::generate_context!())?;
+        .build(tauri_context)?;
 
     app.run(|app_handle, event| {
         if matches!(event, tauri::RunEvent::Exit) {
@@ -155,11 +161,11 @@ mod shared_tests;
 
 #[cfg(test)]
 mod run_event_tests {
+    use crate::external_adapters::clock::{testing::FixedClock, Clock};
+    use crate::external_adapters::persistence::{PersistenceLoadOutcome, PersistenceManager};
     use crate::logging_event::{
         render_persistence_write_failure_message, PERSISTENCE_WRITE_TRIGGER_RUN_EVENT_EXIT,
     };
-    use crate::managers::clock::{testing::FixedClock, Clock};
-    use crate::managers::persistence::{PersistenceLoadOutcome, PersistenceManager};
     use crate::state;
     use crate::types::{TimerState, TimerStatus};
     use chrono::{Local, TimeZone, Utc};

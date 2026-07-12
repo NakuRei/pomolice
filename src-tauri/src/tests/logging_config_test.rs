@@ -1,7 +1,7 @@
 use log::{Level, LevelFilter, Metadata};
 use tauri_plugin_log::{RotationStrategy, TimezoneStrategy, WEBVIEW_TARGET};
 
-use crate::logging::{
+use crate::external_adapters::logging::{
     default_log_level, max_log_file_size_bytes, resolve_log_target_specs, rotation_strategy,
     should_log, timezone_strategy, LogTargetSpec,
 };
