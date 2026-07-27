@@ -15,6 +15,9 @@ pub(crate) mod join_error;
 mod scheduler_concurrency_test;
 
 #[cfg(test)]
+mod timer_workflow_regression_test;
+
+#[cfg(test)]
 mod startup_restore_test;
 
 #[cfg(test)]

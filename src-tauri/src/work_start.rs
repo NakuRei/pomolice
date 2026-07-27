@@ -117,6 +117,16 @@ pub(crate) async fn start_manual_work_from_command(
     app: &AppHandle,
     settings: TimerSettings,
 ) -> Result<()> {
+    let mut effects = AppHandleStartWorkRuntimeEffects { app };
+    start_manual_work_from_command_with_effects(state, settings, &mut effects).await?;
+    Ok(())
+}
+
+pub(crate) async fn start_manual_work_from_command_with_effects(
+    state: &AppState,
+    settings: TimerSettings,
+    effects: &mut impl StartWorkRuntimeEffects,
+) -> Result<StartWorkAttempt> {
     let now_local = state.clock.now_local();
     let (auto_run_feature_enabled, weekly_auto_run_config) = {
         let timer = state.timer_manager.lock().await;
@@ -128,9 +138,8 @@ pub(crate) async fn start_manual_work_from_command(
     };
     let manual_start_origin =
         determine_manual_start_origin(now_local, auto_run_feature_enabled, &weekly_auto_run_config);
-    let mut effects = AppHandleStartWorkRuntimeEffects { app };
-    start_manual_work(state, settings, manual_start_origin, &mut effects).await?;
-    Ok(())
+
+    start_manual_work(state, settings, manual_start_origin, effects).await
 }
 
 pub(crate) async fn resolve_boot_auto_start_prompt_from_command(
@@ -365,6 +374,461 @@ fn log_scheduler_start_rejection(boundary_id: Option<&str>) {
         BackendLogEvent::SchedulerSkippedAutoStartDueToRejection,
         &fields,
     );
+}
+
+#[cfg(test)]
+mod timer_command_behavior_tests {
+    use super::*;
+    use crate::external_adapters::clock::{testing::FixedClock, Clock};
+    use crate::external_adapters::persistence::{PersistenceLoadOutcome, PersistenceManager};
+    use crate::types::{
+        LongBreakDurationSecs, LongBreakIntervalCount, PostBreakTransitionPolicy, SessionType,
+        ShortBreakDurationSecs, TimerState, WorkDurationSecs, WorkStartOrigin,
+    };
+    use chrono::{Local, TimeZone, Utc};
+    use std::future::Future;
+    use std::path::{Path, PathBuf};
+    use std::pin::Pin;
+    use std::sync::Arc;
+    use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
+
+    #[derive(Clone, Debug, PartialEq)]
+    struct TimerTickSnapshot {
+        status: TimerStatus,
+        remaining_seconds: u64,
+        session_type: SessionType,
+        current_cycle: u32,
+        completed_pomodoros: u32,
+        break_interaction_count: u32,
+        is_fullscreen_break: bool,
+    }
+
+    impl From<&TimerTickPayload> for TimerTickSnapshot {
+        fn from(payload: &TimerTickPayload) -> Self {
+            Self {
+                status: payload.status,
+                remaining_seconds: payload.remaining_seconds,
+                session_type: payload.session_type,
+                current_cycle: payload.current_cycle,
+                completed_pomodoros: payload.completed_pomodoros,
+                break_interaction_count: payload.break_interaction_count,
+                is_fullscreen_break: payload.is_fullscreen_break,
+            }
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingRuntimeEffectShell {
+        emitted_tick_snapshots: Vec<TimerTickSnapshot>,
+        tray_tick_snapshots: Vec<TimerTickSnapshot>,
+        work_started_durations: Vec<u64>,
+    }
+
+    impl StartWorkRuntimeEffects for RecordingRuntimeEffectShell {
+        fn emit_timer_tick(&mut self, tick_payload: &TimerTickPayload) {
+            self.emitted_tick_snapshots
+                .push(TimerTickSnapshot::from(tick_payload));
+        }
+
+        fn update_tray(&mut self, tick_payload: &TimerTickPayload) {
+            self.tray_tick_snapshots
+                .push(TimerTickSnapshot::from(tick_payload));
+        }
+
+        fn emit_work_started(&mut self, work_duration: u64) {
+            self.work_started_durations.push(work_duration);
+        }
+
+        fn spawn_timer_task<'a>(
+            &'a mut self,
+            _state: &'a AppState,
+        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+            Box::pin(async {})
+        }
+    }
+
+    fn create_temp_dir(test_name: &str) -> PathBuf {
+        let timestamp_nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+
+        let path = std::env::temp_dir().join(format!(
+            "pomolice-timer-command-{}-{}-{}",
+            test_name,
+            std::process::id(),
+            timestamp_nanos
+        ));
+        std::fs::create_dir_all(&path).expect("temp directory should be created");
+        path
+    }
+
+    fn cleanup_temp_dir(path: &Path) {
+        let _ = std::fs::remove_dir_all(path);
+    }
+
+    fn create_utc_datetime(
+        year: i32,
+        month: u32,
+        day: u32,
+        hour: u32,
+        minute: u32,
+        second: u32,
+    ) -> chrono::DateTime<Utc> {
+        Utc.with_ymd_and_hms(year, month, day, hour, minute, second)
+            .single()
+            .expect("valid UTC datetime")
+    }
+
+    fn fixed_clock(now_utc: chrono::DateTime<Utc>) -> Arc<FixedClock> {
+        Arc::new(FixedClock::new(now_utc.with_timezone(&Local)))
+    }
+
+    fn as_clock_trait(clock: &Arc<FixedClock>) -> Arc<dyn Clock + Send + Sync> {
+        Arc::<FixedClock>::clone(clock) as Arc<dyn Clock + Send + Sync>
+    }
+
+    async fn build_test_state_with_persistence_dir(app_data_dir: PathBuf) -> AppState {
+        let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
+        let persistence = PersistenceManager::new(as_clock_trait(&clock), Some(app_data_dir));
+        let (app_state, _) =
+            AppState::build_startup_state_for_tests(as_clock_trait(&clock), persistence).await;
+        app_state
+    }
+
+    async fn build_test_state_without_persistence_path() -> AppState {
+        let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
+        let persistence = PersistenceManager::new(as_clock_trait(&clock), None);
+        let (app_state, _) =
+            AppState::build_startup_state_for_tests(as_clock_trait(&clock), persistence).await;
+        app_state
+    }
+
+    fn timer_settings(
+        work_duration_secs: u64,
+        short_break_duration_secs: u64,
+        long_break_duration_secs: u64,
+        long_break_interval: u32,
+        post_break_transition_policy: PostBreakTransitionPolicy,
+    ) -> TimerSettings {
+        TimerSettings::new(
+            WorkDurationSecs::try_new(work_duration_secs).expect("work duration should be valid"),
+            ShortBreakDurationSecs::try_new(short_break_duration_secs)
+                .expect("short break duration should be valid"),
+            LongBreakDurationSecs::try_new(long_break_duration_secs)
+                .expect("long break duration should be valid"),
+            LongBreakIntervalCount::try_new(long_break_interval)
+                .expect("long break interval should be valid"),
+            post_break_transition_policy,
+        )
+    }
+
+    async fn prepare_fullscreen_break_state(state: &AppState) {
+        let mut timer = state.timer_manager.lock().await;
+        let settings = timer_settings(
+            1500,
+            300,
+            900,
+            4,
+            PostBreakTransitionPolicy::RequireManualContinue,
+        );
+        timer
+            .start_work(settings, WorkStartOrigin::ManualOutsideScheduleWindow)
+            .expect("work session should start");
+        timer.transition_to_break();
+        timer.set_fullscreen_break(true);
+        assert_eq!(timer.status(), TimerStatus::OnBreak);
+        assert!(timer.get_state().is_fullscreen_break);
+    }
+
+    async fn install_timer_countdown_task(state: &Arc<AppState>) {
+        let state_for_task = Arc::downgrade(state);
+
+        state.timer_manager.lock().await.spawn_timer_task(move || {
+            let state_for_tick = std::sync::Weak::clone(&state_for_task);
+            async move {
+                if let Some(state) = state_for_tick.upgrade() {
+                    let mut timer = state.timer_manager.lock().await;
+                    if timer.status() != TimerStatus::Idle {
+                        let _ = timer.tick();
+                    }
+                }
+            }
+        });
+    }
+
+    fn assert_single_published_timer_state<'a>(
+        emitted_tick_snapshots: &'a [TimerTickSnapshot],
+        tray_tick_snapshots: &[TimerTickSnapshot],
+        expected_status: TimerStatus,
+        expected_session_type: SessionType,
+    ) -> &'a TimerTickSnapshot {
+        assert_eq!(emitted_tick_snapshots.len(), 1);
+        assert_eq!(tray_tick_snapshots.len(), 1);
+        assert_eq!(emitted_tick_snapshots, tray_tick_snapshots);
+        let published = &emitted_tick_snapshots[0];
+        assert_eq!(published.status, expected_status);
+        assert_eq!(published.session_type, expected_session_type);
+        published
+    }
+
+    fn assert_single_published_start_timer_state(
+        runtime_effect_shell: &RecordingRuntimeEffectShell,
+        expected_status: TimerStatus,
+        expected_session_type: SessionType,
+    ) -> &TimerTickSnapshot {
+        assert_single_published_timer_state(
+            &runtime_effect_shell.emitted_tick_snapshots,
+            &runtime_effect_shell.tray_tick_snapshots,
+            expected_status,
+            expected_session_type,
+        )
+    }
+
+    fn assert_start_work_started_duration(
+        runtime_effect_shell: &RecordingRuntimeEffectShell,
+        expected_work_duration: u64,
+    ) {
+        assert_eq!(
+            runtime_effect_shell.work_started_durations,
+            [expected_work_duration]
+        );
+    }
+
+    fn persisted_timer_state(state: &AppState) -> TimerState {
+        match state.persistence.load_state_sync() {
+            PersistenceLoadOutcome::Restored { timer_state, .. } => timer_state,
+            PersistenceLoadOutcome::NoState => panic!("expected restored timer state"),
+            PersistenceLoadOutcome::UnsupportedSchemaFallback => {
+                panic!("expected restored timer state")
+            }
+        }
+    }
+
+    fn assert_persistence_save_error(result: &Result<()>) {
+        assert!(matches!(result, Err(PomoliceError::PersistenceSave(_))));
+    }
+
+    fn assert_command_result_public_error<T>(
+        result: Result<T>,
+        expected_code: &str,
+        diagnostic_fragments: &[&str],
+    ) {
+        let Err(error) = result else {
+            panic!("command result should fail");
+        };
+
+        let serialized = serde_json::to_value(&error).expect("command error should serialize");
+        let response = serialized
+            .as_object()
+            .expect("command error should serialize as a JSON object");
+
+        assert_eq!(
+            response
+                .get("code")
+                .expect("command error should include code")
+                .as_str(),
+            Some(expected_code)
+        );
+        let message = response
+            .get("message")
+            .expect("command error should include message")
+            .as_str()
+            .expect("command error message should be text");
+        assert!(!message.is_empty());
+        assert_public_error_excludes_retry_affordance(response);
+
+        let serialized = serialized.to_string();
+        for fragment in diagnostic_fragments {
+            assert!(
+                !serialized.contains(fragment),
+                "public command error leaked diagnostic fragment: {fragment}"
+            );
+        }
+    }
+
+    fn assert_public_error_excludes_retry_affordance(
+        response: &serde_json::Map<String, serde_json::Value>,
+    ) {
+        for key in response.keys() {
+            let normalized = key.to_ascii_lowercase();
+            assert!(
+                !normalized.contains("retry") && !normalized.contains("transient"),
+                "backend public command error encoded retry eligibility in field: {key}"
+            );
+        }
+    }
+
+    async fn start_work_for_tests(
+        state: &AppState,
+        settings: TimerSettings,
+        manual_start_origin: WorkStartOrigin,
+        runtime_effect_shell: &mut impl StartWorkRuntimeEffects,
+    ) -> Result<()> {
+        start_manual_work(state, settings, manual_start_origin, runtime_effect_shell).await?;
+        Ok(())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_start_work_rejected_during_break_keeps_break_countdown_running() {
+        let state = Arc::new(build_test_state_without_persistence_path().await);
+        prepare_fullscreen_break_state(&state).await;
+        install_timer_countdown_task(&state).await;
+
+        tokio::task::yield_now().await;
+        tokio::time::advance(StdDuration::from_secs(1)).await;
+        tokio::task::yield_now().await;
+
+        let remaining_after_first_tick = {
+            let timer = state.timer_manager.lock().await;
+            let full_state = timer.get_full_state();
+            assert_eq!(full_state.status, TimerStatus::OnBreak);
+            assert!(full_state.is_fullscreen_break);
+            assert!(full_state.remaining_seconds < 300);
+            full_state.remaining_seconds
+        };
+
+        let mut runtime_effect_shell = RecordingRuntimeEffectShell::default();
+        let result = start_work_for_tests(
+            state.as_ref(),
+            timer_settings(
+                1500,
+                300,
+                900,
+                4,
+                PostBreakTransitionPolicy::RequireManualContinue,
+            ),
+            WorkStartOrigin::ManualOutsideScheduleWindow,
+            &mut runtime_effect_shell,
+        )
+        .await;
+
+        assert_command_result_public_error(result, "invalid_state_transition", &["start work"]);
+
+        let remaining_after_rejection = {
+            let timer = state.timer_manager.lock().await;
+            let full_state = timer.get_full_state();
+            assert_eq!(full_state.status, TimerStatus::OnBreak);
+            assert!(full_state.is_fullscreen_break);
+            assert_eq!(full_state.remaining_seconds, remaining_after_first_tick);
+            full_state.remaining_seconds
+        };
+
+        tokio::time::advance(StdDuration::from_secs(3)).await;
+        tokio::task::yield_now().await;
+
+        let timer = state.timer_manager.lock().await;
+        let full_state = timer.get_full_state();
+        assert_eq!(full_state.status, TimerStatus::OnBreak);
+        assert!(full_state.is_fullscreen_break);
+        assert!(full_state.remaining_seconds < remaining_after_rejection);
+    }
+
+    #[tokio::test]
+    async fn start_work_persists_started_work_state() {
+        let temp_dir = create_temp_dir("start-work-persists-started-work");
+        let state = build_test_state_with_persistence_dir(temp_dir.clone()).await;
+        let settings = timer_settings(
+            1500,
+            300,
+            900,
+            4,
+            PostBreakTransitionPolicy::RequireManualContinue,
+        );
+        let mut runtime_effect_shell = RecordingRuntimeEffectShell::default();
+
+        start_work_for_tests(
+            &state,
+            settings,
+            WorkStartOrigin::ManualOutsideScheduleWindow,
+            &mut runtime_effect_shell,
+        )
+        .await
+        .expect("work session should start");
+
+        assert_single_published_start_timer_state(
+            &runtime_effect_shell,
+            TimerStatus::Working,
+            SessionType::Work,
+        );
+        assert_start_work_started_duration(&runtime_effect_shell, 1500);
+
+        let persisted = persisted_timer_state(&state);
+        assert_eq!(persisted.status, TimerStatus::Working);
+        assert_eq!(persisted.session_type, SessionType::Work);
+        assert_eq!(persisted.remaining_seconds, 1500);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_start_work_returns_persistence_error_when_runtime_save_fails() {
+        let temp_dir = create_temp_dir("start-work-save-fails");
+        let invalid_app_data_path = temp_dir.join("app-data-file");
+        std::fs::write(&invalid_app_data_path, "not a directory")
+            .expect("invalid app data file should be created");
+
+        let state = build_test_state_with_persistence_dir(invalid_app_data_path).await;
+        let settings = TimerSettings::new(
+            WorkDurationSecs::try_new(1500).expect("work duration should be valid"),
+            ShortBreakDurationSecs::try_new(300).expect("short break duration should be valid"),
+            LongBreakDurationSecs::try_new(900).expect("long break duration should be valid"),
+            LongBreakIntervalCount::try_new(4).expect("long break interval should be valid"),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        );
+        let mut runtime_effect_shell = RecordingRuntimeEffectShell::default();
+
+        let result = start_work_for_tests(
+            &state,
+            settings,
+            WorkStartOrigin::ManualOutsideScheduleWindow,
+            &mut runtime_effect_shell,
+        )
+        .await;
+
+        assert!(matches!(result, Err(PomoliceError::PersistenceSave(_))));
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_start_work_persistence_failure_does_not_roll_back_started_session() {
+        let temp_dir = create_temp_dir("start-work-save-fails-keeps-started-session");
+        let invalid_app_data_path = temp_dir.join("app-data-file");
+        std::fs::write(&invalid_app_data_path, "not a directory")
+            .expect("invalid app data file should be created");
+
+        let state = build_test_state_with_persistence_dir(invalid_app_data_path).await;
+        let settings = TimerSettings::new(
+            WorkDurationSecs::try_new(1500).expect("work duration should be valid"),
+            ShortBreakDurationSecs::try_new(300).expect("short break duration should be valid"),
+            LongBreakDurationSecs::try_new(900).expect("long break duration should be valid"),
+            LongBreakIntervalCount::try_new(4).expect("long break interval should be valid"),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        );
+        let mut runtime_effect_shell = RecordingRuntimeEffectShell::default();
+
+        let result = start_work_for_tests(
+            &state,
+            settings,
+            WorkStartOrigin::ManualOutsideScheduleWindow,
+            &mut runtime_effect_shell,
+        )
+        .await;
+
+        assert_persistence_save_error(&result);
+
+        let full_state = {
+            let timer_manager = state.timer_manager.lock().await;
+            timer_manager.get_full_state()
+        };
+
+        assert_eq!(full_state.status, TimerStatus::Working);
+        assert_eq!(full_state.session_type, SessionType::Work);
+        assert_eq!(full_state.remaining_seconds, 1500);
+
+        cleanup_temp_dir(&temp_dir);
+    }
 }
 
 #[cfg(test)]

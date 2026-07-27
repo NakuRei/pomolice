@@ -1250,3 +1250,59 @@ mod tests {
         assert!(payload.post_break_decision_pending);
     }
 }
+
+#[cfg(test)]
+mod timer_command_validation_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_work_duration_secs_deserialize_rejects_zero() {
+        let result = serde_json::from_value::<WorkDurationSecs>(json!(0));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_long_break_interval_deserialize_rejects_zero() {
+        let result = serde_json::from_value::<LongBreakIntervalCount>(json!(0));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_day_auto_run_slot_deserialize_rejects_equal_start_and_end() {
+        let result = serde_json::from_value::<DayAutoRunSlot>(json!({
+            "enabled": true,
+            "startTime": "09:00",
+            "endTime": "09:00"
+        }));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_weekly_auto_run_config_deserialize_rejects_overlap() {
+        let result = serde_json::from_value::<WeeklyAutoRunConfig>(json!({
+            "mon": {"enabled": true, "startTime": "22:00", "endTime": "02:00"},
+            "tue": {"enabled": true, "startTime": "01:00", "endTime": "05:00"},
+            "wed": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
+            "thu": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
+            "fri": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
+            "sat": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
+            "sun": {"enabled": false, "startTime": "09:00", "endTime": "18:00"}
+        }));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_weekly_auto_run_config_deserialize_rejects_invalid_start_time() {
+        let result = serde_json::from_value::<WeeklyAutoRunConfig>(json!({
+            "mon": {"enabled": true, "startTime": "24:00", "endTime": "02:00"},
+            "tue": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
+            "wed": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
+            "thu": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
+            "fri": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
+            "sat": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
+            "sun": {"enabled": false, "startTime": "09:00", "endTime": "18:00"}
+        }));
+        assert!(result.is_err());
+    }
+}
