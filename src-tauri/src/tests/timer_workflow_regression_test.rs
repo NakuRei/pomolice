@@ -20,7 +20,7 @@ use crate::session_pipeline::{
 use crate::state::AppState;
 use crate::types::{
     DayAutoRunSlot, FullStatePayload, HhMm, PostBreakTransitionPolicy, SessionTransitionReason,
-    SessionType, TimerSettings, TimerStatus, TimerTickPayload, WeeklyAutoRunConfig,
+    SessionType, TimerSettings, TimerState, TimerStatus, TimerTickPayload, WeeklyAutoRunConfig,
     WorkStartOrigin,
 };
 use crate::work_start::{
@@ -272,6 +272,36 @@ fn make_enabled_daytime_monday_config() -> WeeklyAutoRunConfig {
     monday_config("09:00", "18:00")
 }
 
+fn monday_config_with_disabled_tuesday(start_time: &str, end_time: &str) -> WeeklyAutoRunConfig {
+    WeeklyAutoRunConfig::try_new(
+        enabled_slot("09:00", "18:00"),
+        DayAutoRunSlot::try_new(
+            false,
+            HhMm::try_from(start_time.to_string()).expect("start time should be valid"),
+            HhMm::try_from(end_time.to_string()).expect("end time should be valid"),
+        )
+        .expect("disabled Tuesday slot should be valid"),
+        DayAutoRunSlot::default(),
+        DayAutoRunSlot::default(),
+        DayAutoRunSlot::default(),
+        DayAutoRunSlot::default(),
+        DayAutoRunSlot::default(),
+    )
+    .expect("weekly configuration should be valid")
+}
+
+#[derive(Debug, Clone, Copy)]
+enum TargetScheduleBoundary {
+    Start,
+    End,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum BoundaryRelation {
+    AlreadyPassed,
+    StillAhead,
+}
+
 async fn sync_auto_run_policies_for_test(
     state: &AppState,
     weekly_auto_run_config: WeeklyAutoRunConfig,
@@ -329,21 +359,155 @@ async fn complete_initial_full_state_sync_outside_schedule_window(state: &AppSta
 }
 
 async fn assert_work_session_started_from_boundary(state: &AppState) {
+    assert_work_session_started_from_boundary_for_scenario(
+        state,
+        "scheduled work session should start at the boundary",
+    )
+    .await;
+}
+
+async fn assert_work_session_started_from_boundary_for_scenario(state: &AppState, scenario: &str) {
     let timer = state.timer_manager.lock().await;
     let full_state = timer.get_full_state();
 
-    assert_eq!(full_state.status, TimerStatus::Working);
+    assert_eq!(full_state.status, TimerStatus::Working, "{scenario}");
     assert_eq!(
         full_state.remaining_seconds,
-        full_state.settings.work_duration_secs.get()
+        full_state.settings.work_duration_secs.get(),
+        "{scenario}"
     );
 }
 
 async fn assert_no_work_session_started_from_boundary(state: &AppState) {
+    assert_no_work_session_started_from_boundary_for_scenario(
+        state,
+        "scheduled work session should not start at the boundary",
+    )
+    .await;
+}
+
+async fn assert_no_work_session_started_from_boundary_for_scenario(
+    state: &AppState,
+    scenario: &str,
+) {
     let timer = state.timer_manager.lock().await;
     let full_state = timer.get_full_state();
 
-    assert_eq!(full_state.status, TimerStatus::Idle);
+    assert_eq!(full_state.status, TimerStatus::Idle, "{scenario}");
+}
+
+async fn assert_scope_change_boundary_result(
+    scenario: &str,
+    changed_config: WeeklyAutoRunConfig,
+    restore_original_config_before_evaluation: bool,
+    target_boundary: TargetScheduleBoundary,
+    boundary_relation: BoundaryRelation,
+) {
+    let baseline_config = make_enabled_daytime_monday_config();
+    let (state, previous_local, evaluation_local, later_boundary_local) = match target_boundary {
+        TargetScheduleBoundary::Start => {
+            let state = build_test_state_at(local_datetime(2025, 1, 6, 8, 0, 0)).await;
+            sync_auto_run_policies_for_test(
+                &state,
+                baseline_config.clone(),
+                PostBreakTransitionPolicy::RequireManualContinue,
+            )
+            .await;
+            complete_initial_full_state_sync_outside_schedule_window(&state).await;
+
+            let (evaluation_local, later_boundary_local) = match boundary_relation {
+                BoundaryRelation::AlreadyPassed => (
+                    local_datetime(2025, 1, 6, 10, 0, 0),
+                    local_datetime(2025, 1, 6, 10, 0, 30),
+                ),
+                BoundaryRelation::StillAhead => (
+                    local_datetime(2025, 1, 6, 8, 59, 55),
+                    local_datetime(2025, 1, 6, 9, 0, 10),
+                ),
+            };
+
+            (
+                state,
+                local_datetime(2025, 1, 6, 8, 59, 50),
+                evaluation_local,
+                later_boundary_local,
+            )
+        }
+        TargetScheduleBoundary::End => {
+            let state = build_test_state_without_persistence_path().await;
+            sync_auto_run_policies_for_test(
+                &state,
+                baseline_config.clone(),
+                PostBreakTransitionPolicy::RequireManualContinue,
+            )
+            .await;
+            start_auto_run_eligible_work_session(&state).await;
+
+            let (evaluation_local, later_boundary_local) = match boundary_relation {
+                BoundaryRelation::AlreadyPassed => (
+                    local_datetime(2025, 1, 6, 18, 30, 0),
+                    local_datetime(2025, 1, 6, 18, 30, 30),
+                ),
+                BoundaryRelation::StillAhead => (
+                    local_datetime(2025, 1, 6, 17, 59, 55),
+                    local_datetime(2025, 1, 6, 18, 0, 10),
+                ),
+            };
+
+            (
+                state,
+                local_datetime(2025, 1, 6, 17, 59, 50),
+                evaluation_local,
+                later_boundary_local,
+            )
+        }
+    };
+
+    let mut scheduler_runtime = SchedulerTickTestRuntime::from_state(&state, previous_local).await;
+
+    sync_auto_run_policies_for_test(
+        &state,
+        changed_config,
+        PostBreakTransitionPolicy::RequireManualContinue,
+    )
+    .await;
+
+    if restore_original_config_before_evaluation {
+        sync_auto_run_policies_for_test(
+            &state,
+            baseline_config,
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+    }
+
+    scheduler_runtime.run_tick(&state, evaluation_local).await;
+    scheduler_runtime
+        .run_tick(&state, later_boundary_local)
+        .await;
+
+    match (target_boundary, boundary_relation) {
+        (TargetScheduleBoundary::Start, BoundaryRelation::AlreadyPassed) => {
+            assert_no_work_session_started_from_boundary_for_scenario(&state, scenario).await;
+        }
+        (TargetScheduleBoundary::Start, BoundaryRelation::StillAhead) => {
+            assert_work_session_started_from_boundary_for_scenario(&state, scenario).await;
+        }
+        (TargetScheduleBoundary::End, BoundaryRelation::AlreadyPassed) => {
+            assert_eq!(
+                complete_work_session_reason(&state).await,
+                SessionTransitionReason::WorkToBreak,
+                "{scenario}"
+            );
+        }
+        (TargetScheduleBoundary::End, BoundaryRelation::StillAhead) => {
+            assert_eq!(
+                complete_work_session_reason(&state).await,
+                SessionTransitionReason::ScheduledStopExecuted,
+                "{scenario}"
+            );
+        }
+    }
 }
 
 fn assert_daytime_monday_window(full_state: &FullStatePayload) {
@@ -429,7 +593,7 @@ async fn start_manual_command_and_run_end_boundary(state: &AppState) -> SessionT
     .await
     .expect("manual command should start work");
     let mut scheduler_runtime =
-        SchedulerTickTestRuntime::from_state(state, local_datetime(2025, 1, 6, 17, 59, 50));
+        SchedulerTickTestRuntime::from_state(state, local_datetime(2025, 1, 6, 17, 59, 50)).await;
 
     scheduler_runtime
         .run_tick(state, local_datetime(2025, 1, 6, 18, 0, 10))
@@ -499,7 +663,8 @@ async fn boot_prompt_resolution_before_initial_full_state_does_not_open_start_bo
         .await;
         let mut runtime_effect_shell = RecordingRuntimeEffectShell::default();
         let mut scheduler_runtime =
-            SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50));
+            SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50))
+                .await;
 
         resolve_boot_auto_start_prompt_contract(&state, start_now, &mut runtime_effect_shell)
             .await
@@ -561,7 +726,7 @@ async fn boot_prompt_start_persistence_error_allows_later_scheduled_start_bounda
     assert_no_work_session_started_from_boundary(&state).await;
 
     let mut scheduler_runtime =
-        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 7, 8, 59, 50));
+        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 7, 8, 59, 50)).await;
     scheduler_runtime
         .run_tick(&state, local_datetime(2025, 1, 7, 9, 0, 10))
         .await;
@@ -613,7 +778,7 @@ async fn feature_enable_does_not_replay_past_start_boundary() {
     complete_initial_full_state_sync_outside_schedule_window(&state).await;
 
     let mut scheduler_runtime =
-        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50));
+        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50)).await;
 
     sync_auto_run_policies_for_test(
         &state,
@@ -644,7 +809,7 @@ async fn feature_enable_keeps_future_start_boundary_active() {
     complete_initial_full_state_sync_outside_schedule_window(&state).await;
 
     let mut scheduler_runtime =
-        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50));
+        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50)).await;
 
     sync_auto_run_policies_for_test(
         &state,
@@ -675,7 +840,7 @@ async fn initial_sync_outside_schedule_window_allows_future_scheduled_work_start
         .await
         .expect("full state should be available");
     let mut scheduler_runtime =
-        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50));
+        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50)).await;
 
     scheduler_runtime
         .run_tick(&state, local_datetime(2025, 1, 6, 9, 0, 10))
@@ -684,6 +849,32 @@ async fn initial_sync_outside_schedule_window_allows_future_scheduled_work_start
     assert!(!full_state.should_prompt_start_on_boot);
     assert!(full_state.active_window_summary.is_none());
     assert_work_session_started_from_boundary(&state).await;
+}
+
+#[tokio::test]
+async fn restored_auto_run_scope_allows_first_future_scheduled_work_start() {
+    let temp_dir = create_temp_dir("restored-auto-run-scope");
+    let clock = Arc::new(FixedClock::new(local_datetime(2025, 1, 6, 8, 0, 0)));
+    let persistence = PersistenceManager::new(as_clock_trait(&clock), Some(temp_dir.clone()));
+    persistence
+        .save_state_sync(TimerState {
+            auto_run_feature_enabled: true,
+            weekly_auto_run_config: make_enabled_daytime_monday_config(),
+            ..TimerState::default()
+        })
+        .expect("restored auto-run scope should save");
+    let (state, _) =
+        AppState::build_startup_state_for_tests(as_clock_trait(&clock), persistence).await;
+    complete_initial_full_state_sync_outside_schedule_window(&state).await;
+    let mut scheduler_runtime =
+        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50)).await;
+
+    scheduler_runtime
+        .run_tick(&state, local_datetime(2025, 1, 6, 9, 0, 10))
+        .await;
+
+    assert_work_session_started_from_boundary(&state).await;
+    cleanup_temp_dir(&temp_dir);
 }
 
 #[tokio::test]
@@ -704,7 +895,7 @@ async fn initial_sync_while_working_allows_future_scheduled_work_start_after_sto
         .await
         .expect("emergency stop should succeed");
     let mut scheduler_runtime =
-        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 7, 8, 59, 50));
+        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 7, 8, 59, 50)).await;
 
     scheduler_runtime
         .run_tick(&state, local_datetime(2025, 1, 7, 9, 0, 10))
@@ -726,7 +917,7 @@ async fn pending_boot_prompt_prevents_scheduled_work_start_after_follow_up_full_
         .await
         .expect("second full state should be available");
     let mut scheduler_runtime =
-        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50));
+        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50)).await;
 
     scheduler_runtime
         .run_tick(&state, local_datetime(2025, 1, 6, 9, 0, 10))
@@ -748,7 +939,7 @@ async fn policy_only_change_does_not_suppress_arriving_end_boundary() {
     start_auto_run_eligible_work_session(&state).await;
 
     let mut scheduler_runtime =
-        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 17, 59, 50));
+        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 17, 59, 50)).await;
 
     sync_auto_run_policies_for_test(
         &state,
@@ -778,7 +969,7 @@ async fn policy_only_change_does_not_suppress_arriving_start_boundary() {
     complete_initial_full_state_sync_outside_schedule_window(&state).await;
 
     let mut scheduler_runtime =
-        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50));
+        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50)).await;
 
     sync_auto_run_policies_for_test(
         &state,
@@ -843,7 +1034,7 @@ async fn resolved_later_allows_next_scheduled_start_boundary() {
     .await;
     let mut runtime_effect_shell = RecordingRuntimeEffectShell::default();
     let mut scheduler_runtime =
-        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 10, 0, 0));
+        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 10, 0, 0)).await;
 
     resolve_boot_auto_start_prompt_contract(&state, false, &mut runtime_effect_shell)
         .await
@@ -883,7 +1074,7 @@ async fn resolved_start_allows_next_scheduled_start_boundary() {
     assert_no_work_session_started_from_boundary(&state).await;
 
     let mut scheduler_runtime =
-        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 7, 8, 59, 50));
+        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 7, 8, 59, 50)).await;
     scheduler_runtime
         .run_tick(&state, local_datetime(2025, 1, 7, 9, 0, 10))
         .await;
@@ -899,7 +1090,7 @@ async fn scheduler_does_not_auto_start_while_boot_prompt_is_waiting() {
     )
     .await;
     let mut scheduler_runtime =
-        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50));
+        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50)).await;
 
     scheduler_runtime
         .run_tick(&state, local_datetime(2025, 1, 6, 9, 0, 10))
@@ -920,7 +1111,7 @@ async fn scheduler_waits_for_initial_full_state_before_start_boundary() {
     )
     .await;
     let mut scheduler_runtime =
-        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50));
+        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50)).await;
 
     scheduler_runtime
         .run_tick(&state, local_datetime(2025, 1, 6, 9, 0, 10))
@@ -979,7 +1170,7 @@ async fn topology_change_does_not_replay_past_end_boundary() {
     start_auto_run_eligible_work_session(&state).await;
 
     let mut scheduler_runtime =
-        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 17, 59, 50));
+        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 17, 59, 50)).await;
 
     sync_auto_run_policies_for_test(
         &state,
@@ -1009,7 +1200,7 @@ async fn topology_change_does_not_replay_past_start_boundary() {
     complete_initial_full_state_sync_outside_schedule_window(&state).await;
 
     let mut scheduler_runtime =
-        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50));
+        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50)).await;
 
     sync_auto_run_policies_for_test(
         &state,
@@ -1039,7 +1230,7 @@ async fn topology_change_keeps_future_end_boundary_active() {
     start_auto_run_eligible_work_session(&state).await;
 
     let mut scheduler_runtime =
-        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 17, 59, 50));
+        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 17, 59, 50)).await;
 
     sync_auto_run_policies_for_test(
         &state,
@@ -1072,7 +1263,7 @@ async fn topology_change_keeps_future_start_boundary_active() {
     complete_initial_full_state_sync_outside_schedule_window(&state).await;
 
     let mut scheduler_runtime =
-        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50));
+        SchedulerTickTestRuntime::from_state(&state, local_datetime(2025, 1, 6, 8, 59, 50)).await;
 
     sync_auto_run_policies_for_test(
         &state,
@@ -1088,4 +1279,102 @@ async fn topology_change_keeps_future_start_boundary_active() {
         .await;
 
     assert_work_session_started_from_boundary(&state).await;
+}
+
+#[tokio::test]
+async fn return_to_original_schedule_keeps_past_and_future_boundaries_correct() {
+    for (scenario, target_boundary, boundary_relation) in [
+        (
+            "return-to-original start boundary already passed",
+            TargetScheduleBoundary::Start,
+            BoundaryRelation::AlreadyPassed,
+        ),
+        (
+            "return-to-original start boundary still ahead",
+            TargetScheduleBoundary::Start,
+            BoundaryRelation::StillAhead,
+        ),
+        (
+            "return-to-original end boundary already passed",
+            TargetScheduleBoundary::End,
+            BoundaryRelation::AlreadyPassed,
+        ),
+        (
+            "return-to-original end boundary still ahead",
+            TargetScheduleBoundary::End,
+            BoundaryRelation::StillAhead,
+        ),
+    ] {
+        assert_scope_change_boundary_result(
+            scenario,
+            monday_and_tuesday_config("09:00", "18:00"),
+            true,
+            target_boundary,
+            boundary_relation,
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn disabled_day_time_changes_keep_past_and_future_boundaries_correct() {
+    for (scenario, changed_config, target_boundary, boundary_relation) in [
+        (
+            "disabled Tuesday start time with past start boundary",
+            monday_config_with_disabled_tuesday("10:00", "18:00"),
+            TargetScheduleBoundary::Start,
+            BoundaryRelation::AlreadyPassed,
+        ),
+        (
+            "disabled Tuesday start time with future start boundary",
+            monday_config_with_disabled_tuesday("10:00", "18:00"),
+            TargetScheduleBoundary::Start,
+            BoundaryRelation::StillAhead,
+        ),
+        (
+            "disabled Tuesday start time with past end boundary",
+            monday_config_with_disabled_tuesday("10:00", "18:00"),
+            TargetScheduleBoundary::End,
+            BoundaryRelation::AlreadyPassed,
+        ),
+        (
+            "disabled Tuesday start time with future end boundary",
+            monday_config_with_disabled_tuesday("10:00", "18:00"),
+            TargetScheduleBoundary::End,
+            BoundaryRelation::StillAhead,
+        ),
+        (
+            "disabled Tuesday end time with past start boundary",
+            monday_config_with_disabled_tuesday("09:00", "17:00"),
+            TargetScheduleBoundary::Start,
+            BoundaryRelation::AlreadyPassed,
+        ),
+        (
+            "disabled Tuesday end time with future start boundary",
+            monday_config_with_disabled_tuesday("09:00", "17:00"),
+            TargetScheduleBoundary::Start,
+            BoundaryRelation::StillAhead,
+        ),
+        (
+            "disabled Tuesday end time with past end boundary",
+            monday_config_with_disabled_tuesday("09:00", "17:00"),
+            TargetScheduleBoundary::End,
+            BoundaryRelation::AlreadyPassed,
+        ),
+        (
+            "disabled Tuesday end time with future end boundary",
+            monday_config_with_disabled_tuesday("09:00", "17:00"),
+            TargetScheduleBoundary::End,
+            BoundaryRelation::StillAhead,
+        ),
+    ] {
+        assert_scope_change_boundary_result(
+            scenario,
+            changed_config,
+            false,
+            target_boundary,
+            boundary_relation,
+        )
+        .await;
+    }
 }

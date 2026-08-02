@@ -312,26 +312,14 @@ pub(crate) async fn sync_automation_policies_with_runtime_effects<S>(
 where
     S: TimerCommandRuntimeEffectShell,
 {
-    let (tick_payload, auto_run_boundary_scope_changed) = {
+    let tick_payload = {
         let mut timer = state_handle.timer_manager.lock().await;
-        let previous_auto_run_feature_enabled = timer.get_state().auto_run_feature_enabled;
-        let previous_weekly_auto_run_config = timer.get_state().weekly_auto_run_config.clone();
-        let auto_run_boundary_scope_changed = previous_auto_run_feature_enabled
-            != auto_run_feature_enabled
-            || previous_weekly_auto_run_config != weekly_auto_run_config;
-
-        let tick_payload = timer.sync_automation_policies(
+        timer.sync_automation_policies(
             auto_run_feature_enabled,
             weekly_auto_run_config,
             post_break_transition_policy,
-        );
-
-        (tick_payload, auto_run_boundary_scope_changed)
+        )
     };
-
-    if auto_run_boundary_scope_changed {
-        state_handle.notify_auto_run_boundary_scope_changed();
-    }
 
     emit_tick_and_update_tray(runtime_effect_shell, &tick_payload);
     persist_current_state_after_command_effects(state_handle).await

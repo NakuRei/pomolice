@@ -22,6 +22,81 @@ pub(crate) enum ScheduleEndBoundaryResult {
     Ignored,
 }
 
+#[derive(Clone, PartialEq, Eq)]
+struct AutoRunBoundaryScope {
+    auto_run_feature_enabled: bool,
+    weekly_auto_run_config: WeeklyAutoRunConfig,
+}
+
+impl AutoRunBoundaryScope {
+    fn from_timer_state(timer_state: &TimerState) -> Self {
+        Self {
+            auto_run_feature_enabled: timer_state.auto_run_feature_enabled,
+            weekly_auto_run_config: timer_state.weekly_auto_run_config.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AutoRunBoundaryChangeIdentity(u64);
+
+impl AutoRunBoundaryChangeIdentity {
+    fn initial() -> Self {
+        Self(0)
+    }
+
+    fn advance(&mut self) {
+        self.0 = match self.0.checked_add(1) {
+            Some(next) => next,
+            None => panic!("auto-run boundary change identity overflowed"),
+        };
+    }
+}
+
+impl std::fmt::Display for AutoRunBoundaryChangeIdentity {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct AutoRunBoundaryObservation {
+    pub(crate) auto_run_feature_enabled: bool,
+    pub(crate) weekly_auto_run_config: WeeklyAutoRunConfig,
+    pub(crate) change_identity: AutoRunBoundaryChangeIdentity,
+}
+
+struct AutoRunBoundaryPublication {
+    scope: AutoRunBoundaryScope,
+    change_identity: AutoRunBoundaryChangeIdentity,
+}
+
+impl AutoRunBoundaryPublication {
+    fn from_timer_state(timer_state: &TimerState) -> Self {
+        Self {
+            scope: AutoRunBoundaryScope::from_timer_state(timer_state),
+            change_identity: AutoRunBoundaryChangeIdentity::initial(),
+        }
+    }
+
+    fn observe(&self) -> AutoRunBoundaryObservation {
+        AutoRunBoundaryObservation {
+            auto_run_feature_enabled: self.scope.auto_run_feature_enabled,
+            weekly_auto_run_config: self.scope.weekly_auto_run_config.clone(),
+            change_identity: self.change_identity,
+        }
+    }
+
+    fn publish_if_scope_changed(&mut self, scope: AutoRunBoundaryScope) {
+        if self.scope == scope {
+            return;
+        }
+
+        self.scope = scope;
+        self.change_identity.advance();
+    }
+}
+
 pub(crate) struct SavedTimerSession {
     pub(crate) status: TimerStatus,
     pub(crate) session_type: SessionType,
@@ -148,6 +223,7 @@ fn schedule_stop_state_for_work_start_origin(origin: WorkStartOrigin) -> Schedul
 /// All side effects (event emission to frontend) are the caller's responsibility.
 pub(crate) struct TimerStateManager {
     state: TimerState,
+    auto_run_boundary_publication: AutoRunBoundaryPublication,
     /// Token used to signal the timer task to stop.
     /// Cancelling this token causes the task's `select!` to resolve immediately,
     /// preventing any in-flight tick from being spawned after the task exits.
@@ -159,9 +235,11 @@ impl TimerStateManager {
     /// Create a new timer state manager
     pub(crate) fn new(persisted_state: Option<TimerState>) -> Self {
         let state = persisted_state.unwrap_or_default();
+        let auto_run_boundary_publication = AutoRunBoundaryPublication::from_timer_state(&state);
 
         Self {
             state,
+            auto_run_boundary_publication,
             cancel_token: None,
             timer_task: None,
         }
@@ -176,6 +254,8 @@ impl TimerStateManager {
         persisted_state: TimerState,
     ) -> Option<TimerTickPayload> {
         self.state = persisted_state;
+        self.auto_run_boundary_publication
+            .publish_if_scope_changed(AutoRunBoundaryScope::from_timer_state(&self.state));
         if self.state.status != TimerStatus::Idle {
             return Some(self.state.to_tick_payload());
         }
@@ -195,6 +275,10 @@ impl TimerStateManager {
     /// Get mutable reference to internal state (for persistence)
     pub(crate) fn get_state(&self) -> &TimerState {
         &self.state
+    }
+
+    pub(crate) fn observe_auto_run_boundary_scope(&self) -> AutoRunBoundaryObservation {
+        self.auto_run_boundary_publication.observe()
     }
 
     /// Start a work session with an explicit start request origin.
@@ -669,9 +753,15 @@ impl TimerStateManager {
         weekly_auto_run_config: WeeklyAutoRunConfig,
         post_break_transition_policy: PostBreakTransitionPolicy,
     ) {
+        let auto_run_boundary_scope = AutoRunBoundaryScope {
+            auto_run_feature_enabled,
+            weekly_auto_run_config: weekly_auto_run_config.clone(),
+        };
         self.state.auto_run_feature_enabled = auto_run_feature_enabled;
         self.state.weekly_auto_run_config = weekly_auto_run_config;
         self.state.settings.post_break_transition_policy = post_break_transition_policy;
+        self.auto_run_boundary_publication
+            .publish_if_scope_changed(auto_run_boundary_scope);
 
         log_info_event(
             BackendLogEvent::SettingsSyncApplied,

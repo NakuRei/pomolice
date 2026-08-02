@@ -246,7 +246,6 @@ pub(crate) struct AppState {
     pub scheduler_task_state: StdMutex<SchedulerTaskState>,
     startup_auto_start_gate: StdMutex<StartupAutoStartGate>,
     restored_running_saved_at_local: StdMutex<Option<DateTime<Local>>>,
-    config_revision: AtomicU64,
     ordered_save_lane: OrderedSaveLane,
     #[cfg(test)]
     runtime_save_snapshot_ready_hook: Option<RuntimeSaveSnapshotReadyHook>,
@@ -301,20 +300,11 @@ impl AppState {
                 StartupAutoStartGate::WaitingForInitialFullState,
             ),
             restored_running_saved_at_local: StdMutex::new(restored_running_saved_at_local),
-            config_revision: AtomicU64::new(0),
             ordered_save_lane: OrderedSaveLane::default(),
             #[cfg(test)]
             runtime_save_snapshot_ready_hook: None,
             break_mode_transition_permit: Arc::new(Semaphore::new(1)),
         }
-    }
-
-    pub(crate) fn notify_auto_run_boundary_scope_changed(&self) {
-        self.config_revision.fetch_add(1, Ordering::AcqRel);
-    }
-
-    pub(crate) fn auto_run_boundary_generation(&self) -> u64 {
-        self.config_revision.load(Ordering::Acquire)
     }
 
     pub(crate) fn record_initial_full_state_auto_start_prompt_decision(
