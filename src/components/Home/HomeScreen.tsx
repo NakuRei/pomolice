@@ -9,6 +9,7 @@ import { ConnectionBanner } from "../shared/ConnectionBanner";
 import { IconButton } from "../shared/IconButton";
 import { InfoMessageBanner } from "../shared/InfoMessageBanner";
 import { NotificationMuteToggleButton } from "../shared/NotificationMuteToggleButton";
+import { SettingsSyncBanner } from "../shared/SettingsSyncBanner";
 
 const HEADER_STATUS_BADGE_BASE_CLASS_NAME =
   "inline-flex items-center rounded-full border px-2 py-1 text-xs font-semibold";
@@ -53,6 +54,7 @@ export function HomeScreen({
   return (
     <div className="flex min-h-screen flex-col space-y-8 bg-background p-8 text-on-background">
       <ConnectionBanner />
+      <SettingsSyncBanner />
       <InfoMessageBanner />
 
       <div className="flex items-center justify-between">

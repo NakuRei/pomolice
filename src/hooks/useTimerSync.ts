@@ -15,6 +15,7 @@ import {
   type FullStatePayload,
   useTimerStore,
 } from "../store/timerStore";
+import { useSettingsStore } from "../store/settingsStore";
 import {
   notifyWorkComplete,
   notifyBreakAutoStarted,
@@ -60,6 +61,7 @@ export function useTimerSync(): void {
     const listeners: UnlistenFn[] = [];
     let mounted = true;
     let retryTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    const settingsHydrationSucceeded = useSettingsStore.persist.hasHydrated();
 
     function clearRetryTimeout(): void {
       if (retryTimeoutId !== null) {
@@ -288,17 +290,12 @@ export function useTimerSync(): void {
       }
 
       try {
-        if (mounted) {
-          handleFullState(fullStateResult.fullState);
-
-          // Sync frontend settings to backend
-          await syncSettings();
+        if (!mounted) {
+          return;
         }
 
-        if (mounted) {
-          setConnected(true);
-          clearTimerSyncConnectionError();
-        }
+        handleFullState(fullStateResult.fullState);
+        clearTimerSyncConnectionError();
       } catch (error) {
         handleSetupFailure(
           error,
@@ -307,6 +304,11 @@ export function useTimerSync(): void {
           listenerStartIndex,
           setup,
         );
+        return;
+      }
+
+      if (settingsHydrationSucceeded) {
+        await syncSettings();
       }
     }
 

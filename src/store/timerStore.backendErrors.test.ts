@@ -15,8 +15,71 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 import { useErrorStore, type AppError } from "./errorStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
-import { useTimerStore } from "./timerStore";
-import { useSettingsStore } from "./settingsStore";
+import { TimerStatus, useTimerStore } from "./timerStore";
+import {
+  useSettingsStore,
+  type SettingsApplicationStatus,
+} from "./settingsStore";
+
+interface TimerControlAvailabilityCase {
+  label: string;
+  request: () => Promise<void>;
+  expectedCommand: string;
+  expectedArguments?: Record<string, unknown>;
+}
+
+const SETTINGS_APPLICATION_STATUSES: SettingsApplicationStatus[] = [
+  "confirmed",
+  "pending",
+  "unconfirmed",
+];
+
+const settingsStatusCases = SETTINGS_APPLICATION_STATUSES.flatMap(
+  (durationStatus) =>
+    SETTINGS_APPLICATION_STATUSES.map((automationStatus) => ({
+      durationStatus,
+      automationStatus,
+    })),
+);
+
+const timerControlAvailabilityCases: TimerControlAvailabilityCase[] = [
+  {
+    label: "start",
+    request: () => useTimerStore.getState().start(),
+    expectedCommand: "start_work",
+  },
+  {
+    label: "continue after a break",
+    request: () =>
+      useTimerStore.getState().resolvePostBreakDecision("continue"),
+    expectedCommand: "resolve_post_break_decision",
+    expectedArguments: { action: "continue" },
+  },
+  {
+    label: "stop the cycle after a break",
+    request: () =>
+      useTimerStore.getState().resolvePostBreakDecision("stop_cycle"),
+    expectedCommand: "resolve_post_break_decision",
+    expectedArguments: { action: "stop_cycle" },
+  },
+  {
+    label: "emergency stop",
+    request: () => useTimerStore.getState().emergencyStop(),
+    expectedCommand: "emergency_stop",
+  },
+  {
+    label: "accept the boot prompt",
+    request: () => useTimerStore.getState().resolveBootAutoStartPrompt(true),
+    expectedCommand: "resolve_boot_auto_start_prompt",
+    expectedArguments: { startNow: true },
+  },
+  {
+    label: "decline the boot prompt",
+    request: () => useTimerStore.getState().resolveBootAutoStartPrompt(false),
+    expectedCommand: "resolve_boot_auto_start_prompt",
+    expectedArguments: { startNow: false },
+  },
+];
 
 async function expectCommandRejection(
   action: () => Promise<void>,
@@ -52,16 +115,50 @@ function expectTechnicalDetailExcludesDiagnostics(
 describe("timerStore backend command errors", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockInvoke.mockResolvedValue(undefined);
     useErrorStore.getState().clearAllErrors();
     resetTimerStoreForTest();
     useSettingsStore.getState().resetToDefaults();
   });
+
+  describe.each(settingsStatusCases)(
+    "with $durationStatus duration and $automationStatus automation",
+    ({ durationStatus, automationStatus }) => {
+      it.each(timerControlAvailabilityCases)(
+        "keeps $label available",
+        async ({ request, expectedCommand, expectedArguments }) => {
+          useSettingsStore.setState({
+            durationSettingsApplicationStatus: durationStatus,
+            automationSettingsApplicationStatus: automationStatus,
+          });
+          useTimerStore.setState({
+            isConnected: true,
+            status: TimerStatus.IDLE,
+            requiresManualContinueDecision: true,
+            shouldPromptStartOnBoot: true,
+          });
+
+          await request();
+
+          expect(mockInvoke).toHaveBeenCalledTimes(1);
+          expect(mockInvoke.mock.calls[0]?.[0]).toBe(expectedCommand);
+          if (expectedArguments !== undefined) {
+            expect(mockInvoke.mock.calls[0]?.[1]).toEqual(expectedArguments);
+          }
+        },
+      );
+    },
+  );
 
   it("stores safe structured details for start_work rejections", async () => {
     const backendError: BackendErrorResponse = {
       code: "window_control_error",
       message: "failed to enter fullscreen at C:\\Users\\nak\\secret",
     };
+    useSettingsStore.setState({
+      durationSettingsApplicationStatus: "pending",
+      automationSettingsApplicationStatus: "unconfirmed",
+    });
     mockInvoke.mockRejectedValueOnce(backendError);
 
     await expectCommandRejection(
@@ -83,6 +180,12 @@ describe("timerStore backend command errors", () => {
     expect(useErrorStore.getState().errors.start_work?.retryFn).toEqual(
       expect.any(Function),
     );
+    expect(useSettingsStore.getState().durationSettingsApplicationStatus).toBe(
+      "pending",
+    );
+    expect(
+      useSettingsStore.getState().automationSettingsApplicationStatus,
+    ).toBe("unconfirmed");
   });
 
   it("stores safe structured details for resolve_post_break_decision rejections", async () => {

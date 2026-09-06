@@ -938,6 +938,7 @@ mod timer_command_behavior_tests {
     use std::future::Future;
     use std::path::{Path, PathBuf};
     use std::pin::Pin;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
 
@@ -1024,24 +1025,36 @@ mod timer_command_behavior_tests {
         }
     }
 
-    fn create_temp_dir(test_name: &str) -> PathBuf {
-        let timestamp_nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time should be after unix epoch")
-            .as_nanos();
-
-        let path = std::env::temp_dir().join(format!(
-            "pomolice-timer-command-{}-{}-{}",
-            test_name,
-            std::process::id(),
-            timestamp_nanos
-        ));
-        std::fs::create_dir_all(&path).expect("temp directory should be created");
-        path
+    struct TestTempDir {
+        path: PathBuf,
     }
 
-    fn cleanup_temp_dir(path: &Path) {
-        let _ = std::fs::remove_dir_all(path);
+    impl TestTempDir {
+        fn new(test_name: &str) -> Self {
+            let timestamp_nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "pomolice-timer-command-{}-{}-{}",
+                test_name,
+                std::process::id(),
+                timestamp_nanos
+            ));
+            std::fs::create_dir_all(&path).expect("temp directory should be created");
+
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TestTempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
     }
 
     fn create_utc_datetime(
@@ -1091,6 +1104,26 @@ mod timer_command_behavior_tests {
                             .expect_err("invalid JSON should fail to parse"),
                     },
                 )
+            }));
+        let (app_state, _) =
+            AppState::build_startup_state_for_tests(as_clock_trait(&clock), persistence).await;
+        app_state
+    }
+
+    async fn build_test_state_with_one_shot_persistence_error(app_data_dir: PathBuf) -> AppState {
+        let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
+        let save_attempt_count = Arc::new(AtomicUsize::new(0));
+        let state_file_path = app_data_dir.join("timer_state.json");
+        let persistence = PersistenceManager::new(as_clock_trait(&clock), Some(app_data_dir))
+            .with_injected_save_error_hook(Arc::new(move || {
+                if save_attempt_count.fetch_add(1, Ordering::AcqRel) != 0 {
+                    return None;
+                }
+
+                Some(crate::external_adapters::persistence::SaveError::Write {
+                    path: state_file_path.clone(),
+                    source: std::io::Error::other("injected one-shot settings persistence failure"),
+                })
             }));
         let (app_state, _) =
             AppState::build_startup_state_for_tests(as_clock_trait(&clock), persistence).await;
@@ -1287,8 +1320,8 @@ mod timer_command_behavior_tests {
 
     #[tokio::test]
     async fn automation_policy_sync_persists_updated_policy() {
-        let temp_dir = create_temp_dir("automation-policy-sync-persists-policy");
-        let state = build_test_state_with_persistence_dir(temp_dir.clone()).await;
+        let temp_dir = TestTempDir::new("automation-policy-sync-persists-policy");
+        let state = build_test_state_with_persistence_dir(temp_dir.path().to_path_buf()).await;
         let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
         let expected_weekly_config = make_enabled_daytime_monday_config();
 
@@ -1315,8 +1348,6 @@ mod timer_command_behavior_tests {
             persisted.settings.post_break_transition_policy,
             PostBreakTransitionPolicy::StartNextWorkAutomatically
         );
-
-        cleanup_temp_dir(&temp_dir);
     }
 
     #[tokio::test]
@@ -1385,9 +1416,48 @@ mod timer_command_behavior_tests {
     }
 
     #[tokio::test]
+    async fn automation_policy_replay_converges_after_uncertain_persistence_failure() {
+        let temp_dir = TestTempDir::new("automation-policy-replay-converges");
+        let state =
+            build_test_state_with_one_shot_persistence_error(temp_dir.path().to_path_buf()).await;
+        let expected_weekly_config = make_enabled_daytime_monday_config();
+        let expected_policy = PostBreakTransitionPolicy::StartNextWorkAutomatically;
+        let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+
+        let first_result = sync_automation_policies_with_runtime_effects(
+            &state,
+            true,
+            expected_weekly_config.clone(),
+            expected_policy,
+            &mut runtime_effect_shell,
+        )
+        .await;
+
+        assert_persistence_save_error(&first_result);
+
+        sync_automation_policies_with_runtime_effects(
+            &state,
+            true,
+            expected_weekly_config.clone(),
+            expected_policy,
+            &mut runtime_effect_shell,
+        )
+        .await
+        .expect("identical automation replay should persist successfully");
+
+        let persisted = persisted_timer_state(&state);
+        assert!(persisted.auto_run_feature_enabled);
+        assert_eq!(persisted.weekly_auto_run_config, expected_weekly_config);
+        assert_eq!(
+            persisted.settings.post_break_transition_policy,
+            expected_policy
+        );
+    }
+
+    #[tokio::test]
     async fn continue_post_break_decision_persists_next_work_state() {
-        let temp_dir = create_temp_dir("continue-post-break-persists-work");
-        let state = build_test_state_with_persistence_dir(temp_dir.clone()).await;
+        let temp_dir = TestTempDir::new("continue-post-break-persists-work");
+        let state = build_test_state_with_persistence_dir(temp_dir.path().to_path_buf()).await;
         prepare_post_break_decision_pending_state(&state).await;
         let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
 
@@ -1410,8 +1480,6 @@ mod timer_command_behavior_tests {
         assert_eq!(persisted.session_type, SessionType::Work);
         assert_eq!(persisted.remaining_seconds, 1500);
         assert!(!persisted.post_break_decision_pending);
-
-        cleanup_temp_dir(&temp_dir);
     }
 
     #[tokio::test(start_paused = true)]
@@ -1483,8 +1551,8 @@ mod timer_command_behavior_tests {
 
     #[tokio::test]
     async fn duration_sync_persists_updated_settings() {
-        let temp_dir = create_temp_dir("duration-sync-persists-settings");
-        let state = build_test_state_with_persistence_dir(temp_dir.clone()).await;
+        let temp_dir = TestTempDir::new("duration-sync-persists-settings");
+        let state = build_test_state_with_persistence_dir(temp_dir.path().to_path_buf()).await;
         let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
         let expected_work_duration_secs = command_work_duration_secs();
         let expected_short_break_duration_secs = command_short_break_duration_secs();
@@ -1530,8 +1598,6 @@ mod timer_command_behavior_tests {
             persisted.settings.long_break_interval,
             expected_long_break_interval
         );
-
-        cleanup_temp_dir(&temp_dir);
     }
 
     #[tokio::test]
@@ -1614,9 +1680,67 @@ mod timer_command_behavior_tests {
     }
 
     #[tokio::test]
+    async fn duration_replay_converges_after_uncertain_persistence_failure() {
+        let temp_dir = TestTempDir::new("duration-replay-converges");
+        let state =
+            build_test_state_with_one_shot_persistence_error(temp_dir.path().to_path_buf()).await;
+        let expected_work_duration_secs = command_work_duration_secs();
+        let expected_short_break_duration_secs = command_short_break_duration_secs();
+        let expected_long_break_duration_secs = command_long_break_duration_secs();
+        let expected_long_break_interval = command_long_break_interval();
+        let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
+
+        let first_result = sync_timer_duration_settings_with_runtime_effects(
+            &state,
+            expected_work_duration_secs,
+            expected_short_break_duration_secs,
+            expected_long_break_duration_secs,
+            expected_long_break_interval,
+            &mut runtime_effect_shell,
+        )
+        .await;
+
+        assert_persistence_save_error(&first_result);
+
+        sync_timer_duration_settings_with_runtime_effects(
+            &state,
+            expected_work_duration_secs,
+            expected_short_break_duration_secs,
+            expected_long_break_duration_secs,
+            expected_long_break_interval,
+            &mut runtime_effect_shell,
+        )
+        .await
+        .expect("identical duration replay should persist successfully");
+
+        let persisted = persisted_timer_state(&state);
+        assert_eq!(persisted.status, TimerStatus::Idle);
+        assert_eq!(
+            persisted.remaining_seconds,
+            expected_work_duration_secs.get()
+        );
+        assert_eq!(
+            persisted.settings.work_duration_secs,
+            expected_work_duration_secs
+        );
+        assert_eq!(
+            persisted.settings.short_break_duration_secs,
+            expected_short_break_duration_secs
+        );
+        assert_eq!(
+            persisted.settings.long_break_duration_secs,
+            expected_long_break_duration_secs
+        );
+        assert_eq!(
+            persisted.settings.long_break_interval,
+            expected_long_break_interval
+        );
+    }
+
+    #[tokio::test]
     async fn emergency_stop_persists_idle_state() {
-        let temp_dir = create_temp_dir("emergency-stop-persists-idle");
-        let state = build_test_state_with_persistence_dir(temp_dir.clone()).await;
+        let temp_dir = TestTempDir::new("emergency-stop-persists-idle");
+        let state = build_test_state_with_persistence_dir(temp_dir.path().to_path_buf()).await;
         prepare_fullscreen_break_state(&state).await;
         let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
 
@@ -1634,8 +1758,6 @@ mod timer_command_behavior_tests {
         let persisted = persisted_timer_state(&state);
         assert_eq!(persisted.status, TimerStatus::Idle);
         assert!(!persisted.is_fullscreen_break);
-
-        cleanup_temp_dir(&temp_dir);
     }
 
     #[tokio::test]
@@ -1741,8 +1863,8 @@ mod timer_command_behavior_tests {
 
     #[tokio::test]
     async fn stop_post_break_decision_persists_idle_state() {
-        let temp_dir = create_temp_dir("stop-post-break-persists-idle");
-        let state = build_test_state_with_persistence_dir(temp_dir.clone()).await;
+        let temp_dir = TestTempDir::new("stop-post-break-persists-idle");
+        let state = build_test_state_with_persistence_dir(temp_dir.path().to_path_buf()).await;
         prepare_post_break_decision_pending_state(&state).await;
         let mut runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
 
@@ -1764,8 +1886,6 @@ mod timer_command_behavior_tests {
         assert_eq!(persisted.status, TimerStatus::Idle);
         assert_eq!(persisted.session_type, SessionType::Work);
         assert!(!persisted.post_break_decision_pending);
-
-        cleanup_temp_dir(&temp_dir);
     }
 
     #[tokio::test]

@@ -9,7 +9,8 @@ import {
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import App from "./App";
 import { useSettingsStore } from "./store/settingsStore";
-import { SessionType, TimerStatus, useTimerStore } from "./store/timerStore";
+import { useTimerStore } from "./store/timerStore";
+import { resetTimerStoreForTest } from "./test/resetTimerStore";
 
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(vi.fn()),
@@ -81,21 +82,12 @@ async function openNotificationSettings(user: UserEvent): Promise<void> {
 describe("App", () => {
   beforeEach(() => {
     useSettingsStore.getState().reset();
-    useTimerStore.setState({
-      status: TimerStatus.IDLE,
-      remainingSeconds: 25 * 60,
-      sessionType: SessionType.WORK,
-      currentCycle: 0,
-      completedPomodoros: 0,
-      breakInteractionCount: 0,
-      isFullscreenBreak: false,
-      requiresManualContinueDecision: false,
-      isConnected: true,
-      shouldPromptStartOnBoot: false,
-      activeWindowSummary: null,
-      infoMessage: null,
-      infoMessageShownAtById: {},
+    useSettingsStore.setState({
+      durationSettingsApplicationStatus: "confirmed",
+      automationSettingsApplicationStatus: "confirmed",
     });
+    resetTimerStoreForTest();
+    useTimerStore.setState({ isConnected: true });
   });
 
   it("opens settings top screen when settings button is clicked", async () => {
@@ -170,6 +162,50 @@ describe("App", () => {
       ).toBeInTheDocument();
     },
   );
+
+  it("keeps unresolved settings visible across every settings route", async () => {
+    const user = userEvent.setup();
+    useTimerStore.setState({ isConnected: false });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(useTimerStore.getState().isConnected).toBe(true);
+    });
+    act(() => {
+      useSettingsStore.setState({
+        durationSettingsApplicationStatus: "pending",
+        automationSettingsApplicationStatus: "confirmed",
+      });
+    });
+
+    const expectUnresolvedSettingsNotice = (): void => {
+      expect(screen.getByRole("status")).toHaveTextContent(
+        /適用はまだ確認されていません/u,
+      );
+    };
+
+    expectUnresolvedSettingsNotice();
+    await openSettingsTop(user);
+    expectUnresolvedSettingsNotice();
+
+    await user.click(
+      screen.getByRole("button", { name: settingsTopTimerButtonName }),
+    );
+    expectUnresolvedSettingsNotice();
+    await user.click(screen.getByRole("button", { name: "設定一覧へ戻る" }));
+
+    await user.click(
+      screen.getByRole("button", { name: settingsTopAutoRunButtonName }),
+    );
+    expectUnresolvedSettingsNotice();
+    await user.click(screen.getByRole("button", { name: "設定一覧へ戻る" }));
+
+    await user.click(
+      screen.getByRole("button", { name: settingsTopNotificationButtonName }),
+    );
+    expectUnresolvedSettingsNotice();
+  });
 
   it("returns to home screen after fullscreen break ends while settings top is open", async () => {
     const user = userEvent.setup();

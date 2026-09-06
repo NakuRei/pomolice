@@ -6,9 +6,25 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
-import { useTimerStore, TimerStatus, SessionType } from "@/store/timerStore";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import type { FrontendLogger } from "@/logging/logger";
+import { resetSettingsStoreForTest } from "@/test/resetSettingsStore";
+import { resetTimerStoreForTest } from "@/test/resetTimerStore";
+import {
+  useTimerStore,
+  TimerStatus,
+  SessionType,
+  type FullStatePayload,
+  type SessionCompletedPayload,
+  type TimerTickPayload,
+} from "@/store/timerStore";
 import { useErrorStore } from "@/store/errorStore";
+import {
+  createAutomationSettingsCandidate,
+  createDurationSettingsCandidate,
+  useSettingsStore,
+  type SettingsApplicationStatus,
+} from "@/store/settingsStore";
 import {
   notifyWorkComplete,
   notifyBreakAutoStarted,
@@ -33,6 +49,7 @@ type InvokeCommand = (
 const mockListen = vi.fn<ListenerRegistration>();
 const mockInvoke = vi.fn<InvokeCommand>();
 const noopUnlisten = (): void => undefined;
+const timerSyncWarn = vi.hoisted(() => vi.fn<FrontendLogger["warn"]>());
 
 vi.mock("@tauri-apps/api/event", () => ({
   listen: (
@@ -44,6 +61,13 @@ vi.mock("@tauri-apps/api/event", () => ({
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: Record<string, unknown>): Promise<unknown> =>
     mockInvoke(command, args),
+}));
+
+vi.mock("../logging/logger", () => ({
+  createLogger: (): Pick<FrontendLogger, "error" | "warn"> => ({
+    error: vi.fn<FrontendLogger["error"]>(),
+    warn: timerSyncWarn,
+  }),
 }));
 
 vi.mock("@tauri-apps/plugin-notification", () => ({
@@ -60,6 +84,43 @@ vi.mock("@/services/notifications", () => ({
 
 // Import after mocking
 import { useTimerSync } from "./useTimerSync";
+
+type FullStateOverrides = Omit<Partial<FullStatePayload>, "settings"> & {
+  settings?: Partial<FullStatePayload["settings"]>;
+};
+
+function createFullStatePayload(
+  overrides: FullStateOverrides = {},
+): FullStatePayload {
+  const { settings, ...stateOverrides } = overrides;
+  return {
+    status: TimerStatus.IDLE,
+    remaining_seconds: 1500,
+    session_type: SessionType.WORK,
+    current_cycle: 0,
+    completed_pomodoros: 0,
+    break_interaction_count: 0,
+    is_fullscreen_break: false,
+    post_break_decision_pending: false,
+    should_prompt_start_on_boot: false,
+    active_window_summary: null,
+    ...stateOverrides,
+    settings: {
+      work_duration_secs: 1500,
+      short_break_duration_secs: 300,
+      long_break_duration_secs: 900,
+      long_break_interval: 4,
+      post_break_transition_policy: "require_manual_continue",
+      ...settings,
+    },
+  };
+}
+
+function renderTimerSync(): ReturnType<typeof renderHook> {
+  return renderHook(() => {
+    useTimerSync();
+  });
+}
 
 function expectRecord(
   value: unknown,
@@ -97,6 +158,59 @@ function getRequiredTimerEventHandler(
   return handler;
 }
 
+async function renderAndGetTimerEventHandler(
+  eventName: string,
+): Promise<TimerEventHandler> {
+  let capturedHandler: TimerEventHandler | undefined = undefined;
+  mockListen.mockImplementation((event, handler) => {
+    if (event === eventName) {
+      capturedHandler = handler;
+    }
+    return Promise.resolve(noopUnlisten);
+  });
+
+  renderTimerSync();
+  await vi.waitFor(() => {
+    expect(capturedHandler).toBeDefined();
+  });
+  return getRequiredTimerEventHandler(capturedHandler, `${eventName} handler`);
+}
+
+function emitTimerTick(
+  handler: TimerEventHandler,
+  overrides: Partial<TimerTickPayload> = {},
+): void {
+  handler({
+    payload: {
+      status: TimerStatus.WORKING,
+      remaining_seconds: 1499,
+      session_type: SessionType.WORK,
+      current_cycle: 1,
+      completed_pomodoros: 0,
+      break_interaction_count: 0,
+      is_fullscreen_break: false,
+      ...overrides,
+    },
+  });
+}
+
+function emitSessionCompleted(
+  handler: TimerEventHandler,
+  overrides: Partial<SessionCompletedPayload> = {},
+): void {
+  handler({
+    payload: {
+      transition_reason: "break_waiting_decision",
+      completed_session_type: SessionType.SHORT_BREAK,
+      next_status: TimerStatus.IDLE,
+      next_session_type: SessionType.WORK,
+      requires_manual_continue_decision: true,
+      post_break_decision_pending: true,
+      ...overrides,
+    },
+  });
+}
+
 async function flushTimerSyncSetup(): Promise<void> {
   await vi.advanceTimersByTimeAsync(0);
 }
@@ -124,60 +238,57 @@ function getFullStateInvokeCount(): number {
   ).length;
 }
 
+function settingsCommandNames(): string[] {
+  return mockInvoke.mock.calls
+    .map(([command]) => command)
+    .filter(
+      (command) =>
+        command === "sync_timer_duration_settings" ||
+        command === "sync_automation_policies",
+    );
+}
+
+function setApplicationStatuses(
+  durationStatus: SettingsApplicationStatus,
+  automationStatus: SettingsApplicationStatus,
+): void {
+  useSettingsStore.setState({
+    durationSettingsApplicationStatus: durationStatus,
+    automationSettingsApplicationStatus: automationStatus,
+  });
+}
+
+function confirmCurrentCandidates(): void {
+  const state = useSettingsStore.getState();
+  state.confirmDurationSettingsCandidate(
+    createDurationSettingsCandidate(state),
+  );
+  state.confirmAutomationSettingsCandidate(
+    createAutomationSettingsCandidate(state),
+  );
+}
+
 describe("useTimerSync", () => {
   beforeEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
     useErrorStore.getState().clearAllErrors();
 
-    // Reset store to initial state
-    useTimerStore.setState({
-      status: TimerStatus.IDLE,
-      remainingSeconds: 25 * 60,
-      sessionType: SessionType.WORK,
-      currentCycle: 0,
-      completedPomodoros: 0,
-      breakInteractionCount: 0,
-      isFullscreenBreak: false,
-      requiresManualContinueDecision: false,
-      isConnected: false,
-      shouldPromptStartOnBoot: false,
-      activeWindowSummary: null,
-      infoMessage: null,
-      infoMessageShownAtById: {},
-    });
+    resetTimerStoreForTest();
+    resetSettingsStoreForTest();
 
     // Default mock implementations
     mockListen.mockResolvedValue(noopUnlisten);
-    mockInvoke.mockResolvedValue({
-      status: "idle",
-      remaining_seconds: 1500,
-      session_type: "work",
-      current_cycle: 0,
-      completed_pomodoros: 0,
-      break_interaction_count: 0,
-      is_fullscreen_break: false,
-      post_break_decision_pending: false,
-      should_prompt_start_on_boot: false,
-      active_window_summary: null,
-      settings: {
-        work_duration_secs: 1500,
-        short_break_duration_secs: 300,
-        long_break_duration_secs: 900,
-        long_break_interval: 4,
-        post_break_transition_policy: "require_manual_continue",
-      },
-    });
+    mockInvoke.mockResolvedValue(createFullStatePayload());
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it("should set up event listeners on mount", async () => {
-    renderHook(() => {
-      useTimerSync();
-    });
+    renderTimerSync();
 
     await waitFor(() => {
       expect(mockListen).toHaveBeenCalled();
@@ -191,6 +302,98 @@ describe("useTimerSync", () => {
     expect(listenCalls).toContain("auto_run_stopped");
   });
 
+  it("starts backend setup from the settled synchronous hydration result", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(useSettingsStore.persist, "hasHydrated").mockReturnValue(true);
+    renderTimerSync();
+    await flushTimerSyncSetup();
+
+    expect(mockListen).toHaveBeenCalledTimes(6);
+    expect(mockInvoke.mock.calls[0]).toEqual(["get_full_state", undefined]);
+    expect(getFullStateInvokeCount()).toBe(1);
+    expect(settingsCommandNames()).toEqual([
+      "sync_timer_duration_settings",
+      "sync_automation_policies",
+    ]);
+  });
+
+  it("keeps timer use available without automatically sending settings after terminal hydration failure", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(useSettingsStore.persist, "hasHydrated").mockReturnValue(false);
+    renderTimerSync();
+    await flushTimerSyncSetup();
+
+    expect(mockListen).toHaveBeenCalledTimes(6);
+    expect(mockInvoke.mock.calls).toEqual([["get_full_state", undefined]]);
+    expect(getFullStateInvokeCount()).toBe(1);
+    expect(useTimerStore.getState().isConnected).toBe(true);
+    expect(settingsCommandNames()).toEqual([]);
+    expect(useSettingsStore.getState().durationSettingsApplicationStatus).toBe(
+      "pending",
+    );
+    expect(
+      useSettingsStore.getState().automationSettingsApplicationStatus,
+    ).toBe("pending");
+  });
+
+  it("allows explicit settings recovery after terminal hydration failure", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(useSettingsStore.persist, "hasHydrated").mockReturnValue(false);
+    renderTimerSync();
+    await flushTimerSyncSetup();
+    expect(settingsCommandNames()).toEqual([]);
+
+    await useTimerStore.getState().syncSettings();
+
+    expect(settingsCommandNames()).toEqual([
+      "sync_timer_duration_settings",
+      "sync_automation_policies",
+    ]);
+    expect(useSettingsStore.getState().durationSettingsApplicationStatus).toBe(
+      "confirmed",
+    );
+    expect(
+      useSettingsStore.getState().automationSettingsApplicationStatus,
+    ).toBe("confirmed");
+  });
+
+  it("registers all six listeners before requesting full state", async () => {
+    const setupOrder: string[] = [];
+    mockListen.mockImplementation((event) => {
+      setupOrder.push(`listen:${event}`);
+      return Promise.resolve(noopUnlisten);
+    });
+    mockInvoke.mockImplementation((command) => {
+      setupOrder.push(`invoke:${command}`);
+      if (command === "get_full_state") {
+        return Promise.resolve(createFullStatePayload());
+      }
+      return Promise.resolve(undefined);
+    });
+
+    renderTimerSync();
+
+    await waitFor(() => {
+      expect(getFullStateInvokeCount()).toBe(1);
+    });
+    const fullStateIndex = setupOrder.indexOf("invoke:get_full_state");
+    expect(fullStateIndex).toBeGreaterThanOrEqual(0);
+    const requiredListenerRegistrations = [
+      "listen:timer_tick",
+      "listen:session_completed",
+      "listen:auto_run_stop_pending",
+      "listen:auto_run_stopped",
+      "listen:break_started",
+      "listen:break_completed",
+    ];
+    expect(
+      setupOrder.filter((entry) => entry.startsWith("listen:")),
+    ).toHaveLength(6);
+    requiredListenerRegistrations.forEach((registration) => {
+      expect(setupOrder.indexOf(registration)).toBeLessThan(fullStateIndex);
+    });
+  });
+
   it("should report get_full_state command failures through code-derived connection presentation", async () => {
     vi.useFakeTimers();
     const backendError = {
@@ -199,9 +402,7 @@ describe("useTimerSync", () => {
     };
     mockInvoke.mockRejectedValue(backendError);
 
-    renderHook(() => {
-      useTimerSync();
-    });
+    renderTimerSync();
 
     await flushTimerSyncSetup();
     await advanceThroughTimerSyncConnectionRetries();
@@ -228,9 +429,7 @@ describe("useTimerSync", () => {
       new Error("transport failed from C:\\Users\\nak\\secret"),
     );
 
-    renderHook(() => {
-      useTimerSync();
-    });
+    renderTimerSync();
 
     await flushTimerSyncSetup();
     expect(getFullStateInvokeCount()).toBe(1);
@@ -262,9 +461,7 @@ describe("useTimerSync", () => {
     };
     mockInvoke.mockRejectedValue(backendError);
 
-    renderHook(() => {
-      useTimerSync();
-    });
+    renderTimerSync();
 
     await flushTimerSyncSetup();
 
@@ -305,9 +502,7 @@ describe("useTimerSync", () => {
       return Promise.resolve(noopUnlisten);
     });
 
-    renderHook(() => {
-      useTimerSync();
-    });
+    renderTimerSync();
 
     await waitFor(() => {
       expect(unlistenTick).toHaveBeenCalledTimes(1);
@@ -318,9 +513,7 @@ describe("useTimerSync", () => {
     vi.useFakeTimers();
     mockListen.mockRejectedValue(new Error("listen failed"));
 
-    renderHook(() => {
-      useTimerSync();
-    });
+    renderTimerSync();
 
     await flushTimerSyncSetup();
     expect(mockListen).toHaveBeenCalledTimes(1);
@@ -352,9 +545,7 @@ describe("useTimerSync", () => {
     vi.useFakeTimers();
     mockListen.mockRejectedValue(new Error("listen failed"));
 
-    renderHook(() => {
-      useTimerSync();
-    });
+    renderTimerSync();
 
     await flushTimerSyncSetup();
     expect(mockListen).toHaveBeenCalledTimes(1);
@@ -379,9 +570,7 @@ describe("useTimerSync", () => {
     vi.useFakeTimers();
     mockListen.mockRejectedValue(new Error("listen failed"));
 
-    renderHook(() => {
-      useTimerSync();
-    });
+    renderTimerSync();
 
     await flushTimerSyncSetup();
     expect(mockListen).toHaveBeenCalledTimes(1);
@@ -406,11 +595,10 @@ describe("useTimerSync", () => {
 
   it("should reconnect successfully when manual retry setup succeeds", async () => {
     vi.useFakeTimers();
+    setApplicationStatuses("confirmed", "unconfirmed");
     mockListen.mockRejectedValue(new Error("listen failed"));
 
-    renderHook(() => {
-      useTimerSync();
-    });
+    renderTimerSync();
 
     await flushTimerSyncSetup();
     await advanceThroughTimerSyncConnectionRetries();
@@ -431,12 +619,11 @@ describe("useTimerSync", () => {
     expect(mockListen.mock.calls.map(([event]) => event)).toContain(
       "timer_tick",
     );
+    expect(settingsCommandNames()).toEqual(["sync_automation_policies"]);
   });
 
   it("should call get_full_state on mount", async () => {
-    renderHook(() => {
-      useTimerSync();
-    });
+    renderTimerSync();
 
     await waitFor(() => {
       expect(mockInvoke.mock.calls).toContainEqual([
@@ -447,131 +634,135 @@ describe("useTimerSync", () => {
   });
 
   it("should set isConnected to true after getting full state", async () => {
-    renderHook(() => {
-      useTimerSync();
-    });
+    renderTimerSync();
 
     await waitFor(() => {
       expect(useTimerStore.getState().isConnected).toBe(true);
     });
   });
 
-  it("should handle timer_tick events", async () => {
-    let tickHandler: ((event: { payload: unknown }) => void) | undefined =
-      undefined;
-
-    mockListen.mockImplementation(
-      (event: string, handler: (event: { payload: unknown }) => void) => {
-        if (event === "timer_tick") {
-          tickHandler = handler;
+  it("applies duration readback before starting settings reconciliation", async () => {
+    confirmCurrentCandidates();
+    let synchronizationObservation:
+      | {
+          durationStatus: SettingsApplicationStatus;
+          remainingSeconds: number;
+          isConnected: boolean;
         }
-        return Promise.resolve(noopUnlisten);
-      },
-    );
-
-    renderHook(() => {
-      useTimerSync();
+      | undefined = undefined;
+    mockInvoke.mockImplementation((command) => {
+      if (command === "get_full_state") {
+        return Promise.resolve({
+          status: "idle",
+          remaining_seconds: 777,
+          session_type: "work",
+          current_cycle: 0,
+          completed_pomodoros: 0,
+          break_interaction_count: 0,
+          is_fullscreen_break: false,
+          post_break_decision_pending: false,
+          should_prompt_start_on_boot: false,
+          active_window_summary: null,
+          settings: {
+            work_duration_secs: 1200,
+            short_break_duration_secs: 300,
+            long_break_duration_secs: 900,
+            long_break_interval: 4,
+            post_break_transition_policy: "require_manual_continue",
+          },
+        });
+      }
+      if (command === "sync_timer_duration_settings") {
+        const timerState = useTimerStore.getState();
+        synchronizationObservation = {
+          durationStatus:
+            useSettingsStore.getState().durationSettingsApplicationStatus,
+          remainingSeconds: timerState.remainingSeconds,
+          isConnected: timerState.isConnected,
+        };
+      }
+      return Promise.resolve(undefined);
     });
+
+    renderTimerSync();
 
     await waitFor(() => {
-      expect(tickHandler).toBeDefined();
+      expect(synchronizationObservation).toBeDefined();
     });
+    expect(synchronizationObservation).toEqual({
+      durationStatus: "pending",
+      remainingSeconds: 777,
+      isConnected: true,
+    });
+  });
 
-    // Simulate timer tick from backend
-    const definedTickHandler = getRequiredTimerEventHandler(
-      tickHandler,
-      "timer_tick handler",
-    );
-    definedTickHandler({
-      payload: {
-        status: "working",
-        remaining_seconds: 1499,
-        session_type: "work",
-        current_cycle: 1,
-        completed_pomodoros: 0,
-        break_interaction_count: 0,
-        is_fullscreen_break: false,
-      },
-    });
+  it.each([
+    {
+      label: "both confirmed",
+      durationStatus: "confirmed" as const,
+      automationStatus: "confirmed" as const,
+      expectedCommands: [],
+    },
+    {
+      label: "only duration pending",
+      durationStatus: "pending" as const,
+      automationStatus: "confirmed" as const,
+      expectedCommands: ["sync_timer_duration_settings"],
+    },
+    {
+      label: "only automation unconfirmed",
+      durationStatus: "confirmed" as const,
+      automationStatus: "unconfirmed" as const,
+      expectedCommands: ["sync_automation_policies"],
+    },
+    {
+      label: "both unresolved",
+      durationStatus: "unconfirmed" as const,
+      automationStatus: "pending" as const,
+      expectedCommands: [
+        "sync_timer_duration_settings",
+        "sync_automation_policies",
+      ],
+    },
+  ])(
+    "synchronizes only eligible unresolved groups at startup when $label",
+    async ({ durationStatus, automationStatus, expectedCommands }) => {
+      setApplicationStatuses(durationStatus, automationStatus);
+      renderTimerSync();
+
+      await waitFor(() => {
+        expect(useTimerStore.getState().isConnected).toBe(true);
+        expect(settingsCommandNames()).toEqual(expectedCommands);
+      });
+    },
+  );
+
+  it("should handle timer_tick events", async () => {
+    const tickHandler = await renderAndGetTimerEventHandler("timer_tick");
+    emitTimerTick(tickHandler);
 
     expect(useTimerStore.getState().status).toBe(TimerStatus.WORKING);
     expect(useTimerStore.getState().remainingSeconds).toBe(1499);
   });
 
   it("should handle session_completed events", async () => {
-    let sessionHandler: ((event: { payload: unknown }) => void) | undefined =
-      undefined;
-
-    mockListen.mockImplementation(
-      (event: string, handler: (event: { payload: unknown }) => void) => {
-        if (event === "session_completed") {
-          sessionHandler = handler;
-        }
-        return Promise.resolve(noopUnlisten);
-      },
-    );
-
-    renderHook(() => {
-      useTimerSync();
-    });
-
-    await waitFor(() => {
-      expect(sessionHandler).toBeDefined();
-    });
-
-    // Simulate session completed from backend
-    const definedSessionHandler = getRequiredTimerEventHandler(
-      sessionHandler,
-      "session_completed handler",
-    );
-    definedSessionHandler({
-      payload: {
-        transition_reason: "break_waiting_decision",
-        completed_session_type: "short_break",
-        next_status: "idle",
-        next_session_type: "work",
-        requires_manual_continue_decision: true,
-        post_break_decision_pending: true,
-      },
-    });
+    const sessionHandler =
+      await renderAndGetTimerEventHandler("session_completed");
+    emitSessionCompleted(sessionHandler);
 
     expect(useTimerStore.getState().requiresManualContinueDecision).toBe(true);
   });
 
   it("should call notifyWorkComplete with next_session_type", async () => {
-    let sessionHandler: ((event: { payload: unknown }) => void) | undefined =
-      undefined;
-
-    mockListen.mockImplementation(
-      (event: string, handler: (event: { payload: unknown }) => void) => {
-        if (event === "session_completed") {
-          sessionHandler = handler;
-        }
-        return Promise.resolve(noopUnlisten);
-      },
-    );
-
-    renderHook(() => {
-      useTimerSync();
-    });
-
-    await waitFor(() => {
-      expect(sessionHandler).toBeDefined();
-    });
-
-    const definedSessionHandler = getRequiredTimerEventHandler(
-      sessionHandler,
-      "session_completed handler",
-    );
-    definedSessionHandler({
-      payload: {
-        transition_reason: "work_to_break",
-        completed_session_type: "work",
-        next_status: "on_break",
-        next_session_type: "long_break",
-        requires_manual_continue_decision: false,
-        post_break_decision_pending: false,
-      },
+    const sessionHandler =
+      await renderAndGetTimerEventHandler("session_completed");
+    emitSessionCompleted(sessionHandler, {
+      transition_reason: "work_to_break",
+      completed_session_type: SessionType.WORK,
+      next_status: TimerStatus.ON_BREAK,
+      next_session_type: SessionType.LONG_BREAK,
+      requires_manual_continue_decision: false,
+      post_break_decision_pending: false,
     });
 
     expect(notifyWorkComplete).toHaveBeenCalledWith("long_break");
@@ -581,39 +772,10 @@ describe("useTimerSync", () => {
   });
 
   it("should call notifyBreakComplete when transition_reason is break_waiting_decision", async () => {
-    let sessionHandler: ((event: { payload: unknown }) => void) | undefined =
-      undefined;
-
-    mockListen.mockImplementation(
-      (event: string, handler: (event: { payload: unknown }) => void) => {
-        if (event === "session_completed") {
-          sessionHandler = handler;
-        }
-        return Promise.resolve(noopUnlisten);
-      },
-    );
-
-    renderHook(() => {
-      useTimerSync();
-    });
-
-    await waitFor(() => {
-      expect(sessionHandler).toBeDefined();
-    });
-
-    const definedSessionHandler = getRequiredTimerEventHandler(
-      sessionHandler,
-      "session_completed handler",
-    );
-    definedSessionHandler({
-      payload: {
-        transition_reason: "break_waiting_decision",
-        completed_session_type: "long_break",
-        next_status: "idle",
-        next_session_type: "work",
-        requires_manual_continue_decision: true,
-        post_break_decision_pending: true,
-      },
+    const sessionHandler =
+      await renderAndGetTimerEventHandler("session_completed");
+    emitSessionCompleted(sessionHandler, {
+      completed_session_type: SessionType.LONG_BREAK,
     });
 
     expect(notifyBreakComplete).toHaveBeenCalledTimes(1);
@@ -622,39 +784,13 @@ describe("useTimerSync", () => {
   });
 
   it("should call notifyBreakAutoStarted when transition_reason is break_auto_started", async () => {
-    let sessionHandler: ((event: { payload: unknown }) => void) | undefined =
-      undefined;
-
-    mockListen.mockImplementation(
-      (event: string, handler: (event: { payload: unknown }) => void) => {
-        if (event === "session_completed") {
-          sessionHandler = handler;
-        }
-        return Promise.resolve(noopUnlisten);
-      },
-    );
-
-    renderHook(() => {
-      useTimerSync();
-    });
-
-    await waitFor(() => {
-      expect(sessionHandler).toBeDefined();
-    });
-
-    const definedSessionHandler = getRequiredTimerEventHandler(
-      sessionHandler,
-      "session_completed handler",
-    );
-    definedSessionHandler({
-      payload: {
-        transition_reason: "break_auto_started",
-        completed_session_type: "short_break",
-        next_status: "working",
-        next_session_type: "work",
-        requires_manual_continue_decision: false,
-        post_break_decision_pending: false,
-      },
+    const sessionHandler =
+      await renderAndGetTimerEventHandler("session_completed");
+    emitSessionCompleted(sessionHandler, {
+      transition_reason: "break_auto_started",
+      next_status: TimerStatus.WORKING,
+      requires_manual_continue_decision: false,
+      post_break_decision_pending: false,
     });
 
     expect(notifyBreakAutoStarted).toHaveBeenCalledTimes(1);
@@ -663,39 +799,12 @@ describe("useTimerSync", () => {
   });
 
   it("should not call work-resume notifications for scheduled_stop_executed", async () => {
-    let sessionHandler: ((event: { payload: unknown }) => void) | undefined =
-      undefined;
-
-    mockListen.mockImplementation(
-      (event: string, handler: (event: { payload: unknown }) => void) => {
-        if (event === "session_completed") {
-          sessionHandler = handler;
-        }
-        return Promise.resolve(noopUnlisten);
-      },
-    );
-
-    renderHook(() => {
-      useTimerSync();
-    });
-
-    await waitFor(() => {
-      expect(sessionHandler).toBeDefined();
-    });
-
-    const definedSessionHandler = getRequiredTimerEventHandler(
-      sessionHandler,
-      "session_completed handler",
-    );
-    definedSessionHandler({
-      payload: {
-        transition_reason: "scheduled_stop_executed",
-        completed_session_type: "short_break",
-        next_status: "idle",
-        next_session_type: "work",
-        requires_manual_continue_decision: false,
-        post_break_decision_pending: false,
-      },
+    const sessionHandler =
+      await renderAndGetTimerEventHandler("session_completed");
+    emitSessionCompleted(sessionHandler, {
+      transition_reason: "scheduled_stop_executed",
+      requires_manual_continue_decision: false,
+      post_break_decision_pending: false,
     });
 
     expect(notifyWorkComplete).not.toHaveBeenCalled();
@@ -703,49 +812,72 @@ describe("useTimerSync", () => {
     expect(notifyBreakAutoStarted).not.toHaveBeenCalled();
   });
 
-  it("should clean up listeners on unmount", async () => {
-    const unsubscribe = vi.fn();
-    mockListen.mockResolvedValue(unsubscribe);
+  it("releases every listener and ignores full state resolved after unmount", async () => {
+    vi.spyOn(useSettingsStore.persist, "hasHydrated").mockReturnValue(true);
+    setApplicationStatuses("pending", "pending");
 
-    const { unmount } = renderHook(() => {
-      useTimerSync();
+    const acquiredUnlisteners = Array.from({ length: 6 }, () => vi.fn());
+    let nextUnlistenIndex = 0;
+    mockListen.mockImplementation(() => {
+      const unlisten = acquiredUnlisteners[nextUnlistenIndex];
+      nextUnlistenIndex += 1;
+      if (!unlisten) {
+        throw new Error("Unexpected listener registration");
+      }
+      return Promise.resolve(unlisten);
     });
 
+    let resolvePendingFullState: (payload: FullStatePayload) => void = () => {
+      throw new Error("Expected pending full-state resolver");
+    };
+    const pendingFullState = new Promise<FullStatePayload>((resolve) => {
+      resolvePendingFullState = resolve;
+    });
+    mockInvoke.mockImplementation((command) => {
+      if (command === "get_full_state") {
+        return pendingFullState;
+      }
+      return Promise.resolve(undefined);
+    });
+
+    const remainingSecondsBeforeUnmount = 823;
+    useTimerStore.setState({
+      remainingSeconds: remainingSecondsBeforeUnmount,
+      isConnected: false,
+    });
+    const { unmount } = renderTimerSync();
+
     await waitFor(() => {
-      expect(mockListen).toHaveBeenCalled();
+      expect(mockListen).toHaveBeenCalledTimes(6);
+      expect(getFullStateInvokeCount()).toBe(1);
     });
 
     unmount();
 
-    // Unsubscribe should be called for each listener
-    expect(unsubscribe).toHaveBeenCalled();
+    for (const unlisten of acquiredUnlisteners) {
+      expect(unlisten).toHaveBeenCalledTimes(1);
+    }
+
+    await act(async () => {
+      resolvePendingFullState(
+        createFullStatePayload({ remaining_seconds: 17 }),
+      );
+      await pendingFullState;
+      await Promise.resolve();
+    });
+
+    expect(useTimerStore.getState().remainingSeconds).toBe(
+      remainingSecondsBeforeUnmount,
+    );
+    expect(useTimerStore.getState().isConnected).toBe(false);
+    expect(settingsCommandNames()).toEqual([]);
   });
 
   it("should show stop-pending info on auto_run_stop_pending events", async () => {
-    let stopPendingListener: TimerEventHandler | undefined = undefined;
-
-    mockListen.mockImplementation(
-      (event: string, handler: TimerEventHandler | (() => void)) => {
-        if (event === "auto_run_stop_pending") {
-          stopPendingListener = handler;
-        }
-        return Promise.resolve(noopUnlisten);
-      },
+    const stopPendingListener = await renderAndGetTimerEventHandler(
+      "auto_run_stop_pending",
     );
-
-    renderHook(() => {
-      useTimerSync();
-    });
-
-    await waitFor(() => {
-      expect(stopPendingListener).toBeDefined();
-    });
-
-    const definedStopPendingListener = getRequiredTimerEventHandler(
-      stopPendingListener,
-      "auto_run_stop_pending listener",
-    );
-    definedStopPendingListener({ payload: {} });
+    stopPendingListener({ payload: {} });
 
     expect(useTimerStore.getState().infoMessage?.id).toBe(
       "auto_run_stop_pending",
@@ -753,38 +885,79 @@ describe("useTimerSync", () => {
   });
 
   it("should show stopped info on auto_run_stopped events", async () => {
-    let stoppedListener: TimerEventHandler | undefined = undefined;
-
-    mockListen.mockImplementation(
-      (event: string, handler: TimerEventHandler | (() => void)) => {
-        if (event === "auto_run_stopped") {
-          stoppedListener = handler;
-        }
-        return Promise.resolve(noopUnlisten);
-      },
-    );
-
-    renderHook(() => {
-      useTimerSync();
-    });
-
-    await waitFor(() => {
-      expect(stoppedListener).toBeDefined();
-    });
-
-    const definedStoppedListener = getRequiredTimerEventHandler(
-      stoppedListener,
-      "auto_run_stopped listener",
-    );
-    definedStoppedListener({ payload: {} });
+    const stoppedListener =
+      await renderAndGetTimerEventHandler("auto_run_stopped");
+    stoppedListener({ payload: {} });
 
     expect(useTimerStore.getState().infoMessage?.id).toBe("auto_run_stopped");
   });
 
-  it("should sync settings to backend on mount", async () => {
-    renderHook(() => {
-      useTimerSync();
+  it("defers restored duration reconciliation while non-idle and recovers on idle", async () => {
+    vi.useFakeTimers();
+    setApplicationStatuses("unconfirmed", "confirmed");
+    mockInvoke.mockImplementation((command) => {
+      if (command === "get_full_state") {
+        return Promise.resolve(
+          createFullStatePayload({
+            status: TimerStatus.WORKING,
+            remaining_seconds: 900,
+            current_cycle: 1,
+          }),
+        );
+      }
+      return Promise.resolve(undefined);
     });
+
+    const tickHandler = await renderAndGetTimerEventHandler("timer_tick");
+    await vi.waitFor(() => {
+      expect(useTimerStore.getState().isConnected).toBe(true);
+    });
+    await vi.runOnlyPendingTimersAsync();
+    expect(settingsCommandNames()).toEqual([]);
+    expect(useSettingsStore.getState().durationSettingsApplicationStatus).toBe(
+      "unconfirmed",
+    );
+
+    emitTimerTick(tickHandler, {
+      status: TimerStatus.IDLE,
+      remaining_seconds: 1500,
+    });
+
+    await vi.waitFor(() => {
+      expect(settingsCommandNames()).toEqual(["sync_timer_duration_settings"]);
+    });
+    expect(useSettingsStore.getState().durationSettingsApplicationStatus).toBe(
+      "confirmed",
+    );
+  });
+
+  it("keeps the connection established when settings synchronization rejects", async () => {
+    setApplicationStatuses("pending", "confirmed");
+    mockInvoke.mockImplementation((command) => {
+      if (command === "get_full_state") {
+        return Promise.resolve(createFullStatePayload());
+      }
+      if (command === "sync_timer_duration_settings") {
+        return Promise.reject(new Error("failed to persist duration settings"));
+      }
+      return Promise.resolve(undefined);
+    });
+
+    renderTimerSync();
+
+    await waitFor(() => {
+      expect(
+        useSettingsStore.getState().durationSettingsApplicationStatus,
+      ).toBe("unconfirmed");
+    });
+    expect(useTimerStore.getState().isConnected).toBe(true);
+    expect(useErrorStore.getState().errors.connection).toBeUndefined();
+    expect(getFullStateInvokeCount()).toBe(1);
+    expect(settingsCommandNames()).toEqual(["sync_timer_duration_settings"]);
+  });
+
+  it("should sync settings to backend on mount", async () => {
+    renderTimerSync();
 
     await waitFor(() => {
       const durationSettingsPayload = getInvokePayload(

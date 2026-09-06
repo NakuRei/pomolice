@@ -7,6 +7,7 @@ import { BreakStats } from "./BreakStats";
 import { MotivationalMessage } from "./MotivationalMessage";
 import { SkipButton } from "./SkipButton";
 import SkipFlowModal from "../SkipFlow/SkipFlowModal";
+import { SettingsSyncBanner } from "../shared/SettingsSyncBanner";
 
 /**
  * FullscreenBreak Component
@@ -76,6 +77,12 @@ export function FullscreenBreak(): React.ReactElement {
       className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background text-on-background"
       data-testid="fullscreen-break"
     >
+      <div className="pointer-events-none absolute top-4 right-4 left-4">
+        <div className="pointer-events-auto mx-auto max-w-3xl">
+          <SettingsSyncBanner />
+        </div>
+      </div>
+
       {/* Session type */}
       <div className="mb-6 text-3xl font-medium tracking-wider text-text-muted uppercase">
         {getSessionTypeText()}

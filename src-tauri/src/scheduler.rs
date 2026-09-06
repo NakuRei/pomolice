@@ -1539,6 +1539,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn identical_automation_replay_does_not_skip_an_arriving_start_boundary() {
+        let state = build_test_state_with_persistence_failure().await;
+        complete_startup_auto_start_prompt_gate(&state);
+        let weekly_config = weekly_config_with_monday_daytime();
+        let mut runtime_state =
+            runtime_state_at(&state, local_datetime(2025, 1, 6, 8, 59, 40)).await;
+        let mut command_effects = RecordingSchedulerRuntimeEffects::default();
+
+        let first_result = sync_automation_policies_with_runtime_effects(
+            &state,
+            true,
+            weekly_config.clone(),
+            PostBreakTransitionPolicy::RequireManualContinue,
+            &mut command_effects,
+        )
+        .await;
+        assert!(
+            first_result.is_err(),
+            "the first configuration write should report its persistence failure"
+        );
+
+        let mut scheduler_effects = RecordingSchedulerRuntimeEffects::default();
+        run_scheduler_tick_with_effects(
+            &state,
+            &mut runtime_state,
+            local_datetime(2025, 1, 6, 8, 59, 50),
+            &mut scheduler_effects,
+        )
+        .await;
+        assert_no_work_start_effects(&scheduler_effects);
+
+        let replay_result = sync_automation_policies_with_runtime_effects(
+            &state,
+            true,
+            weekly_config,
+            PostBreakTransitionPolicy::RequireManualContinue,
+            &mut command_effects,
+        )
+        .await;
+        assert!(
+            replay_result.is_err(),
+            "the identical replay should preserve the injected persistence failure"
+        );
+
+        run_scheduler_tick_with_effects(
+            &state,
+            &mut runtime_state,
+            local_datetime(2025, 1, 6, 9, 0, 10),
+            &mut scheduler_effects,
+        )
+        .await;
+
+        assert_eq!(scheduler_effects.work_started_durations, [1500]);
+    }
+
+    #[tokio::test]
     async fn replayed_start_boundary_does_not_start_work_again_after_returning_idle() {
         let state = build_test_state_without_persistence_path().await;
         complete_startup_auto_start_prompt_gate(&state);

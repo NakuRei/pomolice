@@ -1,10 +1,29 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+
+type InvokeCommand = (
+  command: string,
+  args?: Record<string, unknown>,
+) => Promise<unknown>;
+
+const mockInvoke = vi.fn<InvokeCommand>();
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (command: string, args?: Record<string, unknown>): Promise<unknown> =>
+    mockInvoke(command, args),
+}));
+
 import { FullscreenBreak } from "./FullscreenBreak";
-import { useTimerStore, SessionType } from "@/store/timerStore";
+import { useSettingsStore } from "@/store/settingsStore";
+import { useTimerStore, SessionType, TimerStatus } from "@/store/timerStore";
+import { useSkipFlowStore } from "@/store/skipFlowStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { breakMotivationalMessages } from "@/data/motivationalMessages";
+import {
+  LONG_TYPING_PHRASES,
+  SHORT_TYPING_PHRASES,
+} from "@/data/typingPhrases";
 
 function getBreakTimerDisplay(timeText: string): HTMLElement {
   return screen.getByText(timeText);
@@ -35,17 +54,84 @@ async function renderFullscreenBreakWithSkipFlowOpen(): Promise<void> {
   await user.click(screen.getByRole("button", { name: "休憩をスキップ" }));
 }
 
+function renderedPhraseFrom(bank: readonly string[]): string {
+  const phrase = bank.find(
+    (candidate) =>
+      screen.queryAllByText((_, element) => element?.textContent === candidate)
+        .length > 0,
+  );
+  if (phrase === undefined) {
+    throw new Error("Expected a typing challenge phrase");
+  }
+  return phrase;
+}
+
+function solveDisplayedProblem(): number {
+  const problemText = screen.getByText(/[=]\s*\?/u).textContent;
+  const groups = /(?<left>-?\d+)\s*(?<operator>[+\-×])\s*(?<right>-?\d+)/u.exec(
+    problemText,
+  )?.groups;
+  if (groups?.operator === undefined) {
+    throw new Error(
+      `Expected a solvable math problem, received ${problemText}`,
+    );
+  }
+
+  const left = Number(groups.left);
+  const right = Number(groups.right);
+  switch (groups.operator) {
+    case "+":
+      return left + right;
+    case "-":
+      return left - right;
+    case "×":
+      return left * right;
+    default:
+      throw new Error(`Unexpected math operator ${groups.operator}`);
+  }
+}
+
+function completeTypingChallenge(bank: readonly string[]): void {
+  fireEvent.change(screen.getByPlaceholderText("Start typing here..."), {
+    target: { value: renderedPhraseFrom(bank) },
+  });
+}
+
+function completeMathChallenge(): void {
+  const answerInput = screen.getByPlaceholderText("Your answer");
+  fireEvent.change(answerInput, {
+    target: { value: String(solveDisplayedProblem()) },
+  });
+  const answerForm = answerInput.closest("form");
+  if (answerForm === null) {
+    throw new Error("Expected the answer input inside a form");
+  }
+  fireEvent.submit(answerForm);
+}
+
 describe("FullscreenBreak", () => {
   beforeEach(() => {
-    // Reset store to initial state before each test
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue(undefined);
     resetTimerStoreForTest();
+    useSkipFlowStore.getState().resetSkipFlow();
+    useSettingsStore.getState().resetToDefaults();
+    useSettingsStore.setState({
+      durationSettingsApplicationStatus: "confirmed",
+      automationSettingsApplicationStatus: "confirmed",
+    });
     useTimerStore.setState({
       sessionType: SessionType.SHORT_BREAK,
       remainingSeconds: 300,
+      status: TimerStatus.ON_BREAK,
+      isFullscreenBreak: true,
+      isConnected: true,
+      isSettingsSynchronizationInFlight: false,
     });
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -81,6 +167,87 @@ describe("FullscreenBreak", () => {
       rerender(<FullscreenBreak />);
 
       expect(getVisibleBreakMotivationalMessage()).toBe(initialMessage);
+    });
+
+    it("keeps unresolved settings visible without blocking the skip flow", async () => {
+      useSettingsStore.setState({
+        automationSettingsApplicationStatus: "unconfirmed",
+      });
+
+      await renderFullscreenBreakWithSkipFlowOpen();
+
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        /適用を確認できませんでした/u,
+      );
+      expect(
+        screen.queryByRole("button", { name: "設定の同期を再試行" }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText(/Step/iu)).toBeInTheDocument();
+      expect(screen.getByText(/No, Take Break/iu)).toBeInTheDocument();
+    });
+
+    it("keeps settings recovery informational while fullscreen remains enforced", () => {
+      useSettingsStore.setState({
+        automationSettingsApplicationStatus: "unconfirmed",
+      });
+      useTimerStore.getState().handleTimerTick({
+        status: TimerStatus.IDLE,
+        remaining_seconds: 300,
+        session_type: SessionType.SHORT_BREAK,
+        current_cycle: 1,
+        completed_pomodoros: 0,
+        break_interaction_count: 0,
+        is_fullscreen_break: true,
+      });
+
+      render(<FullscreenBreak />);
+
+      expect(useTimerStore.getState().status).toBe(TimerStatus.ON_BREAK);
+      expect(screen.getByRole("alert")).toHaveTextContent(/休憩終了後/u);
+      expect(
+        screen.queryByRole("button", { name: "設定の同期を再試行" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "休憩をスキップ" }),
+      ).toBeInTheDocument();
+    });
+
+    it("keeps the complete skip flow usable while settings remain unresolved", () => {
+      vi.useFakeTimers();
+      useSettingsStore.setState({
+        automationSettingsApplicationStatus: "unconfirmed",
+      });
+      render(<FullscreenBreak />);
+
+      fireEvent.click(screen.getByRole("button", { name: "休憩をスキップ" }));
+      for (let step = 1; step <= 4; step += 1) {
+        expect(
+          screen.getByText(`Step ${String(step)} of 10`),
+        ).toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Yes, Continue" }));
+      }
+
+      completeTypingChallenge(SHORT_TYPING_PHRASES);
+      completeMathChallenge();
+      completeTypingChallenge(LONG_TYPING_PHRASES);
+      completeMathChallenge();
+
+      const longPressButton = screen.getByRole("button", {
+        name: /Press and Hold/iu,
+      });
+      act(() => {
+        fireEvent.mouseDown(longPressButton);
+        vi.advanceTimersByTime(15_100);
+      });
+
+      expect(screen.getByText("Final Warning")).toBeInTheDocument();
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        /適用を確認できませんでした/u,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Yes, Skip Anyway" }));
+
+      expect(mockInvoke).toHaveBeenCalledTimes(1);
+      expect(mockInvoke).toHaveBeenCalledWith("emergency_stop", undefined);
     });
   });
 

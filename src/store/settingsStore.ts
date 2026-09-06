@@ -34,6 +34,21 @@ export {
   createWeeklyAutoRunConfigAllDaysDisabled,
 };
 
+export type SettingsApplicationStatus = "pending" | "confirmed" | "unconfirmed";
+
+export interface DurationSettingsCandidate {
+  workDuration: number;
+  shortBreakDuration: number;
+  longBreakDuration: number;
+  longBreakInterval: number;
+}
+
+export interface AutomationSettingsCandidate {
+  autoRunFeatureEnabled: boolean;
+  postBreakTransitionPolicy: PostBreakTransitionPolicy;
+  weeklyAutoRunConfig: WeeklyAutoRunConfig;
+}
+
 /**
  * Settings state interface
  * Manages timer duration configurations
@@ -47,6 +62,8 @@ interface SettingsState {
   longBreakDuration: number;
   /** Number of pomodoros before a long break (2-10) */
   longBreakInterval: number;
+  /** Whether the current duration candidate is backend-confirmed. */
+  durationSettingsApplicationStatus: SettingsApplicationStatus;
   /** Notification sound volume percentage (0-100) */
   notificationSoundVolumePercent: number;
   /** Whether notification sound is muted */
@@ -57,6 +74,8 @@ interface SettingsState {
   postBreakTransitionPolicy: PostBreakTransitionPolicy;
   /** Weekly auto-run schedule keyed by weekday. */
   weeklyAutoRunConfig: WeeklyAutoRunConfig;
+  /** Whether the current automation candidate is backend-confirmed. */
+  automationSettingsApplicationStatus: SettingsApplicationStatus;
   /** Validation errors scoped to each weekday row. */
   dayScheduleValidationErrors: Partial<
     Record<WeekdayKey, DayScheduleValidationError>
@@ -109,6 +128,27 @@ interface SettingsActions {
   setDayEndTime: (weekday: WeekdayKey, time: string) => void;
   /** Update multiple settings at once */
   updateSettings: (settings: Partial<SettingsEditableValues>) => void;
+  /** Record successful duration synchronization for an exact candidate. */
+  confirmDurationSettingsCandidate: (
+    candidate: DurationSettingsCandidate,
+  ) => void;
+  /** Record successful automation synchronization for an exact candidate. */
+  confirmAutomationSettingsCandidate: (
+    candidate: AutomationSettingsCandidate,
+  ) => void;
+  /** Record uncertain duration synchronization for an exact candidate. */
+  markDurationSettingsCandidateUnconfirmed: (
+    candidate: DurationSettingsCandidate,
+  ) => void;
+  /** Record uncertain automation synchronization for an exact candidate. */
+  markAutomationSettingsCandidateUnconfirmed: (
+    candidate: AutomationSettingsCandidate,
+  ) => void;
+  /** Reconcile a duration readback against an exact captured candidate. */
+  reconcileDurationSettingsCandidateReadback: (
+    candidate: DurationSettingsCandidate,
+    readbackMatchesCandidate: boolean,
+  ) => void;
   /** Reset all settings to default values */
   resetToDefaults: () => void;
   /** Reset to defaults (alias for testing compatibility) */
@@ -129,11 +169,13 @@ function createDefaultSettingsState(): SettingsState {
     shortBreakDuration: 5,
     longBreakDuration: 15,
     longBreakInterval: 4,
+    durationSettingsApplicationStatus: "pending",
     notificationSoundVolumePercent: 50,
     notificationSoundMuted: false,
     autoRunFeatureEnabled: false,
     postBreakTransitionPolicy: "require_manual_continue",
     weeklyAutoRunConfig: createWeeklyAutoRunConfigAllDaysDisabled(),
+    automationSettingsApplicationStatus: "pending",
     dayScheduleValidationErrors: {},
     weeklyScheduleValidationErrors: [],
   };
@@ -232,6 +274,124 @@ function cloneWeeklyAutoRunConfig(
     sat: { ...config.sat },
     sun: { ...config.sun },
   };
+}
+
+export function createDurationSettingsCandidate(
+  settings: DurationSettingsCandidate,
+): DurationSettingsCandidate {
+  return {
+    workDuration: settings.workDuration,
+    shortBreakDuration: settings.shortBreakDuration,
+    longBreakDuration: settings.longBreakDuration,
+    longBreakInterval: settings.longBreakInterval,
+  };
+}
+
+export function createAutomationSettingsCandidate(
+  settings: AutomationSettingsCandidate,
+): AutomationSettingsCandidate {
+  return {
+    autoRunFeatureEnabled: settings.autoRunFeatureEnabled,
+    postBreakTransitionPolicy: settings.postBreakTransitionPolicy,
+    weeklyAutoRunConfig: cloneWeeklyAutoRunConfig(settings.weeklyAutoRunConfig),
+  };
+}
+
+export function durationSettingsCandidatesEqual(
+  firstCandidate: DurationSettingsCandidate,
+  secondCandidate: DurationSettingsCandidate,
+): boolean {
+  return (
+    firstCandidate.workDuration === secondCandidate.workDuration &&
+    firstCandidate.shortBreakDuration === secondCandidate.shortBreakDuration &&
+    firstCandidate.longBreakDuration === secondCandidate.longBreakDuration &&
+    firstCandidate.longBreakInterval === secondCandidate.longBreakInterval
+  );
+}
+
+export function automationSettingsCandidatesEqual(
+  firstCandidate: AutomationSettingsCandidate,
+  secondCandidate: AutomationSettingsCandidate,
+): boolean {
+  return (
+    firstCandidate.autoRunFeatureEnabled ===
+      secondCandidate.autoRunFeatureEnabled &&
+    firstCandidate.postBreakTransitionPolicy ===
+      secondCandidate.postBreakTransitionPolicy &&
+    WEEKDAY_KEYS.every((weekday) => {
+      const firstSlot = firstCandidate.weeklyAutoRunConfig[weekday];
+      const secondSlot = secondCandidate.weeklyAutoRunConfig[weekday];
+      return (
+        firstSlot.enabled === secondSlot.enabled &&
+        firstSlot.startTime === secondSlot.startTime &&
+        firstSlot.endTime === secondSlot.endTime
+      );
+    })
+  );
+}
+
+function markDurationSettingsPendingWhenCandidateChanged(
+  settingsState: SettingsState,
+  previousCandidate: DurationSettingsCandidate,
+): void {
+  if (
+    !durationSettingsCandidatesEqual(
+      previousCandidate,
+      createDurationSettingsCandidate(settingsState),
+    )
+  ) {
+    settingsState.durationSettingsApplicationStatus = "pending";
+  }
+}
+
+function markAutomationSettingsPendingWhenCandidateChanged(
+  settingsState: SettingsState,
+  previousCandidate: AutomationSettingsCandidate,
+): void {
+  if (
+    !automationSettingsCandidatesEqual(
+      previousCandidate,
+      createAutomationSettingsCandidate(settingsState),
+    )
+  ) {
+    settingsState.automationSettingsApplicationStatus = "pending";
+  }
+}
+
+function automationCandidateMatchesDefaults(
+  settingsState: SettingsState,
+  defaultSettingsState: SettingsState,
+): boolean {
+  return automationSettingsCandidatesEqual(
+    createAutomationSettingsCandidate(settingsState),
+    createAutomationSettingsCandidate(defaultSettingsState),
+  );
+}
+
+function resetSettingsStateToDefaults(settingsState: SettingsState): void {
+  const defaultSettingsState = createDefaultSettingsState();
+  const previousDurationStatus =
+    settingsState.durationSettingsApplicationStatus;
+  const previousAutomationStatus =
+    settingsState.automationSettingsApplicationStatus;
+  const durationCandidateMatchesDefaults = durationSettingsCandidatesEqual(
+    createDurationSettingsCandidate(settingsState),
+    createDurationSettingsCandidate(defaultSettingsState),
+  );
+  const automationMatchesDefaults = automationCandidateMatchesDefaults(
+    settingsState,
+    defaultSettingsState,
+  );
+
+  Object.assign(settingsState, defaultSettingsState);
+
+  if (durationCandidateMatchesDefaults) {
+    settingsState.durationSettingsApplicationStatus = previousDurationStatus;
+  }
+  if (automationMatchesDefaults) {
+    settingsState.automationSettingsApplicationStatus =
+      previousAutomationStatus;
+  }
 }
 
 function createDayScheduleValidationError(
@@ -456,6 +616,42 @@ function validateRange(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isCompleteDayAutoRunSlot(value: unknown): value is DayAutoRunSlot {
+  return (
+    isObjectRecord(value) &&
+    typeof value.enabled === "boolean" &&
+    typeof value.startTime === "string" &&
+    typeof value.endTime === "string"
+  );
+}
+
+function isCompleteWeeklyAutoRunConfig(
+  value: unknown,
+): value is WeeklyAutoRunConfig {
+  return (
+    isObjectRecord(value) &&
+    WEEKDAY_KEYS.every((weekday) => isCompleteDayAutoRunSlot(value[weekday]))
+  );
+}
+
+function mergePersistedSettingsState(
+  persistedState: unknown,
+  currentState: SettingsStore,
+): SettingsStore {
+  if (
+    !isObjectRecord(persistedState) ||
+    !isCompleteWeeklyAutoRunConfig(persistedState.weeklyAutoRunConfig)
+  ) {
+    return currentState;
+  }
+
+  return { ...currentState, ...persistedState };
+}
+
 /**
  * Helper to conditionally apply devtools middleware only in development
  */
@@ -476,40 +672,60 @@ export const useSettingsStore = create<SettingsStore>()(
 
         setWorkDuration: (minutes: number): void => {
           set((state) => {
+            const previousCandidate = createDurationSettingsCandidate(state);
             state.workDuration = validateRange(
               minutes,
               VALIDATION_RULES.workDuration.min,
               VALIDATION_RULES.workDuration.max,
+            );
+            markDurationSettingsPendingWhenCandidateChanged(
+              state,
+              previousCandidate,
             );
           });
         },
 
         setShortBreakDuration: (minutes: number): void => {
           set((state) => {
+            const previousCandidate = createDurationSettingsCandidate(state);
             state.shortBreakDuration = validateRange(
               minutes,
               VALIDATION_RULES.shortBreakDuration.min,
               VALIDATION_RULES.shortBreakDuration.max,
+            );
+            markDurationSettingsPendingWhenCandidateChanged(
+              state,
+              previousCandidate,
             );
           });
         },
 
         setLongBreakDuration: (minutes: number): void => {
           set((state) => {
+            const previousCandidate = createDurationSettingsCandidate(state);
             state.longBreakDuration = validateRange(
               minutes,
               VALIDATION_RULES.longBreakDuration.min,
               VALIDATION_RULES.longBreakDuration.max,
+            );
+            markDurationSettingsPendingWhenCandidateChanged(
+              state,
+              previousCandidate,
             );
           });
         },
 
         setLongBreakInterval: (count: number): void => {
           set((state) => {
+            const previousCandidate = createDurationSettingsCandidate(state);
             state.longBreakInterval = validateRange(
               count,
               VALIDATION_RULES.longBreakInterval.min,
               VALIDATION_RULES.longBreakInterval.max,
+            );
+            markDurationSettingsPendingWhenCandidateChanged(
+              state,
+              previousCandidate,
             );
           });
         },
@@ -532,7 +748,12 @@ export const useSettingsStore = create<SettingsStore>()(
 
         setAutoRunFeatureEnabled: (enabled: boolean): void => {
           set((state) => {
+            const previousCandidate = createAutomationSettingsCandidate(state);
             state.autoRunFeatureEnabled = enabled;
+            markAutomationSettingsPendingWhenCandidateChanged(
+              state,
+              previousCandidate,
+            );
           });
         },
 
@@ -540,33 +761,58 @@ export const useSettingsStore = create<SettingsStore>()(
           policy: PostBreakTransitionPolicy,
         ): void => {
           set((state) => {
+            const previousCandidate = createAutomationSettingsCandidate(state);
             state.postBreakTransitionPolicy = policy;
+            markAutomationSettingsPendingWhenCandidateChanged(
+              state,
+              previousCandidate,
+            );
           });
         },
 
         setDayAutoRunEnabled: (weekday: WeekdayKey, enabled: boolean): void => {
           set((state) => {
+            const previousCandidate = createAutomationSettingsCandidate(state);
             state.weeklyAutoRunConfig[weekday].enabled = enabled;
             writeScheduleValidationResults(state);
+            markAutomationSettingsPendingWhenCandidateChanged(
+              state,
+              previousCandidate,
+            );
           });
         },
 
         setDayStartTime: (weekday: WeekdayKey, time: string): void => {
           set((state) => {
+            const previousCandidate = createAutomationSettingsCandidate(state);
             state.weeklyAutoRunConfig[weekday].startTime = time;
             writeScheduleValidationResults(state);
+            markAutomationSettingsPendingWhenCandidateChanged(
+              state,
+              previousCandidate,
+            );
           });
         },
 
         setDayEndTime: (weekday: WeekdayKey, time: string): void => {
           set((state) => {
+            const previousCandidate = createAutomationSettingsCandidate(state);
             state.weeklyAutoRunConfig[weekday].endTime = time;
             writeScheduleValidationResults(state);
+            markAutomationSettingsPendingWhenCandidateChanged(
+              state,
+              previousCandidate,
+            );
           });
         },
 
         updateSettings: (settings: Partial<SettingsEditableValues>): void => {
           set((state) => {
+            const previousDurationCandidate =
+              createDurationSettingsCandidate(state);
+            const previousAutomationCandidate =
+              createAutomationSettingsCandidate(state);
+
             if (settings.workDuration !== undefined) {
               state.workDuration = validateRange(
                 settings.workDuration,
@@ -620,19 +866,113 @@ export const useSettingsStore = create<SettingsStore>()(
               );
               writeScheduleValidationResults(state);
             }
+
+            markDurationSettingsPendingWhenCandidateChanged(
+              state,
+              previousDurationCandidate,
+            );
+            markAutomationSettingsPendingWhenCandidateChanged(
+              state,
+              previousAutomationCandidate,
+            );
+          });
+        },
+
+        confirmDurationSettingsCandidate: (
+          candidate: DurationSettingsCandidate,
+        ): void => {
+          set((state) => {
+            if (
+              durationSettingsCandidatesEqual(
+                candidate,
+                createDurationSettingsCandidate(state),
+              )
+            ) {
+              state.durationSettingsApplicationStatus = "confirmed";
+            }
+          });
+        },
+
+        confirmAutomationSettingsCandidate: (
+          candidate: AutomationSettingsCandidate,
+        ): void => {
+          set((state) => {
+            if (
+              automationSettingsCandidatesEqual(
+                candidate,
+                createAutomationSettingsCandidate(state),
+              )
+            ) {
+              state.automationSettingsApplicationStatus = "confirmed";
+            }
+          });
+        },
+
+        markDurationSettingsCandidateUnconfirmed: (
+          candidate: DurationSettingsCandidate,
+        ): void => {
+          set((state) => {
+            if (
+              durationSettingsCandidatesEqual(
+                candidate,
+                createDurationSettingsCandidate(state),
+              )
+            ) {
+              state.durationSettingsApplicationStatus = "unconfirmed";
+            }
+          });
+        },
+
+        markAutomationSettingsCandidateUnconfirmed: (
+          candidate: AutomationSettingsCandidate,
+        ): void => {
+          set((state) => {
+            if (
+              automationSettingsCandidatesEqual(
+                candidate,
+                createAutomationSettingsCandidate(state),
+              )
+            ) {
+              state.automationSettingsApplicationStatus = "unconfirmed";
+            }
+          });
+        },
+
+        reconcileDurationSettingsCandidateReadback: (
+          candidate: DurationSettingsCandidate,
+          readbackMatchesCandidate: boolean,
+        ): void => {
+          set((state) => {
+            if (
+              readbackMatchesCandidate ||
+              state.durationSettingsApplicationStatus !== "confirmed" ||
+              !durationSettingsCandidatesEqual(
+                candidate,
+                createDurationSettingsCandidate(state),
+              )
+            ) {
+              return;
+            }
+
+            state.durationSettingsApplicationStatus = "pending";
           });
         },
 
         resetToDefaults: (): void => {
-          set(createDefaultSettingsState());
+          set((state) => {
+            resetSettingsStateToDefaults(state);
+          });
         },
 
         reset: (): void => {
-          set(createDefaultSettingsState());
+          set((state) => {
+            resetSettingsStateToDefaults(state);
+          });
         },
       })),
       {
         name: "pomolice-settings", // localStorage key
+        merge: mergePersistedSettingsState,
       },
     ),
     { name: "SettingsStore" },

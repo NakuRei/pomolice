@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HomeScreen, type HomeScreenProps } from "./HomeScreen";
 import { useErrorStore } from "@/store/errorStore";
@@ -25,6 +25,10 @@ describe("HomeScreen", () => {
     vi.clearAllMocks();
     useErrorStore.getState().clearAllErrors();
     useSettingsStore.getState().reset();
+    useSettingsStore.setState({
+      durationSettingsApplicationStatus: "confirmed",
+      automationSettingsApplicationStatus: "confirmed",
+    });
     useTimerStore.setState({
       status: TimerStatus.IDLE,
       remainingSeconds: 25 * 60,
@@ -39,7 +43,43 @@ describe("HomeScreen", () => {
       activeWindowSummary: null,
       infoMessage: null,
       infoMessageShownAtById: {},
+      isSettingsSynchronizationInFlight: false,
     });
+  });
+
+  it("keeps the timer visible while settings remain unresolved", () => {
+    useSettingsStore.setState({
+      durationSettingsApplicationStatus: "pending",
+      automationSettingsApplicationStatus: "unconfirmed",
+    });
+
+    render(<HomeScreen {...createProps()} />);
+
+    expect(screen.getByTestId("timer-display")).toHaveTextContent("25:00");
+  });
+
+  it("shows unresolved settings and hides the notice after confirmation", () => {
+    useSettingsStore.setState({
+      durationSettingsApplicationStatus: "pending",
+      automationSettingsApplicationStatus: "confirmed",
+    });
+    useTimerStore.setState({ isConnected: true });
+
+    const { rerender } = render(<HomeScreen {...createProps()} />);
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      /適用はまだ確認されていません/u,
+    );
+
+    act(() => {
+      useSettingsStore.setState({
+        durationSettingsApplicationStatus: "confirmed",
+      });
+    });
+    rerender(<HomeScreen {...createProps()} />);
+
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("renders the home heading and top-level controls", () => {
