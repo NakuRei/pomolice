@@ -7,7 +7,6 @@ import {
   durationSettingsCandidatesEqual,
   useSettingsStore,
   VALIDATION_RULES,
-  type AutomationSettingsCandidate,
   type DurationSettingsCandidate,
 } from "./settingsStore";
 import { useErrorStore } from "./errorStore";
@@ -162,14 +161,6 @@ type TimerDurationSettingsCommandPayload = Record<string, unknown> & {
   longBreakInterval: number;
 };
 
-type SyncAutomationPoliciesCommandPayload = Record<string, unknown> & {
-  postBreakTransitionPolicy: PostBreakTransitionPolicy;
-  autoRunFeatureEnabled: boolean;
-  weeklyAutoRunConfig: ReturnType<
-    typeof useSettingsStore.getState
-  >["weeklyAutoRunConfig"];
-};
-
 const logger = createLogger("settings_sync");
 
 function clampWithinRange(value: number, min: number, max: number): number {
@@ -222,16 +213,6 @@ function createTimerDurationSettingsCommandPayload(
   };
 }
 
-function createSyncAutomationPoliciesCommandPayload(
-  settings: AutomationSettingsCandidate,
-): SyncAutomationPoliciesCommandPayload {
-  return {
-    postBreakTransitionPolicy: settings.postBreakTransitionPolicy,
-    autoRunFeatureEnabled: settings.autoRunFeatureEnabled,
-    weeklyAutoRunConfig: settings.weeklyAutoRunConfig,
-  };
-}
-
 async function runSettingsSynchronizationPass(
   timerStatus: TimerStatus,
   isConnected: boolean,
@@ -271,10 +252,11 @@ async function runSettingsSynchronizationPass(
   }
 
   try {
-    await invoke(
-      "sync_automation_policies",
-      createSyncAutomationPoliciesCommandPayload(settings),
-    );
+    await invoke("sync_automation_policies", {
+      postBreakTransitionPolicy: settings.postBreakTransitionPolicy,
+      autoRunFeatureEnabled: settings.autoRunFeatureEnabled,
+      weeklyAutoRunConfig: settings.weeklyAutoRunConfig,
+    });
     useSettingsStore.getState().confirmAutomationSettingsCandidate(settings);
   } catch (error) {
     useSettingsStore
