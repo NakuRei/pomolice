@@ -276,27 +276,6 @@ function cloneWeeklyAutoRunConfig(
   };
 }
 
-export function createDurationSettingsCandidate(
-  settings: DurationSettingsCandidate,
-): DurationSettingsCandidate {
-  return {
-    workDuration: settings.workDuration,
-    shortBreakDuration: settings.shortBreakDuration,
-    longBreakDuration: settings.longBreakDuration,
-    longBreakInterval: settings.longBreakInterval,
-  };
-}
-
-export function createAutomationSettingsCandidate(
-  settings: AutomationSettingsCandidate,
-): AutomationSettingsCandidate {
-  return {
-    autoRunFeatureEnabled: settings.autoRunFeatureEnabled,
-    postBreakTransitionPolicy: settings.postBreakTransitionPolicy,
-    weeklyAutoRunConfig: cloneWeeklyAutoRunConfig(settings.weeklyAutoRunConfig),
-  };
-}
-
 export function durationSettingsCandidatesEqual(
   firstCandidate: DurationSettingsCandidate,
   secondCandidate: DurationSettingsCandidate,
@@ -635,12 +614,12 @@ const conditionalDevtools = import.meta.env.DEV ? devtools : noopDevtools;
 export const useSettingsStore = create<SettingsStore>()(
   conditionalDevtools(
     persist(
-      immer((set) => ({
+      immer((set, get) => ({
         ...createDefaultSettingsState(),
 
         setWorkDuration: (minutes: number): void => {
           set((state) => {
-            const previousCandidate = createDurationSettingsCandidate(state);
+            const previousSettings = get();
             state.workDuration = validateRange(
               minutes,
               VALIDATION_RULES.workDuration.min,
@@ -648,14 +627,14 @@ export const useSettingsStore = create<SettingsStore>()(
             );
             markDurationSettingsPendingWhenCandidateChanged(
               state,
-              previousCandidate,
+              previousSettings,
             );
           });
         },
 
         setShortBreakDuration: (minutes: number): void => {
           set((state) => {
-            const previousCandidate = createDurationSettingsCandidate(state);
+            const previousSettings = get();
             state.shortBreakDuration = validateRange(
               minutes,
               VALIDATION_RULES.shortBreakDuration.min,
@@ -663,14 +642,14 @@ export const useSettingsStore = create<SettingsStore>()(
             );
             markDurationSettingsPendingWhenCandidateChanged(
               state,
-              previousCandidate,
+              previousSettings,
             );
           });
         },
 
         setLongBreakDuration: (minutes: number): void => {
           set((state) => {
-            const previousCandidate = createDurationSettingsCandidate(state);
+            const previousSettings = get();
             state.longBreakDuration = validateRange(
               minutes,
               VALIDATION_RULES.longBreakDuration.min,
@@ -678,14 +657,14 @@ export const useSettingsStore = create<SettingsStore>()(
             );
             markDurationSettingsPendingWhenCandidateChanged(
               state,
-              previousCandidate,
+              previousSettings,
             );
           });
         },
 
         setLongBreakInterval: (count: number): void => {
           set((state) => {
-            const previousCandidate = createDurationSettingsCandidate(state);
+            const previousSettings = get();
             state.longBreakInterval = validateRange(
               count,
               VALIDATION_RULES.longBreakInterval.min,
@@ -693,7 +672,7 @@ export const useSettingsStore = create<SettingsStore>()(
             );
             markDurationSettingsPendingWhenCandidateChanged(
               state,
-              previousCandidate,
+              previousSettings,
             );
           });
         },
@@ -716,11 +695,11 @@ export const useSettingsStore = create<SettingsStore>()(
 
         setAutoRunFeatureEnabled: (enabled: boolean): void => {
           set((state) => {
-            const previousCandidate = createAutomationSettingsCandidate(state);
+            const previousSettings = get();
             state.autoRunFeatureEnabled = enabled;
             markAutomationSettingsPendingWhenCandidateChanged(
               state,
-              previousCandidate,
+              previousSettings,
             );
           });
         },
@@ -729,57 +708,54 @@ export const useSettingsStore = create<SettingsStore>()(
           policy: PostBreakTransitionPolicy,
         ): void => {
           set((state) => {
-            const previousCandidate = createAutomationSettingsCandidate(state);
+            const previousSettings = get();
             state.postBreakTransitionPolicy = policy;
             markAutomationSettingsPendingWhenCandidateChanged(
               state,
-              previousCandidate,
+              previousSettings,
             );
           });
         },
 
         setDayAutoRunEnabled: (weekday: WeekdayKey, enabled: boolean): void => {
           set((state) => {
-            const previousCandidate = createAutomationSettingsCandidate(state);
+            const previousSettings = get();
             state.weeklyAutoRunConfig[weekday].enabled = enabled;
             writeScheduleValidationResults(state);
             markAutomationSettingsPendingWhenCandidateChanged(
               state,
-              previousCandidate,
+              previousSettings,
             );
           });
         },
 
         setDayStartTime: (weekday: WeekdayKey, time: string): void => {
           set((state) => {
-            const previousCandidate = createAutomationSettingsCandidate(state);
+            const previousSettings = get();
             state.weeklyAutoRunConfig[weekday].startTime = time;
             writeScheduleValidationResults(state);
             markAutomationSettingsPendingWhenCandidateChanged(
               state,
-              previousCandidate,
+              previousSettings,
             );
           });
         },
 
         setDayEndTime: (weekday: WeekdayKey, time: string): void => {
           set((state) => {
-            const previousCandidate = createAutomationSettingsCandidate(state);
+            const previousSettings = get();
             state.weeklyAutoRunConfig[weekday].endTime = time;
             writeScheduleValidationResults(state);
             markAutomationSettingsPendingWhenCandidateChanged(
               state,
-              previousCandidate,
+              previousSettings,
             );
           });
         },
 
         updateSettings: (settings: Partial<SettingsEditableValues>): void => {
           set((state) => {
-            const previousDurationCandidate =
-              createDurationSettingsCandidate(state);
-            const previousAutomationCandidate =
-              createAutomationSettingsCandidate(state);
+            const previousSettings = get();
 
             if (settings.workDuration !== undefined) {
               state.workDuration = validateRange(
@@ -837,11 +813,11 @@ export const useSettingsStore = create<SettingsStore>()(
 
             markDurationSettingsPendingWhenCandidateChanged(
               state,
-              previousDurationCandidate,
+              previousSettings,
             );
             markAutomationSettingsPendingWhenCandidateChanged(
               state,
-              previousAutomationCandidate,
+              previousSettings,
             );
           });
         },

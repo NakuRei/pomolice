@@ -35,8 +35,6 @@ vi.mock("../logging/logger", () => ({
 import { TimerStatus, useTimerStore } from "./timerStore";
 import {
   WEEKDAY_KEYS,
-  createAutomationSettingsCandidate,
-  createDurationSettingsCandidate,
   useSettingsStore,
   type SettingsApplicationStatus,
 } from "./settingsStore";
@@ -132,16 +130,12 @@ function setApplicationStatuses(
 
 function confirmCurrentDurationCandidate(): void {
   const state = useSettingsStore.getState();
-  state.confirmDurationSettingsCandidate(
-    createDurationSettingsCandidate(state),
-  );
+  state.confirmDurationSettingsCandidate(state);
 }
 
 function confirmCurrentAutomationCandidate(): void {
   const state = useSettingsStore.getState();
-  state.confirmAutomationSettingsCandidate(
-    createAutomationSettingsCandidate(state),
-  );
+  state.confirmAutomationSettingsCandidate(state);
 }
 
 describe("timerStore syncSettings command routing", () => {

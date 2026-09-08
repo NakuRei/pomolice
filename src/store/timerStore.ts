@@ -4,8 +4,6 @@ import { immer } from "zustand/middleware/immer";
 import { invoke } from "@tauri-apps/api/core";
 import {
   automationSettingsCandidatesEqual,
-  createAutomationSettingsCandidate,
-  createDurationSettingsCandidate,
   durationSettingsCandidatesEqual,
   useSettingsStore,
   VALIDATION_RULES,
@@ -243,8 +241,6 @@ async function runSettingsSynchronizationPass(
   }
 
   const settings = useSettingsStore.getState();
-  const durationCandidate = createDurationSettingsCandidate(settings);
-  const automationCandidate = createAutomationSettingsCandidate(settings);
   const shouldSynchronizeDuration =
     timerStatus === TimerStatus.IDLE &&
     settings.durationSettingsApplicationStatus !== "confirmed";
@@ -255,15 +251,13 @@ async function runSettingsSynchronizationPass(
     try {
       await invoke(
         "sync_timer_duration_settings",
-        createTimerDurationSettingsCommandPayload(durationCandidate),
+        createTimerDurationSettingsCommandPayload(settings),
       );
-      useSettingsStore
-        .getState()
-        .confirmDurationSettingsCandidate(durationCandidate);
+      useSettingsStore.getState().confirmDurationSettingsCandidate(settings);
     } catch (error) {
       useSettingsStore
         .getState()
-        .markDurationSettingsCandidateUnconfirmed(durationCandidate);
+        .markDurationSettingsCandidateUnconfirmed(settings);
       logger.warn(FRONTEND_LOG_EVENT_IDS.settingsSyncFailed, {
         failure_message: formatBackendErrorDetail(error),
         timer_status: timerStatus,
@@ -279,15 +273,13 @@ async function runSettingsSynchronizationPass(
   try {
     await invoke(
       "sync_automation_policies",
-      createSyncAutomationPoliciesCommandPayload(automationCandidate),
+      createSyncAutomationPoliciesCommandPayload(settings),
     );
-    useSettingsStore
-      .getState()
-      .confirmAutomationSettingsCandidate(automationCandidate);
+    useSettingsStore.getState().confirmAutomationSettingsCandidate(settings);
   } catch (error) {
     useSettingsStore
       .getState()
-      .markAutomationSettingsCandidateUnconfirmed(automationCandidate);
+      .markAutomationSettingsCandidateUnconfirmed(settings);
     logger.warn(FRONTEND_LOG_EVENT_IDS.settingsSyncFailed, {
       failure_message: formatBackendErrorDetail(error),
       timer_status: timerStatus,

@@ -20,8 +20,6 @@ import {
 } from "@/store/timerStore";
 import { useErrorStore } from "@/store/errorStore";
 import {
-  createAutomationSettingsCandidate,
-  createDurationSettingsCandidate,
   useSettingsStore,
   type SettingsApplicationStatus,
 } from "@/store/settingsStore";
@@ -260,12 +258,8 @@ function setApplicationStatuses(
 
 function confirmCurrentCandidates(): void {
   const state = useSettingsStore.getState();
-  state.confirmDurationSettingsCandidate(
-    createDurationSettingsCandidate(state),
-  );
-  state.confirmAutomationSettingsCandidate(
-    createAutomationSettingsCandidate(state),
-  );
+  state.confirmDurationSettingsCandidate(state);
+  state.confirmAutomationSettingsCandidate(state);
 }
 
 describe("useTimerSync", () => {

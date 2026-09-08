@@ -3,8 +3,6 @@ import { resetSettingsStoreForTest } from "@/test/resetSettingsStore";
 import {
   DEFAULT_SETTINGS,
   WEEKDAY_KEYS,
-  createAutomationSettingsCandidate,
-  createDurationSettingsCandidate,
   createWeeklyAutoRunConfigAllDaysDisabled,
   useSettingsStore,
   type WeeklyAutoRunConfig,
@@ -51,12 +49,8 @@ function restorePersistedSettingsSnapshot(
 
 function confirmCurrentCandidates(): void {
   const state = useSettingsStore.getState();
-  state.confirmDurationSettingsCandidate(
-    createDurationSettingsCandidate(state),
-  );
-  state.confirmAutomationSettingsCandidate(
-    createAutomationSettingsCandidate(state),
-  );
+  state.confirmDurationSettingsCandidate(state);
+  state.confirmAutomationSettingsCandidate(state);
 }
 
 function resetThroughAction(resetAction: ResetAction): void {
@@ -254,12 +248,8 @@ describe("settings application state", () => {
 
   it("treats a changed duration as a new pending candidate after rejection", () => {
     const initialState = useSettingsStore.getState();
-    initialState.markDurationSettingsCandidateUnconfirmed(
-      createDurationSettingsCandidate(initialState),
-    );
-    initialState.markAutomationSettingsCandidateUnconfirmed(
-      createAutomationSettingsCandidate(initialState),
-    );
+    initialState.markDurationSettingsCandidateUnconfirmed(initialState);
+    initialState.markAutomationSettingsCandidateUnconfirmed(initialState);
 
     useSettingsStore.getState().setWorkDuration(30);
 
@@ -270,12 +260,8 @@ describe("settings application state", () => {
 
   it("treats changed automation as a new pending candidate after rejection", () => {
     const initialState = useSettingsStore.getState();
-    initialState.markDurationSettingsCandidateUnconfirmed(
-      createDurationSettingsCandidate(initialState),
-    );
-    initialState.markAutomationSettingsCandidateUnconfirmed(
-      createAutomationSettingsCandidate(initialState),
-    );
+    initialState.markDurationSettingsCandidateUnconfirmed(initialState);
+    initialState.markAutomationSettingsCandidateUnconfirmed(initialState);
 
     useSettingsStore.getState().setAutoRunFeatureEnabled(true);
 
@@ -369,12 +355,8 @@ describe("settings application state", () => {
     },
   ])("keeps both group statuses when changing $label", ({ mutate }) => {
     const initialState = useSettingsStore.getState();
-    initialState.markDurationSettingsCandidateUnconfirmed(
-      createDurationSettingsCandidate(initialState),
-    );
-    initialState.confirmAutomationSettingsCandidate(
-      createAutomationSettingsCandidate(initialState),
-    );
+    initialState.markDurationSettingsCandidateUnconfirmed(initialState);
+    initialState.confirmAutomationSettingsCandidate(initialState);
 
     mutate();
 
@@ -386,9 +368,7 @@ describe("settings application state", () => {
   it("confirms only exact current candidates", () => {
     const initialState = useSettingsStore.getState();
 
-    initialState.confirmDurationSettingsCandidate(
-      createDurationSettingsCandidate(initialState),
-    );
+    initialState.confirmDurationSettingsCandidate(initialState);
 
     expect(useSettingsStore.getState().durationSettingsApplicationStatus).toBe(
       "confirmed",
@@ -399,7 +379,7 @@ describe("settings application state", () => {
 
     const durationConfirmedState = useSettingsStore.getState();
     durationConfirmedState.confirmAutomationSettingsCandidate(
-      createAutomationSettingsCandidate(durationConfirmedState),
+      durationConfirmedState,
     );
 
     expect(
@@ -410,9 +390,7 @@ describe("settings application state", () => {
   it("marks only exact current candidates unconfirmed", () => {
     const initialState = useSettingsStore.getState();
 
-    initialState.markDurationSettingsCandidateUnconfirmed(
-      createDurationSettingsCandidate(initialState),
-    );
+    initialState.markDurationSettingsCandidateUnconfirmed(initialState);
 
     expect(useSettingsStore.getState().durationSettingsApplicationStatus).toBe(
       "unconfirmed",
@@ -423,7 +401,7 @@ describe("settings application state", () => {
 
     const durationRejectedState = useSettingsStore.getState();
     durationRejectedState.markAutomationSettingsCandidateUnconfirmed(
-      createAutomationSettingsCandidate(durationRejectedState),
+      durationRejectedState,
     );
 
     expect(
@@ -434,9 +412,7 @@ describe("settings application state", () => {
   it.each(["success", "failure"] as const)(
     "ignores stale duration synchronization %s",
     (result) => {
-      const capturedCandidate = createDurationSettingsCandidate(
-        useSettingsStore.getState(),
-      );
+      const capturedCandidate = useSettingsStore.getState();
       useSettingsStore.getState().setWorkDuration(35);
 
       const state = useSettingsStore.getState();
@@ -455,9 +431,7 @@ describe("settings application state", () => {
   it.each(["success", "failure"] as const)(
     "ignores stale automation synchronization %s",
     (result) => {
-      const capturedCandidate = createAutomationSettingsCandidate(
-        useSettingsStore.getState(),
-      );
+      const capturedCandidate = useSettingsStore.getState();
       useSettingsStore.getState().setDayStartTime("sun", "10:00");
 
       const state = useSettingsStore.getState();
@@ -475,9 +449,7 @@ describe("settings application state", () => {
 
   it("preserves confirmed duration status when readback matches", () => {
     confirmCurrentCandidates();
-    const currentCandidate = createDurationSettingsCandidate(
-      useSettingsStore.getState(),
-    );
+    const currentCandidate = useSettingsStore.getState();
 
     useSettingsStore
       .getState()
@@ -490,9 +462,7 @@ describe("settings application state", () => {
 
   it("invalidates only a current confirmed duration candidate on mismatch", () => {
     confirmCurrentCandidates();
-    const currentCandidate = createDurationSettingsCandidate(
-      useSettingsStore.getState(),
-    );
+    const currentCandidate = useSettingsStore.getState();
 
     useSettingsStore
       .getState()
@@ -504,14 +474,10 @@ describe("settings application state", () => {
   });
 
   it("ignores a stale readback mismatch for a newer confirmed candidate", () => {
-    const staleCandidate = createDurationSettingsCandidate(
-      useSettingsStore.getState(),
-    );
+    const staleCandidate = useSettingsStore.getState();
     useSettingsStore.getState().setWorkDuration(35);
     const currentState = useSettingsStore.getState();
-    currentState.confirmDurationSettingsCandidate(
-      createDurationSettingsCandidate(currentState),
-    );
+    currentState.confirmDurationSettingsCandidate(currentState);
 
     useSettingsStore
       .getState()
@@ -530,9 +496,7 @@ describe("settings application state", () => {
   ])(
     "does not promote or demote $status duration after readback",
     ({ status, readbackMatchesCandidate }) => {
-      const candidate = createDurationSettingsCandidate(
-        useSettingsStore.getState(),
-      );
+      const candidate = useSettingsStore.getState();
       if (status === "unconfirmed") {
         useSettingsStore
           .getState()
@@ -603,12 +567,8 @@ describe("settings application state", () => {
     "%s preserves statuses for unchanged candidates",
     (resetAction) => {
       const initialState = useSettingsStore.getState();
-      initialState.confirmDurationSettingsCandidate(
-        createDurationSettingsCandidate(initialState),
-      );
-      initialState.markAutomationSettingsCandidateUnconfirmed(
-        createAutomationSettingsCandidate(initialState),
-      );
+      initialState.confirmDurationSettingsCandidate(initialState);
+      initialState.markAutomationSettingsCandidateUnconfirmed(initialState);
 
       resetThroughAction(resetAction);
 
@@ -668,33 +628,20 @@ describe("settings application state", () => {
 
       let state = useSettingsStore.getState();
       if (durationStatus === "unconfirmed") {
-        state.markDurationSettingsCandidateUnconfirmed(
-          createDurationSettingsCandidate(state),
-        );
+        state.markDurationSettingsCandidateUnconfirmed(state);
       }
       if (durationStatus === "confirmed") {
-        state.confirmDurationSettingsCandidate(
-          createDurationSettingsCandidate(state),
-        );
+        state.confirmDurationSettingsCandidate(state);
       }
       state = useSettingsStore.getState();
       if (automationStatus === "unconfirmed") {
-        state.markAutomationSettingsCandidateUnconfirmed(
-          createAutomationSettingsCandidate(state),
-        );
+        state.markAutomationSettingsCandidateUnconfirmed(state);
       }
       if (automationStatus === "confirmed") {
-        state.confirmAutomationSettingsCandidate(
-          createAutomationSettingsCandidate(state),
-        );
+        state.confirmAutomationSettingsCandidate(state);
       }
 
-      const expectedDurationCandidate = createDurationSettingsCandidate(
-        useSettingsStore.getState(),
-      );
-      const expectedAutomationCandidate = createAutomationSettingsCandidate(
-        useSettingsStore.getState(),
-      );
+      const expectedSettings = useSettingsStore.getState();
       const persistedSnapshot = capturePersistedSettingsSnapshot();
 
       useSettingsStore.setState({
@@ -710,12 +657,15 @@ describe("settings application state", () => {
       await useSettingsStore.persist.rehydrate();
 
       state = useSettingsStore.getState();
-      expect(createDurationSettingsCandidate(state)).toEqual(
-        expectedDurationCandidate,
-      );
-      expect(createAutomationSettingsCandidate(state)).toEqual(
-        expectedAutomationCandidate,
-      );
+      expect(state).toMatchObject({
+        workDuration: expectedSettings.workDuration,
+        shortBreakDuration: expectedSettings.shortBreakDuration,
+        longBreakDuration: expectedSettings.longBreakDuration,
+        longBreakInterval: expectedSettings.longBreakInterval,
+        autoRunFeatureEnabled: expectedSettings.autoRunFeatureEnabled,
+        postBreakTransitionPolicy: expectedSettings.postBreakTransitionPolicy,
+        weeklyAutoRunConfig: expectedSettings.weeklyAutoRunConfig,
+      });
       expect(state.durationSettingsApplicationStatus).toBe(durationStatus);
       expect(state.automationSettingsApplicationStatus).toBe(automationStatus);
     },
