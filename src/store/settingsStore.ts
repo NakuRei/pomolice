@@ -334,12 +334,7 @@ function markDurationSettingsPendingWhenCandidateChanged(
   settingsState: SettingsState,
   previousCandidate: DurationSettingsCandidate,
 ): void {
-  if (
-    !durationSettingsCandidatesEqual(
-      previousCandidate,
-      createDurationSettingsCandidate(settingsState),
-    )
-  ) {
+  if (!durationSettingsCandidatesEqual(previousCandidate, settingsState)) {
     settingsState.durationSettingsApplicationStatus = "pending";
   }
 }
@@ -348,50 +343,23 @@ function markAutomationSettingsPendingWhenCandidateChanged(
   settingsState: SettingsState,
   previousCandidate: AutomationSettingsCandidate,
 ): void {
-  if (
-    !automationSettingsCandidatesEqual(
-      previousCandidate,
-      createAutomationSettingsCandidate(settingsState),
-    )
-  ) {
+  if (!automationSettingsCandidatesEqual(previousCandidate, settingsState)) {
     settingsState.automationSettingsApplicationStatus = "pending";
   }
 }
 
-function automationCandidateMatchesDefaults(
-  settingsState: SettingsState,
-  defaultSettingsState: SettingsState,
-): boolean {
-  return automationSettingsCandidatesEqual(
-    createAutomationSettingsCandidate(settingsState),
-    createAutomationSettingsCandidate(defaultSettingsState),
-  );
-}
-
 function resetSettingsStateToDefaults(settingsState: SettingsState): void {
   const defaultSettingsState = createDefaultSettingsState();
-  const previousDurationStatus =
-    settingsState.durationSettingsApplicationStatus;
-  const previousAutomationStatus =
-    settingsState.automationSettingsApplicationStatus;
-  const durationCandidateMatchesDefaults = durationSettingsCandidatesEqual(
-    createDurationSettingsCandidate(settingsState),
-    createDurationSettingsCandidate(defaultSettingsState),
-  );
-  const automationMatchesDefaults = automationCandidateMatchesDefaults(
-    settingsState,
-    defaultSettingsState,
-  );
+  if (durationSettingsCandidatesEqual(settingsState, defaultSettingsState)) {
+    defaultSettingsState.durationSettingsApplicationStatus =
+      settingsState.durationSettingsApplicationStatus;
+  }
+  if (automationSettingsCandidatesEqual(settingsState, defaultSettingsState)) {
+    defaultSettingsState.automationSettingsApplicationStatus =
+      settingsState.automationSettingsApplicationStatus;
+  }
 
   Object.assign(settingsState, defaultSettingsState);
-
-  if (durationCandidateMatchesDefaults) {
-    settingsState.durationSettingsApplicationStatus = previousDurationStatus;
-  }
-  if (automationMatchesDefaults) {
-    settingsState.automationSettingsApplicationStatus =
-      previousAutomationStatus;
-  }
 }
 
 function createDayScheduleValidationError(
@@ -882,12 +850,7 @@ export const useSettingsStore = create<SettingsStore>()(
           candidate: DurationSettingsCandidate,
         ): void => {
           set((state) => {
-            if (
-              durationSettingsCandidatesEqual(
-                candidate,
-                createDurationSettingsCandidate(state),
-              )
-            ) {
+            if (durationSettingsCandidatesEqual(candidate, state)) {
               state.durationSettingsApplicationStatus = "confirmed";
             }
           });
@@ -897,12 +860,7 @@ export const useSettingsStore = create<SettingsStore>()(
           candidate: AutomationSettingsCandidate,
         ): void => {
           set((state) => {
-            if (
-              automationSettingsCandidatesEqual(
-                candidate,
-                createAutomationSettingsCandidate(state),
-              )
-            ) {
+            if (automationSettingsCandidatesEqual(candidate, state)) {
               state.automationSettingsApplicationStatus = "confirmed";
             }
           });
@@ -912,12 +870,7 @@ export const useSettingsStore = create<SettingsStore>()(
           candidate: DurationSettingsCandidate,
         ): void => {
           set((state) => {
-            if (
-              durationSettingsCandidatesEqual(
-                candidate,
-                createDurationSettingsCandidate(state),
-              )
-            ) {
+            if (durationSettingsCandidatesEqual(candidate, state)) {
               state.durationSettingsApplicationStatus = "unconfirmed";
             }
           });
@@ -927,12 +880,7 @@ export const useSettingsStore = create<SettingsStore>()(
           candidate: AutomationSettingsCandidate,
         ): void => {
           set((state) => {
-            if (
-              automationSettingsCandidatesEqual(
-                candidate,
-                createAutomationSettingsCandidate(state),
-              )
-            ) {
+            if (automationSettingsCandidatesEqual(candidate, state)) {
               state.automationSettingsApplicationStatus = "unconfirmed";
             }
           });
@@ -946,10 +894,7 @@ export const useSettingsStore = create<SettingsStore>()(
             if (
               readbackMatchesCandidate ||
               state.durationSettingsApplicationStatus !== "confirmed" ||
-              !durationSettingsCandidatesEqual(
-                candidate,
-                createDurationSettingsCandidate(state),
-              )
+              !durationSettingsCandidatesEqual(candidate, state)
             ) {
               return;
             }

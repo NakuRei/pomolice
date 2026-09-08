@@ -624,6 +624,38 @@ describe("timerStore syncSettings command routing", () => {
     expect(latestPayload.workDurationSecs).toBe(2400);
   });
 
+  it("synchronizes an edit queued as the previous write finishes", async () => {
+    confirmCurrentAutomationCandidate();
+    useTimerStore.setState({ status: TimerStatus.IDLE, isConnected: true });
+    const unsubscribe = useSettingsStore.subscribe((settings) => {
+      if (
+        settings.workDuration === 25 &&
+        settings.durationSettingsApplicationStatus === "confirmed"
+      ) {
+        void Promise.resolve()
+          .then(() => undefined)
+          .then(() => {
+            useSettingsStore.getState().setWorkDuration(40);
+          });
+      }
+    });
+
+    try {
+      await useTimerStore.getState().syncSettings();
+
+      await vi.waitFor(() => {
+        expect(
+          mockInvoke.mock.calls.map(([, payload]) => payload?.workDurationSecs),
+        ).toEqual([1500, 2400]);
+        expect(
+          useSettingsStore.getState().durationSettingsApplicationStatus,
+        ).toBe("confirmed");
+      });
+    } finally {
+      unsubscribe();
+    }
+  });
+
   it.each(["success", "failure"] as const)(
     "keeps a newer candidate pending after stale %s until its own acknowledgement",
     async (staleOutcome) => {

@@ -456,35 +456,28 @@ export const useTimerStore = create<TimerStore>()(
           state.settingsSynchronizationFollowUpRequested = false;
         });
 
-        return new Promise<void>((resolve) => {
-          function runNextSynchronizationPass(): void {
-            const { status: timerStatus, isConnected } = get();
-            void runSettingsSynchronizationPass(timerStatus, isConnected).then(
-              () => {
-                if (!get().settingsSynchronizationFollowUpRequested) {
-                  resolve();
-                  return;
-                }
-
-                set((state) => {
-                  state.settingsSynchronizationFollowUpRequested = false;
-                });
-                runNextSynchronizationPass();
-              },
-              (error: unknown) => {
-                logger.warn(FRONTEND_LOG_EVENT_IDS.settingsSyncFailed, {
-                  failure_message: formatBackendErrorDetail(error),
-                  timer_status: get().status,
-                });
-                resolve();
-              },
-            );
+        async function runNextSynchronizationPass(): Promise<void> {
+          const { status: timerStatus, isConnected } = get();
+          await runSettingsSynchronizationPass(timerStatus, isConnected);
+          if (get().settingsSynchronizationFollowUpRequested) {
+            set((state) => {
+              state.settingsSynchronizationFollowUpRequested = false;
+            });
+            return runNextSynchronizationPass();
           }
 
-          runNextSynchronizationPass();
-        }).finally(() => {
           set((state) => {
             state.isSettingsSynchronizationInFlight = false;
+          });
+        }
+
+        return runNextSynchronizationPass().catch((error: unknown) => {
+          set((state) => {
+            state.isSettingsSynchronizationInFlight = false;
+          });
+          logger.warn(FRONTEND_LOG_EVENT_IDS.settingsSyncFailed, {
+            failure_message: formatBackendErrorDetail(error),
+            timer_status: get().status,
           });
         });
       },
@@ -607,9 +600,8 @@ export const useTimerStore = create<TimerStore>()(
       // Handle full state from backend (initial sync)
       handleFullState: (payload: FullStatePayload): void => {
         const settings = useSettingsStore.getState();
-        const durationCandidate = createDurationSettingsCandidate(settings);
         const durationCommandPayload =
-          createTimerDurationSettingsCommandPayload(durationCandidate);
+          createTimerDurationSettingsCommandPayload(settings);
         const readbackMatchesDurationCandidate =
           payload.settings.work_duration_secs ===
             durationCommandPayload.workDurationSecs &&
@@ -620,7 +612,7 @@ export const useTimerStore = create<TimerStore>()(
           payload.settings.long_break_interval ===
             durationCommandPayload.longBreakInterval;
         settings.reconcileDurationSettingsCandidateReadback(
-          durationCandidate,
+          settings,
           readbackMatchesDurationCandidate,
         );
 
@@ -661,12 +653,12 @@ useSettingsStore.subscribe((settings, previousSettings) => {
   }
 
   const durationCandidateChanged = !durationSettingsCandidatesEqual(
-    createDurationSettingsCandidate(previousSettings),
-    createDurationSettingsCandidate(settings),
+    previousSettings,
+    settings,
   );
   const automationCandidateChanged = !automationSettingsCandidatesEqual(
-    createAutomationSettingsCandidate(previousSettings),
-    createAutomationSettingsCandidate(settings),
+    previousSettings,
+    settings,
   );
 
   if (!durationCandidateChanged && !automationCandidateChanged) {

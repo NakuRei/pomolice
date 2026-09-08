@@ -7,13 +7,6 @@ import { WarningTriangleIcon } from "@/components/icons/AppIcons";
 import { Button } from "./Button";
 import { StatusNotice } from "./StatusNotice";
 
-interface SettingsSyncBannerPresentation {
-  tone: "warning" | "danger";
-  role: "status" | "alert";
-  message: string;
-  canRetry: boolean;
-}
-
 function canRetrySettingsSynchronization(
   durationStatus: SettingsApplicationStatus,
   automationStatus: SettingsApplicationStatus,
@@ -63,49 +56,6 @@ function createSettingsSynchronizationWaitMessage(
   return "時間設定はタイマーがアイドル状態になるまで同期を待ちます。";
 }
 
-function createSettingsSyncBannerPresentation(
-  durationStatus: SettingsApplicationStatus,
-  automationStatus: SettingsApplicationStatus,
-  isConnected: boolean,
-  timerStatus: TimerStatus,
-  isSynchronizationInFlight: boolean,
-): SettingsSyncBannerPresentation | null {
-  const isDurationUnresolved = durationStatus !== "confirmed";
-  const isAutomationUnresolved = automationStatus !== "confirmed";
-  if (!isDurationUnresolved && !isAutomationUnresolved) {
-    return null;
-  }
-
-  const hasUnconfirmedGroup = [durationStatus, automationStatus].includes(
-    "unconfirmed",
-  );
-
-  const applicationStatusMessage = hasUnconfirmedGroup
-    ? "表示中の設定のバックエンドへの適用を確認できませんでした。"
-    : "表示中の設定のバックエンドへの適用はまだ確認されていません。";
-
-  const waitMessage = createSettingsSynchronizationWaitMessage(
-    durationStatus,
-    automationStatus,
-    isConnected,
-    timerStatus,
-    isSynchronizationInFlight,
-  );
-
-  return {
-    tone: hasUnconfirmedGroup ? "danger" : "warning",
-    role: hasUnconfirmedGroup ? "alert" : "status",
-    message: [applicationStatusMessage, waitMessage].filter(Boolean).join(" "),
-    canRetry: canRetrySettingsSynchronization(
-      durationStatus,
-      automationStatus,
-      isConnected,
-      timerStatus,
-      isSynchronizationInFlight,
-    ),
-  };
-}
-
 export function SettingsSyncBanner(): React.ReactElement | null {
   const durationStatus = useSettingsStore(
     (state) => state.durationSettingsApplicationStatus,
@@ -120,7 +70,15 @@ export function SettingsSyncBanner(): React.ReactElement | null {
   );
   const syncSettings = useTimerStore((state) => state.syncSettings);
 
-  const presentation = createSettingsSyncBannerPresentation(
+  const isDurationUnresolved = durationStatus !== "confirmed";
+  const isAutomationUnresolved = automationStatus !== "confirmed";
+  if (!isDurationUnresolved && !isAutomationUnresolved) {
+    return null;
+  }
+
+  const hasUnconfirmedGroup =
+    durationStatus === "unconfirmed" || automationStatus === "unconfirmed";
+  const canRetry = canRetrySettingsSynchronization(
     durationStatus,
     automationStatus,
     isConnected,
@@ -128,27 +86,35 @@ export function SettingsSyncBanner(): React.ReactElement | null {
     isSynchronizationInFlight,
   );
 
-  if (presentation === null) {
-    return null;
-  }
+  const applicationStatusMessage = hasUnconfirmedGroup
+    ? "表示中の設定のバックエンドへの適用を確認できませんでした。"
+    : "表示中の設定のバックエンドへの適用はまだ確認されていません。";
+
+  const waitMessage = createSettingsSynchronizationWaitMessage(
+    durationStatus,
+    automationStatus,
+    isConnected,
+    timerStatus,
+    isSynchronizationInFlight,
+  );
 
   return (
     <StatusNotice
-      tone={presentation.tone}
-      role={presentation.role}
-      ariaLive={presentation.role === "status" ? "polite" : undefined}
+      tone={hasUnconfirmedGroup ? "danger" : "warning"}
+      role={hasUnconfirmedGroup ? "alert" : "status"}
+      ariaLive={hasUnconfirmedGroup ? undefined : "polite"}
       testId="settings-sync-banner"
       icon={
         <WarningTriangleIcon
           className={
-            presentation.tone === "danger"
+            hasUnconfirmedGroup
               ? "h-5 w-5 shrink-0 text-danger-400"
               : "h-5 w-5 shrink-0 text-warning-400"
           }
         />
       }
       actions={
-        presentation.canRetry ? (
+        canRetry ? (
           <Button
             appearance="secondary"
             size="sm"
@@ -161,7 +127,7 @@ export function SettingsSyncBanner(): React.ReactElement | null {
         ) : undefined
       }
     >
-      {presentation.message}
+      {[applicationStatusMessage, waitMessage].filter(Boolean).join(" ")}
     </StatusNotice>
   );
 }
