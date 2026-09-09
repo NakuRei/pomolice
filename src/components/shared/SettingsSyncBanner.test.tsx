@@ -1,6 +1,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
 import {
   type SettingsApplicationStatus,
   useSettingsStore,
@@ -16,6 +17,10 @@ import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { SettingsSyncBanner } from "./SettingsSyncBanner";
 
 const RETRY_BUTTON_NAME = "設定の同期を再試行";
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+}));
 
 function setApplicationStatuses(
   durationStatus: SettingsApplicationStatus,
@@ -51,6 +56,7 @@ function createConnectedFullState(): FullStatePayload {
 
 describe("SettingsSyncBanner", () => {
   beforeEach(() => {
+    vi.mocked(invoke).mockReset().mockResolvedValue(undefined);
     resetTimerStoreForTest();
     useErrorStore.getState().clearAllErrors();
     useSettingsStore.getState().resetToDefaults();
@@ -206,45 +212,44 @@ describe("SettingsSyncBanner", () => {
     ).toBeInTheDocument();
   });
 
-  it("explains that unresolved settings wait for an in-flight pass", () => {
-    setApplicationStatuses("pending", "confirmed");
-    useTimerStore.setState({ isSettingsSynchronizationInFlight: true });
+  it("waits for backend acknowledgement before clearing unresolved settings", async () => {
+    const user = userEvent.setup();
+    let acknowledgeDuration = (): void => {
+      throw new Error("Expected a pending duration command");
+    };
+    vi.mocked(invoke).mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        acknowledgeDuration = resolve;
+      }),
+    );
+    setApplicationStatuses("pending", "pending");
 
     render(<SettingsSyncBanner />);
+    await user.click(screen.getByRole("button", { name: RETRY_BUTTON_NAME }));
 
+    expect(screen.getByRole("status")).toHaveTextContent(/同期の完了/u);
     expect(
       screen.queryByRole("button", { name: RETRY_BUTTON_NAME }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent(/同期の完了/u);
 
     act(() => {
-      useTimerStore.setState({ isSettingsSynchronizationInFlight: false });
+      acknowledgeDuration();
     });
 
-    expect(screen.getByRole("status")).not.toHaveTextContent(/同期の完了/u);
-    expect(
-      screen.getByRole("button", { name: RETRY_BUTTON_NAME }),
-    ).toBeInTheDocument();
-  });
-
-  it("requests one pass for two eligible groups", async () => {
-    const user = userEvent.setup();
-    const syncSettings = vi.fn<() => Promise<void>>(() => Promise.resolve());
-    setApplicationStatuses("pending", "pending");
-    useTimerStore.setState({ syncSettings });
-
-    render(<SettingsSyncBanner />);
-
-    const retryButton = screen.getByRole("button", {
-      name: RETRY_BUTTON_NAME,
+    await waitFor(() => {
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
     });
-    expect(
-      screen.getAllByRole("button", { name: RETRY_BUTTON_NAME }),
-    ).toHaveLength(1);
-
-    await user.click(retryButton);
-
-    expect(syncSettings).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith(
+      "sync_timer_duration_settings",
+      expect.objectContaining({ workDurationSecs: 1500 }),
+    );
+    expect(invoke).toHaveBeenCalledWith(
+      "sync_automation_policies",
+      expect.objectContaining({
+        postBreakTransitionPolicy: "require_manual_continue",
+      }),
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("does not expose a dismiss control", () => {
@@ -276,21 +281,24 @@ describe("SettingsSyncBanner", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
-  it("absorbs a rejected Retry and remains visible", async () => {
+  it("allows retrying unresolved settings after the backend rejects a write", async () => {
     const user = userEvent.setup();
-    const syncSettings = vi.fn<() => Promise<void>>(() =>
-      Promise.reject(new Error("settings write failed")),
-    );
-    setApplicationStatuses("unconfirmed", "confirmed");
-    useTimerStore.setState({ syncSettings });
+    vi.mocked(invoke).mockRejectedValueOnce(new Error("settings write failed"));
+    setApplicationStatuses("pending", "confirmed");
 
     render(<SettingsSyncBanner />);
 
     await user.click(screen.getByRole("button", { name: RETRY_BUTTON_NAME }));
 
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /適用を確認できませんでした/u,
+    );
+
+    await user.click(screen.getByRole("button", { name: RETRY_BUTTON_NAME }));
+
     await waitFor(() => {
-      expect(syncSettings).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
-    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 });

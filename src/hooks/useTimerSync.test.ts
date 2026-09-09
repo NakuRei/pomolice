@@ -7,7 +7,10 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import type { FrontendLogger } from "@/logging/logger";
+import {
+  isPermissionGranted,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
 import { resetSettingsStoreForTest } from "@/test/resetSettingsStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import {
@@ -23,11 +26,6 @@ import {
   useSettingsStore,
   type SettingsApplicationStatus,
 } from "@/store/settingsStore";
-import {
-  notifyWorkComplete,
-  notifyBreakAutoStarted,
-  notifyBreakComplete,
-} from "@/services/notifications";
 import {
   TIMER_SYNC_MAX_CONNECTION_RETRIES,
   timerSyncRetryDelayMs,
@@ -47,7 +45,6 @@ type InvokeCommand = (
 const mockListen = vi.fn<ListenerRegistration>();
 const mockInvoke = vi.fn<InvokeCommand>();
 const noopUnlisten = (): void => undefined;
-const timerSyncWarn = vi.hoisted(() => vi.fn<FrontendLogger["warn"]>());
 
 vi.mock("@tauri-apps/api/event", () => ({
   listen: (
@@ -61,11 +58,12 @@ vi.mock("@tauri-apps/api/core", () => ({
     mockInvoke(command, args),
 }));
 
-vi.mock("../logging/logger", () => ({
-  createLogger: (): Pick<FrontendLogger, "error" | "warn"> => ({
-    error: vi.fn<FrontendLogger["error"]>(),
-    warn: timerSyncWarn,
-  }),
+vi.mock("@tauri-apps/plugin-log", () => ({
+  trace: vi.fn().mockResolvedValue(undefined),
+  debug: vi.fn().mockResolvedValue(undefined),
+  info: vi.fn().mockResolvedValue(undefined),
+  warn: vi.fn().mockResolvedValue(undefined),
+  error: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@tauri-apps/plugin-notification", () => ({
@@ -74,10 +72,8 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
   sendNotification: vi.fn(),
 }));
 
-vi.mock("@/services/notifications", () => ({
-  notifyWorkComplete: vi.fn(),
-  notifyBreakAutoStarted: vi.fn(),
-  notifyBreakComplete: vi.fn(),
+vi.mock("@tauri-apps/api/path", () => ({
+  resolveResource: vi.fn((path: string) => Promise.resolve(`/app/${path}`)),
 }));
 
 // Import after mocking
@@ -241,6 +237,7 @@ describe("useTimerSync", () => {
   beforeEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+    vi.mocked(isPermissionGranted).mockResolvedValue(false);
     useErrorStore.getState().clearAllErrors();
 
     resetTimerStoreForTest();
@@ -690,7 +687,9 @@ describe("useTimerSync", () => {
     expect(useTimerStore.getState().requiresManualContinueDecision).toBe(true);
   });
 
-  it("should call notifyWorkComplete with next_session_type", async () => {
+  it("notifies the user with the long-break sound when work ends before a long break", async () => {
+    vi.mocked(isPermissionGranted).mockResolvedValue(true);
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Linux");
     const sessionHandler =
       await renderAndGetTimerEventHandler("session_completed");
     emitSessionCompleted(sessionHandler, {
@@ -702,25 +701,36 @@ describe("useTimerSync", () => {
       post_break_decision_pending: false,
     });
 
-    expect(notifyWorkComplete).toHaveBeenCalledWith("long_break");
-    expect(notifyWorkComplete).toHaveBeenCalledTimes(1);
-    expect(notifyBreakComplete).not.toHaveBeenCalled();
-    expect(notifyBreakAutoStarted).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(sendNotification).toHaveBeenCalledExactlyOnceWith({
+        title: "休憩時間です！",
+        body: "お疲れ様でした。休憩を取りましょう。",
+        sound: "/app/resources/sounds/long_break.wav",
+      });
+    });
   });
 
-  it("should call notifyBreakComplete when transition_reason is break_waiting_decision", async () => {
+  it("notifies the user to resume work when a break awaits their decision", async () => {
+    vi.mocked(isPermissionGranted).mockResolvedValue(true);
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Linux");
     const sessionHandler =
       await renderAndGetTimerEventHandler("session_completed");
     emitSessionCompleted(sessionHandler, {
       completed_session_type: SessionType.LONG_BREAK,
     });
 
-    expect(notifyBreakComplete).toHaveBeenCalledTimes(1);
-    expect(notifyBreakAutoStarted).not.toHaveBeenCalled();
-    expect(notifyWorkComplete).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(sendNotification).toHaveBeenCalledExactlyOnceWith({
+        title: "作業に戻りましょう！",
+        body: "休憩が終わりました。次のポモドーロを始めましょう。",
+        sound: "/app/resources/sounds/work.wav",
+      });
+    });
   });
 
-  it("should call notifyBreakAutoStarted when transition_reason is break_auto_started", async () => {
+  it("notifies the user when the next work session starts automatically", async () => {
+    vi.mocked(isPermissionGranted).mockResolvedValue(true);
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Linux");
     const sessionHandler =
       await renderAndGetTimerEventHandler("session_completed");
     emitSessionCompleted(sessionHandler, {
@@ -730,12 +740,19 @@ describe("useTimerSync", () => {
       post_break_decision_pending: false,
     });
 
-    expect(notifyBreakAutoStarted).toHaveBeenCalledTimes(1);
-    expect(notifyBreakComplete).not.toHaveBeenCalled();
-    expect(notifyWorkComplete).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(sendNotification).toHaveBeenCalledExactlyOnceWith({
+        title: "休憩終了",
+        body: "休憩終了。次の作業を自動開始しました。",
+        sound: "/app/resources/sounds/work.wav",
+      });
+    });
   });
 
-  it("should not call work-resume notifications for scheduled_stop_executed", async () => {
+  it("does not notify the user to resume work after a scheduled stop", async () => {
+    vi.useFakeTimers();
+    vi.mocked(isPermissionGranted).mockResolvedValue(true);
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Linux");
     const sessionHandler =
       await renderAndGetTimerEventHandler("session_completed");
     emitSessionCompleted(sessionHandler, {
@@ -744,9 +761,9 @@ describe("useTimerSync", () => {
       post_break_decision_pending: false,
     });
 
-    expect(notifyWorkComplete).not.toHaveBeenCalled();
-    expect(notifyBreakComplete).not.toHaveBeenCalled();
-    expect(notifyBreakAutoStarted).not.toHaveBeenCalled();
+    await vi.runOnlyPendingTimersAsync();
+
+    expect(sendNotification).not.toHaveBeenCalled();
   });
 
   it("releases every listener and ignores full state resolved after unmount", async () => {

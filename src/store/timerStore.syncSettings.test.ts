@@ -461,25 +461,6 @@ describe("timerStore syncSettings command routing", () => {
     }
   });
 
-  it("exposes the synchronization lane only while a command is unsettled", async () => {
-    confirmCurrentAutomationCandidate();
-    const durationCommand = createDeferredPromise<unknown>();
-    mockInvoke.mockReturnValueOnce(durationCommand.promise);
-    useTimerStore.setState({ status: TimerStatus.IDLE, isConnected: true });
-
-    const synchronization = useTimerStore.getState().syncSettings();
-
-    expect(useTimerStore.getState().isSettingsSynchronizationInFlight).toBe(
-      true,
-    );
-    durationCommand.resolve(undefined);
-    await synchronization;
-
-    expect(useTimerStore.getState().isSettingsSynchronizationInFlight).toBe(
-      false,
-    );
-  });
-
   it("never overlaps deferred commands across repeated follow-ups", async () => {
     confirmCurrentAutomationCandidate();
     const firstDurationCommand = createDeferredPromise<unknown>();

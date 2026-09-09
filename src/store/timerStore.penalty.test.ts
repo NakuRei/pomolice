@@ -1,233 +1,100 @@
-/**
- * Timer Store Penalty Tests
- * Phase 4: Test input monitoring and penalty system
- *
- * Note: Input penalty logic has been moved to the Rust backend.
- * The frontend now only receives penalty state via timer_tick events.
- * These tests verify that the frontend correctly handles penalty state
- * received from the backend.
- */
+import { beforeEach, describe, expect, it } from "vitest";
+import {
+  useTimerStore,
+  SessionType,
+  TimerStatus,
+  type TimerTickPayload,
+} from "./timerStore";
+import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { useTimerStore, SessionType, TimerStatus } from "./timerStore";
-import { useSettingsStore } from "./settingsStore";
+const breakTick: TimerTickPayload = {
+  status: TimerStatus.ON_BREAK,
+  remaining_seconds: 300,
+  session_type: SessionType.SHORT_BREAK,
+  current_cycle: 1,
+  completed_pomodoros: 1,
+  break_interaction_count: 0,
+  is_fullscreen_break: true,
+};
 
-// Mock the services
-vi.mock("@/services/notifications", () => ({
-  notifyWorkComplete: vi.fn(),
-  notifyBreakComplete: vi.fn(),
-  notifyLongBreakComplete: vi.fn(),
-}));
+describe("backend penalty state", () => {
+  beforeEach(resetTimerStoreForTest);
 
-describe("Timer Store - Penalty System", () => {
-  beforeEach(() => {
-    // Reset stores to initial state
-    useTimerStore.setState({
-      status: TimerStatus.IDLE,
-      remainingSeconds: 25 * 60,
-      sessionType: SessionType.WORK,
-      completedPomodoros: 0,
-      currentCycle: 0,
-      requiresManualContinueDecision: false,
-      isFullscreenBreak: false,
-      breakInteractionCount: 0,
-      isConnected: false,
-      shouldPromptStartOnBoot: false,
-      activeWindowSummary: null,
-      infoMessage: null,
-      infoMessageShownAtById: {},
+  it("reflects the penalty count and countdown reset from successive backend ticks", () => {
+    const { handleTimerTick } = useTimerStore.getState();
+    handleTimerTick({
+      ...breakTick,
+      remaining_seconds: 30,
+      break_interaction_count: 5,
     });
 
-    useSettingsStore.setState({
-      workDuration: 25,
-      shortBreakDuration: 5,
-      longBreakDuration: 15,
-      longBreakInterval: 4,
+    expect(useTimerStore.getState()).toMatchObject({
+      remainingSeconds: 30,
+      breakInteractionCount: 5,
+    });
+
+    handleTimerTick({ ...breakTick, break_interaction_count: 6 });
+
+    expect(useTimerStore.getState()).toMatchObject({
+      remainingSeconds: 300,
+      breakInteractionCount: 6,
     });
   });
 
-  describe("breakInteractionCount from backend", () => {
-    it("should initialize with 0 interactions", () => {
-      const state = useTimerStore.getState();
-      expect(state.breakInteractionCount).toBe(0);
+  it("clears the previous penalty count when the backend starts a new break", () => {
+    const { handleTimerTick } = useTimerStore.getState();
+    handleTimerTick({ ...breakTick, break_interaction_count: 10 });
+
+    handleTimerTick({
+      ...breakTick,
+      current_cycle: 2,
+      completed_pomodoros: 2,
     });
 
-    it("should update breakInteractionCount from timer_tick event", () => {
-      const { handleTimerTick } = useTimerStore.getState();
+    expect(useTimerStore.getState().breakInteractionCount).toBe(0);
+  });
 
-      handleTimerTick({
-        status: TimerStatus.ON_BREAK,
-        remaining_seconds: 300,
-        session_type: SessionType.SHORT_BREAK,
-        current_cycle: 1,
-        completed_pomodoros: 1,
-        break_interaction_count: 5,
-        is_fullscreen_break: true,
-      });
-
-      const state = useTimerStore.getState();
-      expect(state.breakInteractionCount).toBe(5);
+  it("restores the penalty count and fullscreen break from the full backend state", () => {
+    useTimerStore.getState().handleFullState({
+      ...breakTick,
+      remaining_seconds: 250,
+      session_type: SessionType.LONG_BREAK,
+      current_cycle: 4,
+      completed_pomodoros: 4,
+      break_interaction_count: 7,
+      post_break_decision_pending: false,
+      should_prompt_start_on_boot: false,
+      active_window_summary: null,
+      settings: {
+        work_duration_secs: 1500,
+        short_break_duration_secs: 300,
+        long_break_duration_secs: 900,
+        long_break_interval: 4,
+        post_break_transition_policy: "require_manual_continue",
+      },
     });
 
-    it("should update breakInteractionCount on multiple ticks", () => {
-      const { handleTimerTick } = useTimerStore.getState();
-
-      // First tick with 0 interactions
-      handleTimerTick({
-        status: TimerStatus.ON_BREAK,
-        remaining_seconds: 300,
-        session_type: SessionType.SHORT_BREAK,
-        current_cycle: 1,
-        completed_pomodoros: 1,
-        break_interaction_count: 0,
-        is_fullscreen_break: true,
-      });
-
-      expect(useTimerStore.getState().breakInteractionCount).toBe(0);
-
-      // Backend detected input, sent tick with incremented count
-      handleTimerTick({
-        status: TimerStatus.ON_BREAK,
-        remaining_seconds: 300, // Timer reset by backend
-        session_type: SessionType.SHORT_BREAK,
-        current_cycle: 1,
-        completed_pomodoros: 1,
-        break_interaction_count: 1,
-        is_fullscreen_break: true,
-      });
-
-      expect(useTimerStore.getState().breakInteractionCount).toBe(1);
-
-      // More inputs detected
-      handleTimerTick({
-        status: TimerStatus.ON_BREAK,
-        remaining_seconds: 300,
-        session_type: SessionType.SHORT_BREAK,
-        current_cycle: 1,
-        completed_pomodoros: 1,
-        break_interaction_count: 3,
-        is_fullscreen_break: true,
-      });
-
-      expect(useTimerStore.getState().breakInteractionCount).toBe(3);
-    });
-
-    it("should reset breakInteractionCount when entering new break session", () => {
-      // Set some interaction count from previous break
-      useTimerStore.setState({ breakInteractionCount: 10 });
-
-      const { handleTimerTick } = useTimerStore.getState();
-
-      // New break session starts with 0 interactions
-      handleTimerTick({
-        status: TimerStatus.ON_BREAK,
-        remaining_seconds: 300,
-        session_type: SessionType.SHORT_BREAK,
-        current_cycle: 2,
-        completed_pomodoros: 2,
-        break_interaction_count: 0, // Backend resets on new break
-        is_fullscreen_break: true,
-      });
-
-      expect(useTimerStore.getState().breakInteractionCount).toBe(0);
+    expect(useTimerStore.getState()).toMatchObject({
+      breakInteractionCount: 7,
+      isFullscreenBreak: true,
     });
   });
 
-  describe("Timer reset from backend penalty", () => {
-    it("should reflect timer reset in remaining_seconds from tick", () => {
-      const { handleTimerTick } = useTimerStore.getState();
+  it("enters and exits the fullscreen break as reported by the backend", () => {
+    const { handleTimerTick } = useTimerStore.getState();
+    handleTimerTick(breakTick);
 
-      // Break running with 30 seconds left
-      handleTimerTick({
-        status: TimerStatus.ON_BREAK,
-        remaining_seconds: 30,
-        session_type: SessionType.SHORT_BREAK,
-        current_cycle: 1,
-        completed_pomodoros: 1,
-        break_interaction_count: 0,
-        is_fullscreen_break: true,
-      });
+    expect(useTimerStore.getState().isFullscreenBreak).toBe(true);
 
-      expect(useTimerStore.getState().remainingSeconds).toBe(30);
-
-      // Backend detected input and reset timer to full duration
-      handleTimerTick({
-        status: TimerStatus.ON_BREAK,
-        remaining_seconds: 300, // Reset to 5 minutes
-        session_type: SessionType.SHORT_BREAK,
-        current_cycle: 1,
-        completed_pomodoros: 1,
-        break_interaction_count: 1,
-        is_fullscreen_break: true,
-      });
-
-      expect(useTimerStore.getState().remainingSeconds).toBe(300);
-      expect(useTimerStore.getState().breakInteractionCount).toBe(1);
+    handleTimerTick({
+      ...breakTick,
+      status: TimerStatus.WORKING,
+      remaining_seconds: 1500,
+      session_type: SessionType.WORK,
+      current_cycle: 2,
+      is_fullscreen_break: false,
     });
-  });
 
-  describe("handleFullState for penalty state", () => {
-    it("should update breakInteractionCount from full state", () => {
-      const { handleFullState } = useTimerStore.getState();
-
-      handleFullState({
-        status: TimerStatus.ON_BREAK,
-        remaining_seconds: 250,
-        session_type: SessionType.LONG_BREAK,
-        current_cycle: 4,
-        completed_pomodoros: 4,
-        break_interaction_count: 7,
-        is_fullscreen_break: true,
-        post_break_decision_pending: false,
-        should_prompt_start_on_boot: false,
-        active_window_summary: null,
-        settings: {
-          work_duration_secs: 1500,
-          short_break_duration_secs: 300,
-          long_break_duration_secs: 900,
-          long_break_interval: 4,
-          post_break_transition_policy: "require_manual_continue",
-        },
-      });
-
-      const state = useTimerStore.getState();
-      expect(state.breakInteractionCount).toBe(7);
-      expect(state.isFullscreenBreak).toBe(true);
-    });
-  });
-
-  describe("isFullscreenBreak state", () => {
-    it("should track fullscreen break state from tick", () => {
-      const { handleTimerTick } = useTimerStore.getState();
-
-      // Not in fullscreen break
-      expect(useTimerStore.getState().isFullscreenBreak).toBe(false);
-
-      // Enter fullscreen break
-      handleTimerTick({
-        status: TimerStatus.ON_BREAK,
-        remaining_seconds: 300,
-        session_type: SessionType.SHORT_BREAK,
-        current_cycle: 1,
-        completed_pomodoros: 1,
-        break_interaction_count: 0,
-        is_fullscreen_break: true,
-      });
-
-      expect(useTimerStore.getState().isFullscreenBreak).toBe(true);
-
-      // Exit fullscreen break (work session)
-      handleTimerTick({
-        status: TimerStatus.WORKING,
-        remaining_seconds: 1500,
-        session_type: SessionType.WORK,
-        current_cycle: 2,
-        completed_pomodoros: 1,
-        break_interaction_count: 0,
-        is_fullscreen_break: false,
-      });
-
-      expect(useTimerStore.getState().isFullscreenBreak).toBe(false);
-    });
+    expect(useTimerStore.getState().isFullscreenBreak).toBe(false);
   });
 });
