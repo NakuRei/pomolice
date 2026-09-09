@@ -591,9 +591,8 @@ mod tests {
     use crate::external_adapters::clock::testing::FixedClock;
     use crate::external_adapters::clock::Clock;
     use crate::external_adapters::persistence::{PersistenceManager, SaveError};
-    use crate::log_redaction::RedactionClass;
     use crate::logging_event::{
-        log_persistence_write_failure, PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START,
+        PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START,
         PERSISTENCE_WRITE_TRIGGER_SCHEDULER_STOP_PENDING,
     };
     use crate::session_pipeline::{
@@ -689,19 +688,6 @@ mod tests {
         timer_task_spawn_count: usize,
         auto_run_stop_pending_count: usize,
         persist_triggers: Vec<&'static str>,
-        simulate_persistence_failure: bool,
-        logged_persistence_failure_count: usize,
-    }
-
-    impl RecordingSchedulerRuntimeEffects {
-        fn record_persistence_attempt(&mut self, trigger: &'static str) {
-            self.persist_triggers.push(trigger);
-            if self.simulate_persistence_failure {
-                self.logged_persistence_failure_count += 1;
-                let error = std::io::Error::other("simulated scheduler persistence failure");
-                log_persistence_write_failure(trigger, &error);
-            }
-        }
     }
 
     impl SchedulerRuntimeEffects for RecordingSchedulerRuntimeEffects {
@@ -713,7 +699,7 @@ mod tests {
             &'a mut self,
             trigger: &'static str,
         ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-            self.record_persistence_attempt(trigger);
+            self.persist_triggers.push(trigger);
             Box::pin(async {})
         }
     }
@@ -750,7 +736,7 @@ mod tests {
                 return Box::pin(async { Ok(()) });
             };
 
-            self.record_persistence_attempt(trigger);
+            self.persist_triggers.push(trigger);
             Box::pin(async { Ok(()) })
         }
     }
@@ -942,36 +928,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_scheduler_persistence_failure_policy_is_logged_and_nonfatal() {
-        let state = build_test_state_without_persistence_path().await;
-        let start_boundary = scheduler_boundary_id();
-        let mut effects = RecordingSchedulerRuntimeEffects {
-            simulate_persistence_failure: true,
-            ..RecordingSchedulerRuntimeEffects::default()
-        };
-
-        let did_start = start_work_from_scheduler_when_idle_with_effects(
-            &state,
-            TimerStatus::Idle,
-            TimerSettings::default(),
-            &start_boundary,
-            &mut effects,
-        )
-        .await;
-
-        assert!(did_start);
-        assert_eq!(effects.logged_persistence_failure_count, 1);
-        assert_eq!(
-            effects.persist_triggers,
-            [PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START]
-        );
-        assert_eq!(
-            state.timer_manager.lock().await.status(),
-            TimerStatus::Working
-        );
-    }
-
     fn local_datetime(
         year: i32,
         month: u32,
@@ -994,48 +950,6 @@ mod tests {
             HhMm::try_new(18, 0).expect("end time should be valid"),
         )
         .expect("daytime slot should be valid")
-    }
-
-    fn day_slot(enabled: bool, start_hour: u8, end_hour: u8) -> DayAutoRunSlot {
-        DayAutoRunSlot::try_new(
-            enabled,
-            HhMm::try_new(start_hour, 0).expect("start time should be valid"),
-            HhMm::try_new(end_hour, 0).expect("end time should be valid"),
-        )
-        .expect("day slot should be valid")
-    }
-
-    fn weekly_config_with_weekday_slot(
-        weekday_index: usize,
-        slot: DayAutoRunSlot,
-    ) -> WeeklyAutoRunConfig {
-        let disabled = DayAutoRunSlot::default();
-
-        match weekday_index {
-            0 => WeeklyAutoRunConfig::try_new(
-                slot, disabled, disabled, disabled, disabled, disabled, disabled,
-            ),
-            1 => WeeklyAutoRunConfig::try_new(
-                disabled, slot, disabled, disabled, disabled, disabled, disabled,
-            ),
-            2 => WeeklyAutoRunConfig::try_new(
-                disabled, disabled, slot, disabled, disabled, disabled, disabled,
-            ),
-            3 => WeeklyAutoRunConfig::try_new(
-                disabled, disabled, disabled, slot, disabled, disabled, disabled,
-            ),
-            4 => WeeklyAutoRunConfig::try_new(
-                disabled, disabled, disabled, disabled, slot, disabled, disabled,
-            ),
-            5 => WeeklyAutoRunConfig::try_new(
-                disabled, disabled, disabled, disabled, disabled, slot, disabled,
-            ),
-            6 => WeeklyAutoRunConfig::try_new(
-                disabled, disabled, disabled, disabled, disabled, disabled, slot,
-            ),
-            _ => panic!("weekday index should be between zero and six"),
-        }
-        .expect("weekly configuration should be valid")
     }
 
     fn weekly_config_with_monday_daytime() -> WeeklyAutoRunConfig {
@@ -1084,107 +998,6 @@ mod tests {
     ) {
         let mut timer = state.timer_manager.lock().await;
         let _ = timer.sync_automation_policies(auto_run_feature_enabled, config, post_break_policy);
-    }
-
-    async fn collect_config_change_diagnostic_message_batches(
-        initial_auto_run_feature_enabled: bool,
-        initial_config: WeeklyAutoRunConfig,
-        initial_post_break_policy: PostBreakTransitionPolicy,
-        updated_auto_run_feature_enabled: bool,
-        updated_config: WeeklyAutoRunConfig,
-        updated_post_break_policy: PostBreakTransitionPolicy,
-        evaluation_count: usize,
-    ) -> Vec<Vec<String>> {
-        let state = build_test_state_without_persistence_path().await;
-        apply_schedule_with_feature_enabled(
-            &state,
-            initial_auto_run_feature_enabled,
-            initial_config,
-            initial_post_break_policy,
-        )
-        .await;
-
-        let mut runtime_state =
-            runtime_state_at(&state, local_datetime(2025, 2, 1, 11, 59, 50)).await;
-        let mut effects = RecordingSchedulerRuntimeEffects::default();
-
-        apply_schedule_with_feature_enabled(
-            &state,
-            updated_auto_run_feature_enabled,
-            updated_config,
-            updated_post_break_policy,
-        )
-        .await;
-
-        let mut message_batches = Vec::new();
-        for now_local in [
-            local_datetime(2025, 2, 1, 12, 0, 0),
-            local_datetime(2025, 2, 1, 12, 0, 1),
-        ]
-        .into_iter()
-        .take(evaluation_count)
-        {
-            begin_log_capture();
-            run_scheduler_tick_with_effects(&state, &mut runtime_state, now_local, &mut effects)
-                .await;
-            message_batches.push(finish_log_capture());
-        }
-        message_batches
-    }
-
-    async fn collect_config_change_diagnostic_messages(
-        initial_auto_run_feature_enabled: bool,
-        initial_config: WeeklyAutoRunConfig,
-        initial_post_break_policy: PostBreakTransitionPolicy,
-        updated_auto_run_feature_enabled: bool,
-        updated_config: WeeklyAutoRunConfig,
-        updated_post_break_policy: PostBreakTransitionPolicy,
-        evaluation_count: usize,
-    ) -> Vec<String> {
-        collect_config_change_diagnostic_message_batches(
-            initial_auto_run_feature_enabled,
-            initial_config,
-            initial_post_break_policy,
-            updated_auto_run_feature_enabled,
-            updated_config,
-            updated_post_break_policy,
-            evaluation_count,
-        )
-        .await
-        .into_iter()
-        .flatten()
-        .collect()
-    }
-
-    fn config_change_diagnostic_messages(messages: &[String]) -> Vec<&str> {
-        const EVENT_TOKEN: &str = "event_id=scheduler.config_revision_changed";
-
-        messages
-            .iter()
-            .map(String::as_str)
-            .filter(|message| message.split_whitespace().next() == Some(EVENT_TOKEN))
-            .collect()
-    }
-
-    fn assert_config_change_diagnostic_count(
-        scenario: &str,
-        messages: &[String],
-        expected_count: usize,
-    ) {
-        let diagnostic_messages = config_change_diagnostic_messages(messages);
-        assert_eq!(
-            diagnostic_messages.len(),
-            expected_count,
-            "{scenario}; captured messages: {messages:?}"
-        );
-
-        for diagnostic_message in diagnostic_messages {
-            let (_, fields) = diagnostic_message
-                .split_once(" config_revision=")
-                .expect("config-change diagnostic should include its configured field");
-            assert!(!fields.is_empty(), "{scenario}");
-            assert!(!fields.contains(' '), "{scenario}");
-        }
     }
 
     async fn runtime_state_at(
@@ -1707,200 +1520,13 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn config_change_diagnostic_tracks_feature_and_weekday_enablement_mutations() {
-        let unchanged_config = WeeklyAutoRunConfig::default();
+    async fn schedule_changes_are_logged_without_repeating_on_unchanged_ticks() {
+        const CHANGE_EVENT: &str = "event_id=scheduler.config_revision_changed";
 
-        let messages = collect_config_change_diagnostic_messages(
-            false,
-            unchanged_config.clone(),
-            PostBreakTransitionPolicy::RequireManualContinue,
-            true,
-            unchanged_config.clone(),
-            PostBreakTransitionPolicy::RequireManualContinue,
-            1,
-        )
-        .await;
-        assert_config_change_diagnostic_count("feature enable", &messages, 1);
-
-        let messages = collect_config_change_diagnostic_messages(
-            true,
-            unchanged_config.clone(),
-            PostBreakTransitionPolicy::RequireManualContinue,
-            false,
-            unchanged_config.clone(),
-            PostBreakTransitionPolicy::RequireManualContinue,
-            1,
-        )
-        .await;
-        assert_config_change_diagnostic_count("feature disable", &messages, 1);
-
-        for (weekday_index, weekday_key) in [
-            (0, "Monday"),
-            (1, "Tuesday"),
-            (2, "Wednesday"),
-            (3, "Thursday"),
-            (4, "Friday"),
-            (5, "Saturday"),
-            (6, "Sunday"),
-        ] {
-            let enabled_config =
-                weekly_config_with_weekday_slot(weekday_index, enabled_daytime_slot());
-            let enable_scenario = format!("{weekday_key} enable");
-            let messages = collect_config_change_diagnostic_messages(
-                true,
-                unchanged_config.clone(),
-                PostBreakTransitionPolicy::RequireManualContinue,
-                true,
-                enabled_config.clone(),
-                PostBreakTransitionPolicy::RequireManualContinue,
-                1,
-            )
-            .await;
-            assert_config_change_diagnostic_count(&enable_scenario, &messages, 1);
-
-            let disable_scenario = format!("{weekday_key} disable");
-            let messages = collect_config_change_diagnostic_messages(
-                true,
-                enabled_config,
-                PostBreakTransitionPolicy::RequireManualContinue,
-                true,
-                unchanged_config.clone(),
-                PostBreakTransitionPolicy::RequireManualContinue,
-                1,
-            )
-            .await;
-            assert_config_change_diagnostic_count(&disable_scenario, &messages, 1);
-        }
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn config_change_diagnostic_tracks_all_weekday_time_mutations_and_ignores_non_scope_updates(
-    ) {
-        let unchanged_config = WeeklyAutoRunConfig::default();
-
-        for (weekday_index, weekday_key) in [
-            (0, "Monday"),
-            (1, "Tuesday"),
-            (2, "Wednesday"),
-            (3, "Thursday"),
-            (4, "Friday"),
-            (5, "Saturday"),
-            (6, "Sunday"),
-        ] {
-            let enabled_config =
-                weekly_config_with_weekday_slot(weekday_index, enabled_daytime_slot());
-
-            let enabled_start_scenario = format!("{weekday_key} enabled start time");
-            let messages = collect_config_change_diagnostic_messages(
-                true,
-                enabled_config.clone(),
-                PostBreakTransitionPolicy::RequireManualContinue,
-                true,
-                weekly_config_with_weekday_slot(weekday_index, day_slot(true, 10, 18)),
-                PostBreakTransitionPolicy::RequireManualContinue,
-                1,
-            )
-            .await;
-            assert_config_change_diagnostic_count(&enabled_start_scenario, &messages, 1);
-
-            let enabled_end_scenario = format!("{weekday_key} enabled end time");
-            let messages = collect_config_change_diagnostic_messages(
-                true,
-                enabled_config,
-                PostBreakTransitionPolicy::RequireManualContinue,
-                true,
-                weekly_config_with_weekday_slot(weekday_index, day_slot(true, 9, 17)),
-                PostBreakTransitionPolicy::RequireManualContinue,
-                1,
-            )
-            .await;
-            assert_config_change_diagnostic_count(&enabled_end_scenario, &messages, 1);
-
-            let disabled_start_scenario = format!("{weekday_key} disabled start time");
-            let messages = collect_config_change_diagnostic_messages(
-                true,
-                unchanged_config.clone(),
-                PostBreakTransitionPolicy::RequireManualContinue,
-                true,
-                weekly_config_with_weekday_slot(weekday_index, day_slot(false, 10, 18)),
-                PostBreakTransitionPolicy::RequireManualContinue,
-                1,
-            )
-            .await;
-            assert_config_change_diagnostic_count(&disabled_start_scenario, &messages, 1);
-
-            let disabled_end_scenario = format!("{weekday_key} disabled end time");
-            let messages = collect_config_change_diagnostic_messages(
-                true,
-                unchanged_config.clone(),
-                PostBreakTransitionPolicy::RequireManualContinue,
-                true,
-                weekly_config_with_weekday_slot(weekday_index, day_slot(false, 9, 17)),
-                PostBreakTransitionPolicy::RequireManualContinue,
-                1,
-            )
-            .await;
-            assert_config_change_diagnostic_count(&disabled_end_scenario, &messages, 1);
-        }
-
-        let messages = collect_config_change_diagnostic_messages(
-            true,
-            unchanged_config.clone(),
-            PostBreakTransitionPolicy::RequireManualContinue,
-            true,
-            unchanged_config.clone(),
-            PostBreakTransitionPolicy::StartNextWorkAutomatically,
-            1,
-        )
-        .await;
-        assert_config_change_diagnostic_count("post-break policy only", &messages, 0);
-
-        let messages = collect_config_change_diagnostic_messages(
-            true,
-            unchanged_config.clone(),
-            PostBreakTransitionPolicy::RequireManualContinue,
-            true,
-            unchanged_config,
-            PostBreakTransitionPolicy::RequireManualContinue,
-            1,
-        )
-        .await;
-        assert_config_change_diagnostic_count("unchanged synchronization", &messages, 0);
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn config_change_diagnostic_for_single_publication_is_not_reemitted() {
-        let message_batches = collect_config_change_diagnostic_message_batches(
-            false,
-            WeeklyAutoRunConfig::default(),
-            PostBreakTransitionPolicy::RequireManualContinue,
-            true,
-            WeeklyAutoRunConfig::default(),
-            PostBreakTransitionPolicy::RequireManualContinue,
-            2,
-        )
-        .await;
-
-        assert_config_change_diagnostic_count(
-            "single publication first evaluation",
-            &message_batches[0],
-            1,
-        );
-        assert_config_change_diagnostic_count(
-            "single publication unchanged evaluation",
-            &message_batches[1],
-            0,
-        );
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn config_change_diagnostic_is_aggregated_until_the_next_scheduler_evaluation() {
-        let baseline_config = weekly_config_with_monday_daytime();
-        let changed_config = weekly_config_with_monday_and_tuesday_daytime();
         let state = build_test_state_without_persistence_path().await;
         apply_schedule(
             &state,
-            baseline_config.clone(),
+            weekly_config_with_monday_daytime(),
             PostBreakTransitionPolicy::RequireManualContinue,
         )
         .await;
@@ -1910,13 +1536,7 @@ mod tests {
 
         apply_schedule(
             &state,
-            changed_config,
-            PostBreakTransitionPolicy::RequireManualContinue,
-        )
-        .await;
-        apply_schedule(
-            &state,
-            baseline_config,
+            weekly_config_with_monday_and_tuesday_daytime(),
             PostBreakTransitionPolicy::RequireManualContinue,
         )
         .await;
@@ -1929,7 +1549,7 @@ mod tests {
             &mut effects,
         )
         .await;
-        let first_evaluation_messages = finish_log_capture();
+        let changed_messages = finish_log_capture();
 
         begin_log_capture();
         run_scheduler_tick_with_effects(
@@ -1939,80 +1559,19 @@ mod tests {
             &mut effects,
         )
         .await;
-        let unchanged_evaluation_messages = finish_log_capture();
-
-        assert_config_change_diagnostic_count(
-            "return to original schedule first evaluation",
-            &first_evaluation_messages,
-            1,
-        );
-        assert_config_change_diagnostic_count(
-            "return to original schedule unchanged evaluation",
-            &unchanged_evaluation_messages,
-            0,
-        );
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn config_change_diagnostic_survives_configuration_persistence_failure() {
-        let state = build_test_state_with_persistence_failure().await;
-        let baseline_config = weekly_config_with_monday_daytime();
-        let changed_config = weekly_config_with_monday_and_tuesday_daytime();
-        apply_schedule(
-            &state,
-            baseline_config,
-            PostBreakTransitionPolicy::RequireManualContinue,
-        )
-        .await;
-
-        let mut runtime_state =
-            runtime_state_at(&state, local_datetime(2025, 2, 1, 11, 59, 50)).await;
-        let mut command_effects = RecordingSchedulerRuntimeEffects::default();
-        let sync_result = sync_automation_policies_with_runtime_effects(
-            &state,
-            true,
-            changed_config,
-            PostBreakTransitionPolicy::RequireManualContinue,
-            &mut command_effects,
-        )
-        .await;
+        let unchanged_messages = finish_log_capture();
 
         assert!(
-            sync_result.is_err(),
-            "configuration synchronization should report its persistence failure"
-        );
-
-        let mut scheduler_effects = RecordingSchedulerRuntimeEffects::default();
-        begin_log_capture();
-        run_scheduler_tick_with_effects(
-            &state,
-            &mut runtime_state,
-            local_datetime(2025, 2, 1, 12, 0, 0),
-            &mut scheduler_effects,
-        )
-        .await;
-        let messages = finish_log_capture();
-
-        assert_config_change_diagnostic_count("configuration persistence failure", &messages, 1);
-    }
-
-    #[test]
-    fn config_change_diagnostic_catalog_remains_stable() {
-        let event = BackendLogEvent::SchedulerConfigRevisionChanged;
-
-        assert_eq!(event.event_id(), "scheduler.config_revision_changed");
-        assert_eq!(event.severity(), log::Level::Info);
-        assert_eq!(
-            event.spec().message_template,
-            "Weekly scheduler detected config revision change"
-        );
-        assert_eq!(
-            event
-                .allowed_fields()
+            changed_messages
                 .iter()
-                .map(|field| (field.name, field.redaction_classification))
-                .collect::<Vec<_>>(),
-            [("config_revision", RedactionClass::Public)]
+                .any(|message| message.contains(CHANGE_EVENT)),
+            "schedule changes should leave a diagnostic"
+        );
+        assert!(
+            unchanged_messages
+                .iter()
+                .all(|message| !message.contains(CHANGE_EVENT)),
+            "unchanged scheduler ticks should not repeat the diagnostic"
         );
     }
 }

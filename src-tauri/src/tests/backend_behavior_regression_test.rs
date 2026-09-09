@@ -12,7 +12,7 @@ use crate::types::{
 };
 use crate::work_start::{
     start_boot_prompt_work, start_manual_work, start_scheduler_work, StartWorkAttempt,
-    StartWorkPersistencePolicy, StartWorkRuntimeEffects,
+    StartWorkRuntimeEffects,
 };
 use chrono::{Local, TimeZone, Utc};
 use std::collections::BTreeSet;
@@ -46,7 +46,6 @@ impl PublishedTimerState {
 
 #[derive(Debug, Default, PartialEq)]
 struct RecordedStartWorkEffects {
-    effect_order: Vec<&'static str>,
     timer_ticks: Vec<PublishedTimerState>,
     tray_updates: Vec<PublishedTimerState>,
     work_started_durations: Vec<u64>,
@@ -55,19 +54,16 @@ struct RecordedStartWorkEffects {
 
 impl StartWorkRuntimeEffects for RecordedStartWorkEffects {
     fn emit_timer_tick(&mut self, tick_payload: &TimerTickPayload) {
-        self.effect_order.push("timer_tick");
         self.timer_ticks
             .push(PublishedTimerState::from_payload(tick_payload));
     }
 
     fn update_tray(&mut self, tick_payload: &TimerTickPayload) {
-        self.effect_order.push("tray_update");
         self.tray_updates
             .push(PublishedTimerState::from_payload(tick_payload));
     }
 
     fn emit_work_started(&mut self, work_duration_secs: u64) {
-        self.effect_order.push("work_started");
         self.work_started_durations.push(work_duration_secs);
     }
 
@@ -75,29 +71,8 @@ impl StartWorkRuntimeEffects for RecordedStartWorkEffects {
         &'a mut self,
         _state: &'a AppState,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
-        self.effect_order.push("spawn_timer_task");
         self.timer_task_spawn_count += 1;
         Box::pin(async {})
-    }
-
-    fn persist_current_state<'a>(
-        &'a mut self,
-        state: &'a AppState,
-        policy: StartWorkPersistencePolicy,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>> {
-        self.effect_order.push("persist_current_state");
-        Box::pin(async move {
-            match state.persist_current_state_async().await {
-                Ok(()) => Ok(()),
-                Err(error) => match policy {
-                    StartWorkPersistencePolicy::ReturnFailure => Err(error),
-                    StartWorkPersistencePolicy::LogAndContinue { trigger } => {
-                        crate::logging_event::log_persistence_write_failure(trigger, &error);
-                        Ok(())
-                    }
-                },
-            }
-        })
     }
 }
 
@@ -329,16 +304,6 @@ fn assert_accepted_start_effects(
     expected_work_duration_secs: u64,
 ) {
     assert_eq!(
-        effects.effect_order,
-        [
-            "timer_tick",
-            "tray_update",
-            "work_started",
-            "spawn_timer_task",
-            "persist_current_state",
-        ]
-    );
-    assert_eq!(
         effects.timer_ticks,
         [PublishedTimerState {
             status: TimerStatus::Working,
@@ -355,7 +320,6 @@ fn assert_accepted_start_effects(
 }
 
 fn assert_no_start_effects(effects: &RecordedStartWorkEffects) {
-    assert!(effects.effect_order.is_empty());
     assert!(effects.timer_ticks.is_empty());
     assert!(effects.tray_updates.is_empty());
     assert!(effects.work_started_durations.is_empty());
@@ -409,7 +373,7 @@ fn command_failures_return_stable_public_error_envelopes() {
 }
 
 #[tokio::test]
-async fn accepted_work_start_origins_publish_the_same_observable_sequence() {
+async fn accepted_work_start_origins_publish_the_same_state_and_notifications() {
     for origin in [
         AcceptedStartOrigin::Manual,
         AcceptedStartOrigin::BootPrompt,

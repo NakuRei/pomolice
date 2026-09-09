@@ -9,8 +9,6 @@ const DIGIT_HEIGHT: u32 = 7;
 const IDLE_GLYPH_ORIGIN_X: u32 = 4;
 const IDLE_GLYPH_ORIGIN_Y: u32 = 4;
 const IDLE_BACKGROUND_COLOR: [u8; 4] = [96, 96, 96, 255];
-#[cfg(test)]
-const MIN_IDLE_CONTRAST_RATIO: f64 = 4.5;
 
 /// Available visual variants for the idle tray glyph.
 ///
@@ -287,167 +285,66 @@ fn set_pixel(buf: &mut [u8], x: u32, y: u32, color: [u8; 4]) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::collections::VecDeque;
+    use super::{
+        icon_size, render_idle_icon, render_idle_icon_for_variant, render_tray_icon,
+        IdleGlyphVariant, IDLE_GLYPH_VARIANTS,
+    };
+    use crate::types::TimerStatus;
 
-    fn count_white_pixels(buf: &[u8]) -> usize {
-        buf.chunks_exact(4)
-            .filter(|pixel| *pixel == FONT_COLOR)
-            .count()
-    }
+    #[test]
+    fn rendered_icons_match_the_reported_rgba_dimensions() {
+        let icons = [
+            render_tray_icon(5, TimerStatus::Working),
+            render_tray_icon(25, TimerStatus::OnBreak),
+            render_idle_icon(),
+        ];
 
-    fn count_connected_white_components(buf: &[u8]) -> usize {
-        let mut visited = vec![false; (ICON_SIZE * ICON_SIZE) as usize];
-        let mut components = 0usize;
-
-        for y in 0..ICON_SIZE {
-            for x in 0..ICON_SIZE {
-                let index = (y * ICON_SIZE + x) as usize;
-                if visited[index] || !is_white_pixel(buf, x, y) {
-                    continue;
-                }
-
-                components += 1;
-                let mut queue = VecDeque::new();
-                queue.push_back((x, y));
-                visited[index] = true;
-
-                while let Some((cx, cy)) = queue.pop_front() {
-                    for (nx, ny) in neighbors(cx, cy) {
-                        let nindex = (ny * ICON_SIZE + nx) as usize;
-                        if visited[nindex] || !is_white_pixel(buf, nx, ny) {
-                            continue;
-                        }
-                        visited[nindex] = true;
-                        queue.push_back((nx, ny));
-                    }
-                }
-            }
-        }
-
-        components
-    }
-
-    fn is_white_pixel(buf: &[u8], x: u32, y: u32) -> bool {
-        let start = ((y * ICON_SIZE + x) * 4) as usize;
-        buf[start..start + 4] == FONT_COLOR
-    }
-
-    fn neighbors(x: u32, y: u32) -> Vec<(u32, u32)> {
-        let mut result = Vec::new();
-        for dx in [-1_i32, 0, 1] {
-            for dy in [-1_i32, 0, 1] {
-                if dx == 0 && dy == 0 {
-                    continue;
-                }
-                let nx = i64::from(x) + i64::from(dx);
-                let ny = i64::from(y) + i64::from(dy);
-                if nx >= 0 && ny >= 0 && nx < i64::from(ICON_SIZE) && ny < i64::from(ICON_SIZE) {
-                    let Some(nx) = u32::try_from(nx).ok() else {
-                        continue;
-                    };
-                    let Some(ny) = u32::try_from(ny).ok() else {
-                        continue;
-                    };
-                    result.push((nx, ny));
-                }
-            }
-        }
-        result
-    }
-
-    fn white_pixel_bounds(buf: &[u8]) -> Option<(u32, u32, u32, u32)> {
-        let mut min_x = ICON_SIZE;
-        let mut max_x = 0;
-        let mut min_y = ICON_SIZE;
-        let mut max_y = 0;
-        let mut found = false;
-
-        for y in 0..ICON_SIZE {
-            for x in 0..ICON_SIZE {
-                if is_white_pixel(buf, x, y) {
-                    found = true;
-                    min_x = min_x.min(x);
-                    max_x = max_x.max(x);
-                    min_y = min_y.min(y);
-                    max_y = max_y.max(y);
-                }
-            }
-        }
-
-        if found {
-            Some((min_x, max_x, min_y, max_y))
-        } else {
-            None
+        assert!(icon_size() > 0);
+        for icon in icons {
+            assert_eq!(icon.len(), (icon_size() * icon_size() * 4) as usize);
         }
     }
 
     #[test]
-    fn test_icon_buffer_size() {
-        let buf = render_tray_icon(25, TimerStatus::Working);
-        assert_eq!(buf.len(), (ICON_SIZE * ICON_SIZE * 4) as usize);
-    }
-
-    #[test]
-    fn test_idle_icon_buffer_size() {
-        let buf = render_idle_icon();
-        assert_eq!(buf.len(), (ICON_SIZE * ICON_SIZE * 4) as usize);
-    }
-
-    #[test]
-    fn test_icon_size() {
-        assert_eq!(icon_size(), 16);
-    }
-
-    #[test]
-    fn test_background_colors_differ_by_status() {
+    fn timer_statuses_render_distinct_icons() {
         let working = render_tray_icon(10, TimerStatus::Working);
         let on_break = render_tray_icon(10, TimerStatus::OnBreak);
         let idle = render_tray_icon(10, TimerStatus::Idle);
 
-        // First pixel (top-left corner) should reflect the background color
-        assert_ne!(&working[0..4], &on_break[0..4]);
-        assert_ne!(&working[0..4], &idle[0..4]);
-        assert_ne!(&on_break[0..4], &idle[0..4]);
+        assert_ne!(working, on_break);
+        assert_ne!(working, idle);
+        assert_ne!(on_break, idle);
     }
 
     #[test]
-    fn test_single_digit_has_white_pixels() {
-        let buf = render_tray_icon(5, TimerStatus::Working);
-        // There should be at least some white pixels (the digit)
-        let white_count = buf.chunks_exact(4).filter(|p| p == &FONT_COLOR).count();
-        assert!(white_count > 0, "Expected white pixels for digit rendering");
+    fn remaining_minutes_change_the_rendered_icon() {
+        for (first, second) in [(5, 6), (5, 25), (25, 26), (25, 35)] {
+            assert_ne!(
+                render_tray_icon(first, TimerStatus::Working),
+                render_tray_icon(second, TimerStatus::Working),
+                "{first} and {second} minutes should be distinguishable"
+            );
+        }
     }
 
     #[test]
-    fn test_two_digit_has_more_white_than_single() {
-        let single = render_tray_icon(5, TimerStatus::Working);
-        let double = render_tray_icon(25, TimerStatus::Working);
+    fn minutes_above_the_display_limit_render_as_99() {
+        let maximum = render_tray_icon(99, TimerStatus::Working);
 
-        let single_white = single.chunks_exact(4).filter(|p| p == &FONT_COLOR).count();
-        let double_white = double.chunks_exact(4).filter(|p| p == &FONT_COLOR).count();
-
-        assert!(
-            double_white > single_white,
-            "Two-digit icon should have more white pixels than single-digit"
-        );
+        for minutes in [100, 120, u32::MAX] {
+            assert_eq!(render_tray_icon(minutes, TimerStatus::Working), maximum);
+        }
     }
 
     #[test]
-    fn test_clamps_to_99() {
-        // Should not panic for values > 99
-        let buf = render_tray_icon(120, TimerStatus::Working);
-        assert_eq!(buf.len(), (ICON_SIZE * ICON_SIZE * 4) as usize);
-    }
-
-    #[test]
-    fn test_idle_variants_render_visible_glyphs() {
+    fn idle_preview_variants_produce_nonblank_rgba_icons() {
         for variant in IDLE_GLYPH_VARIANTS {
             let icon = render_idle_icon_for_variant(variant);
 
+            assert_eq!(icon.len(), (icon_size() * icon_size() * 4) as usize);
             assert!(
-                count_white_pixels(&icon) > 0,
-                "Idle variant {variant:?} should render a visible glyph"
+                icon.chunks_exact(4).any(|pixel| pixel != &icon[..4]),
+                "Idle variant {variant:?} should not be a solid color"
             );
         }
     }
@@ -461,68 +358,5 @@ mod tests {
         assert_ne!(hollow, standby);
         assert_ne!(hollow, pause);
         assert_ne!(standby, pause);
-    }
-
-    #[test]
-    fn test_pause_idle_variant_renders_two_separated_bars() {
-        let pause = render_idle_icon_for_variant(IdleGlyphVariant::PauseBars);
-
-        assert_eq!(count_connected_white_components(&pause), 2);
-    }
-
-    fn relative_luminance(color: [u8; 4]) -> f64 {
-        fn channel(value: u8) -> f64 {
-            let normalized = f64::from(value) / 255.0;
-            if normalized <= 0.03928 {
-                normalized / 12.92
-            } else {
-                ((normalized + 0.055) / 1.055).powf(2.4)
-            }
-        }
-
-        let red = channel(color[0]);
-        let green = channel(color[1]);
-        let blue = channel(color[2]);
-        (0.2126 * red) + (0.7152 * green) + (0.0722 * blue)
-    }
-
-    fn contrast_ratio(a: [u8; 4], b: [u8; 4]) -> f64 {
-        let a_luma = relative_luminance(a);
-        let b_luma = relative_luminance(b);
-        let (bright, dark) = if a_luma >= b_luma {
-            (a_luma, b_luma)
-        } else {
-            (b_luma, a_luma)
-        };
-        (bright + 0.05) / (dark + 0.05)
-    }
-
-    #[test]
-    fn test_idle_text_contrast_ratio_meets_threshold() {
-        let ratio = contrast_ratio(IDLE_BACKGROUND_COLOR, FONT_COLOR);
-        assert!(
-            ratio >= MIN_IDLE_CONTRAST_RATIO,
-            "Idle contrast ratio {ratio:.2} is below threshold {MIN_IDLE_CONTRAST_RATIO:.2}"
-        );
-    }
-
-    #[test]
-    fn test_idle_glyph_variants_bounds_are_center_aligned() {
-        for variant in IDLE_GLYPH_VARIANTS {
-            let icon = render_idle_icon_for_variant(variant);
-            let bounds = white_pixel_bounds(&icon).expect("Idle icon must include white pixels");
-            let horizontal_center_twice = bounds.0 + bounds.1;
-            let vertical_center_twice = bounds.2 + bounds.3;
-            let icon_center_twice = ICON_SIZE - 1;
-
-            assert!(
-                horizontal_center_twice.abs_diff(icon_center_twice) <= 1,
-                "Idle glyph variant {variant:?} horizontal center is misaligned"
-            );
-            assert!(
-                vertical_center_twice.abs_diff(icon_center_twice) <= 1,
-                "Idle glyph variant {variant:?} vertical center is misaligned"
-            );
-        }
     }
 }

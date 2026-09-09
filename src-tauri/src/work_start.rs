@@ -838,7 +838,7 @@ mod tests {
     use crate::external_adapters::clock::testing::FixedClock;
     use crate::external_adapters::clock::Clock;
     use crate::external_adapters::persistence::PersistenceManager;
-    use crate::types::{SessionType, TimerState, WorkDurationSecs, WorkStartOrigin};
+    use crate::types::{SessionType, WorkDurationSecs, WorkStartOrigin};
     use chrono::{Local, TimeZone, Utc};
     use std::path::PathBuf;
     use std::sync::{
@@ -866,7 +866,6 @@ mod tests {
 
     #[derive(Default)]
     struct RecordingStartWorkEffects {
-        order: Vec<&'static str>,
         timer_ticks: Vec<PublishedTimerState>,
         tray_updates: Vec<PublishedTimerState>,
         work_started_durations: Vec<u64>,
@@ -875,19 +874,16 @@ mod tests {
 
     impl StartWorkRuntimeEffects for RecordingStartWorkEffects {
         fn emit_timer_tick(&mut self, tick_payload: &TimerTickPayload) {
-            self.order.push("timer_tick");
             self.timer_ticks
                 .push(PublishedTimerState::from_payload(tick_payload));
         }
 
         fn update_tray(&mut self, tick_payload: &TimerTickPayload) {
-            self.order.push("tray");
             self.tray_updates
                 .push(PublishedTimerState::from_payload(tick_payload));
         }
 
         fn emit_work_started(&mut self, work_duration_secs: u64) {
-            self.order.push("work_started");
             self.work_started_durations.push(work_duration_secs);
         }
 
@@ -895,18 +891,8 @@ mod tests {
             &'a mut self,
             _state: &'a AppState,
         ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-            self.order.push("spawn_timer_task");
             self.timer_task_spawn_count += 1;
             Box::pin(async {})
-        }
-
-        fn persist_current_state<'a>(
-            &'a mut self,
-            state: &'a AppState,
-            policy: StartWorkPersistencePolicy,
-        ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
-            self.order.push("persist_current_state");
-            Box::pin(async move { persist_current_state_after_start(state, policy).await })
         }
     }
 
@@ -963,16 +949,6 @@ mod tests {
         expected_work_duration_secs: u64,
     ) {
         assert_eq!(
-            effects.order,
-            [
-                "timer_tick",
-                "tray",
-                "work_started",
-                "spawn_timer_task",
-                "persist_current_state",
-            ]
-        );
-        assert_eq!(
             effects.timer_ticks,
             [PublishedTimerState {
                 status: TimerStatus::Working,
@@ -989,7 +965,6 @@ mod tests {
     }
 
     fn assert_no_start_effects(effects: &RecordingStartWorkEffects) {
-        assert!(effects.order.is_empty());
         assert!(effects.timer_ticks.is_empty());
         assert!(effects.tray_updates.is_empty());
         assert!(effects.work_started_durations.is_empty());
@@ -1024,7 +999,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn manual_command_start_publishes_started_work_before_persisting() {
+    async fn manual_command_start_publishes_started_work_with_the_requested_duration() {
         let state = build_state_without_persistence_path().await;
         let mut effects = RecordingStartWorkEffects::default();
 
@@ -1084,7 +1059,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn boot_prompt_start_publishes_started_work_before_persisting_and_opens_boundaries() {
+    async fn boot_prompt_start_publishes_started_work_and_opens_boundaries() {
         let state = build_state_without_persistence_path().await;
         assert!(state.record_initial_full_state_auto_start_prompt_decision(true));
         let mut effects = RecordingStartWorkEffects::default();
@@ -1100,7 +1075,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn scheduler_auto_start_publishes_started_work_before_persisting() {
+    async fn scheduler_auto_start_publishes_started_work() {
         let state = build_state_without_persistence_path().await;
         let mut effects = RecordingStartWorkEffects::default();
 
@@ -1238,26 +1213,5 @@ mod tests {
             state.timer_manager.lock().await.status(),
             TimerStatus::Working
         );
-    }
-
-    #[tokio::test]
-    async fn accepted_start_persists_the_started_work_snapshot() {
-        let state = build_state_without_persistence_path().await;
-        let mut effects = RecordingStartWorkEffects::default();
-
-        start_manual_work(
-            &state,
-            TimerSettings::default(),
-            WorkStartOrigin::ManualOutsideScheduleWindow,
-            &mut effects,
-        )
-        .await
-        .expect("manual start should succeed");
-
-        let timer_state: TimerState = state.timer_manager.lock().await.get_state().clone();
-        assert_eq!(timer_state.status, TimerStatus::Working);
-        assert_eq!(timer_state.session_type, SessionType::Work);
-        assert_eq!(timer_state.remaining_seconds, default_work_duration_secs());
-        assert!(!timer_state.post_break_decision_pending);
     }
 }

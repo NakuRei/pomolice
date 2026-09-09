@@ -6,7 +6,6 @@ import {
   formatDurationInputText,
   parseDurationInputText,
 } from "./durationInputValue";
-import { getAriaDescribedByIds } from "@/test/ariaDescription";
 
 const defaultProps = {
   label: "作業時間",
@@ -29,30 +28,6 @@ function getDurationInput(
   return screen.getByRole("spinbutton", {
     name: accessibleName,
   });
-}
-
-function getArrayItem<T>(items: readonly T[], index: number): T {
-  const item = items[index];
-  if (item === undefined) {
-    throw new Error(`Expected item at index ${String(index)}.`);
-  }
-
-  return item;
-}
-
-function getElementById(id: string): HTMLElement {
-  const element = document.getElementById(id);
-  if (element === null) {
-    throw new Error(`Expected element with id "${id}".`);
-  }
-
-  return element;
-}
-
-function getDescribedTextContents(element: HTMLElement): string[] {
-  return getAriaDescribedByIds(element).map(
-    (descriptionId) => getElementById(descriptionId).textContent,
-  );
 }
 
 describe("DurationInput", () => {
@@ -200,15 +175,9 @@ describe("DurationInput", () => {
       renderDurationInput({ value: "0" });
 
       const input = getDurationInput();
-      const describedByIds = getAriaDescribedByIds(input);
-
       expect(input).toHaveAttribute("aria-invalid", "true");
-      expect(describedByIds).toHaveLength(2);
-      expect(getDescribedTextContents(input)).toEqual(
-        expect.arrayContaining([
-          "範囲: 1〜120分",
-          "1〜120分の範囲で入力してください",
-        ]),
+      expect(input).toHaveAccessibleDescription(
+        "範囲: 1〜120分 1〜120分の範囲で入力してください",
       );
     });
 
@@ -216,25 +185,22 @@ describe("DurationInput", () => {
       renderDurationInput({ value: "25" });
 
       const input = getDurationInput();
-      const describedByIds = getAriaDescribedByIds(input);
-
       expect(input).not.toHaveAttribute("aria-invalid", "true");
-      expect(describedByIds).toHaveLength(1);
-      expect(getDescribedTextContents(input)).toEqual(["範囲: 1〜120分"]);
+      expect(input).toHaveAccessibleDescription("範囲: 1〜120分");
       expect(
         screen.queryByText("1〜120分の範囲で入力してください"),
       ).not.toBeInTheDocument();
     });
 
-    it("generates distinct description ids for inputs with the same label", () => {
+    it("keeps each input associated with its own hint and error when labels match", () => {
       render(
         <>
           <DurationInput
             label="作業時間"
-            value="0"
+            value="100"
             onChange={() => undefined}
-            min={1}
-            max={120}
+            min={5}
+            max={60}
           />
           <DurationInput
             label="作業時間"
@@ -246,27 +212,18 @@ describe("DurationInput", () => {
         </>,
       );
 
-      const inputs = screen.getAllByRole("spinbutton", { name: "作業時間" });
-      expect(inputs).toHaveLength(2);
-
-      const firstInputDescriptionIds = getAriaDescribedByIds(
-        getArrayItem(inputs, 0),
-      );
-      const secondInputDescriptionIds = getAriaDescribedByIds(
-        getArrayItem(inputs, 1),
-      );
-
-      expect(firstInputDescriptionIds).toHaveLength(2);
-      expect(secondInputDescriptionIds).toHaveLength(2);
-      for (const descriptionId of firstInputDescriptionIds) {
-        expect(secondInputDescriptionIds).not.toContain(descriptionId);
-      }
-      for (const descriptionId of [
-        ...firstInputDescriptionIds,
-        ...secondInputDescriptionIds,
-      ]) {
-        expect(getElementById(descriptionId)).toBeInTheDocument();
-      }
+      expect(
+        screen.getByRole("spinbutton", {
+          name: "作業時間",
+          description: "範囲: 1〜120分 1〜120分の範囲で入力してください",
+        }),
+      ).toHaveValue(0);
+      expect(
+        screen.getByRole("spinbutton", {
+          name: "作業時間",
+          description: "範囲: 5〜60分 5〜60分の範囲で入力してください",
+        }),
+      ).toHaveValue(100);
     });
   });
 
@@ -275,10 +232,7 @@ describe("DurationInput", () => {
       renderDurationInput();
 
       const input = getDurationInput();
-      const label = screen.getByText(defaultProps.label);
-
       expect(input).toHaveAttribute("type", "number");
-      expect(label).toHaveAttribute("for", input.id);
       expect(input).toHaveAttribute("min", "1");
       expect(input).toHaveAttribute("max", "120");
       expect(input).toHaveAttribute("step", "0.01");

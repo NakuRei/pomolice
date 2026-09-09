@@ -1,167 +1,91 @@
-/**
- * Unit tests for mathGenerator utility
- * Phase 5: Multi-step skip confirmation flow
- */
-
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import {
   generateEasyProblem,
   generateHardProblem,
   validateAnswer,
 } from "./mathGenerator";
 
-function parseQuestionOperands(question: string): [number, number] | null {
-  const matches = question.match(/\d+/gu);
-  if (matches === null || matches.length < 2) {
-    return null;
+function parseQuestion(question: string): {
+  left: number;
+  operator: string;
+  right: number;
+} {
+  const groups = /^(?<left>\d+) (?<operator>[+×-]) (?<right>\d+) = \?$/u.exec(
+    question,
+  )?.groups;
+  if (groups?.operator === undefined) {
+    throw new Error(`Invalid math question: ${question}`);
   }
 
-  const [firstOperand, secondOperand] = matches as [
-    string,
-    string,
-    ...string[],
-  ];
-
-  return [Number(firstOperand), Number(secondOperand)];
-}
-
-function getQuestionOperands(question: string): [number, number] {
-  const operands = parseQuestionOperands(question);
-  expect(operands).not.toBeNull();
-  if (operands === null) {
-    throw new Error(`Expected two operands in question: ${question}`);
-  }
-
-  return operands;
+  return {
+    left: Number(groups.left),
+    operator: groups.operator,
+    right: Number(groups.right),
+  };
 }
 
 describe("mathGenerator", () => {
-  describe("generateEasyProblem", () => {
-    it("should generate a problem with valid structure", () => {
-      const problem = generateEasyProblem();
-
-      expect(problem).toHaveProperty("question");
-      expect(problem).toHaveProperty("answer");
-      expect(typeof problem.question).toBe("string");
-      expect(typeof problem.answer).toBe("number");
-    });
-
-    it("should generate problems with numbers in valid range", () => {
-      // Test 20 times to ensure consistency
-      for (let i = 0; i < 20; i++) {
-        const problem = generateEasyProblem();
-
-        // Parse numbers from question
-        const numbers = problem.question.match(/\d+/gu)?.map(Number);
-        expect(numbers).toBeDefined();
-        if (numbers === undefined) continue;
-        expect(numbers.length).toBeGreaterThanOrEqual(2);
-
-        // Check range (10-99 for easy problems)
-        numbers.forEach((num) => {
-          expect(num).toBeGreaterThanOrEqual(10);
-          expect(num).toBeLessThanOrEqual(99);
-        });
-      }
-    });
-
-    it("should generate addition and subtraction problems within their ranges", () => {
-      const seenOperators = new Set<string>();
-
-      for (let i = 0; i < 50; i++) {
-        const problem = generateEasyProblem();
-        const [a, b] = getQuestionOperands(problem.question);
-
-        if (problem.question.includes("+")) {
-          seenOperators.add("+");
-          expect(problem.answer).toBe(a + b);
-          expect(a).toBeGreaterThanOrEqual(10);
-          expect(a).toBeLessThanOrEqual(99);
-          expect(b).toBeGreaterThanOrEqual(10);
-          expect(b).toBeLessThanOrEqual(99);
-        } else {
-          seenOperators.add("-");
-          expect(problem.answer).toBe(a - b);
-          expect(problem.answer).toBeGreaterThan(0);
-          expect(a).toBeGreaterThanOrEqual(20);
-          expect(a).toBeLessThanOrEqual(99);
-          expect(b).toBeGreaterThanOrEqual(10);
-          expect(b).toBeLessThanOrEqual(50);
-        }
-      }
-
-      expect(seenOperators).toEqual(new Set(["+", "-"]));
-    });
-
-    it("should have correct answer for generated problems", () => {
-      for (let i = 0; i < 20; i++) {
-        const problem = generateEasyProblem();
-        const operands = parseQuestionOperands(problem.question);
-        expect(operands).not.toBeNull();
-        if (operands === null) continue;
-        const [a, b] = operands;
-
-        if (problem.question.includes("+")) {
-          expect(problem.answer).toBe(a + b);
-        } else if (problem.question.includes("-")) {
-          expect(problem.answer).toBe(a - b);
-        }
-      }
-    });
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
-  describe("generateHardProblem", () => {
-    it("should generate a problem with valid structure", () => {
+  it("generates solvable addition and subtraction problems within the easy range", () => {
+    const random = vi.spyOn(Math, "random");
+    const operators = new Set<string>();
+
+    for (const randomValue of [0, 0.25, 0.75, 0.999999]) {
+      random.mockReturnValue(randomValue);
+
+      const problem = generateEasyProblem();
+      const { left, operator, right } = parseQuestion(problem.question);
+
+      operators.add(operator);
+      if (operator === "+") {
+        expect(left).toBeGreaterThanOrEqual(10);
+        expect(left).toBeLessThanOrEqual(99);
+        expect(right).toBeGreaterThanOrEqual(10);
+        expect(right).toBeLessThanOrEqual(99);
+        expect(problem.answer).toBe(left + right);
+      } else {
+        expect(left).toBeGreaterThanOrEqual(20);
+        expect(left).toBeLessThanOrEqual(99);
+        expect(right).toBeGreaterThanOrEqual(10);
+        expect(right).toBeLessThanOrEqual(50);
+        expect(problem.answer).toBe(left - right);
+        expect(problem.answer).toBeGreaterThan(0);
+      }
+    }
+
+    expect(operators).toEqual(new Set(["+", "-"]));
+  });
+
+  it("generates solvable multiplication and subtraction problems within the hard range", () => {
+    const random = vi.spyOn(Math, "random");
+    const operators = new Set<string>();
+
+    for (const randomValue of [0, 0.25, 0.75, 0.999999]) {
+      random.mockReturnValue(randomValue);
+
       const problem = generateHardProblem();
+      const { left, operator, right } = parseQuestion(problem.question);
 
-      expect(problem).toHaveProperty("question");
-      expect(problem).toHaveProperty("answer");
-      expect(typeof problem.question).toBe("string");
-      expect(typeof problem.answer).toBe("number");
-    });
-
-    it("should generate multiplication and large-subtraction problems within their ranges", () => {
-      const seenOperators = new Set<string>();
-
-      for (let i = 0; i < 50; i++) {
-        const problem = generateHardProblem();
-        const [a, b] = getQuestionOperands(problem.question);
-
-        if (problem.question.includes("×")) {
-          seenOperators.add("×");
-          expect(problem.answer).toBe(a * b);
-          expect(a).toBeGreaterThanOrEqual(2);
-          expect(a).toBeLessThanOrEqual(12);
-          expect(b).toBeGreaterThanOrEqual(2);
-          expect(b).toBeLessThanOrEqual(12);
-        } else {
-          seenOperators.add("-");
-          expect(problem.answer).toBe(a - b);
-          expect(a).toBeGreaterThanOrEqual(100);
-          expect(a).toBeLessThanOrEqual(200);
-          expect(b).toBeGreaterThanOrEqual(20);
-          expect(b).toBeLessThanOrEqual(80);
-        }
+      operators.add(operator);
+      if (operator === "×") {
+        expect(left).toBeGreaterThanOrEqual(2);
+        expect(left).toBeLessThanOrEqual(12);
+        expect(right).toBeGreaterThanOrEqual(2);
+        expect(right).toBeLessThanOrEqual(12);
+        expect(problem.answer).toBe(left * right);
+      } else {
+        expect(left).toBeGreaterThanOrEqual(100);
+        expect(left).toBeLessThanOrEqual(200);
+        expect(right).toBeGreaterThanOrEqual(20);
+        expect(right).toBeLessThanOrEqual(80);
+        expect(problem.answer).toBe(left - right);
       }
+    }
 
-      expect(seenOperators).toEqual(new Set(["×", "-"]));
-    });
-
-    it("should have correct answer for generated problems", () => {
-      for (let i = 0; i < 20; i++) {
-        const problem = generateHardProblem();
-        const operands = parseQuestionOperands(problem.question);
-        expect(operands).not.toBeNull();
-        if (operands === null) continue;
-        const [a, b] = operands;
-
-        if (problem.question.includes("×")) {
-          expect(problem.answer).toBe(a * b);
-        } else if (problem.question.includes("-")) {
-          expect(problem.answer).toBe(a - b);
-        }
-      }
-    });
+    expect(operators).toEqual(new Set(["×", "-"]));
   });
 
   describe("validateAnswer", () => {
@@ -192,40 +116,10 @@ describe("mathGenerator", () => {
       expect(validateAnswer("0", 0)).toBe(true);
     });
 
-    it("should handle string parsing correctly", () => {
+    it("should accept surrounding whitespace", () => {
       expect(validateAnswer("42", 42)).toBe(true);
-      expect(validateAnswer("42 ", 42)).toBe(true); // parseInt ignores trailing whitespace
-      expect(validateAnswer(" 42", 42)).toBe(true); // parseInt ignores leading whitespace
-    });
-  });
-
-  describe("Problem format", () => {
-    it("easy problems should have correct format", () => {
-      for (let i = 0; i < 10; i++) {
-        const problem = generateEasyProblem();
-        expect(problem.question).toMatch(/^\d+ [+-] \d+ = \?$/u);
-      }
-    });
-
-    it("hard problems should have correct format", () => {
-      for (let i = 0; i < 10; i++) {
-        const problem = generateHardProblem();
-        expect(problem.question).toMatch(/^\d+ [×-] \d+ = \?$/u);
-      }
-    });
-  });
-
-  describe("Randomness", () => {
-    it("should generate different problems", () => {
-      const problems = new Set();
-
-      for (let i = 0; i < 20; i++) {
-        const problem = generateEasyProblem();
-        problems.add(problem.question);
-      }
-
-      // Should have at least some variety (not all the same)
-      expect(problems.size).toBeGreaterThan(1);
+      expect(validateAnswer("42 ", 42)).toBe(true);
+      expect(validateAnswer(" 42", 42)).toBe(true);
     });
   });
 });

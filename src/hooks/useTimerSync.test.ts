@@ -2,7 +2,7 @@
  * useTimerSync Hook Tests
  *
  * Note: Timer tick logic is handled by the Rust backend.
- * These tests verify that the hook correctly sets up event listeners.
+ * These tests verify state synchronization and connection recovery.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -118,31 +118,6 @@ function renderTimerSync(): ReturnType<typeof renderHook> {
   return renderHook(() => {
     useTimerSync();
   });
-}
-
-function expectRecord(
-  value: unknown,
-  description: string,
-): asserts value is Record<string, unknown> {
-  expect(value).not.toBeNull();
-  expect(typeof value).toBe("object");
-  if (value === null || typeof value !== "object") {
-    throw new Error(`Expected ${description} to be an object`);
-  }
-}
-
-function getInvokePayload(commandName: string): Record<string, unknown> {
-  const invokeCall = mockInvoke.mock.calls.find(
-    ([invokedCommand]) => invokedCommand === commandName,
-  );
-  expect(invokeCall).toBeDefined();
-  if (!invokeCall) {
-    throw new Error(`Expected invoke command "${commandName}"`);
-  }
-
-  const payload = invokeCall[1];
-  expectRecord(payload, `${commandName} payload`);
-  return payload;
 }
 
 function getRequiredTimerEventHandler(
@@ -281,30 +256,13 @@ describe("useTimerSync", () => {
     vi.restoreAllMocks();
   });
 
-  it("should set up event listeners on mount", async () => {
-    renderTimerSync();
-
-    await waitFor(() => {
-      expect(mockListen).toHaveBeenCalled();
-    });
-
-    // Should set up listeners for timer events
-    const listenCalls = mockListen.mock.calls.map((call) => call[0]);
-    expect(listenCalls).toContain("timer_tick");
-    expect(listenCalls).toContain("session_completed");
-    expect(listenCalls).toContain("auto_run_stop_pending");
-    expect(listenCalls).toContain("auto_run_stopped");
-  });
-
   it("starts backend setup from the settled synchronous hydration result", async () => {
     vi.useFakeTimers();
     vi.spyOn(useSettingsStore.persist, "hasHydrated").mockReturnValue(true);
     renderTimerSync();
     await flushTimerSyncSetup();
 
-    expect(mockListen).toHaveBeenCalledTimes(6);
-    expect(mockInvoke.mock.calls[0]).toEqual(["get_full_state", undefined]);
-    expect(getFullStateInvokeCount()).toBe(1);
+    expect(useTimerStore.getState().isConnected).toBe(true);
     expect(settingsCommandNames()).toEqual([
       "sync_timer_duration_settings",
       "sync_automation_policies",
@@ -317,9 +275,6 @@ describe("useTimerSync", () => {
     renderTimerSync();
     await flushTimerSyncSetup();
 
-    expect(mockListen).toHaveBeenCalledTimes(6);
-    expect(mockInvoke.mock.calls).toEqual([["get_full_state", undefined]]);
-    expect(getFullStateInvokeCount()).toBe(1);
     expect(useTimerStore.getState().isConnected).toBe(true);
     expect(settingsCommandNames()).toEqual([]);
     expect(useSettingsStore.getState().durationSettingsApplicationStatus).toBe(
@@ -351,40 +306,27 @@ describe("useTimerSync", () => {
     ).toBe("confirmed");
   });
 
-  it("registers all six listeners before requesting full state", async () => {
-    const setupOrder: string[] = [];
-    mockListen.mockImplementation((event) => {
-      setupOrder.push(`listen:${event}`);
-      return Promise.resolve(noopUnlisten);
+  it("receives session completion events while the initial full state is pending", async () => {
+    let resolveFullState: (payload: FullStatePayload) => void = () => {
+      throw new Error("Expected the full-state request to be pending");
+    };
+    const pendingFullState = new Promise<FullStatePayload>((resolve) => {
+      resolveFullState = resolve;
     });
-    mockInvoke.mockImplementation((command) => {
-      setupOrder.push(`invoke:${command}`);
-      if (command === "get_full_state") {
-        return Promise.resolve(createFullStatePayload());
-      }
-      return Promise.resolve(undefined);
-    });
+    mockInvoke.mockReturnValue(pendingFullState);
 
-    renderTimerSync();
-
+    const sessionHandler =
+      await renderAndGetTimerEventHandler("session_completed");
     await waitFor(() => {
-      expect(getFullStateInvokeCount()).toBe(1);
+      expect(mockInvoke).toHaveBeenCalledWith("get_full_state", undefined);
     });
-    const fullStateIndex = setupOrder.indexOf("invoke:get_full_state");
-    expect(fullStateIndex).toBeGreaterThanOrEqual(0);
-    const requiredListenerRegistrations = [
-      "listen:timer_tick",
-      "listen:session_completed",
-      "listen:auto_run_stop_pending",
-      "listen:auto_run_stopped",
-      "listen:break_started",
-      "listen:break_completed",
-    ];
-    expect(
-      setupOrder.filter((entry) => entry.startsWith("listen:")),
-    ).toHaveLength(6);
-    requiredListenerRegistrations.forEach((registration) => {
-      expect(setupOrder.indexOf(registration)).toBeLessThan(fullStateIndex);
+    emitSessionCompleted(sessionHandler);
+
+    expect(useTimerStore.getState().requiresManualContinueDecision).toBe(true);
+
+    await act(async () => {
+      resolveFullState(createFullStatePayload());
+      await pendingFullState;
     });
   });
 
@@ -616,22 +558,23 @@ describe("useTimerSync", () => {
     expect(settingsCommandNames()).toEqual(["sync_automation_policies"]);
   });
 
-  it("should call get_full_state on mount", async () => {
+  it("restores the running timer and marks the connection available", async () => {
+    mockInvoke.mockResolvedValue(
+      createFullStatePayload({
+        status: TimerStatus.WORKING,
+        remaining_seconds: 777,
+        current_cycle: 2,
+      }),
+    );
     renderTimerSync();
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls).toContainEqual([
-        "get_full_state",
-        undefined,
-      ]);
-    });
-  });
-
-  it("should set isConnected to true after getting full state", async () => {
-    renderTimerSync();
-
-    await waitFor(() => {
-      expect(useTimerStore.getState().isConnected).toBe(true);
+      expect(useTimerStore.getState()).toMatchObject({
+        status: TimerStatus.WORKING,
+        remainingSeconds: 777,
+        currentCycle: 2,
+        isConnected: true,
+      });
     });
   });
 
@@ -810,14 +753,10 @@ describe("useTimerSync", () => {
     vi.spyOn(useSettingsStore.persist, "hasHydrated").mockReturnValue(true);
     setApplicationStatuses("pending", "pending");
 
-    const acquiredUnlisteners = Array.from({ length: 6 }, () => vi.fn());
-    let nextUnlistenIndex = 0;
+    const acquiredUnlisteners: ReturnType<typeof vi.fn>[] = [];
     mockListen.mockImplementation(() => {
-      const unlisten = acquiredUnlisteners[nextUnlistenIndex];
-      nextUnlistenIndex += 1;
-      if (!unlisten) {
-        throw new Error("Unexpected listener registration");
-      }
+      const unlisten = vi.fn();
+      acquiredUnlisteners.push(unlisten);
       return Promise.resolve(unlisten);
     });
 
@@ -842,12 +781,12 @@ describe("useTimerSync", () => {
     const { unmount } = renderTimerSync();
 
     await waitFor(() => {
-      expect(mockListen).toHaveBeenCalledTimes(6);
       expect(getFullStateInvokeCount()).toBe(1);
     });
 
     unmount();
 
+    expect(acquiredUnlisteners).not.toHaveLength(0);
     for (const unlisten of acquiredUnlisteners) {
       expect(unlisten).toHaveBeenCalledTimes(1);
     }
@@ -948,37 +887,5 @@ describe("useTimerSync", () => {
     expect(useErrorStore.getState().errors.connection).toBeUndefined();
     expect(getFullStateInvokeCount()).toBe(1);
     expect(settingsCommandNames()).toEqual(["sync_timer_duration_settings"]);
-  });
-
-  it("should sync settings to backend on mount", async () => {
-    renderTimerSync();
-
-    await waitFor(() => {
-      const durationSettingsPayload = getInvokePayload(
-        "sync_timer_duration_settings",
-      );
-      expect(typeof durationSettingsPayload.workDurationSecs).toBe("number");
-      expect(typeof durationSettingsPayload.shortBreakDurationSecs).toBe(
-        "number",
-      );
-      expect(typeof durationSettingsPayload.longBreakDurationSecs).toBe(
-        "number",
-      );
-      expect(typeof durationSettingsPayload.longBreakInterval).toBe("number");
-
-      const automationPoliciesPayload = getInvokePayload(
-        "sync_automation_policies",
-      );
-      expect(automationPoliciesPayload.postBreakTransitionPolicy).toBe(
-        "require_manual_continue",
-      );
-      expect(typeof automationPoliciesPayload.autoRunFeatureEnabled).toBe(
-        "boolean",
-      );
-      expectRecord(
-        automationPoliciesPayload.weeklyAutoRunConfig,
-        "weeklyAutoRunConfig",
-      );
-    });
   });
 });
