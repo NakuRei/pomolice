@@ -22,37 +22,6 @@ struct FinalizedSessionCompletionState {
     post_break_decision_pending: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PipelineEmitEvent {
-    SessionCompleted,
-    AutoRunStopped,
-    TimerTick,
-}
-
-const TIMER_TICK_ONLY_EMIT_ORDER: [PipelineEmitEvent; 1] = [PipelineEmitEvent::TimerTick];
-
-const SESSION_COMPLETION_EMIT_ORDER_DEFAULT: [PipelineEmitEvent; 2] = [
-    PipelineEmitEvent::SessionCompleted,
-    PipelineEmitEvent::TimerTick,
-];
-
-const SESSION_COMPLETION_EMIT_ORDER_SCHEDULED_STOP: [PipelineEmitEvent; 3] = [
-    PipelineEmitEvent::SessionCompleted,
-    PipelineEmitEvent::AutoRunStopped,
-    PipelineEmitEvent::TimerTick,
-];
-
-fn session_completion_emit_order(
-    transition_reason: types::SessionTransitionReason,
-) -> &'static [PipelineEmitEvent] {
-    match transition_reason {
-        types::SessionTransitionReason::ScheduledStopExecuted => {
-            &SESSION_COMPLETION_EMIT_ORDER_SCHEDULED_STOP
-        }
-        _ => &SESSION_COMPLETION_EMIT_ORDER_DEFAULT,
-    }
-}
-
 pub(crate) trait SessionPipelineRuntimeEffects {
     fn emit_event<T: serde::Serialize>(&mut self, event_name: &'static str, payload: &T);
     fn update_tray(&mut self, tick_payload: &types::TimerTickPayload);
@@ -353,8 +322,6 @@ trait BreakLockRuntimeEffects {
         &'a mut self,
         state_handle: &'a state::AppState,
     ) -> Pin<Box<dyn Future<Output = crate::error::Result<()>> + Send + 'a>>;
-    fn emit_break_started(&mut self);
-    fn emit_break_completed(&mut self);
 }
 
 struct AppHandleBreakLockRuntimeEffects<'a> {
@@ -389,14 +356,6 @@ impl BreakLockRuntimeEffects for AppHandleBreakLockRuntimeEffects<'_> {
         state_handle: &'a state::AppState,
     ) -> Pin<Box<dyn Future<Output = crate::error::Result<()>> + Send + 'a>> {
         Box::pin(async move { state_handle.release_fullscreen_break_lock(self.app).await })
-    }
-
-    fn emit_break_started(&mut self) {
-        let _ = self.app.emit("break_started", serde_json::json!({}));
-    }
-
-    fn emit_break_completed(&mut self) {
-        let _ = self.app.emit("break_completed", serde_json::json!({}));
     }
 }
 
@@ -584,43 +543,12 @@ fn log_session_completion_finalized(
     );
 }
 
-fn emit_pipeline_events_with_effects(
-    effects: &mut impl SessionPipelineRuntimeEffects,
-    emit_order: &[PipelineEmitEvent],
-    transition_outcome: Option<&types::SessionTransitionOutcome>,
-    tick_payload: &types::TimerTickPayload,
-) {
-    for emit_event in emit_order {
-        match emit_event {
-            PipelineEmitEvent::SessionCompleted => {
-                let Some(transition_outcome) = transition_outcome else {
-                    debug_assert!(
-                        false,
-                        "session_completed emission requires a transition outcome"
-                    );
-                    continue;
-                };
-                let completed_payload =
-                    types::SessionCompletedPayload::from_transition_outcome(transition_outcome);
-                effects.emit_event("session_completed", &completed_payload);
-            }
-            PipelineEmitEvent::AutoRunStopped => {
-                let payload = serde_json::json!({});
-                effects.emit_event("auto_run_stopped", &payload);
-            }
-            PipelineEmitEvent::TimerTick => {
-                effects.emit_event("timer_tick", tick_payload);
-                effects.update_tray(tick_payload);
-            }
-        }
-    }
-}
-
 fn emit_startup_resume_events_with_effects(
     effects: &mut impl SessionPipelineRuntimeEffects,
     tick_payload: &types::TimerTickPayload,
 ) {
-    emit_pipeline_events_with_effects(effects, &TIMER_TICK_ONLY_EMIT_ORDER, None, tick_payload);
+    effects.emit_event("timer_tick", tick_payload);
+    effects.update_tray(tick_payload);
 }
 
 fn emit_session_completion_events_with_effects(
@@ -628,12 +556,17 @@ fn emit_session_completion_events_with_effects(
     transition_outcome: &types::SessionTransitionOutcome,
     tick_payload: &types::TimerTickPayload,
 ) {
-    emit_pipeline_events_with_effects(
-        effects,
-        session_completion_emit_order(transition_outcome.transition_reason),
-        Some(transition_outcome),
-        tick_payload,
-    );
+    let completed_payload =
+        types::SessionCompletedPayload::from_transition_outcome(transition_outcome);
+    effects.emit_event("session_completed", &completed_payload);
+
+    if transition_outcome.transition_reason == types::SessionTransitionReason::ScheduledStopExecuted
+    {
+        effects.emit_event("auto_run_stopped", &serde_json::json!({}));
+    }
+
+    effects.emit_event("timer_tick", tick_payload);
+    effects.update_tray(tick_payload);
 }
 
 async fn persist_timer_state_with_trigger(app: &AppHandle, trigger: &'static str) {
@@ -832,7 +765,6 @@ async fn enter_break_mode_with_effects(
                 timer.set_fullscreen_break(true);
             }
 
-            effects.emit_break_started();
             Ok(())
         })
         .await
@@ -873,7 +805,6 @@ async fn exit_break_mode_with_effects(
                 timer.set_fullscreen_break(false);
             }
 
-            effects.emit_break_completed();
             Ok(())
         })
         .await
@@ -2194,7 +2125,6 @@ mod emit_order_tests {
         enter_error: Option<PomoliceError>,
         release_error: Option<PomoliceError>,
         released_restore_plans: Vec<MainWindowRestorePlan>,
-        emitted_event_names: Vec<&'static str>,
     }
 
     impl Default for RecordingBreakLockRuntimeEffects {
@@ -2206,7 +2136,6 @@ mod emit_order_tests {
                 enter_error: None,
                 release_error: None,
                 released_restore_plans: Vec::new(),
-                emitted_event_names: Vec::new(),
             }
         }
     }
@@ -2276,14 +2205,6 @@ mod emit_order_tests {
                 self.lock_state = RecordedBreakLockState::Unlocked;
                 Ok(())
             })
-        }
-
-        fn emit_break_started(&mut self) {
-            self.emitted_event_names.push("break_started");
-        }
-
-        fn emit_break_completed(&mut self) {
-            self.emitted_event_names.push("break_completed");
         }
     }
 
@@ -2770,7 +2691,6 @@ mod emit_order_tests {
                 if message == "simulated enter failure"
         ));
         assert_eq!(effects.lock_state, RecordedBreakLockState::Unlocked);
-        assert_eq!(effects.emitted_event_names, Vec::<&'static str>::new());
 
         {
             let input_monitor = state.input_monitor.lock().await;
@@ -2833,7 +2753,6 @@ mod emit_order_tests {
                 if message == "simulated enter failure"
         ));
         assert_eq!(effects.lock_state, RecordedBreakLockState::PartiallyLocked);
-        assert_eq!(effects.emitted_event_names, Vec::<&'static str>::new());
 
         {
             let input_monitor = state.input_monitor.lock().await;
@@ -2845,7 +2764,7 @@ mod emit_order_tests {
     }
 
     #[tokio::test]
-    async fn test_break_entry_success_marks_lock_active_and_emits_started() {
+    async fn test_break_entry_success_marks_lock_active() {
         let state = build_test_state_without_persistence_path().await;
         replace_timer_state(
             &state,
@@ -2864,14 +2783,13 @@ mod emit_order_tests {
             .expect("break entry should succeed");
 
         assert_eq!(effects.lock_state, RecordedBreakLockState::Locked);
-        assert_eq!(effects.emitted_event_names, ["break_started"]);
 
         let timer = state.timer_manager.lock().await;
         assert!(timer.get_state().is_fullscreen_break);
     }
 
     #[tokio::test]
-    async fn test_break_exit_releases_lock_clears_flag_and_emits_completed() {
+    async fn test_break_exit_releases_lock_and_clears_flag() {
         let state = build_test_state_without_persistence_path().await;
         replace_timer_state(
             &state,
@@ -2898,7 +2816,6 @@ mod emit_order_tests {
             .expect("break exit should succeed");
 
         assert_eq!(effects.lock_state, RecordedBreakLockState::Unlocked);
-        assert_eq!(effects.emitted_event_names, ["break_completed"]);
 
         {
             let input_monitor = state.input_monitor.lock().await;

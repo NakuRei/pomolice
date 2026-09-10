@@ -141,41 +141,7 @@ export function useTimerSync(): void {
           showAutoRunStoppedInfo();
         }
       });
-      if (!registerActiveListener(unlistenAutoRunStopped)) {
-        return false;
-      }
-
-      // Listen for break started events (for UI updates)
-      const unlistenBreakStarted = await listen("break_started", () => {
-        // State is already updated via timer_tick
-      });
-      if (!registerActiveListener(unlistenBreakStarted)) {
-        return false;
-      }
-
-      // Listen for break completed events (for UI updates)
-      const unlistenBreakCompleted = await listen("break_completed", () => {
-        // State is already updated via timer_tick
-      });
-      if (!registerActiveListener(unlistenBreakCompleted)) {
-        return false;
-      }
-
-      return true;
-    }
-
-    function scheduleRetry(
-      currentRetryAttempt: number,
-      delay: number,
-      startNextAttempt: (nextRetryAttempt: number) => void,
-    ): void {
-      clearRetryTimeout();
-      retryTimeoutId = setTimeout(() => {
-        retryTimeoutId = null;
-        if (mounted) {
-          startNextAttempt(currentRetryAttempt + 1);
-        }
-      }, delay);
+      return registerActiveListener(unlistenAutoRunStopped);
     }
 
     function shouldRetryTimerSyncSetupFailure(
@@ -192,118 +158,70 @@ export function useTimerSync(): void {
       );
     }
 
-    function initialFullStateFailureSource(
-      error: unknown,
-    ): "command" | "initial_state_transport" {
-      return isBackendErrorResponse(error)
-        ? "command"
-        : "initial_state_transport";
-    }
-
-    async function invokeInitialFullState(): Promise<
-      | { status: "ok"; fullState: FullStatePayload }
-      | { status: "error"; error: unknown }
-    > {
-      try {
-        return {
-          status: "ok",
-          fullState: await invoke<FullStatePayload>("get_full_state"),
-        };
-      } catch (error) {
-        return { status: "error", error };
-      }
-    }
-
-    function handleSetupFailure(
-      error: unknown,
-      failureSource: "setup" | "command" | "initial_state_transport",
-      retryAttempt: number,
-      listenerStartIndex: number,
-      retrySetup: (nextRetryAttempt: number) => Promise<void>,
-    ): void {
-      logger.error(FRONTEND_LOG_EVENT_IDS.timerSyncSetupFailed, error, {
-        retry_attempt: retryAttempt,
-        max_connection_retries: TIMER_SYNC_MAX_CONNECTION_RETRIES,
-        failure_message: formatTimerSyncConnectionErrorDetail(
-          error,
-          failureSource,
-        ),
-      });
-
-      clearListenersFrom(listenerStartIndex);
-
-      if (!mounted) {
-        return;
-      }
-
-      if (
-        shouldRetryTimerSyncSetupFailure(error, failureSource, retryAttempt)
-      ) {
-        // Schedule the next retry with exponential backoff
-        const delay = timerSyncRetryDelayMs(retryAttempt);
-        scheduleRetry(retryAttempt, delay, (nextRetryAttempt) => {
-          void retrySetup(nextRetryAttempt);
-        });
-      } else {
-        // All retries exhausted — surface the error to the user
-        setConnected(false);
-        reportTimerSyncConnectionError(
-          error,
-          async () => {
-            clearTimerSyncConnectionError();
-            await retrySetup(0);
-          },
-          failureSource,
-        );
-      }
-    }
-
     async function setup(retryAttempt = 0): Promise<void> {
       const listenerStartIndex = listeners.length;
+      let failureSource: "setup" | "command" | "initial_state_transport" =
+        "setup";
 
       try {
         const listenersRegistered = await registerBackendListeners();
         if (!listenersRegistered) {
           return;
         }
-      } catch (error) {
-        handleSetupFailure(
-          error,
-          "setup",
-          retryAttempt,
-          listenerStartIndex,
-          setup,
-        );
-        return;
-      }
 
-      const fullStateResult = await invokeInitialFullState();
-      if (fullStateResult.status === "error") {
-        handleSetupFailure(
-          fullStateResult.error,
-          initialFullStateFailureSource(fullStateResult.error),
-          retryAttempt,
-          listenerStartIndex,
-          setup,
-        );
-        return;
-      }
+        failureSource = "initial_state_transport";
+        const fullState = await invoke<FullStatePayload>("get_full_state");
+        failureSource = "setup";
 
-      try {
         if (!mounted) {
           return;
         }
 
-        handleFullState(fullStateResult.fullState);
+        handleFullState(fullState);
         clearTimerSyncConnectionError();
       } catch (error) {
-        handleSetupFailure(
-          error,
-          "setup",
-          retryAttempt,
-          listenerStartIndex,
-          setup,
-        );
+        if (
+          failureSource === "initial_state_transport" &&
+          isBackendErrorResponse(error)
+        ) {
+          failureSource = "command";
+        }
+        logger.error(FRONTEND_LOG_EVENT_IDS.timerSyncSetupFailed, error, {
+          retry_attempt: retryAttempt,
+          max_connection_retries: TIMER_SYNC_MAX_CONNECTION_RETRIES,
+          failure_message: formatTimerSyncConnectionErrorDetail(
+            error,
+            failureSource,
+          ),
+        });
+
+        clearListenersFrom(listenerStartIndex);
+
+        if (!mounted) {
+          return;
+        }
+
+        if (
+          shouldRetryTimerSyncSetupFailure(error, failureSource, retryAttempt)
+        ) {
+          clearRetryTimeout();
+          retryTimeoutId = setTimeout(() => {
+            retryTimeoutId = null;
+            if (mounted) {
+              void setup(retryAttempt + 1);
+            }
+          }, timerSyncRetryDelayMs(retryAttempt));
+        } else {
+          setConnected(false);
+          reportTimerSyncConnectionError(
+            error,
+            async () => {
+              clearTimerSyncConnectionError();
+              await setup(0);
+            },
+            failureSource,
+          );
+        }
         return;
       }
 

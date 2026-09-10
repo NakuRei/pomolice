@@ -766,6 +766,47 @@ describe("useTimerSync", () => {
     expect(sendNotification).not.toHaveBeenCalled();
   });
 
+  it("releases a listener registered after unmount without continuing setup", async () => {
+    const unlisten = vi.fn();
+    let resolveRegistration: (unlisten: () => void) => void = () => {
+      throw new Error("Expected a pending listener registration");
+    };
+    const pendingRegistration = new Promise<() => void>((resolve) => {
+      resolveRegistration = resolve;
+    });
+    mockListen.mockReturnValue(pendingRegistration);
+
+    const { unmount } = renderTimerSync();
+    unmount();
+
+    await act(async () => {
+      resolveRegistration(unlisten);
+      await pendingRegistration;
+    });
+
+    expect(unlisten).toHaveBeenCalledTimes(1);
+    expect(mockInvoke).not.toHaveBeenCalled();
+    expect(useTimerStore.getState().isConnected).toBe(false);
+  });
+
+  it("cancels a pending connection retry on unmount", async () => {
+    vi.useFakeTimers();
+    mockInvoke.mockRejectedValue(new Error("connection unavailable"));
+
+    const { unmount } = renderTimerSync();
+    await flushTimerSyncSetup();
+    expect(getFullStateInvokeCount()).toBe(1);
+
+    unmount();
+    mockListen.mockClear();
+    mockInvoke.mockClear();
+    await advanceThroughTimerSyncConnectionRetries();
+
+    expect(mockListen).not.toHaveBeenCalled();
+    expect(mockInvoke).not.toHaveBeenCalled();
+    expect(useErrorStore.getState().errors.connection).toBeUndefined();
+  });
+
   it("releases every listener and ignores full state resolved after unmount", async () => {
     vi.spyOn(useSettingsStore.persist, "hasHydrated").mockReturnValue(true);
     setApplicationStatuses("pending", "pending");
