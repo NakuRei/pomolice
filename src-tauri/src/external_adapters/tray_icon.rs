@@ -60,16 +60,6 @@ static TRAY_NOTIFICATION_SHOWN: AtomicBool = AtomicBool::new(false);
 
 static IDLE_APP_ICON: OnceLock<TrayIconPixels> = OnceLock::new();
 
-/// Guards against phantom menu events on Windows.
-///
-/// On `Windows`, when `WebView2` overlay windows are destroyed (e.g. during
-/// `exit_fullscreen_all_monitors`), the Win32 message pump may dispatch stale
-/// `WM_COMMAND` messages that `muda` misinterprets as menu item clicks.
-/// This flag is set to `true` only when the user actually right-clicks
-/// the tray icon, and reset to `false` after a menu event is processed.
-/// Menu events that arrive without this flag set are ignored as phantom events.
-static MENU_OPENED_BY_USER: AtomicBool = AtomicBool::new(false);
-
 /// Build and register the system tray icon with menu and click handlers.
 ///
 /// Must be called after `app.manage(app_state)` during setup.
@@ -79,8 +69,12 @@ pub(crate) fn setup_tray(
     let decoded_icon = decode_idle_app_icon()?;
     let _ = IDLE_APP_ICON.set(decoded_icon);
 
-    let exit_item = MenuItemBuilder::with_id("exit", "Exit").build(app)?;
-    let menu = MenuBuilder::new(app).item(&exit_item).build()?;
+    let show_clock_item = MenuItemBuilder::new("時計を表示").build(app)?;
+    let exit_item = MenuItemBuilder::new("Exit").build(app)?;
+    let menu = MenuBuilder::new(app)
+        .item(&show_clock_item)
+        .item(&exit_item)
+        .build()?;
 
     let initial_spec = compose_tray_visual_spec(TimerStatus::Idle, 0);
     let initial_icon = render_icon_content(initial_spec.icon_content);
@@ -91,38 +85,28 @@ pub(crate) fn setup_tray(
         .tooltip(initial_spec.tooltip)
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| {
-            if event.id() == "exit" {
-                // Only process if the user actually opened the menu via right-click.
-                // Phantom WM_COMMAND messages from overlay window destruction are
-                // ignored because MENU_OPENED_BY_USER will be false.
-                if MENU_OPENED_BY_USER.swap(false, Ordering::SeqCst) {
-                    log_info_event(BackendLogEvent::AppTrayMenuExitSelected, &[]);
-                    app.exit(0);
-                } else {
-                    log_warn_event(BackendLogEvent::AppTrayPhantomMenuEventIgnored, &[]);
+        .on_menu_event(move |app, event| {
+            // Tauri broadcasts menu events from every window and tray to this callback.
+            if event.id() == show_clock_item.id() {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
                 }
+            } else if event.id() == exit_item.id() {
+                log_info_event(BackendLogEvent::AppTrayMenuExitSelected, &[]);
+                app.exit(0);
             }
         })
-        .on_tray_icon_event(|tray, event| match event {
-            TrayIconEvent::Click {
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
                 ..
-            } => {
+            } = event
+            {
                 toggle_main_window_visibility(tray.app_handle());
             }
-            TrayIconEvent::Click {
-                button: MouseButton::Right,
-                button_state: MouseButtonState::Up,
-                ..
-            } => {
-                // Mark that the user intentionally opened the context menu.
-                // The menu itself is shown automatically by the OS since it
-                // was attached via TrayIconBuilder::menu().
-                MENU_OPENED_BY_USER.store(true, Ordering::SeqCst);
-            }
-            _ => {}
         })
         .build(app)?;
 

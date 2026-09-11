@@ -68,12 +68,6 @@ macro_rules! backend_log_event_spec_match {
                 "Tray exit menu item selected",
                 []
             ),
-            BackendLogEvent::AppTrayPhantomMenuEventIgnored => spec!(
-                "tray.menu.phantom_event_ignored",
-                Warn,
-                "Ignored phantom tray menu event",
-                []
-            ),
             BackendLogEvent::AppTrayIconUpdateFailed => spec!(
                 "tray.icon.update_failed",
                 Warn,

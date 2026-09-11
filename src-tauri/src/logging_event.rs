@@ -22,7 +22,6 @@ pub enum BackendLogEvent {
     AppTrayInitialized,
     AppTraySetupFailed,
     AppTrayMenuExitSelected,
-    AppTrayPhantomMenuEventIgnored,
     AppTrayIconUpdateFailed,
     AppTrayTooltipUpdateFailed,
     AppTrayIdleAppIconMissing,
