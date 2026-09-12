@@ -74,36 +74,38 @@ export function FullscreenBreak(): React.ReactElement {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background text-on-background"
+      className="absolute inset-0 z-50 flex flex-col items-center overflow-y-auto bg-background text-on-background"
       data-testid="fullscreen-break"
     >
-      <div className="pointer-events-none absolute top-4 right-4 left-4">
-        <div className="pointer-events-auto mx-auto max-w-3xl">
+      <div className="w-full shrink-0 px-4 pt-4">
+        <div className="mx-auto max-w-3xl">
           <SettingsSyncBanner />
         </div>
       </div>
 
-      {/* Session type */}
-      <div className="mb-6 text-3xl font-medium tracking-wider text-text-muted uppercase">
-        {getSessionTypeText()}
-      </div>
+      <div className="my-auto flex shrink-0 flex-col items-center px-4 py-8">
+        {/* Session type */}
+        <div className="mb-6 text-3xl font-medium tracking-wider text-text-muted uppercase">
+          {getSessionTypeText()}
+        </div>
 
-      {/* Large countdown timer */}
-      <div
-        className="mb-8 font-['Geist_Mono'] text-[120px] font-bold tracking-tight text-text tabular-nums"
-        data-testid="break-timer-display"
-        aria-live="polite"
-        aria-atomic="true"
-      >
-        {formattedTime}
-      </div>
+        {/* Large countdown timer */}
+        <div
+          className="mb-8 font-['Geist_Mono'] text-[120px] font-bold tracking-tight text-text tabular-nums"
+          data-testid="break-timer-display"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {formattedTime}
+        </div>
 
-      {/* Motivational message */}
-      <MotivationalMessage message={motivationalMessage} />
+        {/* Motivational message */}
+        <MotivationalMessage message={motivationalMessage} />
 
-      {/* Break statistics */}
-      <div className="mt-8">
-        <BreakStats />
+        {/* Break statistics */}
+        <div className="mt-8">
+          <BreakStats />
+        </div>
       </div>
 
       {/* Skip button - positioned in bottom-right corner */}

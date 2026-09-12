@@ -52,7 +52,7 @@ export function HomeScreen({
   onOpenSettingsTopScreen,
 }: HomeScreenProps): React.ReactElement {
   return (
-    <div className="flex min-h-screen flex-col space-y-8 bg-background p-8 text-on-background">
+    <div className="flex min-h-full flex-col space-y-8 bg-background p-8 text-on-background">
       <ConnectionBanner />
       <SettingsSyncBanner />
       <InfoMessageBanner />

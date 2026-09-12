@@ -5,6 +5,8 @@ use tauri_build::{AppManifest, Attributes};
 fn main() -> Result<(), Box<dyn Error>> {
     tauri_build::try_build(
         Attributes::new().app_manifest(AppManifest::new().commands(&[
+            "is_tray_available",
+            "exit_without_tray",
             "start_work",
             "resolve_post_break_decision",
             "emergency_stop",

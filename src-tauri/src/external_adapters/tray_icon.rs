@@ -60,6 +60,10 @@ static TRAY_NOTIFICATION_SHOWN: AtomicBool = AtomicBool::new(false);
 
 static IDLE_APP_ICON: OnceLock<TrayIconPixels> = OnceLock::new();
 
+pub(crate) fn is_tray_available(app: &AppHandle) -> bool {
+    app.tray_by_id("pomolice-tray").is_some()
+}
+
 /// Build and register the system tray icon with menu and click handlers.
 ///
 /// Must be called after `app.manage(app_state)` during setup.

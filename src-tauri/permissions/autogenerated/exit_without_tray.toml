@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-exit-without-tray"
+description = "Enables the exit_without_tray command without any pre-configured scope."
+commands.allow = ["exit_without_tray"]
+
+[[permission]]
+identifier = "deny-exit-without-tray"
+description = "Denies the exit_without_tray command without any pre-configured scope."
+commands.deny = ["exit_without_tray"]

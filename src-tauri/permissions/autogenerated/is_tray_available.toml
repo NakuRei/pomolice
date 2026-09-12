@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-is-tray-available"
+description = "Enables the is_tray_available command without any pre-configured scope."
+commands.allow = ["is_tray_available"]
+
+[[permission]]
+identifier = "deny-is-tray-available"
+description = "Denies the is_tray_available command without any pre-configured scope."
+commands.deny = ["is_tray_available"]

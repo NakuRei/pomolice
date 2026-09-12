@@ -7,6 +7,8 @@
     "core:default",
     "log:default",
     "notification:default",
+    "allow-is-tray-available",
+    "allow-exit-without-tray",
     "allow-start-work",
     "allow-resolve-post-break-decision",
     "allow-emergency-stop",

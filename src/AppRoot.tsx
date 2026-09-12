@@ -1,13 +1,19 @@
 import { StrictMode } from "react";
 import App from "./App";
 import { AppErrorBoundary } from "./components/ErrorBoundary/AppErrorBoundary";
+import { TrayUnavailableNotice } from "./components/shared/TrayUnavailableNotice";
 
 export function AppRoot(): React.ReactElement {
   return (
-    <AppErrorBoundary>
-      <StrictMode>
-        <App />
-      </StrictMode>
-    </AppErrorBoundary>
+    <StrictMode>
+      <div className="flex h-screen flex-col">
+        <TrayUnavailableNotice />
+        <div className="relative min-h-0 flex-1 overflow-y-auto">
+          <AppErrorBoundary>
+            <App />
+          </AppErrorBoundary>
+        </div>
+      </div>
+    </StrictMode>
   );
 }

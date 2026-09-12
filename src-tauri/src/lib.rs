@@ -28,6 +28,9 @@ fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
         if window.label() == "main" {
             api.prevent_close();
+            if !external_adapters::tray_icon::is_tray_available(window.app_handle()) {
+                return;
+            }
             let _ = window.hide();
 
             if external_adapters::tray_icon::should_show_tray_notification() {
@@ -133,6 +136,8 @@ pub fn run() -> RunResult {
         })
         .on_window_event(handle_window_event)
         .invoke_handler(tauri::generate_handler![
+            commands::application::is_tray_available,
+            commands::application::exit_without_tray,
             commands::timer::start_work,
             commands::timer::resolve_post_break_decision,
             commands::timer::emergency_stop,
