@@ -136,6 +136,16 @@ describe("FullscreenBreak", () => {
   });
 
   describe("Rendering", () => {
+    it.each([SessionType.SHORT_BREAK, SessionType.LONG_BREAK])(
+      "shows emergency release instructions during %s without opening the skip flow",
+      (sessionType) => {
+        useTimerStore.setState({ sessionType });
+        render(<FullscreenBreak />);
+        const guidance = screen.getByText(/緊急解除/u);
+        expect(guidance).toHaveTextContent("Ctrl + Alt + Shift + E");
+      },
+    );
+
     it("should render the initial short-break ui", () => {
       render(<FullscreenBreak />);
 

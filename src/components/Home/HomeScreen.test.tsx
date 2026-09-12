@@ -94,6 +94,15 @@ describe("HomeScreen", () => {
     expect(screen.getByRole("button", { name: "通知音" })).toBeInTheDocument();
   });
 
+  it.each([TimerStatus.IDLE, TimerStatus.WORKING])(
+    "does not show break emergency release guidance while %s",
+    (status) => {
+      useTimerStore.setState({ status });
+      render(<HomeScreen {...createProps()} />);
+      expect(screen.queryByText(/緊急解除/u)).not.toBeInTheDocument();
+    },
+  );
+
   it("calls onOpenSettingsTopScreen when settings button is clicked", async () => {
     const user = userEvent.setup();
     const onOpenSettingsTopScreen = vi.fn();

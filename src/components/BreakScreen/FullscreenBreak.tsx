@@ -108,6 +108,10 @@ export function FullscreenBreak(): React.ReactElement {
         </div>
       </div>
 
+      <p className="fixed bottom-4 left-3 text-xs text-text-muted">
+        緊急解除：<kbd>Ctrl + Alt + Shift + E</kbd>
+      </p>
+
       {/* Skip button - positioned in bottom-right corner */}
       <div className="absolute right-3 bottom-3">
         <SkipButton onClick={handleSkipClick} />
