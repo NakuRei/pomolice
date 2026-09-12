@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-has-input-monitor-failed"
+description = "Enables the has_input_monitor_failed command without any pre-configured scope."
+commands.allow = ["has_input_monitor_failed"]
+
+[[permission]]
+identifier = "deny-has-input-monitor-failed"
+description = "Denies the has_input_monitor_failed command without any pre-configured scope."
+commands.deny = ["has_input_monitor_failed"]

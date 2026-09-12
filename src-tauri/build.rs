@@ -6,6 +6,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     tauri_build::try_build(
         Attributes::new().app_manifest(AppManifest::new().commands(&[
             "is_tray_available",
+            "has_input_monitor_failed",
             "exit_without_tray",
             "start_work",
             "resolve_post_break_decision",

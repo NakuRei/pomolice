@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tauri::{async_runtime, Manager};
+use tauri::{async_runtime, Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 
 type RunResult = std::result::Result<(), Box<dyn std::error::Error>>;
@@ -68,6 +68,7 @@ pub fn run() -> RunResult {
         .setup(|app| {
             let app_for_escape = app.handle().clone();
             let app_for_input = app.handle().clone();
+            let app_for_input_failure = app.handle().clone();
             let on_escape_combo = move || {
                 let app = app_for_escape.clone();
                 async_runtime::spawn(async move {
@@ -93,6 +94,9 @@ pub fn run() -> RunResult {
                     persistence,
                     on_escape_combo,
                     on_input_detected,
+                    move || {
+                        let _ = app_for_input_failure.emit_to("main", "input_monitor_failed", ());
+                    },
                 ));
             let has_persisted_state =
                 initialization_outcome.restore_status == state::AppRestoreStatus::Restored;
@@ -137,6 +141,7 @@ pub fn run() -> RunResult {
         .on_window_event(handle_window_event)
         .invoke_handler(tauri::generate_handler![
             commands::application::is_tray_available,
+            commands::application::has_input_monitor_failed,
             commands::application::exit_without_tray,
             commands::timer::start_work,
             commands::timer::resolve_post_break_decision,

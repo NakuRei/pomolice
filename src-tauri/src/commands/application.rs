@@ -4,6 +4,20 @@ use crate::commands::error_response::{BackendErrorCode, BackendErrorResponse};
 use crate::external_adapters::tray_icon;
 
 #[tauri::command]
+pub(crate) async fn has_input_monitor_failed(
+    window: WebviewWindow,
+) -> Result<bool, BackendErrorResponse> {
+    if window.label() != "main" {
+        return Err(BackendErrorResponse::from_code(
+            BackendErrorCode::UnauthorizedWindow,
+        ));
+    }
+    let state = window.state::<crate::state::AppState>();
+    let monitor = state.input_monitor.lock().await;
+    Ok(monitor.has_observed_failure())
+}
+
+#[tauri::command]
 pub(crate) async fn is_tray_available(window: WebviewWindow) -> Result<bool, BackendErrorResponse> {
     if window.label() != "main" {
         return Err(BackendErrorResponse::from_code(

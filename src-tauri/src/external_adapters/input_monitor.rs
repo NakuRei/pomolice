@@ -96,6 +96,8 @@ pub(crate) struct InputMonitorManager {
     on_escape_combo: Arc<dyn Fn() + Send + Sync>,
     /// Called when any input event (key, mouse, wheel) is detected during break.
     on_input_detected: Arc<dyn Fn() + Send + Sync>,
+    on_failure: Arc<dyn Fn() + Send + Sync>,
+    failure_observed: Arc<AtomicBool>,
     runtime: Arc<dyn InputMonitorRuntime>,
 }
 
@@ -107,10 +109,12 @@ impl InputMonitorManager {
     pub(crate) fn new(
         on_escape_combo: impl Fn() + Send + Sync + 'static,
         on_input_detected: impl Fn() + Send + Sync + 'static,
+        on_failure: impl Fn() + Send + Sync + 'static,
     ) -> Self {
         Self::new_with_runtime(
             on_escape_combo,
             on_input_detected,
+            on_failure,
             Arc::new(RdevInputMonitorRuntime),
         )
     }
@@ -118,6 +122,7 @@ impl InputMonitorManager {
     fn new_with_runtime(
         on_escape_combo: impl Fn() + Send + Sync + 'static,
         on_input_detected: impl Fn() + Send + Sync + 'static,
+        on_failure: impl Fn() + Send + Sync + 'static,
         runtime: Arc<dyn InputMonitorRuntime>,
     ) -> Self {
         Self {
@@ -127,8 +132,14 @@ impl InputMonitorManager {
             modifier_state: Arc::new(parking_lot::Mutex::new(ModifierState::default())),
             on_escape_combo: Arc::new(on_escape_combo),
             on_input_detected: Arc::new(on_input_detected),
+            on_failure: Arc::new(on_failure),
+            failure_observed: Arc::new(AtomicBool::new(false)),
             runtime,
         }
+    }
+
+    pub(crate) fn has_observed_failure(&self) -> bool {
+        self.failure_observed.load(Ordering::SeqCst)
     }
 
     /// Start global input monitoring.
@@ -158,6 +169,8 @@ impl InputMonitorManager {
         let modifier_state = Arc::clone(&self.modifier_state);
         let on_escape_combo = Arc::clone(&self.on_escape_combo);
         let on_input_detected = Arc::clone(&self.on_input_detected);
+        let on_failure = Arc::clone(&self.on_failure);
+        let failure_observed = Arc::clone(&self.failure_observed);
         let runtime = Arc::clone(&self.runtime);
 
         thread::spawn(move || {
@@ -195,6 +208,9 @@ impl InputMonitorManager {
                             &[("backoff", format!("{backoff:?}")), ("error_message", e)],
                             None,
                         );
+                        if !failure_observed.swap(true, Ordering::SeqCst) {
+                            on_failure();
+                        }
                         runtime.sleep(backoff);
                         if shutdown_requested.load(Ordering::SeqCst) {
                             log_info_event(
@@ -320,7 +336,7 @@ mod tests {
     use std::sync::{Arc as StdArc, Mutex as StdMutex};
 
     fn make_manager() -> InputMonitorManager {
-        InputMonitorManager::new(|| {}, || {})
+        InputMonitorManager::new(|| {}, || {}, || {})
     }
 
     fn make_manager_with_runtime(
@@ -338,6 +354,7 @@ mod tests {
         InputMonitorManager::new_with_runtime(
             on_escape_combo,
             on_input_detected,
+            || {},
             StdArc::new(runtime),
         )
     }
@@ -888,6 +905,54 @@ mod tests {
         mgr.stop();
         runtime.release_next_listener();
         runtime.wait_for_completed_listen_call_count(2, "the restarted input listener to stop");
+    }
+
+    #[test]
+    fn detected_failure_is_reported_and_remains_available_after_retry_and_stop() {
+        struct ImmediateRetryRuntime(RecordingInputMonitorRuntime);
+
+        impl InputMonitorRuntime for ImmediateRetryRuntime {
+            fn listen(&self, callback: InputEventCallback) -> Result<(), String> {
+                self.0.listen(callback)
+            }
+
+            fn sleep(&self, _duration: Duration) {}
+        }
+
+        let runtime = RecordingInputMonitorRuntime::with_steps([
+            ListenStep::BlockThenErr("listen failed"),
+            ListenStep::BlockThenOk,
+        ]);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let mut manager = InputMonitorManager::new_with_runtime(
+            || {},
+            || {},
+            move || {
+                let _ = sender.send(());
+            },
+            StdArc::new(ImmediateRetryRuntime(runtime.clone())),
+        );
+        assert!(!manager.has_observed_failure());
+        manager.start();
+        runtime.wait_for_listen_call_count(1, "initial listener");
+        runtime.release_next_listener();
+        let notification = receiver.recv_timeout(Duration::from_secs(2));
+        let failure_was_recorded = manager.has_observed_failure();
+        runtime.wait_for_listen_call_count(2, "retry listener");
+        manager.stop();
+        runtime.release_next_listener();
+        assert!(
+            notification.is_ok(),
+            "detected failures must notify subscribers"
+        );
+        assert!(
+            failure_was_recorded,
+            "late subscribers must be able to retrieve the failure"
+        );
+        assert!(
+            manager.has_observed_failure(),
+            "retrying or stopping is not proof of recovery"
+        );
     }
 
     #[test]

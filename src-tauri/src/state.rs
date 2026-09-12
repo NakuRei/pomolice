@@ -258,7 +258,7 @@ impl AppState {
         clock: Arc<dyn Clock + Send + Sync>,
         persistence: PersistenceManager,
     ) -> (Self, AppInitializationOutcome) {
-        Self::build_startup_state_with_handlers(clock, persistence, || {}, || {}).await
+        Self::build_startup_state_with_handlers(clock, persistence, || {}, || {}, || {}).await
     }
 
     pub(crate) async fn build_startup_state_with_handlers(
@@ -266,6 +266,7 @@ impl AppState {
         persistence: PersistenceManager,
         on_escape_combo: impl Fn() + Send + Sync + 'static,
         on_input_detected: impl Fn() + Send + Sync + 'static,
+        on_input_failure: impl Fn() + Send + Sync + 'static,
     ) -> (Self, AppInitializationOutcome) {
         let preparation = Self::prepare_startup(clock.as_ref(), &persistence).await;
         let app_state = Self::build_state(
@@ -275,6 +276,7 @@ impl AppState {
             preparation.restored_running_saved_at_local,
             on_escape_combo,
             on_input_detected,
+            on_input_failure,
         );
         (app_state, preparation.initialization_outcome)
     }
@@ -286,12 +288,17 @@ impl AppState {
         restored_running_saved_at_local: Option<DateTime<Local>>,
         on_escape_combo: impl Fn() + Send + Sync + 'static,
         on_input_detected: impl Fn() + Send + Sync + 'static,
+        on_input_failure: impl Fn() + Send + Sync + 'static,
     ) -> Self {
         log_info_event(BackendLogEvent::AppStateCreated, &[]);
 
         Self {
             timer_manager: Mutex::new(TimerStateManager::new(Some(initial_timer_state))),
-            input_monitor: Mutex::new(InputMonitorManager::new(on_escape_combo, on_input_detected)),
+            input_monitor: Mutex::new(InputMonitorManager::new(
+                on_escape_combo,
+                on_input_detected,
+                on_input_failure,
+            )),
             window_manager: Mutex::new(WindowStateManager::new()),
             persistence,
             clock,
