@@ -63,6 +63,8 @@ pub fn run() -> RunResult {
     let tauri_context = tauri::generate_context!();
 
     let app = tauri::Builder::default()
+        // Raw Input registration interferes with rdev keyboard hooks on Windows while focused.
+        .device_event_filter(tauri::DeviceEventFilter::Always)
         .plugin(external_adapters::logging::build_log_plugin())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
