@@ -1,0 +1,12 @@
+**
+!package.json
+!package-lock.json
+!index.html
+!tsconfig*.json
+!vite.config.ts
+!public/**
+!src/**
+!src-tauri/**
+!docker/**
+src-tauri/target
+src-tauri/gen

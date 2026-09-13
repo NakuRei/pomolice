@@ -1,0 +1,13 @@
+{
+  "bundle": {
+    "linux": {
+      "deb": {
+        "depends": [
+          "libx11-6",
+          "libxi6",
+          "libxtst6"
+        ]
+      }
+    }
+  }
+}

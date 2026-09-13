@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:linux": "docker build --platform linux/amd64 --file docker/ubuntu22.Dockerfile --output type=local,dest=artifacts/ubuntu22 .",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "audit:rust": "cd src-tauri && cargo audit",
