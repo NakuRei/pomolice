@@ -3,8 +3,12 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import { Button } from "./Button";
 import { StatusNotice } from "./StatusNotice";
+import { useEmergencyShortcutStore } from "@/store/emergencyShortcutStore";
 
 export function InputMonitorFailureNotice(): React.ReactElement | null {
+  const usesInputMonitorShortcut = useEmergencyShortcutStore(
+    (state) => state.status?.kind === "input_monitor",
+  );
   const [failureObserved, setFailureObserved] = useState(false);
   const [connectionFailed, setConnectionFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -63,7 +67,9 @@ export function InputMonitorFailureNotice(): React.ReactElement | null {
           <>
             <p>入力監視でエラーが発生しました。</p>
             <p>
-              休憩中の操作へのペナルティと緊急解除キー（Ctrl+Alt+Shift+E）が働かない可能性があります。
+              {usesInputMonitorShortcut
+                ? "休憩中の操作へのペナルティと緊急解除キー（Ctrl+Alt+Shift+E）が働かない可能性があります。"
+                : "休憩中の操作へのペナルティが働かない可能性があります。"}
             </p>
           </>
         ) : (

@@ -9,6 +9,7 @@
     "notification:default",
     "allow-is-tray-available",
     "allow-has-input-monitor-failed",
+    "allow-get-emergency-shortcut-status",
     "allow-exit-without-tray",
     "allow-start-work",
     "allow-resolve-post-break-decision",

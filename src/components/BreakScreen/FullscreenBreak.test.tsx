@@ -15,6 +15,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import { FullscreenBreak } from "./FullscreenBreak";
+import { useEmergencyShortcutStore } from "@/store/emergencyShortcutStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useTimerStore, SessionType, TimerStatus } from "@/store/timerStore";
 import { useSkipFlowStore } from "@/store/skipFlowStore";
@@ -111,6 +112,10 @@ function completeMathChallenge(): void {
 
 describe("FullscreenBreak", () => {
   beforeEach(() => {
+    useEmergencyShortcutStore.setState({
+      status: { kind: "input_monitor" },
+      connectionFailed: false,
+    });
     mockInvoke.mockReset();
     mockInvoke.mockResolvedValue(undefined);
     resetTimerStoreForTest();

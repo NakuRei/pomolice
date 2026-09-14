@@ -1,7 +1,22 @@
 use tauri::{Manager, WebviewWindow};
 
 use crate::commands::error_response::{BackendErrorCode, BackendErrorResponse};
+use crate::external_adapters::emergency_shortcut::{
+    EmergencyShortcutState, EmergencyShortcutStatus,
+};
 use crate::external_adapters::tray_icon;
+
+#[tauri::command]
+pub(crate) async fn get_emergency_shortcut_status(
+    window: WebviewWindow,
+) -> Result<EmergencyShortcutStatus, BackendErrorResponse> {
+    if window.label() != "main" {
+        return Err(BackendErrorResponse::from_code(
+            BackendErrorCode::UnauthorizedWindow,
+        ));
+    }
+    Ok(window.state::<EmergencyShortcutState>().0.lock().clone())
+}
 
 #[tauri::command]
 pub(crate) async fn has_input_monitor_failed(

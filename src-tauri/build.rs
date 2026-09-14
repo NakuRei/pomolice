@@ -7,6 +7,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Attributes::new().app_manifest(AppManifest::new().commands(&[
             "is_tray_available",
             "has_input_monitor_failed",
+            "get_emergency_shortcut_status",
             "exit_without_tray",
             "start_work",
             "resolve_post_break_decision",

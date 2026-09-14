@@ -1,0 +1,3 @@
+**
+!artifacts/**
+!docker/verify-portal-registration.sh

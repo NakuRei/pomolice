@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Pomolice
+Exec=pomolice
+Icon=pomolice
+Terminal=false
+NoDisplay=true

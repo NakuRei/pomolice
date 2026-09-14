@@ -2,6 +2,9 @@
   "bundle": {
     "linux": {
       "deb": {
+        "files": {
+          "/usr/share/applications/io.github.NakuRei.pomolice.desktop": "linux/io.github.NakuRei.pomolice.desktop"
+        },
         "depends": [
           "libx11-6",
           "libxi6",

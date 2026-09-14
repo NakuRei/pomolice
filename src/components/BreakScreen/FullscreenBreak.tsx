@@ -8,6 +8,7 @@ import { MotivationalMessage } from "./MotivationalMessage";
 import { SkipButton } from "./SkipButton";
 import SkipFlowModal from "../SkipFlow/SkipFlowModal";
 import { SettingsSyncBanner } from "../shared/SettingsSyncBanner";
+import { EmergencyShortcutHint } from "../shared/EmergencyShortcutNotice";
 
 /**
  * FullscreenBreak Component
@@ -108,9 +109,7 @@ export function FullscreenBreak(): React.ReactElement {
         </div>
       </div>
 
-      <p className="fixed bottom-4 left-3 text-xs text-text-muted">
-        緊急解除：<kbd>Ctrl + Alt + Shift + E</kbd>
-      </p>
+      <EmergencyShortcutHint />
 
       {/* Skip button - positioned in bottom-right corner */}
       <div className="absolute right-3 bottom-3">

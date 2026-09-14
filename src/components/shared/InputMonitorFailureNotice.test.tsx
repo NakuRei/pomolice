@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type EventCallback } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { InputMonitorFailureNotice } from "./InputMonitorFailureNotice";
+import { useEmergencyShortcutStore } from "@/store/emergencyShortcutStore";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
@@ -25,6 +26,10 @@ function notifyFailure(): void {
 
 describe("input monitoring failure notice", () => {
   beforeEach(() => {
+    useEmergencyShortcutStore.setState({
+      status: { kind: "input_monitor" },
+      connectionFailed: false,
+    });
     failureNotification = undefined;
     vi.mocked(invoke)
       .mockReset()
@@ -67,6 +72,16 @@ describe("input monitoring failure notice", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "入力監視でエラーが発生しました",
     );
+  });
+
+  it("does not claim a portal shortcut is affected by an input monitor failure", async () => {
+    useEmergencyShortcutStore.setState({
+      status: { kind: "registered", trigger: "Super + F12" },
+    });
+    vi.mocked(invoke).mockResolvedValue(true);
+    await renderNotice();
+    expect(screen.getByRole("alert")).toHaveTextContent("ペナルティ");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("緊急解除キー");
   });
 
   it("does not erase a new failure with an older snapshot", async () => {

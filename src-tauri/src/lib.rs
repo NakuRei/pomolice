@@ -50,6 +50,77 @@ fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     }
 }
 
+fn setup_app(app: &tauri::App) {
+    let app_for_escape = app.handle().clone();
+    let app_for_input = app.handle().clone();
+    let app_for_input_failure = app.handle().clone();
+    let on_escape_combo = move || {
+        let app = app_for_escape.clone();
+        async_runtime::spawn(async move {
+            session_pipeline::lib_handle_escape_combo(app).await;
+        });
+    };
+    let on_input_detected = move || {
+        let app = app_for_input.clone();
+        async_runtime::spawn(async move {
+            session_pipeline::lib_handle_input_detected(app).await;
+        });
+    };
+    let clock: Arc<dyn external_adapters::clock::Clock + Send + Sync> =
+        Arc::new(external_adapters::clock::SystemClock);
+    let app_data_dir = app.handle().path().app_data_dir().ok();
+    let persistence =
+        external_adapters::persistence::PersistenceManager::new(Arc::clone(&clock), app_data_dir);
+    let (app_state, initialization_outcome) =
+        async_runtime::block_on(state::AppState::build_startup_state_with_handlers(
+            clock,
+            persistence,
+            on_escape_combo,
+            on_input_detected,
+            move || {
+                let _ = app_for_input_failure.emit_to("main", "input_monitor_failed", ());
+            },
+        ));
+    let has_persisted_state =
+        initialization_outcome.restore_status == state::AppRestoreStatus::Restored;
+
+    app.manage(app_state);
+    external_adapters::emergency_shortcut::setup(app.handle());
+
+    if let Err(e) = external_adapters::tray_icon::setup_tray(app.handle()) {
+        log_error_event(
+            BackendLogEvent::AppTraySetupFailed,
+            &[("error_message", e.to_string())],
+            None,
+        );
+    }
+
+    async_runtime::block_on(async {
+        session_pipeline::lib_handle_startup_restore(
+            app.handle().clone(),
+            initialization_outcome.clone(),
+        )
+        .await;
+    });
+
+    let scheduler_app_handle = app.handle().clone();
+    async_runtime::spawn(async move {
+        lib_start_scheduler_task(scheduler_app_handle).await;
+    });
+
+    log_info_event(
+        BackendLogEvent::AppStartupCompleted,
+        &[
+            ("startup_phase", "setup".to_string()),
+            ("has_persisted_state", has_persisted_state.to_string()),
+            (
+                "restored_state_status",
+                format!("{:?}", initialization_outcome.restore_status),
+            ),
+        ],
+    );
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Start the Tauri application and register all runtime state, handlers, and background tasks.
 ///
@@ -68,82 +139,14 @@ pub fn run() -> RunResult {
         .plugin(external_adapters::logging::build_log_plugin())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
-            let app_for_escape = app.handle().clone();
-            let app_for_input = app.handle().clone();
-            let app_for_input_failure = app.handle().clone();
-            let on_escape_combo = move || {
-                let app = app_for_escape.clone();
-                async_runtime::spawn(async move {
-                    session_pipeline::lib_handle_escape_combo(app).await;
-                });
-            };
-            let on_input_detected = move || {
-                let app = app_for_input.clone();
-                async_runtime::spawn(async move {
-                    session_pipeline::lib_handle_input_detected(app).await;
-                });
-            };
-            let clock: Arc<dyn external_adapters::clock::Clock + Send + Sync> =
-                Arc::new(external_adapters::clock::SystemClock);
-            let app_data_dir = app.handle().path().app_data_dir().ok();
-            let persistence = external_adapters::persistence::PersistenceManager::new(
-                Arc::clone(&clock),
-                app_data_dir,
-            );
-            let (app_state, initialization_outcome) =
-                async_runtime::block_on(state::AppState::build_startup_state_with_handlers(
-                    clock,
-                    persistence,
-                    on_escape_combo,
-                    on_input_detected,
-                    move || {
-                        let _ = app_for_input_failure.emit_to("main", "input_monitor_failed", ());
-                    },
-                ));
-            let has_persisted_state =
-                initialization_outcome.restore_status == state::AppRestoreStatus::Restored;
-
-            app.manage(app_state);
-
-            if let Err(e) = external_adapters::tray_icon::setup_tray(app.handle()) {
-                log_error_event(
-                    BackendLogEvent::AppTraySetupFailed,
-                    &[("error_message", e.to_string())],
-                    None,
-                );
-            }
-
-            async_runtime::block_on(async {
-                session_pipeline::lib_handle_startup_restore(
-                    app.handle().clone(),
-                    initialization_outcome.clone(),
-                )
-                .await;
-            });
-
-            let scheduler_app_handle = app.handle().clone();
-            async_runtime::spawn(async move {
-                lib_start_scheduler_task(scheduler_app_handle).await;
-            });
-
-            log_info_event(
-                BackendLogEvent::AppStartupCompleted,
-                &[
-                    ("startup_phase", "setup".to_string()),
-                    ("has_persisted_state", has_persisted_state.to_string()),
-                    (
-                        "restored_state_status",
-                        format!("{:?}", initialization_outcome.restore_status),
-                    ),
-                ],
-            );
-
+            setup_app(app);
             Ok(())
         })
         .on_window_event(handle_window_event)
         .invoke_handler(tauri::generate_handler![
             commands::application::is_tray_available,
             commands::application::has_input_monitor_failed,
+            commands::application::get_emergency_shortcut_status,
             commands::application::exit_without_tray,
             commands::timer::start_work,
             commands::timer::resolve_post_break_decision,

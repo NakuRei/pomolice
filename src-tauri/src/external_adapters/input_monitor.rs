@@ -93,7 +93,7 @@ pub(crate) struct InputMonitorManager {
     /// Callback-only modifier tracking; keep the guard around state updates only.
     modifier_state: Arc<parking_lot::Mutex<ModifierState>>,
     /// Called when the escape combo (Ctrl+Alt+Shift+E) is detected.
-    on_escape_combo: Arc<dyn Fn() + Send + Sync>,
+    on_escape_combo: Option<Arc<dyn Fn() + Send + Sync>>,
     /// Called when any input event (key, mouse, wheel) is detected during break.
     on_input_detected: Arc<dyn Fn() + Send + Sync>,
     on_failure: Arc<dyn Fn() + Send + Sync>,
@@ -111,12 +111,16 @@ impl InputMonitorManager {
         on_input_detected: impl Fn() + Send + Sync + 'static,
         on_failure: impl Fn() + Send + Sync + 'static,
     ) -> Self {
-        Self::new_with_runtime(
+        let mut manager = Self::new_with_runtime(
             on_escape_combo,
             on_input_detected,
             on_failure,
             Arc::new(RdevInputMonitorRuntime),
-        )
+        );
+        if super::emergency_shortcut::uses_portal() {
+            manager.on_escape_combo = None;
+        }
+        manager
     }
 
     fn new_with_runtime(
@@ -130,7 +134,7 @@ impl InputMonitorManager {
             listener_alive: Arc::new(AtomicBool::new(false)),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             modifier_state: Arc::new(parking_lot::Mutex::new(ModifierState::default())),
-            on_escape_combo: Arc::new(on_escape_combo),
+            on_escape_combo: Some(Arc::new(on_escape_combo)),
             on_input_detected: Arc::new(on_input_detected),
             on_failure: Arc::new(on_failure),
             failure_observed: Arc::new(AtomicBool::new(false)),
@@ -167,7 +171,7 @@ impl InputMonitorManager {
         let listener_alive = Arc::clone(&self.listener_alive);
         let shutdown_requested = Arc::clone(&self.shutdown_requested);
         let modifier_state = Arc::clone(&self.modifier_state);
-        let on_escape_combo = Arc::clone(&self.on_escape_combo);
+        let on_escape_combo = self.on_escape_combo.clone();
         let on_input_detected = Arc::clone(&self.on_input_detected);
         let on_failure = Arc::clone(&self.on_failure);
         let failure_observed = Arc::clone(&self.failure_observed);
@@ -184,7 +188,7 @@ impl InputMonitorManager {
                 let callback: InputEventCallback = Box::new(build_event_callback(
                     Arc::clone(&enabled),
                     Arc::clone(&modifier_state),
-                    Arc::clone(&on_escape_combo),
+                    on_escape_combo.clone(),
                     Arc::clone(&on_input_detected),
                 ));
 
@@ -279,7 +283,7 @@ impl InputMonitorManager {
 fn build_event_callback(
     enabled: Arc<AtomicBool>,
     modifier_state: Arc<parking_lot::Mutex<ModifierState>>,
-    on_escape_combo: Arc<dyn Fn() + Send + Sync>,
+    on_escape_combo: Option<Arc<dyn Fn() + Send + Sync>>,
     on_input_detected: Arc<dyn Fn() + Send + Sync>,
 ) -> impl Fn(Event) {
     move |event: Event| {
@@ -297,7 +301,8 @@ fn build_event_callback(
                 };
 
                 // Escape hatch: Ctrl+Alt+Shift+E exits break mode immediately.
-                if is_escape_combo {
+                if let Some(on_escape_combo) = on_escape_combo.as_ref().filter(|_| is_escape_combo)
+                {
                     enabled.store(false, Ordering::SeqCst);
                     (on_escape_combo)();
                     return;
@@ -710,9 +715,9 @@ mod tests {
         let callback = build_event_callback(
             Arc::clone(&enabled),
             Arc::clone(&modifier_state),
-            Arc::new(move || {
+            Some(Arc::new(move || {
                 escape_combo_count_for_callback.fetch_add(1, Ordering::SeqCst);
-            }),
+            })),
             Arc::new(move || {
                 input_event_count_for_callback.fetch_add(1, Ordering::SeqCst);
             }),

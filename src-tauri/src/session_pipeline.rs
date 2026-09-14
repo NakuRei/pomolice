@@ -821,6 +821,9 @@ pub(crate) async fn lib_handle_escape_combo(app: AppHandle) {
 
     state_handle
         .run_break_mode_transition(async {
+            if state_handle.timer_manager.lock().await.status() != types::TimerStatus::OnBreak {
+                return;
+            }
             state_handle.stop_input_monitor_for_break().await;
 
             if let Err(error) = state_handle.release_fullscreen_break_lock(&app).await {
