@@ -25,6 +25,17 @@ export default defineConfig(() => ({
     },
   },
 
+  // The break overlay is its own window, so it is a second entry rather than a
+  // public/ file — that way it shares the app's processed font assets.
+  build: {
+    rollupOptions: {
+      input: {
+        main: path.resolve(import.meta.dirname, "index.html"),
+        breakOverlay: path.resolve(import.meta.dirname, "break-overlay.html"),
+      },
+    },
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

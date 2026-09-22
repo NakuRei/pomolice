@@ -1,17 +1,21 @@
 @import "tailwindcss";
+@import "@fontsource/jetbrains-mono/latin-300.css";
+@import "@fontsource/jetbrains-mono/latin-400.css";
+@import "@fontsource/jetbrains-mono/latin-500.css";
+@import "@fontsource/jetbrains-mono/latin-700.css";
 
 @theme inline {
-  --color-primary-50: var(--color-cyan-50);
-  --color-primary-100: var(--color-cyan-100);
-  --color-primary-200: var(--color-cyan-200);
-  --color-primary-300: var(--color-cyan-300);
-  --color-primary-400: var(--color-cyan-400);
-  --color-primary-500: var(--color-cyan-500);
-  --color-primary-600: var(--color-cyan-600);
-  --color-primary-700: var(--color-cyan-700);
-  --color-primary-800: var(--color-cyan-800);
-  --color-primary-900: var(--color-cyan-900);
-  --color-primary-950: var(--color-cyan-950);
+  --color-primary-50: #f1f5fa;
+  --color-primary-100: #e6ecf4;
+  --color-primary-200: #d2e0ef;
+  --color-primary-300: #b7d2ec;
+  --color-primary-400: #8fb4da;
+  --color-primary-500: #6e97c4;
+  --color-primary-600: #5e7fa6;
+  --color-primary-700: #4a6e96;
+  --color-primary-800: #35577d;
+  --color-primary-900: #24405f;
+  --color-primary-950: #1b2b44;
   --color-success-50: var(--color-emerald-50);
   --color-success-100: var(--color-emerald-100);
   --color-success-200: var(--color-emerald-200);
@@ -23,17 +27,17 @@
   --color-success-800: var(--color-emerald-800);
   --color-success-900: var(--color-emerald-900);
   --color-success-950: var(--color-emerald-950);
-  --color-warning-50: var(--color-amber-50);
-  --color-warning-100: var(--color-amber-100);
-  --color-warning-200: var(--color-amber-200);
-  --color-warning-300: var(--color-amber-300);
-  --color-warning-400: var(--color-amber-400);
-  --color-warning-500: var(--color-amber-500);
-  --color-warning-600: var(--color-amber-600);
-  --color-warning-700: var(--color-amber-700);
-  --color-warning-800: var(--color-amber-800);
-  --color-warning-900: var(--color-amber-900);
-  --color-warning-950: var(--color-amber-950);
+  --color-warning-50: #fbf3e7;
+  --color-warning-100: #f6e5cc;
+  --color-warning-200: #efc48c;
+  --color-warning-300: #e0ae6e;
+  --color-warning-400: #c99755;
+  --color-warning-500: #a5854f;
+  --color-warning-600: #8a6c3e;
+  --color-warning-700: #6e5531;
+  --color-warning-800: #513e24;
+  --color-warning-900: #362818;
+  --color-warning-950: #221a0f;
   --color-danger-50: var(--color-red-50);
   --color-danger-100: var(--color-red-100);
   --color-danger-200: var(--color-red-200);
@@ -56,38 +60,29 @@
   --color-info-800: var(--color-sky-800);
   --color-info-900: var(--color-sky-900);
   --color-info-950: var(--color-sky-950);
-  --color-backdrop: var(--color-zinc-950);
-  --color-shadow: var(--color-zinc-950);
+  --color-backdrop: #0d1728;
+  --color-shadow: #0d1728;
   --color-on-background: var(--color-text);
   --color-on-surface: var(--color-text);
   --color-on-primary: var(--color-white);
   --color-on-success: var(--color-white);
   --color-on-danger: var(--color-white);
-  --color-background: var(--color-zinc-950);
-  --color-surface: var(--color-zinc-900);
-  --color-surface-raised: var(--color-zinc-800);
-  --color-surface-hover: var(--color-zinc-700);
-  --color-border: var(--color-zinc-700);
-  --color-border-strong: var(--color-zinc-600);
-  --color-disabled-bg: var(--color-zinc-800);
-  --color-disabled-text: var(--color-zinc-500);
-  --color-disabled-border: var(--color-zinc-700);
-  --color-text: var(--color-zinc-100);
-  --color-text-muted: var(--color-zinc-400);
+  --color-background: #101a2b;
+  --color-surface: #1b2b44;
+  --color-surface-raised: #24405f;
+  --color-surface-hover: #35577d;
+  --color-border: #35577d;
+  --color-border-strong: #4a6e96;
+  --color-disabled-bg: #24405f;
+  --color-disabled-text: #5e7fa6;
+  --color-disabled-border: #35577d;
+  --color-text: #e6ecf4;
+  --color-text-muted: #8195af;
+  --color-track: #35577d59;
 }
 
-@font-face {
-  font-family: "Geist Mono";
-  src: url("./assets/fonts/GeistMono-Regular.woff2") format("woff2");
-  font-weight: 400;
-  font-style: normal;
-  font-display: block;
-}
-
-@font-face {
-  font-family: "Geist Mono";
-  src: url("./assets/fonts/GeistMono-Bold.woff2") format("woff2");
-  font-weight: 700;
-  font-style: normal;
-  font-display: block;
+@layer base {
+  body {
+    font-family: "JetBrains Mono", "Noto Sans JP", ui-monospace, monospace;
+  }
 }

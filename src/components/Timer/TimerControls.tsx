@@ -1,13 +1,11 @@
 import { useTimerStore, TimerStatus } from "@/store/timerStore";
+import { PlayIcon } from "@/components/icons/AppIcons";
 import { EmergencyStopButton } from "../EmergencyStop/EmergencyStopButton";
 import { Button } from "../shared/Button";
-import { InlineError } from "../shared/InlineError";
 
 /**
  * TimerControls Component
- * Provides start button and emergency stop button for timer control
- *
- * Phase 2: Start button (IDLE) and Emergency stop button (RUNNING) shown in same position
+ * Holds the single footer action: start while idle, emergency stop while running.
  */
 export function TimerControls(): React.ReactElement {
   const status = useTimerStore((state) => state.status);
@@ -17,26 +15,26 @@ export function TimerControls(): React.ReactElement {
   const isWorking = status === TimerStatus.WORKING;
 
   const handleStart = (): void => {
-    // Errors from start() are reported to errorStore by timerStore — InlineError handles display
+    // Errors from start() are reported to errorStore by timerStore — the home
+    // screen's toast stack handles display.
     start().catch(() => undefined);
   };
 
   return (
-    <div className="flex min-h-16 flex-col items-center gap-2">
+    <div className="flex min-h-14 items-center">
       {isIdle && (
-        <>
-          <Button
-            appearance="primary"
-            size="lg"
-            onClick={handleStart}
-            testId="start-button"
-            aria-label="タイマーを開始"
-          >
-            開始
-          </Button>
-          {/* Shown when start_work fails; auto-clears after 5 seconds */}
-          <InlineError errorId="start_work" />
-        </>
+        <Button
+          appearance="primary"
+          size="md"
+          shape="pill"
+          onClick={handleStart}
+          testId="start-button"
+          aria-label="タイマーを開始"
+          className="gap-2.5 tracking-wider shadow-2xl shadow-primary-800/45"
+        >
+          <PlayIcon className="size-5" />
+          開始
+        </Button>
       )}
       {isWorking && <EmergencyStopButton />}
     </div>

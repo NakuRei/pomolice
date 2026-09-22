@@ -97,9 +97,7 @@ describe("App", () => {
     await openSettingsTop(user);
 
     expect(screen.getByRole("heading", { name: "設定" })).toBeInTheDocument();
-    expect(
-      screen.queryByRole("heading", { name: "Pomolice" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("timer-display")).not.toBeInTheDocument();
   });
 
   it("returns to home screen when the settings top header back button is clicked", async () => {
@@ -109,9 +107,7 @@ describe("App", () => {
     await openSettingsTop(user);
     await user.click(screen.getByRole("button", { name: "ホームへ戻る" }));
 
-    expect(
-      screen.getByRole("heading", { name: "Pomolice" }),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("timer-display")).toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: "設定" }),
     ).not.toBeInTheDocument();
@@ -125,9 +121,7 @@ describe("App", () => {
 
     fireEvent.keyDown(window, { key: "Escape" });
 
-    expect(
-      screen.getByRole("heading", { name: "Pomolice" }),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("timer-display")).toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: "設定" }),
     ).not.toBeInTheDocument();
@@ -226,9 +220,7 @@ describe("App", () => {
       useTimerStore.setState({ isFullscreenBreak: false });
     });
     await waitFor(() => {
-      expect(
-        screen.getByRole("heading", { name: "Pomolice" }),
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("timer-display")).toBeInTheDocument();
     });
     expect(
       screen.queryByRole("heading", { name: "設定" }),

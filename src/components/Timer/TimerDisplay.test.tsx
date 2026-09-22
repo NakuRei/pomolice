@@ -27,15 +27,15 @@ describe("TimerDisplay", () => {
     render(<TimerDisplay />);
 
     expect(getTimerDisplay("25:00")).toBeInTheDocument();
-    expect(screen.getByText("作業時間")).toBeInTheDocument();
-    expect(screen.getByText("待機中")).toBeInTheDocument();
+    expect(screen.getByText("FOCUS")).toBeInTheDocument();
   });
 
   it.each([
-    { sessionType: SessionType.SHORT_BREAK, expectedText: "短い休憩" },
-    { sessionType: SessionType.LONG_BREAK, expectedText: "長い休憩" },
+    { sessionType: SessionType.WORK, expectedText: "FOCUS" },
+    { sessionType: SessionType.SHORT_BREAK, expectedText: "BREAK" },
+    { sessionType: SessionType.LONG_BREAK, expectedText: "LONG" },
   ])(
-    "should display the session label $expectedText",
+    "should display the phase label $expectedText",
     ({ sessionType, expectedText }) => {
       useTimerStore.setState({ sessionType });
       render(<TimerDisplay />);
@@ -45,15 +45,16 @@ describe("TimerDisplay", () => {
   );
 
   it.each([
-    { status: TimerStatus.WORKING, expectedText: "実行中" },
-    { status: TimerStatus.ON_BREAK, expectedText: "休憩中" },
+    { sessionType: SessionType.WORK, expectedName: "作業時間" },
+    { sessionType: SessionType.SHORT_BREAK, expectedName: "短い休憩" },
+    { sessionType: SessionType.LONG_BREAK, expectedName: "長い休憩" },
   ])(
-    "should display the status label $expectedText",
-    ({ status, expectedText }) => {
-      useTimerStore.setState({ status });
+    "should name the phase $expectedName for assistive technology",
+    ({ sessionType, expectedName }) => {
+      useTimerStore.setState({ sessionType });
       render(<TimerDisplay />);
 
-      expect(screen.getByText(expectedText)).toBeInTheDocument();
+      expect(screen.getByLabelText(expectedName)).toBeInTheDocument();
     },
   );
 
@@ -90,5 +91,17 @@ describe("TimerDisplay", () => {
     const timerElement = getTimerDisplay("25:00");
     expect(timerElement).toHaveAttribute("aria-live", "polite");
     expect(timerElement).toHaveAttribute("aria-atomic", "true");
+  });
+
+  it("should keep the phase label independent of whether the timer runs", () => {
+    useTimerStore.setState({ status: TimerStatus.WORKING });
+    const { rerender } = render(<TimerDisplay />);
+    expect(screen.getByText("FOCUS")).toBeInTheDocument();
+
+    act(() => {
+      useTimerStore.setState({ status: TimerStatus.IDLE });
+    });
+    rerender(<TimerDisplay />);
+    expect(screen.getByText("FOCUS")).toBeInTheDocument();
   });
 });

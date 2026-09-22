@@ -82,12 +82,10 @@ describe("HomeScreen", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("renders the home heading and top-level controls", () => {
+  it("renders the timer and top-level controls", () => {
     render(<HomeScreen {...createProps()} />);
 
-    expect(
-      screen.getByRole("heading", { name: "Pomolice" }),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("timer-display")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "設定を開く" }),
     ).toBeInTheDocument();
@@ -125,7 +123,7 @@ describe("HomeScreen", () => {
     expect(onToggleNotificationSoundMuted).toHaveBeenCalledTimes(1);
   });
 
-  it("renders auto-run and auto-continue badges when both are enabled", () => {
+  it("shows the scheduled auto-run state alongside the continue mode", () => {
     render(
       <HomeScreen
         {...createProps({
@@ -135,12 +133,14 @@ describe("HomeScreen", () => {
       />,
     );
 
-    expect(screen.getByText("自動実行ON")).toBeInTheDocument();
-    expect(screen.getByText("自動継続ON")).toBeInTheDocument();
-    expect(screen.queryByText("毎回確認")).not.toBeInTheDocument();
+    expect(screen.getByTestId("header-auto-run")).toHaveTextContent(
+      "SCHEDULED",
+    );
+    expect(screen.getByText(/AUTO_CONTINUE/u)).toBeInTheDocument();
+    expect(screen.queryByText(/ASK_EACH_TIME/u)).not.toBeInTheDocument();
   });
 
-  it("renders only manual-continue badge when confirmation policy is active", () => {
+  it("shows ASK_EACH_TIME when the confirmation policy is active", () => {
     render(
       <HomeScreen
         {...createProps({
@@ -149,12 +149,11 @@ describe("HomeScreen", () => {
       />,
     );
 
-    expect(screen.getByText("毎回確認")).toBeInTheDocument();
-    expect(screen.queryByText("自動実行ON")).not.toBeInTheDocument();
-    expect(screen.queryByText("自動継続ON")).not.toBeInTheDocument();
+    expect(screen.getByText(/ASK_EACH_TIME/u)).toBeInTheDocument();
+    expect(screen.queryByText(/AUTO_CONTINUE/u)).not.toBeInTheDocument();
   });
 
-  it("renders only auto-continue badge when auto-continue is enabled", () => {
+  it("shows AUTO_CONTINUE when auto-continue is on", () => {
     render(
       <HomeScreen
         {...createProps({
@@ -163,8 +162,28 @@ describe("HomeScreen", () => {
       />,
     );
 
-    expect(screen.getByText("自動継続ON")).toBeInTheDocument();
-    expect(screen.queryByText("自動実行ON")).not.toBeInTheDocument();
-    expect(screen.queryByText("毎回確認")).not.toBeInTheDocument();
+    expect(screen.getByText(/AUTO_CONTINUE/u)).toBeInTheDocument();
+    expect(screen.queryByText(/ASK_EACH_TIME/u)).not.toBeInTheDocument();
+  });
+
+  it("reports the scheduled auto-run state whether it is on or off", () => {
+    const { rerender } = render(
+      <HomeScreen {...createProps({ autoRunFeatureEnabled: false })} />,
+    );
+    expect(screen.getByTestId("header-auto-run")).toHaveTextContent("MANUAL");
+
+    rerender(<HomeScreen {...createProps({ autoRunFeatureEnabled: true })} />);
+    expect(screen.getByTestId("header-auto-run")).toHaveTextContent(
+      "SCHEDULED",
+    );
+  });
+
+  it("no longer duplicates the cycle count as text beside the bar", () => {
+    render(<HomeScreen {...createProps()} />);
+
+    expect(
+      screen.queryByText(/^ポモドーロ \d+\/\d+$/u),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("cycle-progress")).toBeInTheDocument();
   });
 });

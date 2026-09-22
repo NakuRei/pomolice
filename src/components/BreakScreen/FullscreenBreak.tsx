@@ -92,7 +92,7 @@ export function FullscreenBreak(): React.ReactElement {
 
         {/* Large countdown timer */}
         <div
-          className="mb-8 font-['Geist_Mono'] text-[120px] font-bold tracking-tight text-text tabular-nums"
+          className="mb-8 text-[120px] font-bold tracking-tight text-text tabular-nums"
           data-testid="break-timer-display"
           aria-live="polite"
           aria-atomic="true"

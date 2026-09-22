@@ -77,14 +77,17 @@ export function EmergencyStopButton(): React.ReactElement | null {
 
   return (
     <>
-      <button
+      <Button
+        appearance="secondary"
+        size="md"
+        shape="pill"
         onClick={handleEmergencyStopClick}
-        className="text-xs text-text-muted underline transition-colors hover:text-danger-400"
-        data-testid="emergency-stop-button"
+        testId="emergency-stop-button"
         aria-label="緊急停止"
+        className="tracking-wider"
       >
         緊急停止
-      </button>
+      </Button>
 
       {showConfirmDialog && (
         <DialogOverlay testId="emergency-stop-dialog">

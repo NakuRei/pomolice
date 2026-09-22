@@ -2,6 +2,7 @@ import type { SVGProps } from "react";
 import {
   ArrowLeft,
   LoaderCircle,
+  Play,
   Settings,
   TriangleAlert,
   Volume2,
@@ -73,6 +74,16 @@ export function WarningTriangleIcon(props: AppIconProps): React.ReactElement {
 export function LoadingSpinnerIcon(props: AppIconProps): React.ReactElement {
   return (
     <LoaderCircle
+      strokeWidth={DEFAULT_ICON_STROKE_WIDTH}
+      aria-hidden="true"
+      {...props}
+    />
+  );
+}
+
+export function PlayIcon(props: AppIconProps): React.ReactElement {
+  return (
+    <Play
       strokeWidth={DEFAULT_ICON_STROKE_WIDTH}
       aria-hidden="true"
       {...props}
