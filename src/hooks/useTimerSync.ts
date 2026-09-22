@@ -10,6 +10,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { createLogger } from "../logging/logger";
 import { FRONTEND_LOG_EVENT_IDS } from "../logging/logEvents";
 import {
+  type ActiveWindowChangedPayload,
   type TimerTickPayload,
   type SessionCompletedPayload,
   type FullStatePayload,
@@ -50,6 +51,9 @@ export function useTimerSync(): void {
   const handleTimerTick = useTimerStore((s) => s.handleTimerTick);
   const handleSessionCompleted = useTimerStore((s) => s.handleSessionCompleted);
   const handleFullState = useTimerStore((s) => s.handleFullState);
+  const handleActiveWindowChanged = useTimerStore(
+    (s) => s.handleActiveWindowChanged,
+  );
   const setConnected = useTimerStore((s) => s.setConnected);
   const syncSettings = useTimerStore((s) => s.syncSettings);
   const showAutoRunStopPendingInfo = useTimerStore(
@@ -141,7 +145,20 @@ export function useTimerSync(): void {
           showAutoRunStoppedInfo();
         }
       });
-      return registerActiveListener(unlistenAutoRunStopped);
+      if (!registerActiveListener(unlistenAutoRunStopped)) {
+        return false;
+      }
+
+      const unlistenActiveWindowChanged =
+        await listen<ActiveWindowChangedPayload>(
+          "active_window_changed",
+          (event) => {
+            if (mounted) {
+              handleActiveWindowChanged(event.payload);
+            }
+          },
+        );
+      return registerActiveListener(unlistenActiveWindowChanged);
     }
 
     function shouldRetryTimerSyncSetupFailure(
@@ -241,6 +258,7 @@ export function useTimerSync(): void {
     handleTimerTick,
     handleSessionCompleted,
     handleFullState,
+    handleActiveWindowChanged,
     setConnected,
     showAutoRunStopPendingInfo,
     showAutoRunStoppedInfo,

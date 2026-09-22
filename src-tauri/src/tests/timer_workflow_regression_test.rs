@@ -355,7 +355,7 @@ async fn complete_initial_full_state_sync_outside_schedule_window(state: &AppSta
         .await
         .expect("full state should be available");
 
-    assert!(!full_state.should_prompt_start_on_boot);
+    assert!(full_state.boot_auto_start_prompt_window.is_none());
 }
 
 async fn assert_work_session_started_from_boundary(state: &AppState) {
@@ -537,7 +537,7 @@ async fn build_prompting_state(
     let full_state = get_full_state_for_tests(&state)
         .await
         .expect("full state should be available");
-    assert!(full_state.should_prompt_start_on_boot);
+    assert!(full_state.boot_auto_start_prompt_window.is_some());
     assert!(full_state.active_window_summary.is_some());
 
     state
@@ -577,7 +577,7 @@ async fn build_prompting_state_with_controlled_save_failure(
     let full_state = get_full_state_for_tests(&state)
         .await
         .expect("full state should be available");
-    assert!(full_state.should_prompt_start_on_boot);
+    assert!(full_state.boot_auto_start_prompt_window.is_some());
     assert!(full_state.active_window_summary.is_some());
 
     state
@@ -678,7 +678,7 @@ async fn boot_prompt_resolution_before_initial_full_state_does_not_open_start_bo
         let full_state = get_full_state_for_tests(&state)
             .await
             .expect("initial full state should still decide startup prompt");
-        assert!(full_state.should_prompt_start_on_boot);
+        assert!(full_state.boot_auto_start_prompt_window.is_some());
         assert_daytime_monday_window(&full_state);
     }
 }
@@ -846,7 +846,7 @@ async fn initial_sync_outside_schedule_window_allows_future_scheduled_work_start
         .run_tick(&state, local_datetime(2025, 1, 6, 9, 0, 10))
         .await;
 
-    assert!(!full_state.should_prompt_start_on_boot);
+    assert!(full_state.boot_auto_start_prompt_window.is_none());
     assert!(full_state.active_window_summary.is_none());
     assert_work_session_started_from_boundary(&state).await;
 }
@@ -902,7 +902,7 @@ async fn initial_sync_while_working_allows_future_scheduled_work_start_after_sto
         .await;
 
     assert_eq!(full_state.status, TimerStatus::Working);
-    assert!(!full_state.should_prompt_start_on_boot);
+    assert!(full_state.boot_auto_start_prompt_window.is_none());
     assert_work_session_started_from_boundary(&state).await;
 }
 
@@ -923,7 +923,7 @@ async fn pending_boot_prompt_prevents_scheduled_work_start_after_follow_up_full_
         .run_tick(&state, local_datetime(2025, 1, 6, 9, 0, 10))
         .await;
 
-    assert!(!second_full_state.should_prompt_start_on_boot);
+    assert!(second_full_state.boot_auto_start_prompt_window.is_none());
     assert_no_work_session_started_from_boundary(&state).await;
 }
 
@@ -1121,7 +1121,7 @@ async fn scheduler_waits_for_initial_full_state_before_start_boundary() {
     let full_state = get_full_state_for_tests(&state)
         .await
         .expect("initial full state should still be available");
-    assert!(full_state.should_prompt_start_on_boot);
+    assert!(full_state.boot_auto_start_prompt_window.is_some());
     assert_daytime_monday_window(&full_state);
 }
 

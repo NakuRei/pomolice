@@ -15,15 +15,17 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockResolvedValue("resolved_later"),
 }));
 
+const MONDAY_DAYTIME_WINDOW = {
+  weekday_key: "mon",
+  start_time: "09:00",
+  end_time: "18:00",
+  crosses_midnight: false,
+} as const;
+
 function setDialogVisible(): void {
   useTimerStore.setState({
-    shouldPromptStartOnBoot: true,
-    activeWindowSummary: {
-      weekday_key: "mon",
-      start_time: "09:00",
-      end_time: "18:00",
-      crosses_midnight: false,
-    },
+    bootAutoStartPromptWindow: MONDAY_DAYTIME_WINDOW,
+    activeWindowSummary: MONDAY_DAYTIME_WINDOW,
   });
 }
 
@@ -44,7 +46,7 @@ describe("AutoStartConfirmDialog", () => {
       isFullscreenBreak: false,
       requiresManualContinueDecision: false,
       isConnected: true,
-      shouldPromptStartOnBoot: false,
+      bootAutoStartPromptWindow: null,
       activeWindowSummary: null,
     });
   });
@@ -56,27 +58,26 @@ describe("AutoStartConfirmDialog", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("does not render when prompt flag is true but active window summary is missing", () => {
-    useTimerStore.setState({
-      shouldPromptStartOnBoot: true,
-      activeWindowSummary: null,
+  it("stays open with the boot-time window after the live window ends", () => {
+    setDialogVisible();
+    render(<AutoStartConfirmDialog />);
+
+    act(() => {
+      useTimerStore
+        .getState()
+        .handleActiveWindowChanged({ active_window_summary: null });
     });
 
-    render(<AutoStartConfirmDialog />);
+    expect(getAutoStartConfirmDialog()).toBeInTheDocument();
     expect(
-      screen.queryByRole("dialog", { name: "作業を開始しますか？" }),
-    ).not.toBeInTheDocument();
+      screen.getByText(/現在は 月曜日 09:00 - 18:00/u),
+    ).toBeInTheDocument();
   });
 
-  it("does not render when active window summary exists but prompt flag is false", () => {
+  it("does not render when only the live active window exists without a boot prompt", () => {
     useTimerStore.setState({
-      shouldPromptStartOnBoot: false,
-      activeWindowSummary: {
-        weekday_key: "mon",
-        start_time: "09:00",
-        end_time: "18:00",
-        crosses_midnight: false,
-      },
+      bootAutoStartPromptWindow: null,
+      activeWindowSummary: MONDAY_DAYTIME_WINDOW,
     });
 
     render(<AutoStartConfirmDialog />);
@@ -167,7 +168,7 @@ describe("AutoStartConfirmDialog", () => {
 
     act(() => {
       useTimerStore.setState({
-        shouldPromptStartOnBoot: false,
+        bootAutoStartPromptWindow: null,
         activeWindowSummary: null,
       });
       setDialogVisible();

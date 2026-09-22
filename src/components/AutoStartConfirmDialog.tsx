@@ -8,11 +8,8 @@ import { DialogPanel } from "./shared/DialogPanel";
 import { InlineError } from "./shared/InlineError";
 
 export function AutoStartConfirmDialog(): React.ReactElement | null {
-  const shouldPromptStartOnBoot = useTimerStore(
-    (state) => state.shouldPromptStartOnBoot,
-  );
-  const activeWindowSummary = useTimerStore(
-    (state) => state.activeWindowSummary,
+  const bootAutoStartPromptWindow = useTimerStore(
+    (state) => state.bootAutoStartPromptWindow,
   );
   const resolveBootAutoStartPrompt = useTimerStore(
     (state) => state.resolveBootAutoStartPrompt,
@@ -20,7 +17,7 @@ export function AutoStartConfirmDialog(): React.ReactElement | null {
   const titleId = useId();
   const startButtonRef = useRef<HTMLButtonElement>(null);
 
-  const isVisible = shouldPromptStartOnBoot && activeWindowSummary !== null;
+  const isVisible = bootAutoStartPromptWindow !== null;
   useEffect(() => {
     if (!isVisible) {
       return;
@@ -52,8 +49,8 @@ export function AutoStartConfirmDialog(): React.ReactElement | null {
   }
 
   const weekdayLabel =
-    WEEKDAY_LABELS_BY_KEY[activeWindowSummary.weekday_key].full;
-  const crossesMidnightSuffix = activeWindowSummary.crosses_midnight
+    WEEKDAY_LABELS_BY_KEY[bootAutoStartPromptWindow.weekday_key].full;
+  const crossesMidnightSuffix = bootAutoStartPromptWindow.crosses_midnight
     ? "（日跨ぎ）"
     : "";
 
@@ -64,8 +61,8 @@ export function AutoStartConfirmDialog(): React.ReactElement | null {
           作業を開始しますか？
         </h2>
         <p className="mb-2 text-text-muted">
-          現在は {weekdayLabel} {activeWindowSummary.start_time} -{" "}
-          {activeWindowSummary.end_time}
+          現在は {weekdayLabel} {bootAutoStartPromptWindow.start_time} -{" "}
+          {bootAutoStartPromptWindow.end_time}
           {crossesMidnightSuffix} の自動実行枠です。
         </p>
         <p className="mb-4 text-text-muted">

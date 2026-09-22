@@ -49,7 +49,7 @@ function createConnectedFullState(): FullStatePayload {
       long_break_interval: 4,
       post_break_transition_policy: "require_manual_continue",
     },
-    should_prompt_start_on_boot: false,
+    boot_auto_start_prompt_window: null,
     active_window_summary: null,
   };
 }

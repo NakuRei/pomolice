@@ -86,7 +86,7 @@ export interface FullStatePayload extends TimerTickPayload {
     long_break_interval: number;
     post_break_transition_policy: PostBreakTransitionPolicy;
   };
-  should_prompt_start_on_boot: boolean;
+  boot_auto_start_prompt_window: ActiveWindowSummaryPayload | null;
   active_window_summary: ActiveWindowSummaryPayload | null;
 }
 
@@ -95,6 +95,14 @@ export interface ActiveWindowSummaryPayload {
   start_time: string;
   end_time: string;
   crosses_midnight: boolean;
+}
+
+/**
+ * Payload received from backend active_window_changed events.
+ * Null while auto-run is disabled or the time is outside every enabled slot.
+ */
+export interface ActiveWindowChangedPayload {
+  active_window_summary: ActiveWindowSummaryPayload | null;
 }
 
 export type InfoMessageId = "auto_run_stop_pending" | "auto_run_stopped";
@@ -122,7 +130,9 @@ interface TimerState {
   // UI-only state
   requiresManualContinueDecision: boolean;
   isConnected: boolean;
-  shouldPromptStartOnBoot: boolean;
+  // Snapshot from the boot-time prompt, kept apart from the live
+  // activeWindowSummary so the dialog survives until the user answers.
+  bootAutoStartPromptWindow: ActiveWindowSummaryPayload | null;
   activeWindowSummary: ActiveWindowSummaryPayload | null;
   infoMessage: InfoMessage | null;
   infoMessageShownAtById: Partial<Record<InfoMessageId, number>>;
@@ -149,6 +159,7 @@ interface TimerActions {
   handleTimerTick: (payload: TimerTickPayload) => void;
   handleSessionCompleted: (payload: SessionCompletedPayload) => void;
   handleFullState: (payload: FullStatePayload) => void;
+  handleActiveWindowChanged: (payload: ActiveWindowChangedPayload) => void;
   setConnected: (connected: boolean) => void;
 }
 
@@ -306,7 +317,7 @@ const initialState: TimerState = {
   isFullscreenBreak: false,
   requiresManualContinueDecision: false,
   isConnected: false,
-  shouldPromptStartOnBoot: false,
+  bootAutoStartPromptWindow: null,
   activeWindowSummary: null,
   infoMessage: null,
   infoMessageShownAtById: {},
@@ -460,7 +471,7 @@ export const useTimerStore = create<TimerStore>()(
         try {
           await invoke("resolve_boot_auto_start_prompt", { startNow });
           set((state) => {
-            state.shouldPromptStartOnBoot = false;
+            state.bootAutoStartPromptWindow = null;
           });
         } catch (error) {
           const detail = formatPublicCommandErrorDetail(error);
@@ -603,9 +614,18 @@ export const useTimerStore = create<TimerStore>()(
           state.isFullscreenBreak = payload.is_fullscreen_break;
           state.requiresManualContinueDecision =
             payload.post_break_decision_pending;
-          state.shouldPromptStartOnBoot = payload.should_prompt_start_on_boot;
+          state.bootAutoStartPromptWindow =
+            payload.boot_auto_start_prompt_window;
           state.activeWindowSummary = payload.active_window_summary;
           state.isConnected = true;
+        });
+      },
+
+      handleActiveWindowChanged: (
+        payload: ActiveWindowChangedPayload,
+      ): void => {
+        set((state) => {
+          state.activeWindowSummary = payload.active_window_summary;
         });
       },
 

@@ -1,11 +1,13 @@
 // Timer State Manager
 // Manages timer state and session lifecycle without global statics
 
+use chrono::{DateTime, Local};
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
 use crate::error::{PomoliceError, Result};
 use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
+use crate::schedule_boundary::{is_now_inside_schedule_window, ActiveWindow};
 use crate::types::{
     FullStatePayload, LongBreakDurationSecs, LongBreakIntervalCount, PostBreakDecisionAction,
     PostBreakTransitionPolicy, ScheduleStopState, SessionCompletedPayload,
@@ -64,6 +66,15 @@ pub(crate) struct AutoRunBoundaryObservation {
     pub(crate) auto_run_feature_enabled: bool,
     pub(crate) weekly_auto_run_config: WeeklyAutoRunConfig,
     pub(crate) change_identity: AutoRunBoundaryChangeIdentity,
+}
+
+impl AutoRunBoundaryObservation {
+    pub(crate) fn active_window_at(&self, now_local: DateTime<Local>) -> Option<ActiveWindow> {
+        if !self.auto_run_feature_enabled {
+            return None;
+        }
+        is_now_inside_schedule_window(now_local, &self.weekly_auto_run_config)
+    }
 }
 
 struct AutoRunBoundaryPublication {

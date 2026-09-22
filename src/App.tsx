@@ -27,8 +27,8 @@ function App(): React.ReactElement {
   const notificationSoundMuted = useSettingsStore(
     (state) => state.notificationSoundMuted,
   );
-  const autoRunFeatureEnabled = useSettingsStore(
-    (state) => state.autoRunFeatureEnabled,
+  const activeWindowSummary = useTimerStore(
+    (state) => state.activeWindowSummary,
   );
   const postBreakTransitionPolicy = useSettingsStore(
     (state) => state.postBreakTransitionPolicy,
@@ -83,7 +83,7 @@ function App(): React.ReactElement {
       renderHomeScreen={() => (
         <HomeScreen
           notificationSoundMuted={notificationSoundMuted}
-          autoRunFeatureEnabled={autoRunFeatureEnabled}
+          isAutoRunWindowActive={activeWindowSummary !== null}
           isAutoContinueEnabled={isAutoContinueEnabled}
           requiresManualContinue={requiresManualContinue}
           onToggleNotificationSoundMuted={toggleNotificationSoundMuted}

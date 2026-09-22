@@ -96,7 +96,7 @@ function createFullStatePayload(
     break_interaction_count: 0,
     is_fullscreen_break: false,
     post_break_decision_pending: false,
-    should_prompt_start_on_boot: false,
+    boot_auto_start_prompt_window: null,
     active_window_summary: null,
     ...stateOverrides,
     settings: {
@@ -595,7 +595,7 @@ describe("useTimerSync", () => {
           break_interaction_count: 0,
           is_fullscreen_break: false,
           post_break_decision_pending: false,
-          should_prompt_start_on_boot: false,
+          boot_auto_start_prompt_window: null,
           active_window_summary: null,
           settings: {
             work_duration_secs: 1200,

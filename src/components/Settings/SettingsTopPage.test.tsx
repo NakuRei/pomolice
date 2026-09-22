@@ -21,7 +21,7 @@ describe("SettingsTopPage", () => {
       isFullscreenBreak: false,
       requiresManualContinueDecision: false,
       isConnected: true,
-      shouldPromptStartOnBoot: false,
+      bootAutoStartPromptWindow: null,
       activeWindowSummary: null,
       infoMessage: null,
       infoMessageShownAtById: {},

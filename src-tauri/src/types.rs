@@ -835,17 +835,24 @@ pub(crate) struct FullStatePayload {
     pub is_fullscreen_break: bool,
     pub post_break_decision_pending: bool,
     pub settings: TimerSettings,
-    pub should_prompt_start_on_boot: bool,
+    /// Set only by the first idle full-state sync; later syncs return `None`
+    /// even while the window is still active.
+    pub boot_auto_start_prompt_window: Option<ActiveWindowSummaryPayload>,
     pub active_window_summary: Option<ActiveWindowSummaryPayload>,
 }
 
 /// Summary of the currently active schedule window.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct ActiveWindowSummaryPayload {
     pub weekday_key: String,
     pub start_time: String,
     pub end_time: String,
     pub crosses_midnight: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct ActiveWindowChangedPayload {
+    pub active_window_summary: Option<ActiveWindowSummaryPayload>,
 }
 
 /// Application state for timer management
@@ -913,7 +920,7 @@ impl TimerState {
             is_fullscreen_break: self.is_fullscreen_break,
             post_break_decision_pending: self.post_break_decision_pending,
             settings: self.settings.clone(),
-            should_prompt_start_on_boot: false,
+            boot_auto_start_prompt_window: None,
             active_window_summary: None,
         }
     }

@@ -135,7 +135,12 @@ describe("timerStore backend command errors", () => {
             isConnected: true,
             status: TimerStatus.IDLE,
             requiresManualContinueDecision: true,
-            shouldPromptStartOnBoot: true,
+            bootAutoStartPromptWindow: {
+              weekday_key: "mon",
+              start_time: "09:00",
+              end_time: "18:00",
+              crosses_midnight: false,
+            },
           });
 
           await request();

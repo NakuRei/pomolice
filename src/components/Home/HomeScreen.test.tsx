@@ -11,7 +11,7 @@ function createProps(
 ): HomeScreenProps {
   return {
     notificationSoundMuted: false,
-    autoRunFeatureEnabled: false,
+    isAutoRunWindowActive: false,
     isAutoContinueEnabled: false,
     requiresManualContinue: false,
     onToggleNotificationSoundMuted: vi.fn(),
@@ -39,7 +39,7 @@ describe("HomeScreen", () => {
       isFullscreenBreak: false,
       requiresManualContinueDecision: false,
       isConnected: false,
-      shouldPromptStartOnBoot: false,
+      bootAutoStartPromptWindow: null,
       activeWindowSummary: null,
       infoMessage: null,
       infoMessageShownAtById: {},
@@ -127,7 +127,7 @@ describe("HomeScreen", () => {
     render(
       <HomeScreen
         {...createProps({
-          autoRunFeatureEnabled: true,
+          isAutoRunWindowActive: true,
           isAutoContinueEnabled: true,
         })}
       />,
@@ -166,13 +166,13 @@ describe("HomeScreen", () => {
     expect(screen.queryByText(/ASK_EACH_TIME/u)).not.toBeInTheDocument();
   });
 
-  it("reports the scheduled auto-run state whether it is on or off", () => {
+  it("shows SCHEDULED only while an auto-run window is active", () => {
     const { rerender } = render(
-      <HomeScreen {...createProps({ autoRunFeatureEnabled: false })} />,
+      <HomeScreen {...createProps({ isAutoRunWindowActive: false })} />,
     );
     expect(screen.getByTestId("header-auto-run")).toHaveTextContent("MANUAL");
 
-    rerender(<HomeScreen {...createProps({ autoRunFeatureEnabled: true })} />);
+    rerender(<HomeScreen {...createProps({ isAutoRunWindowActive: true })} />);
     expect(screen.getByTestId("header-auto-run")).toHaveTextContent(
       "SCHEDULED",
     );

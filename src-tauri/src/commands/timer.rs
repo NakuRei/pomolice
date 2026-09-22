@@ -3,12 +3,12 @@ use tauri::{Manager, State, WebviewWindow};
 use crate::commands::input_rejection::ObservedCommandArg;
 use crate::error::{PomoliceError, Result};
 use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
-use crate::schedule_boundary::{is_now_inside_schedule_window, ActiveWindow};
+use crate::schedule_boundary::ActiveWindow;
 use crate::state::AppState;
 use crate::types::{
-    ActiveWindowSummaryPayload, FullStatePayload, LongBreakDurationSecs, LongBreakIntervalCount,
-    PostBreakDecisionAction, PostBreakTransitionPolicy, ShortBreakDurationSecs, TimerSettings,
-    TimerStatus, WeeklyAutoRunConfig, WorkDurationSecs,
+    FullStatePayload, LongBreakDurationSecs, LongBreakIntervalCount, PostBreakDecisionAction,
+    PostBreakTransitionPolicy, ShortBreakDurationSecs, TimerSettings, TimerStatus,
+    WeeklyAutoRunConfig, WorkDurationSecs,
 };
 
 /// Start a work session with settings
@@ -159,15 +159,6 @@ fn authorize_main_window(window: &WebviewWindow, command_name: &'static str) -> 
     Ok(())
 }
 
-fn to_active_window_summary_payload(active_window: &ActiveWindow) -> ActiveWindowSummaryPayload {
-    ActiveWindowSummaryPayload {
-        weekday_key: active_window.slot_key.clone(),
-        start_time: active_window.start_time.clone(),
-        end_time: active_window.end_time.clone(),
-        crosses_midnight: active_window.crosses_midnight,
-    }
-}
-
 #[cfg(test)]
 async fn start_work_for_tests(
     state: &AppState,
@@ -199,31 +190,29 @@ async fn start_work_after_authorizing_window_label_for_tests(
 async fn get_full_state_contract(state: &AppState) -> Result<FullStatePayload> {
     let now_local = state.clock.now_local();
 
-    let (mut full_state_payload, timer_status, auto_run_feature_enabled, weekly_auto_run_config) = {
+    let (mut full_state_payload, timer_status, active_window) = {
         let timer_manager = state.timer_manager.lock().await;
-        let timer_state = timer_manager.get_state();
         (
             timer_manager.get_full_state(),
             timer_manager.status(),
-            timer_state.auto_run_feature_enabled,
-            timer_state.weekly_auto_run_config.clone(),
+            timer_manager
+                .observe_auto_run_boundary_scope()
+                .active_window_at(now_local),
         )
     };
 
-    let active_window = if auto_run_feature_enabled {
-        is_now_inside_schedule_window(now_local, &weekly_auto_run_config)
-    } else {
-        None
-    };
-
-    full_state_payload.active_window_summary =
-        active_window.as_ref().map(to_active_window_summary_payload);
+    let active_window_summary = active_window.as_ref().map(ActiveWindow::to_summary_payload);
 
     let should_prompt_start_on_boot = state.record_initial_full_state_auto_start_prompt_decision(
         timer_status == TimerStatus::Idle && active_window.is_some(),
     );
 
-    full_state_payload.should_prompt_start_on_boot = should_prompt_start_on_boot;
+    full_state_payload.boot_auto_start_prompt_window = if should_prompt_start_on_boot {
+        active_window_summary.clone()
+    } else {
+        None
+    };
+    full_state_payload.active_window_summary = active_window_summary;
     Ok(full_state_payload)
 }
 
@@ -666,7 +655,7 @@ mod tests {
             .expect("full state should be available");
 
         assert_eq!(full_state.status, TimerStatus::Idle);
-        assert!(full_state.should_prompt_start_on_boot);
+        assert!(full_state.boot_auto_start_prompt_window.is_some());
         assert_daytime_monday_window(&full_state);
     }
 
@@ -686,7 +675,7 @@ mod tests {
             .expect("full state should be available");
 
         assert_eq!(full_state.status, TimerStatus::Idle);
-        assert!(!full_state.should_prompt_start_on_boot);
+        assert!(full_state.boot_auto_start_prompt_window.is_none());
         assert!(full_state.active_window_summary.is_none());
     }
 
@@ -707,9 +696,9 @@ mod tests {
             .await
             .expect("second full state should be available");
 
-        assert!(first_full_state.should_prompt_start_on_boot);
+        assert!(first_full_state.boot_auto_start_prompt_window.is_some());
         assert_daytime_monday_window(&first_full_state);
-        assert!(!second_full_state.should_prompt_start_on_boot);
+        assert!(second_full_state.boot_auto_start_prompt_window.is_none());
         assert_daytime_monday_window(&second_full_state);
     }
 
@@ -737,7 +726,7 @@ mod tests {
             .expect("full state should be available");
 
         assert_eq!(full_state.status, TimerStatus::Working);
-        assert!(!full_state.should_prompt_start_on_boot);
+        assert!(full_state.boot_auto_start_prompt_window.is_none());
         assert_daytime_monday_window(&full_state);
     }
 

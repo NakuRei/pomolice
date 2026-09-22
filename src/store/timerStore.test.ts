@@ -57,7 +57,7 @@ function createFullStatePayload(
     break_interaction_count: 0,
     is_fullscreen_break: false,
     post_break_decision_pending: false,
-    should_prompt_start_on_boot: false,
+    boot_auto_start_prompt_window: null,
     active_window_summary: null,
     settings: {
       work_duration_secs: 1500,
@@ -454,7 +454,7 @@ describe("timerStore", () => {
           break_interaction_count: 0,
           is_fullscreen_break: false,
           post_break_decision_pending: false,
-          should_prompt_start_on_boot: false,
+          boot_auto_start_prompt_window: null,
           active_window_summary: null,
           settings: {
             work_duration_secs: 1500,
@@ -496,7 +496,12 @@ describe("timerStore", () => {
           break_interaction_count: 0,
           is_fullscreen_break: false,
           post_break_decision_pending: false,
-          should_prompt_start_on_boot: true,
+          boot_auto_start_prompt_window: {
+            weekday_key: "mon",
+            start_time: "09:00",
+            end_time: "18:00",
+            crosses_midnight: false,
+          },
           active_window_summary: {
             weekday_key: "mon",
             start_time: "09:00",
@@ -513,7 +518,12 @@ describe("timerStore", () => {
         });
 
         const state = useTimerStore.getState();
-        expect(state.shouldPromptStartOnBoot).toBe(true);
+        expect(state.bootAutoStartPromptWindow).toEqual({
+          weekday_key: "mon",
+          start_time: "09:00",
+          end_time: "18:00",
+          crosses_midnight: false,
+        });
         expect(state.activeWindowSummary).toEqual({
           weekday_key: "mon",
           start_time: "09:00",

@@ -7,6 +7,8 @@ import {
   waitFor,
 } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import App from "./App";
 import { useSettingsStore } from "./store/settingsStore";
 import { useTimerStore } from "./store/timerStore";
@@ -16,26 +18,28 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(vi.fn()),
 }));
 
+const IDLE_FULL_STATE = vi.hoisted(() => ({
+  status: "idle",
+  remaining_seconds: 1500,
+  session_type: "work",
+  current_cycle: 0,
+  completed_pomodoros: 0,
+  break_interaction_count: 0,
+  is_fullscreen_break: false,
+  post_break_decision_pending: false,
+  boot_auto_start_prompt_window: null,
+  active_window_summary: null,
+  settings: {
+    work_duration_secs: 1500,
+    short_break_duration_secs: 300,
+    long_break_duration_secs: 900,
+    long_break_interval: 4,
+    post_break_transition_policy: "require_manual_continue",
+  },
+}));
+
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn().mockResolvedValue({
-    status: "idle",
-    remaining_seconds: 1500,
-    session_type: "work",
-    current_cycle: 0,
-    completed_pomodoros: 0,
-    break_interaction_count: 0,
-    is_fullscreen_break: false,
-    post_break_decision_pending: false,
-    should_prompt_start_on_boot: false,
-    active_window_summary: null,
-    settings: {
-      work_duration_secs: 1500,
-      short_break_duration_secs: 300,
-      long_break_duration_secs: 900,
-      long_break_interval: 4,
-      post_break_transition_policy: "require_manual_continue",
-    },
-  }),
+  invoke: vi.fn().mockResolvedValue(IDLE_FULL_STATE),
 }));
 
 vi.mock("@tauri-apps/plugin-notification", () => ({
@@ -49,6 +53,13 @@ vi.mock("./services/notifications", () => ({
     Promise.resolve({ status: "played" }),
   ),
 }));
+
+const MONDAY_DAYTIME_WINDOW = {
+  weekday_key: "mon",
+  start_time: "09:00",
+  end_time: "18:00",
+  crosses_midnight: false,
+} as const;
 
 const settingsTopTimerButtonName = /^タイマー設定/u;
 const settingsTopAutoRunButtonName = /^曜日別自動実行/u;
@@ -88,6 +99,53 @@ describe("App", () => {
     });
     resetTimerStoreForTest();
     useTimerStore.setState({ isConnected: true });
+    vi.mocked(listen).mockResolvedValue(vi.fn());
+  });
+
+  it("shows SCHEDULED when the backend reports an active auto-run window at connection", async () => {
+    vi.mocked(invoke).mockResolvedValueOnce({
+      ...IDLE_FULL_STATE,
+      active_window_summary: MONDAY_DAYTIME_WINDOW,
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("header-auto-run")).toHaveTextContent(
+        "SCHEDULED",
+      );
+    });
+  });
+
+  it("switches between SCHEDULED and MANUAL as the backend reports window changes", async () => {
+    const backendEventHandlers = new Map<string, (event: unknown) => void>();
+    vi.mocked(listen).mockImplementation((event, handler) => {
+      backendEventHandlers.set(event, handler as (event: unknown) => void);
+      return Promise.resolve(vi.fn());
+    });
+
+    render(<App />);
+    expect(screen.getByTestId("header-auto-run")).toHaveTextContent("MANUAL");
+    await waitFor(() => {
+      expect(backendEventHandlers.has("active_window_changed")).toBe(true);
+    });
+    const emitActiveWindowChanged = (
+      activeWindowSummary: typeof MONDAY_DAYTIME_WINDOW | null,
+    ): void => {
+      act(() => {
+        backendEventHandlers.get("active_window_changed")?.({
+          payload: { active_window_summary: activeWindowSummary },
+        });
+      });
+    };
+
+    emitActiveWindowChanged(MONDAY_DAYTIME_WINDOW);
+    expect(screen.getByTestId("header-auto-run")).toHaveTextContent(
+      "SCHEDULED",
+    );
+
+    emitActiveWindowChanged(null);
+    expect(screen.getByTestId("header-auto-run")).toHaveTextContent("MANUAL");
   });
 
   it("opens settings top screen when settings button is clicked", async () => {

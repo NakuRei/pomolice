@@ -25,7 +25,7 @@ const CONTENT_WIDTH_CLASS_NAME = "mx-auto w-full max-w-4xl";
  * ```tsx
  * <HomeScreen
  *   notificationSoundMuted={notificationSoundMuted}
- *   autoRunFeatureEnabled={autoRunFeatureEnabled}
+ *   isAutoRunWindowActive={activeWindowSummary !== null}
  *   isAutoContinueEnabled={isAutoContinueEnabled}
  *   requiresManualContinue={requiresManualContinue}
  *   onToggleNotificationSoundMuted={toggleNotificationSoundMuted}
@@ -35,7 +35,7 @@ const CONTENT_WIDTH_CLASS_NAME = "mx-auto w-full max-w-4xl";
  */
 export interface HomeScreenProps {
   notificationSoundMuted: boolean;
-  autoRunFeatureEnabled: boolean;
+  isAutoRunWindowActive: boolean;
   isAutoContinueEnabled: boolean;
   requiresManualContinue: boolean;
   onToggleNotificationSoundMuted: () => void;
@@ -44,7 +44,7 @@ export interface HomeScreenProps {
 
 export function HomeScreen({
   notificationSoundMuted,
-  autoRunFeatureEnabled,
+  isAutoRunWindowActive,
   isAutoContinueEnabled,
   requiresManualContinue,
   onToggleNotificationSoundMuted,
@@ -83,11 +83,11 @@ export function HomeScreen({
 
             <div
               className={`${HEADER_LINE_CLASS_NAME} ${
-                autoRunFeatureEnabled ? "text-success-300" : "text-primary-600"
+                isAutoRunWindowActive ? "text-success-300" : "text-primary-600"
               }`}
               data-testid="header-auto-run"
             >
-              {autoRunFeatureEnabled ? "SCHEDULED" : "MANUAL"}
+              {isAutoRunWindowActive ? "SCHEDULED" : "MANUAL"}
             </div>
           </div>
 

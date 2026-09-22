@@ -11,10 +11,17 @@ use crate::logging_event::{
     log_info_event, log_persistence_write_failure, BackendLogEvent,
     PERSISTENCE_WRITE_TRIGGER_SCHEDULER_STOP_PENDING,
 };
-use crate::schedule_boundary::{collect_crossed_end_boundaries, collect_crossed_start_boundaries};
+use crate::schedule_boundary::{
+    collect_crossed_end_boundaries, collect_crossed_start_boundaries, ActiveWindow,
+};
 use crate::state;
-use crate::timer_state_transition::{AutoRunBoundaryChangeIdentity, ScheduleEndBoundaryResult};
-use crate::types::{BoundaryOccurrenceId, TimerSettings, TimerStatus, WeeklyAutoRunConfig};
+use crate::timer_state_transition::{
+    AutoRunBoundaryChangeIdentity, AutoRunBoundaryObservation, ScheduleEndBoundaryResult,
+};
+use crate::types::{
+    ActiveWindowChangedPayload, BoundaryOccurrenceId, TimerSettings, TimerStatus,
+    WeeklyAutoRunConfig,
+};
 use crate::work_start::{self, StartWorkAttempt, StartWorkRuntimeEffects};
 
 const SCHEDULER_INTERVAL_SECONDS: u64 = 1;
@@ -51,14 +58,13 @@ struct SchedulerRuntimeState {
     last_checked_local: DateTime<Local>,
     start_boundaries_blocked_until_idle: bool,
     last_observed_auto_run_boundary_change: AutoRunBoundaryChangeIdentity,
+    last_published_active_window: Option<ActiveWindow>,
 }
 
 struct SchedulerTimerSnapshot {
     status: TimerStatus,
-    auto_run_feature_enabled: bool,
-    weekly_auto_run_config: WeeklyAutoRunConfig,
+    auto_run: AutoRunBoundaryObservation,
     timer_settings: TimerSettings,
-    auto_run_boundary_change_identity: AutoRunBoundaryChangeIdentity,
 }
 
 struct SchedulerTickPlan {
@@ -68,6 +74,7 @@ struct SchedulerTickPlan {
 
 trait SchedulerRuntimeEffects {
     fn emit_auto_run_stop_pending(&mut self);
+    fn emit_active_window_changed(&mut self, payload: &ActiveWindowChangedPayload);
     fn persist_current_state_with_trigger<'a>(
         &'a mut self,
         trigger: &'static str,
@@ -83,6 +90,10 @@ impl SchedulerRuntimeEffects for AppHandleSchedulerRuntimeEffects<'_> {
         let _ = self
             .app
             .emit("auto_run_stop_pending", serde_json::json!({}));
+    }
+
+    fn emit_active_window_changed(&mut self, payload: &ActiveWindowChangedPayload) {
+        let _ = self.app.emit("active_window_changed", payload);
     }
 
     fn persist_current_state_with_trigger<'a>(
@@ -133,10 +144,7 @@ impl SchedulerTickTestRuntime {
         previous_local: DateTime<Local>,
     ) -> Self {
         let timer_snapshot = load_scheduler_timer_snapshot(state_handle).await;
-        Self::new(
-            previous_local,
-            timer_snapshot.auto_run_boundary_change_identity,
-        )
+        Self::new(previous_local, timer_snapshot.auto_run.change_identity)
     }
 
     fn new(
@@ -149,6 +157,7 @@ impl SchedulerTickTestRuntime {
                 last_checked_local: previous_local,
                 start_boundaries_blocked_until_idle: false,
                 last_observed_auto_run_boundary_change,
+                last_published_active_window: None,
             },
         }
     }
@@ -175,6 +184,8 @@ struct NoopSchedulerRuntimeEffects;
 #[cfg(test)]
 impl SchedulerRuntimeEffects for NoopSchedulerRuntimeEffects {
     fn emit_auto_run_stop_pending(&mut self) {}
+
+    fn emit_active_window_changed(&mut self, _payload: &ActiveWindowChangedPayload) {}
 
     fn persist_current_state_with_trigger<'a>(
         &'a mut self,
@@ -278,7 +289,8 @@ async fn run_app_scheduler_loop(
         processed_boundaries: ProcessedBoundaryOccurrences::default(),
         last_checked_local: initial_previous_local,
         start_boundaries_blocked_until_idle,
-        last_observed_auto_run_boundary_change: timer_snapshot.auto_run_boundary_change_identity,
+        last_observed_auto_run_boundary_change: timer_snapshot.auto_run.change_identity,
+        last_published_active_window: None,
     };
 
     log_info_event(
@@ -357,8 +369,8 @@ async fn run_scheduler_tick_with_effects<S>(
     process_crossed_end_boundaries_with_effects(
         state_handle,
         runtime_state,
-        &timer_snapshot.weekly_auto_run_config,
-        timer_snapshot.auto_run_feature_enabled,
+        &timer_snapshot.auto_run.weekly_auto_run_config,
+        timer_snapshot.auto_run.auto_run_feature_enabled,
         tick_plan.end_boundary_previous_local,
         now_local,
         effects,
@@ -381,19 +393,35 @@ async fn run_scheduler_tick_with_effects<S>(
         .processed_boundaries
         .discard_stale_or_invalid(now_local);
     runtime_state.last_checked_local = now_local;
+
+    publish_active_window_when_changed(runtime_state, now_local, &timer_snapshot, effects);
+}
+
+fn publish_active_window_when_changed(
+    runtime_state: &mut SchedulerRuntimeState,
+    now_local: DateTime<Local>,
+    timer_snapshot: &SchedulerTimerSnapshot,
+    effects: &mut impl SchedulerRuntimeEffects,
+) {
+    let active_window = timer_snapshot.auto_run.active_window_at(now_local);
+    if active_window == runtime_state.last_published_active_window {
+        return;
+    }
+
+    effects.emit_active_window_changed(&ActiveWindowChangedPayload {
+        active_window_summary: active_window.as_ref().map(ActiveWindow::to_summary_payload),
+    });
+    runtime_state.last_published_active_window = active_window;
 }
 
 async fn load_scheduler_timer_snapshot(state_handle: &state::AppState) -> SchedulerTimerSnapshot {
     let timer_manager = state_handle.timer_manager.lock().await;
-    let auto_run_boundary_observation = timer_manager.observe_auto_run_boundary_scope();
     let timer_state = timer_manager.get_state();
 
     SchedulerTimerSnapshot {
         status: timer_manager.status(),
-        auto_run_feature_enabled: auto_run_boundary_observation.auto_run_feature_enabled,
-        weekly_auto_run_config: auto_run_boundary_observation.weekly_auto_run_config,
+        auto_run: timer_manager.observe_auto_run_boundary_scope(),
         timer_settings: timer_state.settings.clone(),
-        auto_run_boundary_change_identity: auto_run_boundary_observation.change_identity,
     }
 }
 
@@ -420,7 +448,7 @@ fn build_scheduler_tick_plan(
     timer_snapshot: &SchedulerTimerSnapshot,
     resumed_start_boundary_evaluation: bool,
 ) -> SchedulerTickPlan {
-    let auto_run_boundary_scope_changed = timer_snapshot.auto_run_boundary_change_identity
+    let auto_run_boundary_scope_changed = timer_snapshot.auto_run.change_identity
         != runtime_state.last_observed_auto_run_boundary_change;
     let mut skip_start_boundaries_this_tick = false;
 
@@ -430,13 +458,13 @@ fn build_scheduler_tick_plan(
             .clear_for_schedule_topology_change();
         runtime_state.last_checked_local = now_local;
         runtime_state.last_observed_auto_run_boundary_change =
-            timer_snapshot.auto_run_boundary_change_identity;
+            timer_snapshot.auto_run.change_identity;
         skip_start_boundaries_this_tick = true;
         log_info_event(
             BackendLogEvent::SchedulerConfigRevisionChanged,
             &[(
                 "config_revision",
-                timer_snapshot.auto_run_boundary_change_identity.to_string(),
+                timer_snapshot.auto_run.change_identity.to_string(),
             )],
         );
         now_local - ChronoDuration::seconds(1)
@@ -444,7 +472,7 @@ fn build_scheduler_tick_plan(
         runtime_state.last_checked_local
     };
 
-    let should_evaluate_start_boundaries = timer_snapshot.auto_run_feature_enabled
+    let should_evaluate_start_boundaries = timer_snapshot.auto_run.auto_run_feature_enabled
         && state_handle.start_boundaries_allowed_after_startup_prompt()
         && !runtime_state.start_boundaries_blocked_until_idle
         && !resumed_start_boundary_evaluation
@@ -508,7 +536,7 @@ async fn process_crossed_start_boundaries_with_effects<S>(
     let crossed_start_boundaries = collect_crossed_start_boundaries(
         previous_local,
         now_local,
-        &timer_snapshot.weekly_auto_run_config,
+        &timer_snapshot.auto_run.weekly_auto_run_config,
     );
 
     for start_boundary in crossed_start_boundaries {
@@ -599,8 +627,9 @@ mod tests {
         sync_automation_policies_with_runtime_effects, TimerCommandRuntimeEffectShell,
     };
     use crate::types::{
-        DayAutoRunSlot, HhMm, PostBreakTransitionPolicy, SessionTransitionReason, SessionType,
-        TimerTickPayload, WeeklyAutoRunConfig, WorkStartOrigin,
+        ActiveWindowSummaryPayload, DayAutoRunSlot, HhMm, PostBreakTransitionPolicy,
+        SessionTransitionReason, SessionType, TimerTickPayload, WeeklyAutoRunConfig,
+        WorkStartOrigin,
     };
     use crate::work_start::StartWorkPersistencePolicy;
     use chrono::{LocalResult, TimeZone, Utc};
@@ -687,12 +716,17 @@ mod tests {
         work_started_durations: Vec<u64>,
         timer_task_spawn_count: usize,
         auto_run_stop_pending_count: usize,
+        active_window_changed_payloads: Vec<ActiveWindowChangedPayload>,
         persist_triggers: Vec<&'static str>,
     }
 
     impl SchedulerRuntimeEffects for RecordingSchedulerRuntimeEffects {
         fn emit_auto_run_stop_pending(&mut self) {
             self.auto_run_stop_pending_count += 1;
+        }
+
+        fn emit_active_window_changed(&mut self, payload: &ActiveWindowChangedPayload) {
+            self.active_window_changed_payloads.push(payload.clone());
         }
 
         fn persist_current_state_with_trigger<'a>(
@@ -1010,8 +1044,8 @@ mod tests {
             processed_boundaries: ProcessedBoundaryOccurrences::default(),
             last_checked_local: previous_local,
             start_boundaries_blocked_until_idle: false,
-            last_observed_auto_run_boundary_change: timer_snapshot
-                .auto_run_boundary_change_identity,
+            last_observed_auto_run_boundary_change: timer_snapshot.auto_run.change_identity,
+            last_published_active_window: None,
         }
     }
 
@@ -1025,8 +1059,8 @@ mod tests {
             processed_boundaries: ProcessedBoundaryOccurrences::default(),
             last_checked_local: previous_local,
             start_boundaries_blocked_until_idle: true,
-            last_observed_auto_run_boundary_change: timer_snapshot
-                .auto_run_boundary_change_identity,
+            last_observed_auto_run_boundary_change: timer_snapshot.auto_run.change_identity,
+            last_published_active_window: None,
         }
     }
 
@@ -1103,6 +1137,141 @@ mod tests {
         assert!(processed_boundaries.record_if_first_seen(&stale_boundary));
         assert!(processed_boundaries.record_if_first_seen(&invalid_boundary));
         assert!(!processed_boundaries.record_if_first_seen(&recent_boundary));
+    }
+
+    fn monday_daytime_summary() -> ActiveWindowSummaryPayload {
+        ActiveWindowSummaryPayload {
+            weekday_key: "mon".to_string(),
+            start_time: "09:00".to_string(),
+            end_time: "18:00".to_string(),
+            crosses_midnight: false,
+        }
+    }
+
+    fn last_published_active_window_change(
+        effects: &RecordingSchedulerRuntimeEffects,
+    ) -> Option<&ActiveWindowChangedPayload> {
+        effects.active_window_changed_payloads.last()
+    }
+
+    fn published_window(
+        active_window_summary: Option<ActiveWindowSummaryPayload>,
+    ) -> ActiveWindowChangedPayload {
+        ActiveWindowChangedPayload {
+            active_window_summary,
+        }
+    }
+
+    async fn tick_through(
+        state: &state::AppState,
+        runtime_state: &mut SchedulerRuntimeState,
+        effects: &mut RecordingSchedulerRuntimeEffects,
+        tick_times: &[DateTime<Local>],
+    ) {
+        for now_local in tick_times {
+            run_scheduler_tick_with_effects(state, runtime_state, *now_local, effects).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn frontend_sees_the_enabled_slot_while_inside_it() {
+        let state = build_test_state_without_persistence_path().await;
+        apply_schedule(
+            &state,
+            weekly_config_with_monday_daytime(),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+        let mut runtime_state =
+            runtime_state_at(&state, local_datetime(2025, 1, 6, 10, 0, 0)).await;
+        let mut effects = RecordingSchedulerRuntimeEffects::default();
+
+        tick_through(
+            &state,
+            &mut runtime_state,
+            &mut effects,
+            &[
+                local_datetime(2025, 1, 6, 10, 0, 1),
+                local_datetime(2025, 1, 6, 10, 0, 2),
+            ],
+        )
+        .await;
+
+        assert_eq!(
+            last_published_active_window_change(&effects),
+            Some(&published_window(Some(monday_daytime_summary())))
+        );
+    }
+
+    #[tokio::test]
+    async fn frontend_sees_no_window_once_the_slot_end_is_reached() {
+        let state = build_test_state_without_persistence_path().await;
+        apply_schedule(
+            &state,
+            weekly_config_with_monday_daytime(),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+        let mut runtime_state =
+            runtime_state_at(&state, local_datetime(2025, 1, 6, 17, 59, 58)).await;
+        let mut effects = RecordingSchedulerRuntimeEffects::default();
+
+        tick_through(
+            &state,
+            &mut runtime_state,
+            &mut effects,
+            &[
+                local_datetime(2025, 1, 6, 17, 59, 59),
+                local_datetime(2025, 1, 6, 18, 0, 0),
+            ],
+        )
+        .await;
+
+        assert_eq!(
+            last_published_active_window_change(&effects),
+            Some(&published_window(None))
+        );
+    }
+
+    #[tokio::test]
+    async fn frontend_sees_no_window_after_auto_run_is_disabled_inside_the_slot() {
+        let state = build_test_state_without_persistence_path().await;
+        apply_schedule(
+            &state,
+            weekly_config_with_monday_daytime(),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+        let mut runtime_state =
+            runtime_state_at(&state, local_datetime(2025, 1, 6, 10, 0, 0)).await;
+        let mut effects = RecordingSchedulerRuntimeEffects::default();
+
+        tick_through(
+            &state,
+            &mut runtime_state,
+            &mut effects,
+            &[local_datetime(2025, 1, 6, 10, 0, 1)],
+        )
+        .await;
+        apply_schedule_with_feature_enabled(
+            &state,
+            false,
+            weekly_config_with_monday_daytime(),
+            PostBreakTransitionPolicy::RequireManualContinue,
+        )
+        .await;
+        tick_through(
+            &state,
+            &mut runtime_state,
+            &mut effects,
+            &[local_datetime(2025, 1, 6, 10, 0, 2)],
+        )
+        .await;
+
+        assert_eq!(
+            last_published_active_window_change(&effects),
+            Some(&published_window(None))
+        );
     }
 
     #[tokio::test]
