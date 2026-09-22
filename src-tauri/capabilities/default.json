@@ -13,6 +13,7 @@
     "allow-exit-without-tray",
     "allow-start-work",
     "allow-resolve-post-break-decision",
+    "allow-set-away-during-break",
     "allow-emergency-stop",
     "allow-sync-timer-duration-settings",
     "allow-sync-automation-policies",

@@ -130,6 +130,15 @@ pub(crate) async fn emergency_stop_from_command(
     emergency_stop_with_runtime_effects(state_handle, &mut effects).await
 }
 
+pub(crate) async fn set_break_attendance_from_command(
+    app: &AppHandle,
+    state_handle: &state::AppState,
+    attendance: types::BreakAttendance,
+) -> Result<()> {
+    let mut effects = AppHandleTimerCommandRuntimeEffectShell { app };
+    set_break_attendance_with_runtime_effects(state_handle, attendance, &mut effects).await
+}
+
 pub(crate) async fn sync_timer_duration_settings_from_command(
     app: &AppHandle,
     state_handle: &state::AppState,
@@ -244,6 +253,23 @@ where
     }
 
     persist_current_state_after_command_effects(state_handle).await
+}
+
+pub(crate) async fn set_break_attendance_with_runtime_effects<S>(
+    state_handle: &state::AppState,
+    attendance: types::BreakAttendance,
+    runtime_effect_shell: &mut S,
+) -> Result<()>
+where
+    S: TimerCommandRuntimeEffectShell,
+{
+    let tick_payload = {
+        let mut timer = state_handle.timer_manager.lock().await;
+        timer.set_break_attendance(attendance)?
+    };
+
+    emit_tick_and_update_tray(runtime_effect_shell, &tick_payload);
+    Ok(())
 }
 
 pub(crate) async fn sync_timer_duration_settings_with_runtime_effects<S>(
@@ -862,7 +888,7 @@ mod timer_command_behavior_tests {
     use crate::external_adapters::persistence::{PersistenceLoadOutcome, PersistenceManager};
     use crate::state::AppState;
     use crate::types::{
-        DayAutoRunSlot, HhMm, LongBreakDurationSecs, LongBreakIntervalCount,
+        BreakAttendance, DayAutoRunSlot, HhMm, LongBreakDurationSecs, LongBreakIntervalCount,
         PostBreakDecisionAction, PostBreakTransitionPolicy, SessionType, ShortBreakDurationSecs,
         TimerSettings, TimerState, TimerStatus, TimerTickPayload, WeeklyAutoRunConfig,
         WorkDurationSecs, WorkStartOrigin,
@@ -885,6 +911,7 @@ mod timer_command_behavior_tests {
         completed_pomodoros: u32,
         break_interaction_count: u32,
         is_fullscreen_break: bool,
+        away_during_break: bool,
     }
 
     impl From<&TimerTickPayload> for TimerTickSnapshot {
@@ -897,6 +924,7 @@ mod timer_command_behavior_tests {
                 completed_pomodoros: payload.completed_pomodoros,
                 break_interaction_count: payload.break_interaction_count,
                 is_fullscreen_break: payload.is_fullscreen_break,
+                away_during_break: payload.away_during_break,
             }
         }
     }
@@ -2061,6 +2089,50 @@ mod timer_command_behavior_tests {
         let timer = state.timer_manager.lock().await;
         assert_eq!(timer.status(), TimerStatus::Idle);
         assert!(!timer.get_state().is_fullscreen_break);
+    }
+
+    #[tokio::test]
+    async fn away_attendance_publishes_break_state_with_away_flag() {
+        let state = build_test_state_without_persistence_path().await;
+        prepare_fullscreen_break_state(&state).await;
+        let mut effects = RecordingCommandRuntimeEffectShell::default();
+
+        set_break_attendance_with_runtime_effects(&state, BreakAttendance::Away, &mut effects)
+            .await
+            .expect("marking away during break should succeed");
+
+        let published = assert_single_published_command_timer_state(
+            &effects,
+            TimerStatus::OnBreak,
+            SessionType::ShortBreak,
+        );
+        assert!(published.away_during_break);
+        assert!(published.is_fullscreen_break);
+        assert_eq!(effects.fullscreen_break_exit_requests, 0);
+        assert!(state
+            .timer_manager
+            .lock()
+            .await
+            .get_state()
+            .break_attendance
+            .is_away());
+    }
+
+    #[tokio::test]
+    async fn break_attendance_is_rejected_and_publishes_nothing_outside_break() {
+        let state = build_test_state_without_persistence_path().await;
+        let mut effects = RecordingCommandRuntimeEffectShell::default();
+
+        let result =
+            set_break_attendance_with_runtime_effects(&state, BreakAttendance::Away, &mut effects)
+                .await;
+
+        assert!(matches!(
+            result,
+            Err(PomoliceError::InvalidStateTransition { .. })
+        ));
+        assert!(effects.emitted_tick_snapshots.is_empty());
+        assert!(effects.tray_tick_snapshots.is_empty());
     }
 }
 

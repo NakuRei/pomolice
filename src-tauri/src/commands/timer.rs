@@ -6,9 +6,9 @@ use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
 use crate::schedule_boundary::ActiveWindow;
 use crate::state::AppState;
 use crate::types::{
-    FullStatePayload, LongBreakDurationSecs, LongBreakIntervalCount, PostBreakDecisionAction,
-    PostBreakTransitionPolicy, ShortBreakDurationSecs, TimerSettings, TimerStatus,
-    WeeklyAutoRunConfig, WorkDurationSecs,
+    BreakAttendance, FullStatePayload, LongBreakDurationSecs, LongBreakIntervalCount,
+    PostBreakDecisionAction, PostBreakTransitionPolicy, ShortBreakDurationSecs, TimerSettings,
+    TimerStatus, WeeklyAutoRunConfig, WorkDurationSecs,
 };
 
 /// Start a work session with settings
@@ -61,6 +61,29 @@ pub(crate) async fn resolve_post_break_decision(
 
     let app = window.app_handle();
     crate::session_pipeline::resolve_post_break_decision_from_command(app, &state, action).await
+}
+
+/// Record whether the user is away from the desk during the current break.
+///
+/// This command is valid only while the timer is on break.
+#[tauri::command]
+pub(crate) async fn set_away_during_break(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    away: ObservedCommandArg<bool>,
+) -> Result<()> {
+    log_info_event(
+        BackendLogEvent::TimerCommandInvoked,
+        &[
+            ("command_name", "set_away_during_break".to_string()),
+            ("window_label", window.label().to_string()),
+        ],
+    );
+    authorize_main_window(&window, "set_away_during_break")?;
+    let attendance = BreakAttendance::from_away_flag(away.into_inner());
+
+    let app = window.app_handle();
+    crate::session_pipeline::set_break_attendance_from_command(app, &state, attendance).await
 }
 
 /// Emergency stop - reset all state

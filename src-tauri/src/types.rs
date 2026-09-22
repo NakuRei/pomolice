@@ -657,6 +657,32 @@ pub(crate) enum ScheduleStopState {
     StopAtNextSessionBoundary,
 }
 
+/// Whether the user is at the desk during the current break.
+///
+/// `Away` keeps the break running but makes its end wait for a manual
+/// decision even under the automatic post-break policy, so an unattended
+/// machine does not run through work sessions nobody is doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum BreakAttendance {
+    #[default]
+    AtDesk,
+    Away,
+}
+
+impl BreakAttendance {
+    pub(crate) fn from_away_flag(away: bool) -> Self {
+        if away {
+            Self::Away
+        } else {
+            Self::AtDesk
+        }
+    }
+
+    pub(crate) fn is_away(self) -> bool {
+        self == Self::Away
+    }
+}
+
 /// Policy for deciding what happens when a break session finishes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -795,6 +821,7 @@ pub(crate) struct TimerTickPayload {
     pub completed_pomodoros: u32,
     pub break_interaction_count: u32,
     pub is_fullscreen_break: bool,
+    pub away_during_break: bool,
 }
 
 /// Payload sent to frontend when a session completes
@@ -833,6 +860,7 @@ pub(crate) struct FullStatePayload {
     pub completed_pomodoros: u32,
     pub break_interaction_count: u32,
     pub is_fullscreen_break: bool,
+    pub away_during_break: bool,
     pub post_break_decision_pending: bool,
     pub settings: TimerSettings,
     /// Set only by the first idle full-state sync; later syncs return `None`
@@ -871,6 +899,7 @@ pub(crate) struct TimerState {
     pub schedule_stop_state: ScheduleStopState,
     pub post_break_decision_pending: bool,
     pub is_fullscreen_break: bool,
+    pub break_attendance: BreakAttendance,
     pub last_transition: Option<std::time::Instant>,
 }
 
@@ -891,6 +920,7 @@ impl Default for TimerState {
             schedule_stop_state: ScheduleStopState::NotControlledBySchedule,
             post_break_decision_pending: false,
             is_fullscreen_break: false,
+            break_attendance: BreakAttendance::AtDesk,
             last_transition: None,
         }
     }
@@ -906,6 +936,7 @@ impl TimerState {
             completed_pomodoros: self.completed_pomodoros,
             break_interaction_count: self.break_interaction_count,
             is_fullscreen_break: self.is_fullscreen_break,
+            away_during_break: self.break_attendance.is_away(),
         }
     }
 
@@ -918,6 +949,7 @@ impl TimerState {
             completed_pomodoros: self.completed_pomodoros,
             break_interaction_count: self.break_interaction_count,
             is_fullscreen_break: self.is_fullscreen_break,
+            away_during_break: self.break_attendance.is_away(),
             post_break_decision_pending: self.post_break_decision_pending,
             settings: self.settings.clone(),
             boot_auto_start_prompt_window: None,

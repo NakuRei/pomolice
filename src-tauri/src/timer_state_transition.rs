@@ -9,8 +9,8 @@ use crate::error::{PomoliceError, Result};
 use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
 use crate::schedule_boundary::{is_now_inside_schedule_window, ActiveWindow};
 use crate::types::{
-    FullStatePayload, LongBreakDurationSecs, LongBreakIntervalCount, PostBreakDecisionAction,
-    PostBreakTransitionPolicy, ScheduleStopState, SessionCompletedPayload,
+    BreakAttendance, FullStatePayload, LongBreakDurationSecs, LongBreakIntervalCount,
+    PostBreakDecisionAction, PostBreakTransitionPolicy, ScheduleStopState, SessionCompletedPayload,
     SessionTransitionOutcome, SessionTransitionReason, SessionType, ShortBreakDurationSecs,
     TimerSettings, TimerState, TimerStatus, TimerTickPayload, WeeklyAutoRunConfig,
     WorkDurationSecs, WorkStartOrigin,
@@ -158,6 +158,7 @@ pub(crate) fn restore_saved_timer_session(
             schedule_stop_state,
             post_break_decision_pending: session.post_break_decision_pending,
             is_fullscreen_break: false,
+            break_attendance: BreakAttendance::AtDesk,
             last_transition: None,
         },
         pending_decision_normalization,
@@ -404,6 +405,29 @@ impl TimerStateManager {
         Ok(self.state.to_tick_payload())
     }
 
+    /// Record whether the user is at the desk during the current break.
+    pub(crate) fn set_break_attendance(
+        &mut self,
+        attendance: BreakAttendance,
+    ) -> Result<TimerTickPayload> {
+        if self.state.status != TimerStatus::OnBreak {
+            log_warn_event(
+                BackendLogEvent::TimerTransitionRejected,
+                &[
+                    ("action", "set_break_attendance".to_string()),
+                    ("current_state", format!("{:?}", self.state.status)),
+                ],
+            );
+            return Err(PomoliceError::InvalidStateTransition {
+                action: "set break attendance".to_string(),
+                current_state: self.state.status,
+            });
+        }
+
+        self.state.break_attendance = attendance;
+        Ok(self.state.to_tick_payload())
+    }
+
     /// Emergency stop - reset all state
     ///
     /// Returns `(was_fullscreen_break, tick_payload)`.
@@ -417,6 +441,7 @@ impl TimerStateManager {
         self.state.remaining_seconds = self.state.settings.work_duration_secs.get();
         self.state.post_break_decision_pending = false;
         self.state.is_fullscreen_break = false;
+        self.state.break_attendance = BreakAttendance::AtDesk;
         self.state.break_interaction_count = 0;
         self.state.last_penalty_time = None;
         self.state.schedule_stop_state = ScheduleStopState::NotControlledBySchedule;
@@ -550,6 +575,7 @@ impl TimerStateManager {
         // Transition to break
         self.state.status = TimerStatus::OnBreak;
         self.state.post_break_decision_pending = false;
+        self.state.break_attendance = BreakAttendance::AtDesk;
         self.state.break_interaction_count = 0;
         self.state.last_transition = Some(Instant::now());
 
@@ -583,6 +609,10 @@ impl TimerStateManager {
             return self.execute_scheduled_stop_transition(completed_session_type);
         }
 
+        if self.state.break_attendance.is_away() {
+            return self.transition_to_idle_after_break();
+        }
+
         match self.state.settings.post_break_transition_policy {
             PostBreakTransitionPolicy::RequireManualContinue => {
                 self.transition_to_idle_after_break()
@@ -605,6 +635,7 @@ impl TimerStateManager {
         self.state.remaining_seconds = self.state.settings.work_duration_secs.get();
         self.state.post_break_decision_pending = true;
         self.state.is_fullscreen_break = false;
+        self.state.break_attendance = BreakAttendance::AtDesk;
         self.state.schedule_stop_state = ScheduleStopState::NotControlledBySchedule;
         self.state.last_transition = Some(Instant::now());
 
@@ -637,6 +668,7 @@ impl TimerStateManager {
         self.state.remaining_seconds = self.state.settings.work_duration_secs.get();
         self.state.post_break_decision_pending = false;
         self.state.is_fullscreen_break = false;
+        self.state.break_attendance = BreakAttendance::AtDesk;
         self.state.last_transition = Some(Instant::now());
 
         let payload = SessionCompletedPayload::from_transition_outcome(
@@ -666,6 +698,7 @@ impl TimerStateManager {
         self.state.remaining_seconds = self.state.settings.work_duration_secs.get();
         self.state.post_break_decision_pending = false;
         self.state.is_fullscreen_break = false;
+        self.state.break_attendance = BreakAttendance::AtDesk;
         self.state.schedule_stop_state = ScheduleStopState::NotControlledBySchedule;
         self.state.last_transition = Some(Instant::now());
 
@@ -2062,5 +2095,122 @@ mod tests {
 
         let result = mgr.start_work(settings, WorkStartOrigin::ScheduleStartBoundary);
         assert!(result.is_ok());
+    }
+
+    fn start_auto_policy_break(mgr: &mut TimerStateManager) {
+        mgr.start_work(
+            make_auto_start_settings(1500, 300, 900, 4),
+            WorkStartOrigin::ManualOutsideScheduleWindow,
+        )
+        .unwrap();
+        mgr.transition_to_break();
+        assert_eq!(mgr.status(), TimerStatus::OnBreak);
+    }
+
+    #[test]
+    fn test_away_during_break_makes_break_end_wait_for_manual_decision() {
+        let mut mgr = make_manager();
+        start_auto_policy_break(&mut mgr);
+
+        let payload = mgr.set_break_attendance(BreakAttendance::Away).unwrap();
+        assert!(payload.away_during_break);
+        assert_eq!(payload.status, TimerStatus::OnBreak);
+
+        let completed = mgr.complete_break_session_transition();
+
+        assert_eq!(
+            completed.transition_reason,
+            crate::types::SessionTransitionReason::BreakWaitingDecision
+        );
+        assert!(completed.requires_manual_continue_decision);
+        let full_state = mgr.get_full_state();
+        assert_eq!(full_state.status, TimerStatus::Idle);
+        assert!(full_state.post_break_decision_pending);
+        assert!(!full_state.away_during_break);
+    }
+
+    #[test]
+    fn test_returning_during_break_restores_automatic_work_start() {
+        let mut mgr = make_manager();
+        start_auto_policy_break(&mut mgr);
+        mgr.set_break_attendance(BreakAttendance::Away).unwrap();
+
+        let payload = mgr.set_break_attendance(BreakAttendance::AtDesk).unwrap();
+        assert!(!payload.away_during_break);
+
+        let completed = mgr.complete_break_session_transition();
+
+        assert_eq!(
+            completed.transition_reason,
+            crate::types::SessionTransitionReason::BreakAutoStarted
+        );
+        assert_eq!(mgr.status(), TimerStatus::Working);
+    }
+
+    #[test]
+    fn test_away_during_break_is_rejected_outside_break() {
+        let mut mgr = make_manager();
+        assert!(matches!(
+            mgr.set_break_attendance(BreakAttendance::Away),
+            Err(PomoliceError::InvalidStateTransition { .. })
+        ));
+
+        mgr.start_work(
+            make_auto_start_settings(1500, 300, 900, 4),
+            WorkStartOrigin::ManualOutsideScheduleWindow,
+        )
+        .unwrap();
+        assert!(matches!(
+            mgr.set_break_attendance(BreakAttendance::Away),
+            Err(PomoliceError::InvalidStateTransition { .. })
+        ));
+        assert!(!mgr.get_full_state().away_during_break);
+    }
+
+    #[test]
+    fn test_away_flag_does_not_carry_over_to_the_next_break() {
+        let mut mgr = make_manager();
+        start_auto_policy_break(&mut mgr);
+        mgr.set_break_attendance(BreakAttendance::Away).unwrap();
+        mgr.complete_break_session_transition();
+        mgr.resolve_post_break_decision(PostBreakDecisionAction::Continue)
+            .unwrap();
+
+        mgr.transition_to_break();
+        assert!(!mgr.get_full_state().away_during_break);
+
+        let completed = mgr.complete_break_session_transition();
+        assert_eq!(
+            completed.transition_reason,
+            crate::types::SessionTransitionReason::BreakAutoStarted
+        );
+    }
+
+    #[test]
+    fn test_emergency_stop_clears_away_flag() {
+        let mut mgr = make_manager();
+        start_auto_policy_break(&mut mgr);
+        mgr.set_break_attendance(BreakAttendance::Away).unwrap();
+
+        let (_, payload) = mgr.emergency_stop();
+
+        assert!(!payload.away_during_break);
+    }
+
+    #[test]
+    fn test_scheduled_stop_still_takes_priority_over_away_flag() {
+        let mut mgr = make_manager();
+        start_auto_policy_break(&mut mgr);
+        mgr.set_break_attendance(BreakAttendance::Away).unwrap();
+        mgr.state.schedule_stop_state = ScheduleStopState::StopAtNextSessionBoundary;
+
+        let completed = mgr.complete_break_session_transition();
+
+        assert_eq!(
+            completed.transition_reason,
+            crate::types::SessionTransitionReason::ScheduledStopExecuted
+        );
+        assert!(!completed.requires_manual_continue_decision);
+        assert!(!mgr.get_full_state().away_during_break);
     }
 }

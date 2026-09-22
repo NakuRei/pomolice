@@ -213,6 +213,7 @@ describe("FullscreenBreak", () => {
         completed_pomodoros: 0,
         break_interaction_count: 0,
         is_fullscreen_break: true,
+        away_during_break: false,
       });
 
       render(<FullscreenBreak />);
@@ -314,6 +315,73 @@ describe("FullscreenBreak", () => {
       await renderFullscreenBreakWithSkipFlowOpen();
 
       expect(screen.getByText(/No, Take Break/iu)).toBeInTheDocument();
+    });
+  });
+
+  describe("Away During Break", () => {
+    function enableAutomaticPostBreakPolicy(): void {
+      useSettingsStore.setState({
+        postBreakTransitionPolicy: "start_next_work_automatically",
+      });
+    }
+
+    it("offers the away action only when the next work would start automatically", () => {
+      useSettingsStore.setState({
+        postBreakTransitionPolicy: "require_manual_continue",
+      });
+      const { unmount } = render(<FullscreenBreak />);
+      expect(
+        screen.queryByRole("button", { name: "離席する" }),
+      ).not.toBeInTheDocument();
+      unmount();
+
+      enableAutomaticPostBreakPolicy();
+      render(<FullscreenBreak />);
+      expect(
+        screen.getByRole("button", { name: "離席する" }),
+      ).toBeInTheDocument();
+    });
+
+    it("marks the user away without any confirmation step", async () => {
+      enableAutomaticPostBreakPolicy();
+      const user = userEvent.setup();
+      render(<FullscreenBreak />);
+
+      await user.click(screen.getByRole("button", { name: "離席する" }));
+
+      expect(mockInvoke).toHaveBeenCalledWith("set_away_during_break", {
+        away: true,
+      });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("shows the away notice with a return action while away", async () => {
+      enableAutomaticPostBreakPolicy();
+      useTimerStore.setState({ isAwayDuringBreak: true });
+      const user = userEvent.setup();
+      render(<FullscreenBreak />);
+
+      expect(screen.getByRole("status")).toHaveTextContent(
+        /休憩後は自動で作業を開始しません/u,
+      );
+      expect(
+        screen.queryByRole("button", { name: "離席する" }),
+      ).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "戻りました" }));
+
+      expect(mockInvoke).toHaveBeenCalledWith("set_away_during_break", {
+        away: false,
+      });
+    });
+
+    it("keeps the skip flow reachable while away", async () => {
+      enableAutomaticPostBreakPolicy();
+      useTimerStore.setState({ isAwayDuringBreak: true });
+
+      await renderFullscreenBreakWithSkipFlowOpen();
+
+      expect(screen.getByText(/Step/iu)).toBeInTheDocument();
     });
   });
 

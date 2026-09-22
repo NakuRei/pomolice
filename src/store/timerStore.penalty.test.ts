@@ -15,6 +15,7 @@ const breakTick: TimerTickPayload = {
   completed_pomodoros: 1,
   break_interaction_count: 0,
   is_fullscreen_break: true,
+  away_during_break: false,
 };
 
 describe("backend penalty state", () => {
@@ -93,6 +94,7 @@ describe("backend penalty state", () => {
       session_type: SessionType.WORK,
       current_cycle: 2,
       is_fullscreen_break: false,
+      away_during_break: false,
     });
 
     expect(useTimerStore.getState().isFullscreenBreak).toBe(false);

@@ -95,6 +95,7 @@ function createFullStatePayload(
     completed_pomodoros: 0,
     break_interaction_count: 0,
     is_fullscreen_break: false,
+    away_during_break: false,
     post_break_decision_pending: false,
     boot_auto_start_prompt_window: null,
     active_window_summary: null,
@@ -158,6 +159,7 @@ function emitTimerTick(
       completed_pomodoros: 0,
       break_interaction_count: 0,
       is_fullscreen_break: false,
+      away_during_break: false,
       ...overrides,
     },
   });
@@ -594,6 +596,7 @@ describe("useTimerSync", () => {
           completed_pomodoros: 0,
           break_interaction_count: 0,
           is_fullscreen_break: false,
+          away_during_break: false,
           post_break_decision_pending: false,
           boot_auto_start_prompt_window: null,
           active_window_summary: null,

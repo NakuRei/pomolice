@@ -150,6 +150,7 @@ pub fn run() -> RunResult {
             commands::application::exit_without_tray,
             commands::timer::start_work,
             commands::timer::resolve_post_break_decision,
+            commands::timer::set_away_during_break,
             commands::timer::emergency_stop,
             commands::timer::sync_timer_duration_settings,
             commands::timer::sync_automation_policies,

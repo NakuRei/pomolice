@@ -6,6 +6,7 @@ import { getRandomBreakMotivationalMessage } from "@/data/motivationalMessages";
 import { BreakStats } from "./BreakStats";
 import { MotivationalMessage } from "./MotivationalMessage";
 import { SkipButton } from "./SkipButton";
+import { AwayDuringBreakControls } from "./AwayDuringBreakControls";
 import SkipFlowModal from "../SkipFlow/SkipFlowModal";
 import { SettingsSyncBanner } from "../shared/SettingsSyncBanner";
 import { EmergencyShortcutHint } from "../shared/EmergencyShortcutNotice";
@@ -110,6 +111,11 @@ export function FullscreenBreak(): React.ReactElement {
       </div>
 
       <EmergencyShortcutHint />
+
+      {/* Away controls - bottom-left, apart from the deliberately small skip button */}
+      <div className="absolute bottom-3 left-3">
+        <AwayDuringBreakControls />
+      </div>
 
       {/* Skip button - positioned in bottom-right corner */}
       <div className="absolute right-3 bottom-3">

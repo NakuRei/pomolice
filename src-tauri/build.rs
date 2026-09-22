@@ -11,6 +11,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             "exit_without_tray",
             "start_work",
             "resolve_post_break_decision",
+            "set_away_during_break",
             "emergency_stop",
             "sync_timer_duration_settings",
             "sync_automation_policies",

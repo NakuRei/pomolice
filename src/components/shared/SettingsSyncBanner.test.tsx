@@ -41,6 +41,7 @@ function createConnectedFullState(): FullStatePayload {
     completed_pomodoros: 0,
     break_interaction_count: 0,
     is_fullscreen_break: false,
+    away_during_break: false,
     post_break_decision_pending: false,
     settings: {
       work_duration_secs: 1500,

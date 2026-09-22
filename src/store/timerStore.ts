@@ -64,6 +64,7 @@ export interface TimerTickPayload {
   completed_pomodoros: number;
   break_interaction_count: number;
   is_fullscreen_break: boolean;
+  away_during_break: boolean;
 }
 
 /**
@@ -126,6 +127,7 @@ interface TimerState {
   completedPomodoros: number;
   breakInteractionCount: number;
   isFullscreenBreak: boolean;
+  isAwayDuringBreak: boolean;
 
   // UI-only state
   requiresManualContinueDecision: boolean;
@@ -149,6 +151,7 @@ interface TimerActions {
   start: () => Promise<void>;
   resolvePostBreakDecision: (action: PostBreakDecisionAction) => Promise<void>;
   emergencyStop: () => Promise<void>;
+  setAwayDuringBreak: (away: boolean) => Promise<void>;
   syncSettings: () => Promise<void>;
   resolveBootAutoStartPrompt: (startNow: boolean) => Promise<void>;
   showAutoRunStopPendingInfo: () => void;
@@ -315,6 +318,7 @@ const initialState: TimerState = {
   completedPomodoros: 0,
   breakInteractionCount: 0,
   isFullscreenBreak: false,
+  isAwayDuringBreak: false,
   requiresManualContinueDecision: false,
   isConnected: false,
   bootAutoStartPromptWindow: null,
@@ -467,6 +471,31 @@ export const useTimerStore = create<TimerStore>()(
         });
       },
 
+      setAwayDuringBreak: async (away: boolean): Promise<void> => {
+        try {
+          await invoke("set_away_during_break", { away });
+          useErrorStore.getState().clearError("set_away_during_break");
+        } catch (error) {
+          const detail = formatPublicCommandErrorDetail(error);
+          const { userMessage, severity, canRetry } =
+            classifyBackendError(error);
+          useErrorStore.getState().reportError({
+            id: "set_away_during_break",
+            message: userMessage,
+            technicalDetail: detail,
+            severity,
+            origin: "backend_command",
+            canRetry,
+            retryFn: canRetry
+              ? async (): Promise<void> => {
+                  await get().setAwayDuringBreak(away);
+                }
+              : null,
+          });
+          throw error;
+        }
+      },
+
       resolveBootAutoStartPrompt: async (startNow: boolean): Promise<void> => {
         try {
           await invoke("resolve_boot_auto_start_prompt", { startNow });
@@ -566,6 +595,7 @@ export const useTimerStore = create<TimerStore>()(
           state.completedPomodoros = payload.completed_pomodoros;
           state.breakInteractionCount = payload.break_interaction_count;
           state.isFullscreenBreak = payload.is_fullscreen_break;
+          state.isAwayDuringBreak = payload.away_during_break;
         });
 
         if (shouldRequestDurationReconciliation) {
@@ -612,6 +642,7 @@ export const useTimerStore = create<TimerStore>()(
           state.completedPomodoros = payload.completed_pomodoros;
           state.breakInteractionCount = payload.break_interaction_count;
           state.isFullscreenBreak = payload.is_fullscreen_break;
+          state.isAwayDuringBreak = payload.away_during_break;
           state.requiresManualContinueDecision =
             payload.post_break_decision_pending;
           state.bootAutoStartPromptWindow =

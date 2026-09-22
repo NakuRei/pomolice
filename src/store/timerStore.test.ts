@@ -22,6 +22,7 @@ import {
   type SettingsApplicationStatus,
 } from "./settingsStore";
 import { resetTimerStoreForTest } from "../test/resetTimerStore";
+import { useErrorStore } from "./errorStore";
 
 function createDeferredInvoke(): {
   promise: Promise<unknown>;
@@ -56,6 +57,7 @@ function createFullStatePayload(
     completed_pomodoros: 0,
     break_interaction_count: 0,
     is_fullscreen_break: false,
+    away_during_break: false,
     post_break_decision_pending: false,
     boot_auto_start_prompt_window: null,
     active_window_summary: null,
@@ -107,6 +109,7 @@ async function assertDurationReconciliationAfterIdleTransition(
     completed_pomodoros: 0,
     break_interaction_count: 0,
     is_fullscreen_break: false,
+    away_during_break: false,
   };
 
   useTimerStore.getState().handleTimerTick(idleTick);
@@ -198,6 +201,7 @@ describe("timerStore", () => {
           completed_pomodoros: 1,
           break_interaction_count: 0,
           is_fullscreen_break: false,
+          away_during_break: false,
         });
 
         const state = useTimerStore.getState();
@@ -219,6 +223,7 @@ describe("timerStore", () => {
           completed_pomodoros: 1,
           break_interaction_count: 3,
           is_fullscreen_break: true,
+          away_during_break: false,
         });
 
         const state = useTimerStore.getState();
@@ -246,6 +251,7 @@ describe("timerStore", () => {
           completed_pomodoros: 1,
           break_interaction_count: 0,
           is_fullscreen_break: true,
+          away_during_break: false,
         });
 
         const state = useTimerStore.getState();
@@ -258,6 +264,52 @@ describe("timerStore", () => {
         "requests deferred duration reconciliation once when %s transitions to idle",
         assertDurationReconciliationAfterIdleTransition,
       );
+
+      it("exposes whether the user is away during the break", () => {
+        const breakTick = {
+          status: TimerStatus.ON_BREAK,
+          remaining_seconds: 300,
+          session_type: SessionType.SHORT_BREAK,
+          current_cycle: 1,
+          completed_pomodoros: 1,
+          break_interaction_count: 0,
+          is_fullscreen_break: true,
+        };
+
+        useTimerStore
+          .getState()
+          .handleTimerTick({ ...breakTick, away_during_break: true });
+        expect(useTimerStore.getState().isAwayDuringBreak).toBe(true);
+
+        useTimerStore
+          .getState()
+          .handleTimerTick({ ...breakTick, away_during_break: false });
+        expect(useTimerStore.getState().isAwayDuringBreak).toBe(false);
+      });
+    });
+
+    describe("setAwayDuringBreak()", () => {
+      it.each([true, false])("sends away=%s to the backend", async (away) => {
+        await useTimerStore.getState().setAwayDuringBreak(away);
+
+        expect(mockInvoke).toHaveBeenCalledWith("set_away_during_break", {
+          away,
+        });
+      });
+
+      it("reports a backend rejection and rethrows", async () => {
+        mockInvoke.mockRejectedValueOnce({
+          code: "invalid_state_transition",
+          message: "invalid state",
+        });
+
+        await expect(
+          useTimerStore.getState().setAwayDuringBreak(true),
+        ).rejects.toBeDefined();
+        expect(
+          useErrorStore.getState().errors.set_away_during_break,
+        ).toBeDefined();
+      });
     });
 
     describe("handleSessionCompleted()", () => {
@@ -453,6 +505,7 @@ describe("timerStore", () => {
           completed_pomodoros: 2,
           break_interaction_count: 0,
           is_fullscreen_break: false,
+          away_during_break: false,
           post_break_decision_pending: false,
           boot_auto_start_prompt_window: null,
           active_window_summary: null,
@@ -477,6 +530,7 @@ describe("timerStore", () => {
         useTimerStore.getState().handleFullState({
           ...createFullStatePayload(),
           is_fullscreen_break: true,
+          away_during_break: false,
         });
 
         const state = useTimerStore.getState();
@@ -495,6 +549,7 @@ describe("timerStore", () => {
           completed_pomodoros: 0,
           break_interaction_count: 0,
           is_fullscreen_break: false,
+          away_during_break: false,
           post_break_decision_pending: false,
           boot_auto_start_prompt_window: {
             weekday_key: "mon",
