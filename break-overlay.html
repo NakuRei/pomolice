@@ -9,10 +9,11 @@
       /* Served from public/, so it cannot read the app's theme tokens.
          Keep these in step with src/index.css. */
       :root {
-        --color-background: #101a2b;
+        --color-background: #0d1727;
+        --color-background-mid: #0f1f2a;
+        --color-background-glow: #1a3a3a;
         --color-text: #e6ecf4;
         --color-text-muted: #8195af;
-        --color-primary: #8fb4da;
       }
 
       * {
@@ -29,6 +30,12 @@
         align-items: center;
         justify-content: center;
         background-color: var(--color-background);
+        background-image: radial-gradient(
+          70% 80% at 50% 100%,
+          var(--color-background-glow) 0%,
+          var(--color-background-mid) 55%,
+          var(--color-background) 100%
+        );
         color: var(--color-text);
         font-family: "JetBrains Mono", "Noto Sans JP", ui-monospace, monospace;
         overflow: hidden;
@@ -47,12 +54,6 @@
         text-align: center;
       }
 
-      .icon {
-        font-size: 120px;
-        margin-bottom: 32px;
-        color: var(--color-primary);
-      }
-
       .emergency-release {
         position: absolute;
         bottom: 16px;
@@ -68,7 +69,6 @@
   </head>
   <body>
     <p class="emergency-release">緊急解除：<kbd>Ctrl + Alt + Shift + E</kbd></p>
-    <div class="icon">☕</div>
     <div class="message">休憩中</div>
     <div class="submessage">メインディスプレイを確認してください</div>
   </body>

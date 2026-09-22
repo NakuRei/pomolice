@@ -1,127 +1,144 @@
-import { useState } from "react";
 import { useTimerStore, SessionType } from "@/store/timerStore";
+import { useSettingsStore } from "@/store/settingsStore";
 import { useSkipFlowStore } from "@/store/skipFlowStore";
-import { formatTime } from "@/formatters/timeFormatter";
-import { getRandomBreakMotivationalMessage } from "@/data/motivationalMessages";
-import { BreakStats } from "./BreakStats";
-import { MotivationalMessage } from "./MotivationalMessage";
-import { SkipButton } from "./SkipButton";
-import { AwayDuringBreakControls } from "./AwayDuringBreakControls";
+import { FootprintsIcon, SkipForwardIcon } from "@/components/icons/AppIcons";
+import { CycleProgress } from "@/components/Timer/CycleProgress";
+import { TimerNumber } from "@/components/Timer/TimerNumber";
+import { TimerPhaseLabel } from "@/components/Timer/TimerPhaseLabel";
 import SkipFlowModal from "../SkipFlow/SkipFlowModal";
+import { Button } from "../shared/Button";
+import { NotificationMuteToggleButton } from "../shared/NotificationMuteToggleButton";
 import { SettingsSyncBanner } from "../shared/SettingsSyncBanner";
 import { EmergencyShortcutHint } from "../shared/EmergencyShortcutNotice";
 
+const SIDE_PADDING_CLASS_NAME = "px-8 md:px-24";
+
 /**
- * FullscreenBreak Component
- *
- * Displays during break time as a fullscreen overlay.
- * Prevents users from working by covering the entire screen.
- *
- * Features:
- * - Large countdown timer (state from backend)
- * - Motivational messages
- * - Break statistics
- * - Small skip button (triggers multi-step confirmation)
- *
- * Note: Input monitoring and penalties are handled entirely by the backend.
- * This component is display-only.
+ * Input monitoring and penalties are handled entirely by the backend; this
+ * component only displays the break state and offers the skip flow.
  */
 export function FullscreenBreak(): React.ReactElement {
-  const remainingSeconds = useTimerStore((state) => state.remainingSeconds);
   const sessionType = useTimerStore((state) => state.sessionType);
+  const notificationSoundMuted = useSettingsStore(
+    (state) => state.notificationSoundMuted,
+  );
+  const toggleNotificationSoundMuted = useSettingsStore(
+    (state) => state.toggleNotificationSoundMuted,
+  );
+  const postBreakTransitionPolicy = useSettingsStore(
+    (state) => state.postBreakTransitionPolicy,
+  );
+  const isAwayDuringBreak = useTimerStore((state) => state.isAwayDuringBreak);
+  const setAwayDuringBreak = useTimerStore((state) => state.setAwayDuringBreak);
   const isActive = useSkipFlowStore((state) => state.isActive);
   const startSkipFlow = useSkipFlowStore((state) => state.startSkipFlow);
   const resetSkipFlow = useSkipFlowStore((state) => state.resetSkipFlow);
   const emergencyStop = useTimerStore((state) => state.emergencyStop);
-  const [motivationalMessage] = useState<string>(() =>
-    getRandomBreakMotivationalMessage(),
-  );
 
-  const formattedTime = formatTime(remainingSeconds);
-
-  // Get session type display text
-  const getSessionTypeText = (): "短い休憩" | "長い休憩" | "休憩" => {
-    switch (sessionType) {
-      case SessionType.WORK:
-        return "休憩";
-      case SessionType.SHORT_BREAK:
-        return "短い休憩";
-      case SessionType.LONG_BREAK:
-        return "長い休憩";
-      default:
-        return "休憩";
-    }
-  };
-
-  // Handle skip button click - start the multi-step skip flow
   const handleSkipClick = (): void => {
     startSkipFlow();
   };
 
-  // Handle skip flow completion - user completed all steps
+  // Completing every step ends the break through emergency stop, which exits
+  // fullscreen and resets to idle. Errors are reported to errorStore by
+  // timerStore.
   const handleSkipComplete = (): void => {
-    // User successfully completed all steps, skip the break via emergency stop
-    // This will exit fullscreen and reset to idle state
-    // Errors are reported to errorStore by timerStore
     emergencyStop().catch(() => undefined);
-
-    // Reset skip flow
     resetSkipFlow();
   };
 
-  // Handle skip flow cancel - user gave up and decided to take break
   const handleSkipCancel = (): void => {
     resetSkipFlow();
   };
 
+  // Being away only suspends the automatic start of the next work session, so
+  // an unattended machine does not run through work sessions nobody is doing.
+  // The break itself keeps running and stays locked.
+  const offersAway =
+    postBreakTransitionPolicy === "start_next_work_automatically";
+
+  const handleAwayToggle = (): void => {
+    setAwayDuringBreak(!isAwayDuringBreak).catch(() => undefined);
+  };
+
   return (
-    <div
-      className="absolute inset-0 z-50 flex flex-col items-center overflow-y-auto bg-background text-on-background"
-      data-testid="fullscreen-break"
-    >
-      <div className="w-full shrink-0 px-4 pt-4">
-        <div className="mx-auto max-w-3xl">
-          <SettingsSyncBanner />
+    <div className="absolute inset-0 z-50 flex flex-col overflow-hidden bg-break-base bg-[radial-gradient(70%_80%_at_50%_100%,var(--color-break-glow)_0%,var(--color-break-mid)_55%,var(--color-break-base)_100%)] text-on-background accent-break">
+      <SettingsSyncBanner />
+
+      <div
+        className={`flex shrink-0 items-center justify-end pt-6 md:pt-7 ${SIDE_PADDING_CLASS_NAME}`}
+      >
+        <NotificationMuteToggleButton
+          muted={notificationSoundMuted}
+          onToggle={toggleNotificationSoundMuted}
+          className="md:size-12"
+          iconClassName="size-5 md:size-7"
+        />
+      </div>
+
+      <div
+        className={`flex min-h-0 flex-1 flex-col items-center justify-center gap-15 md:gap-16.5 ${SIDE_PADDING_CLASS_NAME}`}
+      >
+        <div className="flex flex-col items-center gap-11.25 md:gap-12.5">
+          <TimerPhaseLabel
+            sessionType={sessionType}
+            className="tracking-[0.3em]"
+          >
+            {sessionType === SessionType.LONG_BREAK ? "LONG BREAK" : "BREAK"}
+          </TimerPhaseLabel>
+          <TimerNumber />
+        </div>
+
+        <div className="w-full max-w-140">
+          <CycleProgress />
         </div>
       </div>
 
-      <div className="my-auto flex shrink-0 flex-col items-center px-4 py-8">
-        {/* Session type */}
-        <div className="mb-6 text-3xl font-medium tracking-wider text-text-muted uppercase">
-          {getSessionTypeText()}
-        </div>
-
-        {/* Large countdown timer */}
-        <div
-          className="mb-8 text-[120px] font-bold tracking-tight text-text tabular-nums"
-          data-testid="break-timer-display"
-          aria-live="polite"
-          aria-atomic="true"
-        >
-          {formattedTime}
-        </div>
-
-        {/* Motivational message */}
-        <MotivationalMessage message={motivationalMessage} />
-
-        {/* Break statistics */}
-        <div className="mt-8">
-          <BreakStats />
-        </div>
-      </div>
-
-      <div className="grid w-full shrink-0 grid-cols-[1fr_auto_1fr] items-end px-3 pb-3">
+      <div
+        className={`grid shrink-0 grid-cols-[1fr_auto_1fr] items-end pb-8 md:pb-13 ${SIDE_PADDING_CLASS_NAME}`}
+      >
         <div className="justify-self-start">
           <EmergencyShortcutHint />
         </div>
-        <AwayDuringBreakControls />
-        {/* Skip button - positioned in bottom-right corner */}
-        <div className="justify-self-end">
-          <SkipButton onClick={handleSkipClick} />
+        <div className="flex flex-col items-center gap-4">
+          {offersAway && isAwayDuringBreak && (
+            <p role="status" className="text-sm text-text-muted">
+              離席中：休憩後は自動で作業を開始しません
+            </p>
+          )}
+          <div className="flex items-center gap-3.5">
+            <Button
+              appearance="outline"
+              size="md"
+              shape="pill"
+              onClick={handleSkipClick}
+              aria-label="休憩をスキップ"
+            >
+              <SkipForwardIcon className="size-5" />
+              スキップ
+            </Button>
+            {offersAway && (
+              <Button
+                appearance="primary"
+                size="md"
+                shape="pill"
+                onClick={handleAwayToggle}
+                className="shadow-2xl shadow-accent-glow"
+              >
+                {isAwayDuringBreak ? (
+                  "戻りました"
+                ) : (
+                  <>
+                    <FootprintsIcon className="size-5" />
+                    離席する
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Multi-step skip confirmation flow */}
       {isActive && (
         <SkipFlowModal
           onComplete={handleSkipComplete}

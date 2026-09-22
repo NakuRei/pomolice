@@ -21,7 +21,6 @@ describe("NotificationMuteToggleButton", () => {
         <NotificationMuteToggleButton
           muted={muted}
           onToggle={() => undefined}
-          testId="notification-mute-toggle-button"
         />,
       );
 

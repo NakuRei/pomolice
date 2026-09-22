@@ -272,7 +272,7 @@ describe("App", () => {
       useTimerStore.setState({ isFullscreenBreak: true });
     });
     await waitFor(() => {
-      expect(screen.getByText("休憩")).toBeInTheDocument();
+      expect(screen.getByText("BREAK")).toBeInTheDocument();
     });
 
     act(() => {

@@ -20,7 +20,6 @@ import { useSettingsStore } from "@/store/settingsStore";
 import { useTimerStore, SessionType, TimerStatus } from "@/store/timerStore";
 import { useSkipFlowStore } from "@/store/skipFlowStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
-import { breakMotivationalMessages } from "@/data/motivationalMessages";
 import {
   LONG_TYPING_PHRASES,
   SHORT_TYPING_PHRASES,
@@ -28,24 +27,6 @@ import {
 
 function getBreakTimerDisplay(timeText: string): HTMLElement {
   return screen.getByText(timeText);
-}
-
-function getVisibleBreakMotivationalMessages(): string[] {
-  return breakMotivationalMessages.filter(
-    (message) => screen.queryByText(message) !== null,
-  );
-}
-
-function getVisibleBreakMotivationalMessage(): string {
-  const visibleMessages = getVisibleBreakMotivationalMessages();
-  expect(visibleMessages).toHaveLength(1);
-
-  const visibleMessage = visibleMessages[0];
-  if (visibleMessage === undefined) {
-    throw new Error("Expected one break motivational message to be visible.");
-  }
-
-  return visibleMessage;
 }
 
 async function renderFullscreenBreakWithSkipFlowOpen(): Promise<void> {
@@ -152,15 +133,19 @@ describe("FullscreenBreak", () => {
     );
 
     it("should render the initial short-break ui", () => {
+      useTimerStore.setState({ currentCycle: 2 });
+
       render(<FullscreenBreak />);
 
       expect(getBreakTimerDisplay("05:00")).toBeInTheDocument();
-      expect(screen.getByText("短い休憩")).toBeInTheDocument();
-      expect(screen.getByText("今日のポモドーロ:")).toBeInTheDocument();
+      expect(screen.getByText("BREAK")).toBeInTheDocument();
+      expect(screen.getByLabelText("短い休憩")).toBeInTheDocument();
+      expect(
+        screen.getByRole("img", { name: "ポモドーロ 2 / 4" }),
+      ).toBeInTheDocument();
       expect(
         screen.getByRole("button", { name: "休憩をスキップ" }),
       ).toBeInTheDocument();
-      getVisibleBreakMotivationalMessage();
     });
 
     it("should display 'long break' for long break", () => {
@@ -168,20 +153,21 @@ describe("FullscreenBreak", () => {
 
       render(<FullscreenBreak />);
 
-      expect(screen.getByText("長い休憩")).toBeInTheDocument();
+      expect(screen.getByText("LONG BREAK")).toBeInTheDocument();
+      expect(screen.getByLabelText("長い休憩")).toBeInTheDocument();
     });
 
-    it("should keep the initially visible motivational message when timer rerenders", () => {
-      const { rerender } = render(<FullscreenBreak />);
+    it("toggles the notification sound mute from the break screen", async () => {
+      const user = userEvent.setup();
+      render(<FullscreenBreak />);
 
-      const initialMessage = getVisibleBreakMotivationalMessage();
+      const muteToggle = screen.getByRole("button", { name: "通知音" });
+      expect(muteToggle).toHaveAttribute("aria-pressed", "false");
 
-      act(() => {
-        useTimerStore.setState({ remainingSeconds: 299 });
-      });
-      rerender(<FullscreenBreak />);
+      await user.click(muteToggle);
 
-      expect(getVisibleBreakMotivationalMessage()).toBe(initialMessage);
+      expect(useSettingsStore.getState().notificationSoundMuted).toBe(true);
+      expect(muteToggle).toHaveAttribute("aria-pressed", "true");
     });
 
     it("keeps unresolved settings visible without blocking the skip flow", async () => {

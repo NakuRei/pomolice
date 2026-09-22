@@ -30,7 +30,7 @@ export function TimerControls(): React.ReactElement {
           onClick={handleStart}
           testId="start-button"
           aria-label="タイマーを開始"
-          className="gap-2.5 tracking-wider shadow-2xl shadow-primary-800/45"
+          className="shadow-2xl shadow-accent-glow"
         >
           <PlayIcon className="size-5" />
           開始

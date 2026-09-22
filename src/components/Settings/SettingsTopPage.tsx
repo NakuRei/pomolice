@@ -111,7 +111,7 @@ function SettingsTopRowButton({
       type="button"
       onClick={openCategoryPage}
       data-testid={testId}
-      className="w-full rounded-lg border border-border bg-surface px-4 py-3 text-left transition-colors hover:border-border-strong hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600"
+      className="w-full rounded-lg border border-border bg-surface px-4 py-3 text-left transition-colors hover:border-border-strong hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-ring"
     >
       <span className="block text-sm font-semibold text-text">{label}</span>
       <span className="mt-1 block truncate text-sm text-text-muted">

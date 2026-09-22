@@ -84,7 +84,6 @@ export function EmergencyStopButton(): React.ReactElement | null {
         onClick={handleEmergencyStopClick}
         testId="emergency-stop-button"
         aria-label="緊急停止"
-        className="tracking-wider"
       >
         緊急停止
       </Button>

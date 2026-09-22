@@ -146,7 +146,6 @@ export function SettingsNotificationPage({
             <NotificationMuteToggleButton
               muted={notificationSoundMutedDraft}
               onToggle={toggleNotificationMuteDraft}
-              testId="settings-notification-mute-button"
             />
 
             <input

@@ -4,7 +4,6 @@ import { ToggleIconButton } from "./ToggleIconButton";
 interface NotificationMuteToggleButtonProps {
   muted: boolean;
   onToggle: () => void;
-  testId: string;
   iconClassName?: string;
   className?: string;
 }
@@ -12,7 +11,6 @@ interface NotificationMuteToggleButtonProps {
 export function NotificationMuteToggleButton({
   muted,
   onToggle,
-  testId,
   iconClassName = "h-5 w-5",
   className = "",
 }: NotificationMuteToggleButtonProps): React.ReactElement {
@@ -27,7 +25,6 @@ export function NotificationMuteToggleButton({
       }}
       pressedAppearance="danger"
       className={className}
-      testId={testId}
       title={buttonTitle}
       pressedChildren={<VolumeMutedIcon className={iconClassName} />}
     >

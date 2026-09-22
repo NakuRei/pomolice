@@ -47,6 +47,46 @@ describe("HomeScreen", () => {
     });
   });
 
+  it.each([
+    { sessionType: SessionType.WORK, label: "FOCUS", name: "作業時間" },
+    { sessionType: SessionType.SHORT_BREAK, label: "BREAK", name: "短い休憩" },
+    { sessionType: SessionType.LONG_BREAK, label: "LONG", name: "長い休憩" },
+  ])(
+    "labels the $sessionType session as $label, named $name for assistive technology",
+    ({ sessionType, label, name }) => {
+      useTimerStore.setState({ sessionType });
+
+      render(<HomeScreen {...createProps()} />);
+
+      expect(screen.getByText(label)).toBeInTheDocument();
+      expect(screen.getByLabelText(name)).toBeInTheDocument();
+    },
+  );
+
+  it("shows the remaining time as a polite live region that follows the timer", () => {
+    render(<HomeScreen {...createProps()} />);
+
+    const timer = screen.getByText("25:00");
+    expect(timer).toHaveAttribute("aria-live", "polite");
+    expect(timer).toHaveAttribute("aria-atomic", "true");
+
+    act(() => {
+      useTimerStore.setState({ remainingSeconds: 1499 });
+    });
+    expect(screen.getByText("24:59")).toBeInTheDocument();
+  });
+
+  it("keeps the phase label whether or not the timer runs", () => {
+    useTimerStore.setState({ status: TimerStatus.WORKING });
+    render(<HomeScreen {...createProps()} />);
+    expect(screen.getByText("FOCUS")).toBeInTheDocument();
+
+    act(() => {
+      useTimerStore.setState({ status: TimerStatus.IDLE });
+    });
+    expect(screen.getByText("FOCUS")).toBeInTheDocument();
+  });
+
   it("keeps the timer visible while settings remain unresolved", () => {
     useSettingsStore.setState({
       durationSettingsApplicationStatus: "pending",

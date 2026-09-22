@@ -78,7 +78,42 @@
   --color-disabled-border: #35577d;
   --color-text: #e6ecf4;
   --color-text-muted: #8195af;
-  --color-track: #35577d59;
+  --color-break-glow: #1a3a3a;
+  --color-break-mid: #0f1f2a;
+  --color-break-base: #0d1727;
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-deep: var(--accent-deep);
+  --color-accent-ring: var(--accent-ring);
+  --color-accent-track: var(--accent-track);
+  --color-accent-glow: var(--accent-glow);
+  --color-on-accent: var(--on-accent);
+}
+
+/* The accent palette is scoped per screen: blue everywhere by default, mint
+   inside the break screen. Components use the accent-* colors and never pick
+   a palette themselves. */
+:root {
+  --accent: var(--color-primary-400);
+  --accent-hover: var(--color-primary-300);
+  --accent-soft: var(--color-primary-100);
+  --accent-deep: var(--color-primary-800);
+  --accent-ring: var(--color-primary-600);
+  --accent-track: #35577d59;
+  --accent-glow: #35577d73;
+  --on-accent: var(--color-primary-950);
+}
+
+@utility accent-break {
+  --accent: #8fd4c4;
+  --accent-hover: #b4e6da;
+  --accent-soft: #c9ede4;
+  --accent-deep: #2f6b62;
+  --accent-ring: #8fd4c4;
+  --accent-track: #8fd4c429;
+  --accent-glow: #8fd4c440;
+  --on-accent: #0a1e1c;
 }
 
 @layer base {

@@ -3,7 +3,8 @@ import { ContinueDialog } from "@/components/ContinueDialog/ContinueDialog";
 import { SettingsGearIcon } from "@/components/icons/AppIcons";
 import { CycleProgress } from "@/components/Timer/CycleProgress";
 import { TimerControls } from "@/components/Timer/TimerControls";
-import { TimerDisplay } from "@/components/Timer/TimerDisplay";
+import { TimerNumber } from "@/components/Timer/TimerNumber";
+import { TimerPhaseLabel } from "@/components/Timer/TimerPhaseLabel";
 import { ConnectionBanner } from "../shared/ConnectionBanner";
 import { IconButton } from "../shared/IconButton";
 import { InfoMessageBanner } from "../shared/InfoMessageBanner";
@@ -11,12 +12,19 @@ import { InlineError } from "../shared/InlineError";
 import { NotificationMuteToggleButton } from "../shared/NotificationMuteToggleButton";
 import { SettingsSyncBanner } from "../shared/SettingsSyncBanner";
 import { ToastStack } from "../shared/ToastStack";
+import { useTimerStore, SessionType } from "@/store/timerStore";
 
 const HEADER_LINE_CLASS_NAME = "text-sm tracking-widest md:text-lg";
 const ICON_BUTTON_SIZE_CLASS_NAME = "md:size-12";
 const ICON_SIZE_CLASS_NAME = "size-5 md:size-7";
 const SIDE_PADDING_CLASS_NAME = "px-8 md:px-20";
 const CONTENT_WIDTH_CLASS_NAME = "mx-auto w-full max-w-4xl";
+
+const SESSION_PHASE_LABEL = {
+  [SessionType.WORK]: "FOCUS",
+  [SessionType.SHORT_BREAK]: "BREAK",
+  [SessionType.LONG_BREAK]: "LONG",
+} as const;
 
 /**
  * Fixed props for App's extracted home-screen branch.
@@ -50,6 +58,8 @@ export function HomeScreen({
   onToggleNotificationSoundMuted,
   onOpenSettingsTopScreen,
 }: HomeScreenProps): React.ReactElement {
+  const sessionType = useTimerStore((state) => state.sessionType);
+
   return (
     // Fills the space AppRoot leaves below its notices, rather than claiming
     // the whole viewport and pushing its own footer off-screen.
@@ -95,7 +105,6 @@ export function HomeScreen({
             <NotificationMuteToggleButton
               muted={notificationSoundMuted}
               onToggle={onToggleNotificationSoundMuted}
-              testId="notification-mute-button"
               className={ICON_BUTTON_SIZE_CLASS_NAME}
               iconClassName={ICON_SIZE_CLASS_NAME}
             />
@@ -114,7 +123,15 @@ export function HomeScreen({
         <div
           className={`grid gap-y-[clamp(0.625rem,3vh,1.25rem)] ${CONTENT_WIDTH_CLASS_NAME}`}
         >
-          <TimerDisplay />
+          <div className="flex items-baseline justify-between gap-4">
+            <TimerNumber />
+            <TimerPhaseLabel
+              sessionType={sessionType}
+              className="tracking-[0.2em]"
+            >
+              {SESSION_PHASE_LABEL[sessionType]}
+            </TimerPhaseLabel>
+          </div>
           <CycleProgress />
         </div>
 

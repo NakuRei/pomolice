@@ -5,9 +5,9 @@ import { deriveCycleSegments } from "@/components/Timer/cycleSegments";
 const SECONDS_PER_MINUTE = 60;
 
 const SEGMENT_FILL_CLASS_NAME_BY_STATE = {
-  completed: "bg-primary-800",
-  active: "bg-primary-400",
-  upcoming: "bg-primary-400",
+  completed: "bg-accent-deep",
+  active: "bg-accent",
+  upcoming: "bg-accent",
 } as const;
 
 /**
@@ -57,7 +57,7 @@ export function CycleProgress(): React.ReactElement {
         {segments.map((segment) => (
           <div
             key={segment.key}
-            className="min-w-0 basis-0 overflow-hidden rounded-sm bg-track"
+            className="min-w-0 basis-0 overflow-hidden rounded-sm bg-accent-track"
             style={{ flexGrow: segment.flexGrow }}
             data-testid={`cycle-segment-${segment.key}`}
             data-state={segment.state}

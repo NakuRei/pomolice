@@ -1,9 +1,11 @@
 import type { SVGProps } from "react";
 import {
   ArrowLeft,
+  Footprints,
   LoaderCircle,
   Play,
   Settings,
+  SkipForward,
   TriangleAlert,
   Volume2,
   VolumeX,
@@ -84,6 +86,26 @@ export function LoadingSpinnerIcon(props: AppIconProps): React.ReactElement {
 export function PlayIcon(props: AppIconProps): React.ReactElement {
   return (
     <Play
+      strokeWidth={DEFAULT_ICON_STROKE_WIDTH}
+      aria-hidden="true"
+      {...props}
+    />
+  );
+}
+
+export function SkipForwardIcon(props: AppIconProps): React.ReactElement {
+  return (
+    <SkipForward
+      strokeWidth={DEFAULT_ICON_STROKE_WIDTH}
+      aria-hidden="true"
+      {...props}
+    />
+  );
+}
+
+export function FootprintsIcon(props: AppIconProps): React.ReactElement {
+  return (
+    <Footprints
       strokeWidth={DEFAULT_ICON_STROKE_WIDTH}
       aria-hidden="true"
       {...props}

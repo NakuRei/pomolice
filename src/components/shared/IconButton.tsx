@@ -10,7 +10,7 @@ const ICON_BUTTON_APPEARANCE_CLASS_NAME_BY_VALUE: Record<
   string
 > = {
   neutral:
-    "text-text-muted hover:text-text focus-visible:outline-primary-600 disabled:text-disabled-text",
+    "text-text-muted hover:text-text focus-visible:outline-accent-ring disabled:text-disabled-text",
   danger:
     "text-danger-500 hover:text-danger-400 focus-visible:outline-danger-500 disabled:text-disabled-text",
 };

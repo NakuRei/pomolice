@@ -1,6 +1,11 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 
-export type ButtonAppearance = "primary" | "secondary" | "danger" | "subtle";
+export type ButtonAppearance =
+  | "primary"
+  | "secondary"
+  | "outline"
+  | "danger"
+  | "subtle";
 export type ButtonSize = "sm" | "md" | "lg";
 export type ButtonWidth = "auto" | "full";
 export type ButtonShape = "rounded" | "pill";
@@ -11,13 +16,15 @@ const BUTTON_BASE_CLASS_NAME =
 const BUTTON_APPEARANCE_CLASS_NAME_BY_VALUE: Record<ButtonAppearance, string> =
   {
     primary:
-      "border-transparent bg-primary-400 text-primary-950 hover:bg-primary-300 focus-visible:outline-primary-600 disabled:bg-disabled-bg disabled:text-disabled-text disabled:focus-visible:outline-disabled-border",
+      "border-transparent bg-accent text-on-accent hover:bg-accent-hover focus-visible:outline-accent-ring disabled:bg-disabled-bg disabled:text-disabled-text disabled:focus-visible:outline-disabled-border",
     secondary:
-      "border-border bg-surface-raised text-on-surface hover:border-border-strong hover:bg-surface-hover focus-visible:outline-primary-600 disabled:border-disabled-border disabled:bg-disabled-bg disabled:text-disabled-text disabled:focus-visible:outline-disabled-border",
+      "border-border bg-surface-raised text-on-surface hover:border-border-strong hover:bg-surface-hover focus-visible:outline-accent-ring disabled:border-disabled-border disabled:bg-disabled-bg disabled:text-disabled-text disabled:focus-visible:outline-disabled-border",
     danger:
       "border-transparent bg-danger-600 text-on-danger hover:bg-danger-700 focus-visible:outline-danger-500 disabled:bg-disabled-bg disabled:text-disabled-text disabled:focus-visible:outline-disabled-border",
     subtle:
-      "border-transparent bg-transparent text-text-muted hover:bg-surface hover:text-text focus-visible:outline-primary-600 disabled:text-disabled-text disabled:hover:bg-transparent",
+      "border-transparent bg-transparent text-text-muted hover:bg-surface hover:text-text focus-visible:outline-accent-ring disabled:text-disabled-text disabled:hover:bg-transparent",
+    outline:
+      "border-accent/35 bg-transparent text-accent-soft hover:bg-accent/10 focus-visible:outline-accent-ring disabled:border-disabled-border disabled:text-disabled-text disabled:hover:bg-transparent",
   };
 
 const BUTTON_SIZE_CLASS_NAME_BY_VALUE: Record<ButtonSize, string> = {
@@ -28,7 +35,7 @@ const BUTTON_SIZE_CLASS_NAME_BY_VALUE: Record<ButtonSize, string> = {
 
 const BUTTON_SHAPE_CLASS_NAME_BY_VALUE: Record<ButtonShape, string> = {
   rounded: "rounded-lg",
-  pill: "rounded-full",
+  pill: "gap-2.5 rounded-full tracking-wider",
 };
 
 const BUTTON_WIDTH_CLASS_NAME_BY_VALUE: Record<ButtonWidth, string> = {
@@ -62,6 +69,7 @@ function buildButtonClassName(
  * ```tsx
  * <Button appearance="primary">Save</Button>
  * <Button appearance="secondary" size="sm">Cancel</Button>
+ * <Button appearance="outline" shape="pill">Skip</Button>
  * <Button appearance="danger" width="full">Delete</Button>
  * ```
  */
@@ -75,7 +83,7 @@ interface ButtonProps extends Omit<
   size?: ButtonSize;
   /** Shared width token for standard text buttons. */
   width?: ButtonWidth;
-  /** Corner treatment; `pill` is the fully rounded timer action. */
+  /** Corner treatment; `pill` is the fully rounded screen action with icon spacing. */
   shape?: ButtonShape;
   /** Optional class name for layout-only adjustments such as `flex-1`. */
   className?: string;
