@@ -546,7 +546,7 @@ impl AppState {
                 log_info_event(
                     BackendLogEvent::AppStateRestoredFromPersistence,
                     &[
-                        ("state_status", format!("{:?}", timer_state.status)),
+                        ("state_status", format!("{:?}", timer_state.status())),
                         ("saved_at", saved_at_utc.to_rfc3339()),
                     ],
                 );
@@ -554,7 +554,7 @@ impl AppState {
             }
         };
 
-        let is_running = preparation.initial_timer_state.status != TimerStatus::Idle;
+        let is_running = preparation.initial_timer_state.status() != TimerStatus::Idle;
 
         log_info_event(
             BackendLogEvent::AppStateInitializationCompleted,
@@ -575,7 +575,7 @@ impl AppState {
         timer_state: TimerState,
         saved_at_utc: DateTime<Utc>,
     ) -> StartupPreparation {
-        if timer_state.status == TimerStatus::Working && timer_state.remaining_seconds == 0 {
+        if timer_state.status() == TimerStatus::Working && timer_state.remaining_seconds == 0 {
             return Self::prepare_expired_work_restore(clock, timer_state, saved_at_utc);
         }
 
@@ -659,7 +659,7 @@ fn restored_running_saved_at_local(
     saved_at_utc: DateTime<Utc>,
 ) -> Option<DateTime<Local>> {
     if !matches!(
-        timer_state.status,
+        timer_state.status(),
         TimerStatus::Working | TimerStatus::OnBreak
     ) {
         return None;
@@ -703,7 +703,11 @@ impl Drop for AppState {
 mod tests {
     use super::*;
     use crate::external_adapters::clock::testing::FixedClock;
-    use crate::types::{ScheduleStopState, SessionType, PERSISTED_STATE_SCHEMA_VERSION};
+    use crate::external_adapters::persistence::PersistedState;
+    use crate::types::{
+        ScheduleStopState, SessionType, TimerPhase, TimerSettings, WeeklyAutoRunConfig,
+        PERSISTED_STATE_SCHEMA_VERSION,
+    };
     use chrono::TimeZone;
     use serde_json::json;
     use std::path::{Path, PathBuf};
@@ -857,7 +861,7 @@ mod tests {
     async fn apply_working_timer_state(app_state: &AppState, remaining_seconds: u64) {
         let mut timer_manager = app_state.timer_manager.lock().await;
         let mut state = timer_manager.get_state().clone();
-        state.status = TimerStatus::Working;
+        state.phase = TimerPhase::Working;
         state.remaining_seconds = remaining_seconds;
         let _ = timer_manager.apply_persisted_state(state);
     }
@@ -927,7 +931,7 @@ mod tests {
         let temp_dir = create_temp_dir("build-startup-state-restores-running");
         let clock = fixed_clock(create_utc_datetime(2025, 2, 1, 9, 0, 0));
         let running_state = TimerState {
-            status: TimerStatus::Working,
+            phase: TimerPhase::Working,
             remaining_seconds: 900,
             ..TimerState::default()
         };
@@ -966,7 +970,7 @@ mod tests {
             Arc::clone(&save_clock),
             &temp_dir,
             TimerState {
-                status: TimerStatus::Working,
+                phase: TimerPhase::Working,
                 remaining_seconds: 900,
                 ..TimerState::default()
             },
@@ -998,21 +1002,30 @@ mod tests {
         let temp_dir = create_temp_dir("build-startup-state-pending-post-break-decision");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
         let restore_at_utc = create_utc_datetime(2025, 2, 1, 9, 5, 0);
-        let save_clock = fixed_clock(saved_at_utc);
         let restore_clock = fixed_clock(restore_at_utc);
 
-        save_state_to_dir(
-            Arc::clone(&save_clock),
-            &temp_dir,
-            TimerState {
-                status: TimerStatus::Working,
-                remaining_seconds: 123,
-                session_type: SessionType::ShortBreak,
-                post_break_decision_pending: true,
-                schedule_stop_state: ScheduleStopState::StopAtNextSessionBoundary,
-                ..TimerState::default()
-            },
-        );
+        // The state file is user-writable, so it can claim a pending decision
+        // while still working. That pair cannot exist in memory, so write the
+        // file directly.
+        let persisted = PersistedState {
+            schema_version: PERSISTED_STATE_SCHEMA_VERSION,
+            status: TimerStatus::Working,
+            remaining_seconds: 123,
+            session_type: SessionType::ShortBreak,
+            current_cycle: 0,
+            completed_pomodoros: 0,
+            post_break_decision_pending: true,
+            settings: TimerSettings::default(),
+            saved_at: saved_at_utc,
+            auto_run_feature_enabled: false,
+            weekly_auto_run_config: WeeklyAutoRunConfig::default(),
+            schedule_stop_state: ScheduleStopState::StopAtNextSessionBoundary,
+        };
+        std::fs::write(
+            temp_dir.join("timer_state.json"),
+            serde_json::to_string_pretty(&persisted).expect("persisted state should serialize"),
+        )
+        .expect("persisted state should be writable");
 
         let (app_state, outcome) =
             build_startup_state_for_tests(Arc::clone(&restore_clock), &temp_dir).await;
@@ -1045,7 +1058,7 @@ mod tests {
             Arc::clone(&save_clock),
             &temp_dir,
             TimerState {
-                status: TimerStatus::Working,
+                phase: TimerPhase::Working,
                 remaining_seconds: 60,
                 current_cycle: 1,
                 ..TimerState::default()
@@ -1059,7 +1072,7 @@ mod tests {
         assert!(outcome.initial_tick_payload.is_none());
 
         let timer_state = app_state.timer_manager.lock().await.get_state().clone();
-        assert_eq!(timer_state.status, TimerStatus::OnBreak);
+        assert_eq!(timer_state.status(), TimerStatus::OnBreak);
         assert_eq!(timer_state.session_type, SessionType::ShortBreak);
         assert_eq!(timer_state.remaining_seconds, 300);
         assert_eq!(
@@ -1082,7 +1095,7 @@ mod tests {
             Arc::clone(&save_clock),
             &temp_dir,
             TimerState {
-                status: TimerStatus::Working,
+                phase: TimerPhase::Working,
                 remaining_seconds: 60,
                 schedule_stop_state: ScheduleStopState::StopAtNextSessionBoundary,
                 auto_run_feature_enabled: true,
@@ -1097,7 +1110,7 @@ mod tests {
         assert!(outcome.initial_tick_payload.is_none());
 
         let timer_state = app_state.timer_manager.lock().await.get_state().clone();
-        assert_eq!(timer_state.status, TimerStatus::Idle);
+        assert_eq!(timer_state.status(), TimerStatus::Idle);
         assert_eq!(timer_state.session_type, SessionType::Work);
         assert_eq!(
             timer_state.remaining_seconds,
@@ -1190,7 +1203,7 @@ mod tests {
         {
             let mut timer_manager = app_state.timer_manager.lock().await;
             let mut state = timer_manager.get_state().clone();
-            state.status = TimerStatus::Working;
+            state.phase = TimerPhase::Working;
             state.remaining_seconds = 111;
             let _ = timer_manager.apply_persisted_state(state);
         }
@@ -1202,7 +1215,7 @@ mod tests {
 
         match app_state.persistence.load_state_sync() {
             PersistenceLoadOutcome::Restored { timer_state, .. } => {
-                assert_eq!(timer_state.status, TimerStatus::Working);
+                assert_eq!(timer_state.status(), TimerStatus::Working);
                 assert_eq!(timer_state.remaining_seconds, 111);
             }
             PersistenceLoadOutcome::NoState => panic!("expected restored state"),
@@ -1223,7 +1236,7 @@ mod tests {
         {
             let mut timer_manager = app_state.timer_manager.lock().await;
             let mut state = timer_manager.get_state().clone();
-            state.status = TimerStatus::Working;
+            state.phase = TimerPhase::Working;
             state.remaining_seconds = 111;
             let _ = timer_manager.apply_persisted_state(state);
         }
@@ -1400,7 +1413,7 @@ mod tests {
         {
             let mut timer_manager = app_state.timer_manager.lock().await;
             let mut state = timer_manager.get_state().clone();
-            state.status = TimerStatus::Working;
+            state.phase = TimerPhase::Working;
             state.remaining_seconds = 111;
             let _ = timer_manager.apply_persisted_state(state);
         }
@@ -1490,7 +1503,7 @@ mod tests {
         {
             let mut timer_manager = app_state.timer_manager.lock().await;
             let mut state = timer_manager.get_state().clone();
-            state.status = TimerStatus::Working;
+            state.phase = TimerPhase::Working;
             state.remaining_seconds = 555;
             let _ = timer_manager.apply_persisted_state(state);
         }
@@ -1600,7 +1613,7 @@ mod tests {
         {
             let mut timer_manager = app_state.timer_manager.blocking_lock();
             let mut state = timer_manager.get_state().clone();
-            state.status = TimerStatus::Working;
+            state.phase = TimerPhase::Working;
             state.remaining_seconds = 444;
             let _ = timer_manager.apply_persisted_state(state);
         }
@@ -1611,7 +1624,7 @@ mod tests {
 
         match app_state.persistence.load_state_sync() {
             PersistenceLoadOutcome::Restored { timer_state, .. } => {
-                assert_eq!(timer_state.status, TimerStatus::Working);
+                assert_eq!(timer_state.status(), TimerStatus::Working);
                 assert_eq!(timer_state.remaining_seconds, 444);
             }
             PersistenceLoadOutcome::NoState => panic!("expected restored state"),

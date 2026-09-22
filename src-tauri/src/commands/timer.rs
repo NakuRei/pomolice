@@ -63,9 +63,7 @@ pub(crate) async fn resolve_post_break_decision(
     crate::session_pipeline::resolve_post_break_decision_from_command(app, &state, action).await
 }
 
-/// Record whether the user is away from the desk during the current break.
-///
-/// This command is valid only while the timer is on break.
+/// Valid only while the timer is on break.
 #[tauri::command]
 pub(crate) async fn set_away_during_break(
     window: WebviewWindow,
@@ -487,7 +485,7 @@ mod tests {
         timer.transition_to_break();
         timer.complete_break_session_transition();
         assert_eq!(timer.status(), TimerStatus::Idle);
-        assert!(timer.get_state().post_break_decision_pending);
+        assert!(timer.get_state().post_break_decision_pending());
     }
 
     fn assert_no_start_runtime_effects(runtime_effect_shell: &RecordingRuntimeEffectShell) {

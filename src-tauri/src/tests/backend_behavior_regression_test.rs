@@ -7,8 +7,9 @@ use crate::external_adapters::window_lock::{WindowState, WindowStateManager};
 use crate::state::AppState;
 use crate::timer_state_transition::TimerStateManager;
 use crate::types::{
-    PostBreakDecisionAction, PostBreakTransitionPolicy, ScheduleStopState, SessionTransitionReason,
-    SessionType, TimerSettings, TimerState, TimerStatus, TimerTickPayload, WorkStartOrigin,
+    BreakSessionState, PostBreakDecisionAction, PostBreakTransitionPolicy, ScheduleStopState,
+    SessionTransitionReason, SessionType, TimerPhase, TimerSettings, TimerState, TimerStatus,
+    TimerTickPayload, WorkStartOrigin,
 };
 use crate::work_start::{
     start_boot_prompt_work, start_manual_work, start_scheduler_work, StartWorkAttempt,
@@ -328,7 +329,7 @@ fn assert_no_start_effects(effects: &RecordedStartWorkEffects) {
 
 fn working_state() -> TimerState {
     TimerState {
-        status: TimerStatus::Working,
+        phase: TimerPhase::Working,
         session_type: SessionType::Work,
         remaining_seconds: 0,
         current_cycle: 1,
@@ -338,7 +339,7 @@ fn working_state() -> TimerState {
 
 fn short_break_state(policy: PostBreakTransitionPolicy) -> TimerState {
     TimerState {
-        status: TimerStatus::OnBreak,
+        phase: TimerPhase::OnBreak(BreakSessionState::default()),
         session_type: SessionType::ShortBreak,
         remaining_seconds: 0,
         current_cycle: 1,
@@ -488,7 +489,7 @@ fn break_completion_preserves_manual_wait_and_auto_continue_policies() {
         SessionTransitionReason::BreakWaitingDecision
     );
     assert_eq!(manual_timer.status(), TimerStatus::Idle);
-    assert!(manual_timer.get_state().post_break_decision_pending);
+    assert!(manual_timer.get_state().post_break_decision_pending());
 
     let mut automatic_timer = timer_transition_manager_from_state(short_break_state(
         PostBreakTransitionPolicy::StartNextWorkAutomatically,
@@ -501,15 +502,16 @@ fn break_completion_preserves_manual_wait_and_auto_continue_policies() {
         SessionTransitionReason::BreakAutoStarted
     );
     assert_eq!(automatic_timer.status(), TimerStatus::Working);
-    assert!(!automatic_timer.get_state().post_break_decision_pending);
+    assert!(!automatic_timer.get_state().post_break_decision_pending());
 }
 
 #[test]
 fn post_break_decision_continue_and_stop_resolve_only_pending_idle_state() {
     let pending_state = TimerState {
-        status: TimerStatus::Idle,
+        phase: TimerPhase::Idle {
+            post_break_decision_pending: true,
+        },
         session_type: SessionType::Work,
-        post_break_decision_pending: true,
         current_cycle: 1,
         ..TimerState::default()
     };
@@ -521,7 +523,7 @@ fn post_break_decision_continue_and_stop_resolve_only_pending_idle_state() {
 
     assert_eq!(continue_payload.status, TimerStatus::Working);
     assert_eq!(continue_timer.get_state().current_cycle, 2);
-    assert!(!continue_timer.get_state().post_break_decision_pending);
+    assert!(!continue_timer.get_state().post_break_decision_pending());
     assert!(matches!(
         continue_timer.resolve_post_break_decision(PostBreakDecisionAction::Continue),
         Err(PomoliceError::InvalidStateTransition { .. })
@@ -534,14 +536,17 @@ fn post_break_decision_continue_and_stop_resolve_only_pending_idle_state() {
         .expect("pending stop should be accepted");
 
     assert_eq!(stop_payload.status, TimerStatus::Idle);
-    assert!(!stop_timer.get_state().post_break_decision_pending);
+    assert!(!stop_timer.get_state().post_break_decision_pending());
 }
 
 #[test]
 fn emergency_stop_resets_running_or_breaking_state_to_idle() {
     let mut timer = timer_transition_manager_from_state(TimerState {
-        is_fullscreen_break: true,
-        break_interaction_count: 3,
+        phase: TimerPhase::OnBreak(BreakSessionState {
+            is_fullscreen: true,
+            interaction_count: 3,
+            ..BreakSessionState::default()
+        }),
         ..short_break_state(PostBreakTransitionPolicy::RequireManualContinue)
     });
 
@@ -551,8 +556,7 @@ fn emergency_stop_resets_running_or_breaking_state_to_idle() {
     assert_eq!(payload.status, TimerStatus::Idle);
     assert_eq!(timer.status(), TimerStatus::Idle);
     assert_eq!(timer.get_state().session_type, SessionType::Work);
-    assert!(!timer.get_state().is_fullscreen_break);
-    assert_eq!(timer.get_state().break_interaction_count, 0);
+    assert!(timer.get_state().current_break().is_none());
 }
 
 #[test]
@@ -575,8 +579,8 @@ fn duplicate_emergency_stop_while_idle_preserves_idle_result() {
     }
     assert_eq!(timer.status(), TimerStatus::Idle);
     assert_eq!(timer.get_state().session_type, SessionType::Work);
-    assert!(!timer.get_state().is_fullscreen_break);
-    assert!(!timer.get_state().post_break_decision_pending);
+    assert!(timer.get_state().current_break().is_none());
+    assert!(!timer.get_state().post_break_decision_pending());
 }
 
 #[test]
@@ -596,7 +600,7 @@ fn invalid_start_attempts_preserve_current_timer_state() {
             result,
             Err(PomoliceError::InvalidStateTransition { .. })
         ));
-        assert_eq!(timer.get_state().status, blocked_state.status);
+        assert_eq!(timer.get_state().status(), blocked_state.status());
         assert_eq!(timer.get_state().session_type, blocked_state.session_type);
     }
 }

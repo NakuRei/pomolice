@@ -883,23 +883,80 @@ pub(crate) struct ActiveWindowChangedPayload {
     pub active_window_summary: Option<ActiveWindowSummaryPayload>,
 }
 
+/// Created with the break and dropped with it, so nothing here can leak into
+/// the next session.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct BreakSessionState {
+    pub is_fullscreen: bool,
+    pub interaction_count: u32,
+    pub last_penalty_time: Option<std::time::Instant>,
+    pub attendance: BreakAttendance,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum TimerPhase {
+    Idle { post_break_decision_pending: bool },
+    Working,
+    OnBreak(BreakSessionState),
+}
+
+impl TimerPhase {
+    /// Break-scoped values are not persisted, so a restored break starts with
+    /// a fresh `BreakSessionState`.
+    pub(crate) fn restored(status: TimerStatus, post_break_decision_pending: bool) -> Self {
+        match status {
+            TimerStatus::Idle => Self::Idle {
+                post_break_decision_pending,
+            },
+            TimerStatus::Working => Self::Working,
+            TimerStatus::OnBreak => Self::OnBreak(BreakSessionState::default()),
+        }
+    }
+
+    pub(crate) fn status(&self) -> TimerStatus {
+        match self {
+            Self::Idle { .. } => TimerStatus::Idle,
+            Self::Working => TimerStatus::Working,
+            Self::OnBreak(_) => TimerStatus::OnBreak,
+        }
+    }
+
+    pub(crate) fn post_break_decision_pending(&self) -> bool {
+        matches!(
+            self,
+            Self::Idle {
+                post_break_decision_pending: true
+            }
+        )
+    }
+
+    pub(crate) fn current_break(&self) -> Option<&BreakSessionState> {
+        match self {
+            Self::OnBreak(current_break) => Some(current_break),
+            Self::Idle { .. } | Self::Working => None,
+        }
+    }
+
+    pub(crate) fn current_break_mut(&mut self) -> Option<&mut BreakSessionState> {
+        match self {
+            Self::OnBreak(current_break) => Some(current_break),
+            Self::Idle { .. } | Self::Working => None,
+        }
+    }
+}
+
 /// Application state for timer management
 #[derive(Debug, Clone)]
 pub(crate) struct TimerState {
-    pub status: TimerStatus,
+    pub phase: TimerPhase,
     pub remaining_seconds: u64,
     pub session_type: SessionType,
     pub current_cycle: u32,
     pub completed_pomodoros: u32,
-    pub break_interaction_count: u32,
-    pub last_penalty_time: Option<std::time::Instant>,
     pub settings: TimerSettings,
     pub auto_run_feature_enabled: bool,
     pub weekly_auto_run_config: WeeklyAutoRunConfig,
     pub schedule_stop_state: ScheduleStopState,
-    pub post_break_decision_pending: bool,
-    pub is_fullscreen_break: bool,
-    pub break_attendance: BreakAttendance,
     pub last_transition: Option<std::time::Instant>,
 }
 
@@ -907,50 +964,61 @@ impl Default for TimerState {
     fn default() -> Self {
         let settings = TimerSettings::default();
         Self {
-            status: TimerStatus::Idle,
+            phase: TimerPhase::Idle {
+                post_break_decision_pending: false,
+            },
             remaining_seconds: settings.work_duration_secs.get(),
             session_type: SessionType::Work,
             current_cycle: 0,
             completed_pomodoros: 0,
-            break_interaction_count: 0,
-            last_penalty_time: None,
             settings,
             auto_run_feature_enabled: false,
             weekly_auto_run_config: WeeklyAutoRunConfig::default(),
             schedule_stop_state: ScheduleStopState::NotControlledBySchedule,
-            post_break_decision_pending: false,
-            is_fullscreen_break: false,
-            break_attendance: BreakAttendance::AtDesk,
             last_transition: None,
         }
     }
 }
 
 impl TimerState {
+    pub(crate) fn status(&self) -> TimerStatus {
+        self.phase.status()
+    }
+
+    pub(crate) fn post_break_decision_pending(&self) -> bool {
+        self.phase.post_break_decision_pending()
+    }
+
+    pub(crate) fn current_break(&self) -> Option<&BreakSessionState> {
+        self.phase.current_break()
+    }
+
     pub(crate) fn to_tick_payload(&self) -> TimerTickPayload {
+        let current_break = self.current_break();
         TimerTickPayload {
-            status: self.status,
+            status: self.status(),
             remaining_seconds: self.remaining_seconds,
             session_type: self.session_type,
             current_cycle: self.current_cycle,
             completed_pomodoros: self.completed_pomodoros,
-            break_interaction_count: self.break_interaction_count,
-            is_fullscreen_break: self.is_fullscreen_break,
-            away_during_break: self.break_attendance.is_away(),
+            break_interaction_count: current_break.map_or(0, |b| b.interaction_count),
+            is_fullscreen_break: current_break.is_some_and(|b| b.is_fullscreen),
+            away_during_break: current_break.is_some_and(|b| b.attendance.is_away()),
         }
     }
 
     pub(crate) fn to_full_payload(&self) -> FullStatePayload {
+        let current_break = self.current_break();
         FullStatePayload {
-            status: self.status,
+            status: self.status(),
             remaining_seconds: self.remaining_seconds,
             session_type: self.session_type,
             current_cycle: self.current_cycle,
             completed_pomodoros: self.completed_pomodoros,
-            break_interaction_count: self.break_interaction_count,
-            is_fullscreen_break: self.is_fullscreen_break,
-            away_during_break: self.break_attendance.is_away(),
-            post_break_decision_pending: self.post_break_decision_pending,
+            break_interaction_count: current_break.map_or(0, |b| b.interaction_count),
+            is_fullscreen_break: current_break.is_some_and(|b| b.is_fullscreen),
+            away_during_break: current_break.is_some_and(|b| b.attendance.is_away()),
+            post_break_decision_pending: self.post_break_decision_pending(),
             settings: self.settings.clone(),
             boot_auto_start_prompt_window: None,
             active_window_summary: None,
@@ -1164,7 +1232,7 @@ mod tests {
     #[test]
     fn test_timer_state_default() {
         let state = TimerState::default();
-        assert_eq!(state.status, TimerStatus::Idle);
+        assert_eq!(state.status(), TimerStatus::Idle);
         assert_eq!(state.session_type, SessionType::Work);
         assert_eq!(state.remaining_seconds, 25 * 60);
         assert!(!state.auto_run_feature_enabled);

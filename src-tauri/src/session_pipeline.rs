@@ -203,7 +203,7 @@ where
         let mut timer = state_handle.timer_manager.lock().await;
         validate_post_break_decision_command_state(
             timer.status(),
-            timer.get_state().post_break_decision_pending,
+            timer.get_state().post_break_decision_pending(),
         )?;
         let tick_payload = timer.resolve_post_break_decision(action)?;
         let should_spawn_timer_task = action == types::PostBreakDecisionAction::Continue;
@@ -540,7 +540,7 @@ async fn finalized_session_completion_state(
     FinalizedSessionCompletionState {
         tick_payload: state.to_tick_payload(),
         post_break_transition_policy: state.settings.post_break_transition_policy,
-        post_break_decision_pending: state.post_break_decision_pending,
+        post_break_decision_pending: state.post_break_decision_pending(),
     }
 }
 
@@ -890,7 +890,7 @@ mod timer_command_behavior_tests {
     use crate::types::{
         BreakAttendance, DayAutoRunSlot, HhMm, LongBreakDurationSecs, LongBreakIntervalCount,
         PostBreakDecisionAction, PostBreakTransitionPolicy, SessionType, ShortBreakDurationSecs,
-        TimerSettings, TimerState, TimerStatus, TimerTickPayload, WeeklyAutoRunConfig,
+        TimerPhase, TimerSettings, TimerState, TimerStatus, TimerTickPayload, WeeklyAutoRunConfig,
         WorkDurationSecs, WorkStartOrigin,
     };
     use crate::work_start::{start_manual_work, StartWorkRuntimeEffects};
@@ -1142,7 +1142,7 @@ mod timer_command_behavior_tests {
         timer.transition_to_break();
         timer.complete_break_session_transition();
         assert_eq!(timer.status(), TimerStatus::Idle);
-        assert!(timer.get_state().post_break_decision_pending);
+        assert!(timer.get_state().post_break_decision_pending());
     }
 
     async fn apply_restored_post_break_decision_pending_state(state: &AppState) {
@@ -1155,17 +1155,18 @@ mod timer_command_behavior_tests {
             PostBreakTransitionPolicy::RequireManualContinue,
         );
         let _ = timer.apply_persisted_state(TimerState {
-            status: TimerStatus::Idle,
+            phase: TimerPhase::Idle {
+                post_break_decision_pending: true,
+            },
             remaining_seconds: settings.work_duration_secs.get(),
             session_type: SessionType::Work,
             current_cycle: 4,
             completed_pomodoros: 3,
-            post_break_decision_pending: true,
             settings,
             ..TimerState::default()
         });
         assert_eq!(timer.status(), TimerStatus::Idle);
-        assert!(timer.get_state().post_break_decision_pending);
+        assert!(timer.get_state().post_break_decision_pending());
     }
 
     async fn prepare_fullscreen_break_state(state: &AppState) {
@@ -1183,7 +1184,10 @@ mod timer_command_behavior_tests {
         timer.transition_to_break();
         timer.set_fullscreen_break(true);
         assert_eq!(timer.status(), TimerStatus::OnBreak);
-        assert!(timer.get_state().is_fullscreen_break);
+        assert!(timer
+            .get_state()
+            .current_break()
+            .is_some_and(|b| b.is_fullscreen));
     }
 
     async fn install_timer_countdown_task(state: &Arc<AppState>) {
@@ -1438,10 +1442,10 @@ mod timer_command_behavior_tests {
         );
 
         let persisted = persisted_timer_state(&state);
-        assert_eq!(persisted.status, TimerStatus::Working);
+        assert_eq!(persisted.status(), TimerStatus::Working);
         assert_eq!(persisted.session_type, SessionType::Work);
         assert_eq!(persisted.remaining_seconds, 1500);
-        assert!(!persisted.post_break_decision_pending);
+        assert!(!persisted.post_break_decision_pending());
     }
 
     #[tokio::test(start_paused = true)]
@@ -1470,10 +1474,10 @@ mod timer_command_behavior_tests {
 
         let timer = state.timer_manager.lock().await;
         let timer_state = timer.get_state();
-        assert_eq!(timer_state.status, TimerStatus::Working);
+        assert_eq!(timer_state.status(), TimerStatus::Working);
         assert_eq!(timer_state.session_type, SessionType::Work);
         assert_eq!(timer_state.remaining_seconds, 1500);
-        assert!(!timer_state.post_break_decision_pending);
+        assert!(!timer_state.post_break_decision_pending());
         assert_eq!(published.remaining_seconds, 1500);
     }
 
@@ -1505,10 +1509,10 @@ mod timer_command_behavior_tests {
             .await
             .get_state()
             .clone();
-        assert_eq!(timer_state.status, TimerStatus::Working);
+        assert_eq!(timer_state.status(), TimerStatus::Working);
         assert_eq!(timer_state.session_type, SessionType::Work);
         assert_eq!(timer_state.remaining_seconds, 1500);
-        assert!(!timer_state.post_break_decision_pending);
+        assert!(!timer_state.post_break_decision_pending());
     }
 
     #[tokio::test]
@@ -1539,7 +1543,7 @@ mod timer_command_behavior_tests {
         );
 
         let persisted = persisted_timer_state(&state);
-        assert_eq!(persisted.status, TimerStatus::Idle);
+        assert_eq!(persisted.status(), TimerStatus::Idle);
         assert_eq!(
             persisted.remaining_seconds,
             expected_work_duration_secs.get()
@@ -1676,7 +1680,7 @@ mod timer_command_behavior_tests {
         .expect("identical duration replay should persist successfully");
 
         let persisted = persisted_timer_state(&state);
-        assert_eq!(persisted.status, TimerStatus::Idle);
+        assert_eq!(persisted.status(), TimerStatus::Idle);
         assert_eq!(
             persisted.remaining_seconds,
             expected_work_duration_secs.get()
@@ -1718,8 +1722,8 @@ mod timer_command_behavior_tests {
         assert_eq!(runtime_effect_shell.fullscreen_break_exit_requests, 1);
 
         let persisted = persisted_timer_state(&state);
-        assert_eq!(persisted.status, TimerStatus::Idle);
-        assert!(!persisted.is_fullscreen_break);
+        assert_eq!(persisted.status(), TimerStatus::Idle);
+        assert!(persisted.current_break().is_none());
     }
 
     #[tokio::test]
@@ -1748,7 +1752,7 @@ mod timer_command_behavior_tests {
         {
             let fullscreen_timer = fullscreen_state.timer_manager.lock().await;
             assert_eq!(fullscreen_timer.status(), TimerStatus::Idle);
-            assert!(!fullscreen_timer.get_state().is_fullscreen_break);
+            assert!(fullscreen_timer.get_state().current_break().is_none());
         }
         assert_eq!(fullscreen_published.status, TimerStatus::Idle);
         assert!(!fullscreen_published.is_fullscreen_break);
@@ -1819,8 +1823,8 @@ mod timer_command_behavior_tests {
             .await
             .get_state()
             .clone();
-        assert_eq!(timer_state.status, TimerStatus::Idle);
-        assert!(!timer_state.is_fullscreen_break);
+        assert_eq!(timer_state.status(), TimerStatus::Idle);
+        assert!(timer_state.current_break().is_none());
     }
 
     #[tokio::test]
@@ -1845,9 +1849,9 @@ mod timer_command_behavior_tests {
         );
 
         let persisted = persisted_timer_state(&state);
-        assert_eq!(persisted.status, TimerStatus::Idle);
+        assert_eq!(persisted.status(), TimerStatus::Idle);
         assert_eq!(persisted.session_type, SessionType::Work);
-        assert!(!persisted.post_break_decision_pending);
+        assert!(!persisted.post_break_decision_pending());
     }
 
     #[tokio::test]
@@ -1873,7 +1877,7 @@ mod timer_command_behavior_tests {
 
         let timer = state.timer_manager.lock().await;
         assert_eq!(timer.status(), TimerStatus::Idle);
-        assert!(!timer.get_state().post_break_decision_pending);
+        assert!(!timer.get_state().post_break_decision_pending());
         assert_eq!(published.status, TimerStatus::Idle);
     }
 
@@ -1890,9 +1894,9 @@ mod timer_command_behavior_tests {
         {
             let timer = state.timer_manager.lock().await;
             let timer_state = timer.get_state();
-            assert_eq!(timer_state.status, TimerStatus::OnBreak);
+            assert_eq!(timer_state.status(), TimerStatus::OnBreak);
             assert_eq!(timer_state.remaining_seconds, 299);
-            assert!(timer_state.is_fullscreen_break);
+            assert!(timer_state.current_break().is_some_and(|b| b.is_fullscreen));
         }
 
         let mut stop_runtime_effect_shell = RecordingCommandRuntimeEffectShell::default();
@@ -1903,8 +1907,8 @@ mod timer_command_behavior_tests {
         {
             let timer = state.timer_manager.lock().await;
             let timer_state = timer.get_state();
-            assert_eq!(timer_state.status, TimerStatus::Idle);
-            assert!(!timer_state.is_fullscreen_break);
+            assert_eq!(timer_state.status(), TimerStatus::Idle);
+            assert!(timer_state.current_break().is_none());
         }
 
         let mut start_runtime_effect_shell =
@@ -1927,7 +1931,7 @@ mod timer_command_behavior_tests {
         {
             let timer = state.timer_manager.lock().await;
             let timer_state = timer.get_state();
-            assert_eq!(timer_state.status, TimerStatus::Working);
+            assert_eq!(timer_state.status(), TimerStatus::Working);
             assert_eq!(timer_state.session_type, SessionType::Work);
             assert_eq!(timer_state.remaining_seconds, 1500);
         }
@@ -1938,7 +1942,7 @@ mod timer_command_behavior_tests {
 
         let timer = state.timer_manager.lock().await;
         let timer_state = timer.get_state();
-        assert_eq!(timer_state.status, TimerStatus::Working);
+        assert_eq!(timer_state.status(), TimerStatus::Working);
         assert_eq!(timer_state.session_type, SessionType::Work);
         assert_eq!(timer_state.remaining_seconds, 1499);
     }
@@ -1965,10 +1969,10 @@ mod timer_command_behavior_tests {
 
         let timer = state.timer_manager.lock().await;
         let timer_state = timer.get_state();
-        assert_eq!(timer_state.status, TimerStatus::Working);
+        assert_eq!(timer_state.status(), TimerStatus::Working);
         assert_eq!(timer_state.session_type, SessionType::Work);
         assert_eq!(timer_state.remaining_seconds, 1500);
-        assert!(!timer_state.post_break_decision_pending);
+        assert!(!timer_state.post_break_decision_pending());
         assert_eq!(published.remaining_seconds, 1500);
     }
 
@@ -1994,10 +1998,10 @@ mod timer_command_behavior_tests {
 
         let timer = state.timer_manager.lock().await;
         let timer_state = timer.get_state();
-        assert_eq!(timer_state.status, TimerStatus::Idle);
+        assert_eq!(timer_state.status(), TimerStatus::Idle);
         assert_eq!(timer_state.session_type, SessionType::Work);
         assert_eq!(timer_state.remaining_seconds, 1500);
-        assert!(!timer_state.post_break_decision_pending);
+        assert!(!timer_state.post_break_decision_pending());
         assert_eq!(published.remaining_seconds, 1500);
     }
 
@@ -2050,8 +2054,7 @@ mod timer_command_behavior_tests {
         {
             let mut timer = state.timer_manager.lock().await;
             let _ = timer.apply_persisted_state(TimerState {
-                status: TimerStatus::Working,
-                post_break_decision_pending: true,
+                phase: TimerPhase::Working,
                 ..TimerState::default()
             });
         }
@@ -2088,7 +2091,7 @@ mod timer_command_behavior_tests {
         assert_eq!(effects.fullscreen_break_exit_requests, 1);
         let timer = state.timer_manager.lock().await;
         assert_eq!(timer.status(), TimerStatus::Idle);
-        assert!(!timer.get_state().is_fullscreen_break);
+        assert!(timer.get_state().current_break().is_none());
     }
 
     #[tokio::test]
@@ -2109,13 +2112,6 @@ mod timer_command_behavior_tests {
         assert!(published.away_during_break);
         assert!(published.is_fullscreen_break);
         assert_eq!(effects.fullscreen_break_exit_requests, 0);
-        assert!(state
-            .timer_manager
-            .lock()
-            .await
-            .get_state()
-            .break_attendance
-            .is_away());
     }
 
     #[tokio::test]
@@ -2151,8 +2147,8 @@ mod emit_order_tests {
     use crate::external_adapters::window_lock::{MainWindowRestorePlan, WindowState};
     use crate::state::{self, AppState};
     use crate::types::{
-        PostBreakTransitionPolicy, SessionTransitionOutcome, SessionType, TimerSettings,
-        TimerState, TimerStatus, TimerTickPayload,
+        BreakSessionState, PostBreakTransitionPolicy, SessionTransitionOutcome, SessionType,
+        TimerPhase, TimerSettings, TimerState, TimerStatus, TimerTickPayload,
     };
     use chrono::{Local, TimeZone, Utc};
     use std::future::Future;
@@ -2419,13 +2415,13 @@ mod emit_order_tests {
         replace_timer_state(
             &state,
             TimerState {
-                status: TimerStatus::Idle,
+                phase: TimerPhase::Idle {
+                    post_break_decision_pending: false,
+                },
                 session_type: SessionType::Work,
                 remaining_seconds: 0,
                 current_cycle: 3,
                 completed_pomodoros: 8,
-                break_interaction_count: 5,
-                is_fullscreen_break: false,
                 ..TimerState::default()
             },
         )
@@ -2438,13 +2434,12 @@ mod emit_order_tests {
 
         let timer = state.timer_manager.lock().await;
         let timer_state = timer.get_state();
-        assert_eq!(timer_state.status, TimerStatus::Idle);
+        assert_eq!(timer_state.status(), TimerStatus::Idle);
         assert_eq!(timer_state.session_type, SessionType::Work);
         assert_eq!(timer_state.remaining_seconds, 0);
         assert_eq!(timer_state.current_cycle, 3);
         assert_eq!(timer_state.completed_pomodoros, 8);
-        assert_eq!(timer_state.break_interaction_count, 5);
-        assert!(!timer_state.is_fullscreen_break);
+        assert!(timer_state.current_break().is_none());
     }
 
     #[tokio::test]
@@ -2453,7 +2448,7 @@ mod emit_order_tests {
         replace_timer_state(
             &state,
             TimerState {
-                status: TimerStatus::Working,
+                phase: TimerPhase::Working,
                 session_type: SessionType::Work,
                 remaining_seconds: 1,
                 ..TimerState::default()
@@ -2475,7 +2470,7 @@ mod emit_order_tests {
 
         let timer = state.timer_manager.lock().await;
         let timer_state = timer.get_state();
-        assert_eq!(timer_state.status, TimerStatus::Working);
+        assert_eq!(timer_state.status(), TimerStatus::Working);
         assert_eq!(timer_state.session_type, SessionType::Work);
         assert_eq!(timer_state.remaining_seconds, 0);
     }
@@ -2573,7 +2568,7 @@ mod emit_order_tests {
         let effects = complete_work_session_with_recorded_effects(
             &state,
             TimerState {
-                status: TimerStatus::Working,
+                phase: TimerPhase::Working,
                 session_type: SessionType::Work,
                 remaining_seconds: 0,
                 current_cycle: 1,
@@ -2616,7 +2611,7 @@ mod emit_order_tests {
         let effects = complete_work_session_with_recorded_effects(
             &state,
             TimerState {
-                status: TimerStatus::Working,
+                phase: TimerPhase::Working,
                 session_type: SessionType::Work,
                 remaining_seconds: 0,
                 current_cycle: 4,
@@ -2748,7 +2743,7 @@ mod emit_order_tests {
         replace_timer_state(
             &state,
             TimerState {
-                status: TimerStatus::OnBreak,
+                phase: TimerPhase::OnBreak(BreakSessionState::default()),
                 session_type: SessionType::ShortBreak,
                 remaining_seconds: 1,
                 ..TimerState::default()
@@ -2777,7 +2772,10 @@ mod emit_order_tests {
 
         let timer = state.timer_manager.lock().await;
         assert!(
-            !timer.get_state().is_fullscreen_break,
+            !timer
+                .get_state()
+                .current_break()
+                .is_some_and(|b| b.is_fullscreen),
             "failed break entry must not be exposed as an active fullscreen break"
         );
     }
@@ -2788,7 +2786,7 @@ mod emit_order_tests {
         replace_timer_state(
             &state,
             TimerState {
-                status: TimerStatus::OnBreak,
+                phase: TimerPhase::OnBreak(BreakSessionState::default()),
                 session_type: SessionType::ShortBreak,
                 remaining_seconds: 1,
                 ..TimerState::default()
@@ -2844,7 +2842,7 @@ mod emit_order_tests {
         replace_timer_state(
             &state,
             TimerState {
-                status: TimerStatus::OnBreak,
+                phase: TimerPhase::OnBreak(BreakSessionState::default()),
                 session_type: SessionType::ShortBreak,
                 remaining_seconds: 1,
                 ..TimerState::default()
@@ -2860,7 +2858,10 @@ mod emit_order_tests {
         assert_eq!(effects.lock_state, RecordedBreakLockState::Locked);
 
         let timer = state.timer_manager.lock().await;
-        assert!(timer.get_state().is_fullscreen_break);
+        assert!(timer
+            .get_state()
+            .current_break()
+            .is_some_and(|b| b.is_fullscreen));
     }
 
     #[tokio::test]
@@ -2869,10 +2870,12 @@ mod emit_order_tests {
         replace_timer_state(
             &state,
             TimerState {
-                status: TimerStatus::OnBreak,
+                phase: TimerPhase::OnBreak(BreakSessionState {
+                    is_fullscreen: true,
+                    ..BreakSessionState::default()
+                }),
                 session_type: SessionType::ShortBreak,
                 remaining_seconds: 1,
-                is_fullscreen_break: true,
                 ..TimerState::default()
             },
         )
@@ -2898,7 +2901,10 @@ mod emit_order_tests {
         }
 
         let timer = state.timer_manager.lock().await;
-        assert!(!timer.get_state().is_fullscreen_break);
+        assert!(!timer
+            .get_state()
+            .current_break()
+            .is_some_and(|b| b.is_fullscreen));
     }
 
     #[tokio::test]
@@ -2907,7 +2913,7 @@ mod emit_order_tests {
         replace_timer_state(
             &state,
             TimerState {
-                status: TimerStatus::OnBreak,
+                phase: TimerPhase::OnBreak(BreakSessionState::default()),
                 session_type: SessionType::ShortBreak,
                 remaining_seconds: 1,
                 ..TimerState::default()
@@ -2940,7 +2946,9 @@ mod tests {
     use crate::external_adapters::persistence::PersistenceManager;
     use crate::logging_event::PERSISTENCE_WRITE_TRIGGER_INPUT_PENALTY;
     use crate::state::AppState;
-    use crate::types::{SessionType, TimerState, TimerStatus, TimerTickPayload};
+    use crate::types::{
+        BreakSessionState, SessionType, TimerPhase, TimerState, TimerStatus, TimerTickPayload,
+    };
     use chrono::{Local, TimeZone, Utc};
     use std::future::Future;
     use std::pin::Pin;
@@ -3016,7 +3024,7 @@ mod tests {
         replace_timer_state(
             &app_state,
             TimerState {
-                status: TimerStatus::OnBreak,
+                phase: TimerPhase::OnBreak(BreakSessionState::default()),
                 session_type: SessionType::ShortBreak,
                 remaining_seconds: 1,
                 ..TimerState::default()
@@ -3051,11 +3059,13 @@ mod tests {
         replace_timer_state(
             &app_state,
             TimerState {
-                status: TimerStatus::OnBreak,
+                phase: TimerPhase::OnBreak(BreakSessionState {
+                    interaction_count: 1,
+                    last_penalty_time: Some(Instant::now() + Duration::from_secs(60)),
+                    ..BreakSessionState::default()
+                }),
                 session_type: SessionType::ShortBreak,
                 remaining_seconds: 1,
-                last_penalty_time: Some(Instant::now() + Duration::from_secs(60)),
-                break_interaction_count: 1,
                 ..TimerState::default()
             },
         )
@@ -3073,10 +3083,9 @@ mod tests {
         replace_timer_state(
             &app_state,
             TimerState {
-                status: TimerStatus::Working,
+                phase: TimerPhase::Working,
                 session_type: SessionType::Work,
                 remaining_seconds: 123,
-                break_interaction_count: 7,
                 ..TimerState::default()
             },
         )
@@ -3089,9 +3098,9 @@ mod tests {
 
         let timer = app_state.timer_manager.lock().await;
         let timer_state = timer.get_state();
-        assert_eq!(timer_state.status, TimerStatus::Working);
+        assert_eq!(timer_state.status(), TimerStatus::Working);
         assert_eq!(timer_state.session_type, SessionType::Work);
         assert_eq!(timer_state.remaining_seconds, 123);
-        assert_eq!(timer_state.break_interaction_count, 7);
+        assert!(timer_state.current_break().is_none());
     }
 }

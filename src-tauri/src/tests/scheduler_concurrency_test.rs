@@ -223,7 +223,7 @@ mod scheduler_concurrency_tests {
         assert_eq!(timer.status(), TimerStatus::Working);
         assert_eq!(state.session_type, SessionType::Work);
         assert_eq!(state.current_cycle, 2);
-        assert!(!state.post_break_decision_pending);
+        assert!(!state.post_break_decision_pending());
     }
 
     #[tokio::test]
@@ -272,7 +272,7 @@ mod scheduler_concurrency_tests {
         let state = timer.get_state();
         assert_eq!(timer.status(), TimerStatus::Working);
         assert_eq!(state.session_type, SessionType::Work);
-        assert!(!state.post_break_decision_pending);
+        assert!(!state.post_break_decision_pending());
 
         if manual_decision_succeeded {
             assert_eq!(state.current_cycle, 2);

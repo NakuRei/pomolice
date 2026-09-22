@@ -16,8 +16,8 @@ mod startup_restore_tests {
     };
     use crate::state::AppState;
     use crate::types::{
-        PostBreakTransitionPolicy, ScheduleStopState, SessionType, TimerSettings, TimerState,
-        TimerStatus, TimerTickPayload,
+        BreakSessionState, PostBreakTransitionPolicy, ScheduleStopState, SessionType, TimerPhase,
+        TimerSettings, TimerState, TimerStatus, TimerTickPayload,
     };
 
     #[derive(Default)]
@@ -155,7 +155,7 @@ mod startup_restore_tests {
             run_startup_restore_from_dir(Arc::clone(&restore_clock), &temp_dir).await;
 
         let timer_state = current_timer_state(&app_state).await;
-        assert_eq!(timer_state.status, TimerStatus::Idle);
+        assert_eq!(timer_state.status(), TimerStatus::Idle);
         assert_eq!(timer_state.session_type, SessionType::Work);
         assert_eq!(
             timer_state.remaining_seconds,
@@ -179,7 +179,7 @@ mod startup_restore_tests {
             run_startup_restore_from_dir(Arc::clone(&restore_clock), &temp_dir).await;
 
         let timer_state = current_timer_state(&app_state).await;
-        assert_eq!(timer_state.status, TimerStatus::Idle);
+        assert_eq!(timer_state.status(), TimerStatus::Idle);
         assert_eq!(timer_state.session_type, SessionType::Work);
         assert_eq!(
             timer_state.remaining_seconds,
@@ -249,7 +249,7 @@ mod startup_restore_tests {
             &save_clock,
             &temp_dir,
             TimerState {
-                status: TimerStatus::Working,
+                phase: TimerPhase::Working,
                 remaining_seconds: saved_remaining_seconds,
                 ..TimerState::default()
             },
@@ -259,7 +259,7 @@ mod startup_restore_tests {
             run_startup_restore_from_dir(Arc::clone(&restore_clock), &temp_dir).await;
 
         let timer_state = current_timer_state(&app_state).await;
-        assert_eq!(timer_state.status, TimerStatus::Working);
+        assert_eq!(timer_state.status(), TimerStatus::Working);
         assert_eq!(timer_state.session_type, SessionType::Work);
         assert_eq!(
             timer_state.remaining_seconds,
@@ -292,7 +292,7 @@ mod startup_restore_tests {
             &save_clock,
             &temp_dir,
             TimerState {
-                status: TimerStatus::OnBreak,
+                phase: TimerPhase::OnBreak(BreakSessionState::default()),
                 session_type: SessionType::ShortBreak,
                 remaining_seconds: saved_remaining_seconds,
                 current_cycle: 2,
@@ -305,7 +305,7 @@ mod startup_restore_tests {
             run_startup_restore_from_dir(Arc::clone(&restore_clock), &temp_dir).await;
 
         let timer_state = current_timer_state(&app_state).await;
-        assert_eq!(timer_state.status, TimerStatus::OnBreak);
+        assert_eq!(timer_state.status(), TimerStatus::OnBreak);
         assert_eq!(timer_state.session_type, SessionType::ShortBreak);
         assert_eq!(timer_state.remaining_seconds, saved_remaining_seconds);
         assert_eq!(timer_state.current_cycle, 2);
@@ -336,7 +336,7 @@ mod startup_restore_tests {
             &save_clock,
             &temp_dir,
             TimerState {
-                status: TimerStatus::Working,
+                phase: TimerPhase::Working,
                 remaining_seconds: 60,
                 current_cycle: 1,
                 ..TimerState::default()
@@ -347,7 +347,7 @@ mod startup_restore_tests {
             run_startup_restore_from_dir(Arc::clone(&restore_clock), &temp_dir).await;
 
         let timer_state = current_timer_state(&app_state).await;
-        assert_eq!(timer_state.status, TimerStatus::OnBreak);
+        assert_eq!(timer_state.status(), TimerStatus::OnBreak);
         assert_eq!(timer_state.session_type, SessionType::ShortBreak);
         assert_eq!(
             timer_state.remaining_seconds,
@@ -379,7 +379,7 @@ mod startup_restore_tests {
             &save_clock,
             &temp_dir,
             TimerState {
-                status: TimerStatus::Working,
+                phase: TimerPhase::Working,
                 remaining_seconds: 60,
                 schedule_stop_state: ScheduleStopState::StopAtNextSessionBoundary,
                 auto_run_feature_enabled: true,
@@ -391,7 +391,7 @@ mod startup_restore_tests {
             run_startup_restore_from_dir(Arc::clone(&restore_clock), &temp_dir).await;
 
         let timer_state = current_timer_state(&app_state).await;
-        assert_eq!(timer_state.status, TimerStatus::Idle);
+        assert_eq!(timer_state.status(), TimerStatus::Idle);
         assert_eq!(timer_state.session_type, SessionType::Work);
         assert_eq!(
             timer_state.remaining_seconds,

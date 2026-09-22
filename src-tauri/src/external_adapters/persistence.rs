@@ -114,13 +114,13 @@ fn log_restore_normalized(snapshot: &RestoreNormalizationSnapshot) {
 
 impl PersistedState {
     pub(crate) fn from_timer_state(state: TimerState, clock: &dyn Clock) -> Self {
+        let status = state.status();
+        let post_break_decision_pending = state.post_break_decision_pending();
         let TimerState {
-            status,
             remaining_seconds,
             session_type,
             current_cycle,
             completed_pomodoros,
-            post_break_decision_pending,
             settings,
             auto_run_feature_enabled,
             weekly_auto_run_config,
@@ -501,7 +501,7 @@ mod tests {
     use super::*;
     use crate::external_adapters::clock::testing::FixedClock;
     use crate::types::{
-        DayAutoRunSlot, HhMm, PostBreakTransitionPolicy, PERSISTED_STATE_SCHEMA_VERSION,
+        DayAutoRunSlot, HhMm, PostBreakTransitionPolicy, TimerPhase, PERSISTED_STATE_SCHEMA_VERSION,
     };
     use chrono::{Local, TimeZone};
     use serde_json::json;
@@ -605,12 +605,11 @@ mod tests {
 
     fn contract_timer_state() -> TimerState {
         TimerState {
-            status: TimerStatus::Working,
+            phase: TimerPhase::Working,
             remaining_seconds: 1234,
             session_type: SessionType::Work,
             current_cycle: 3,
             completed_pomodoros: 2,
-            post_break_decision_pending: false,
             settings: contract_timer_settings(),
             auto_run_feature_enabled: true,
             weekly_auto_run_config: contract_weekly_auto_run_config(),
@@ -621,12 +620,11 @@ mod tests {
 
     fn alternate_contract_timer_state() -> TimerState {
         TimerState {
-            status: TimerStatus::Working,
+            phase: TimerPhase::Working,
             remaining_seconds: 678,
             session_type: SessionType::Work,
             current_cycle: 9,
             completed_pomodoros: 5,
-            post_break_decision_pending: false,
             settings: TimerSettings::try_from_raw(
                 1800,
                 600,
@@ -689,12 +687,12 @@ mod tests {
     }
 
     fn assert_timer_state_matches_persistence_contract(timer_state: &TimerState) {
-        assert_eq!(timer_state.status, TimerStatus::Working);
+        assert_eq!(timer_state.status(), TimerStatus::Working);
         assert_eq!(timer_state.remaining_seconds, 1234);
         assert_eq!(timer_state.session_type, SessionType::Work);
         assert_eq!(timer_state.current_cycle, 3);
         assert_eq!(timer_state.completed_pomodoros, 2);
-        assert!(!timer_state.post_break_decision_pending);
+        assert!(!timer_state.post_break_decision_pending());
         assert_timer_settings_match_contract(&timer_state.settings);
         assert!(timer_state.auto_run_feature_enabled);
         assert_eq!(
@@ -708,12 +706,12 @@ mod tests {
     }
 
     fn assert_timer_state_matches_alternate_contract(timer_state: &TimerState) {
-        assert_eq!(timer_state.status, TimerStatus::Working);
+        assert_eq!(timer_state.status(), TimerStatus::Working);
         assert_eq!(timer_state.remaining_seconds, 678);
         assert_eq!(timer_state.session_type, SessionType::Work);
         assert_eq!(timer_state.current_cycle, 9);
         assert_eq!(timer_state.completed_pomodoros, 5);
-        assert!(!timer_state.post_break_decision_pending);
+        assert!(!timer_state.post_break_decision_pending());
         assert_eq!(timer_state.settings.work_duration_secs.get(), 1800);
         assert_eq!(timer_state.settings.short_break_duration_secs.get(), 600);
         assert_eq!(timer_state.settings.long_break_duration_secs.get(), 1500);
@@ -761,7 +759,7 @@ mod tests {
 
     fn working_timer_state(remaining_seconds: u64, current_cycle: u32) -> TimerState {
         TimerState {
-            status: TimerStatus::Working,
+            phase: TimerPhase::Working,
             remaining_seconds,
             current_cycle,
             schedule_stop_state: ScheduleStopState::StopAtNextSessionBoundary,
@@ -886,13 +884,13 @@ mod tests {
         let (timer_state, restored_saved_at_utc) = restore_timer_state(&persistence);
 
         assert_eq!(restored_saved_at_utc, saved_at_utc);
-        assert_eq!(timer_state.status, TimerStatus::Idle);
+        assert_eq!(timer_state.status(), TimerStatus::Idle);
         assert_eq!(timer_state.session_type, SessionType::Work);
         assert_eq!(
             timer_state.remaining_seconds,
             timer_state.settings.work_duration_secs.get()
         );
-        assert!(timer_state.post_break_decision_pending);
+        assert!(timer_state.post_break_decision_pending());
 
         cleanup_temp_dir(&temp_dir);
     }
@@ -916,7 +914,7 @@ mod tests {
         let (timer_state, restored_saved_at_utc) = restore_timer_state(&persistence);
 
         assert_eq!(restored_saved_at_utc, saved_at_utc);
-        assert_eq!(timer_state.status, TimerStatus::OnBreak);
+        assert_eq!(timer_state.status(), TimerStatus::OnBreak);
         assert_eq!(timer_state.session_type, SessionType::ShortBreak);
         assert_eq!(timer_state.remaining_seconds, 123);
         assert_eq!(timer_state.current_cycle, 4);
@@ -927,7 +925,7 @@ mod tests {
             contract_weekly_auto_run_config()
         );
         assert!(timer_state.auto_run_feature_enabled);
-        assert!(!timer_state.post_break_decision_pending);
+        assert!(!timer_state.post_break_decision_pending());
         assert_eq!(
             timer_state.schedule_stop_state,
             ScheduleStopState::StopAtNextSessionBoundary
@@ -952,7 +950,7 @@ mod tests {
 
         let (timer_state, _) = restore_timer_state(&persistence);
 
-        assert_eq!(timer_state.status, TimerStatus::OnBreak);
+        assert_eq!(timer_state.status(), TimerStatus::OnBreak);
         assert_eq!(timer_state.session_type, SessionType::ShortBreak);
         assert_eq!(
             timer_state.remaining_seconds,
@@ -977,7 +975,7 @@ mod tests {
 
         let (timer_state, _) = restore_timer_state(&persistence);
 
-        assert_eq!(timer_state.status, TimerStatus::Working);
+        assert_eq!(timer_state.status(), TimerStatus::Working);
         assert_eq!(timer_state.session_type, SessionType::Work);
         assert_eq!(
             timer_state.remaining_seconds,
@@ -1005,7 +1003,7 @@ mod tests {
         let (timer_state, restored_saved_at_utc) = restore_timer_state(&persistence);
 
         assert_eq!(restored_saved_at_utc, saved_at_utc);
-        assert_eq!(timer_state.status, TimerStatus::OnBreak);
+        assert_eq!(timer_state.status(), TimerStatus::OnBreak);
         assert_eq!(timer_state.session_type, SessionType::LongBreak);
         assert_eq!(timer_state.remaining_seconds, 240);
         assert_eq!(timer_state.completed_pomodoros, 0);
@@ -1260,7 +1258,7 @@ mod tests {
         let (timer_state, restored_saved_at_utc) = restore_timer_state(&persistence);
 
         assert_eq!(restored_saved_at_utc, saved_at_utc);
-        assert_eq!(timer_state.status, TimerStatus::Working);
+        assert_eq!(timer_state.status(), TimerStatus::Working);
         assert_eq!(timer_state.remaining_seconds, 1200);
 
         cleanup_temp_dir(&temp_dir);

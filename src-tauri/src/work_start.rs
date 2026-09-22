@@ -538,7 +538,10 @@ mod timer_command_behavior_tests {
         timer.transition_to_break();
         timer.set_fullscreen_break(true);
         assert_eq!(timer.status(), TimerStatus::OnBreak);
-        assert!(timer.get_state().is_fullscreen_break);
+        assert!(timer
+            .get_state()
+            .current_break()
+            .is_some_and(|b| b.is_fullscreen));
     }
 
     async fn install_timer_countdown_task(state: &Arc<AppState>) {
@@ -754,7 +757,7 @@ mod timer_command_behavior_tests {
         assert_start_work_started_duration(&runtime_effect_shell, 1500);
 
         let persisted = persisted_timer_state(&state);
-        assert_eq!(persisted.status, TimerStatus::Working);
+        assert_eq!(persisted.status(), TimerStatus::Working);
         assert_eq!(persisted.session_type, SessionType::Work);
         assert_eq!(persisted.remaining_seconds, 1500);
 

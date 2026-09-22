@@ -183,7 +183,7 @@ mod run_event_tests {
         render_persistence_write_failure_message, PERSISTENCE_WRITE_TRIGGER_RUN_EVENT_EXIT,
     };
     use crate::state;
-    use crate::types::{TimerState, TimerStatus};
+    use crate::types::{TimerPhase, TimerState, TimerStatus};
     use chrono::{Local, TimeZone, Utc};
     use std::io;
     use std::path::{Path, PathBuf};
@@ -252,7 +252,7 @@ mod run_event_tests {
         {
             let mut timer_manager = app_state.timer_manager.blocking_lock();
             let state = TimerState {
-                status: TimerStatus::Working,
+                phase: TimerPhase::Working,
                 remaining_seconds: 321,
                 ..TimerState::default()
             };
@@ -265,7 +265,7 @@ mod run_event_tests {
 
         match app_state.persistence.load_state_sync() {
             PersistenceLoadOutcome::Restored { timer_state, .. } => {
-                assert_eq!(timer_state.status, TimerStatus::Working);
+                assert_eq!(timer_state.status(), TimerStatus::Working);
                 assert_eq!(timer_state.remaining_seconds, 321);
             }
             PersistenceLoadOutcome::NoState => panic!("expected restored state"),

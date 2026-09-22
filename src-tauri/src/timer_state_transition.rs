@@ -9,11 +9,11 @@ use crate::error::{PomoliceError, Result};
 use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
 use crate::schedule_boundary::{is_now_inside_schedule_window, ActiveWindow};
 use crate::types::{
-    BreakAttendance, FullStatePayload, LongBreakDurationSecs, LongBreakIntervalCount,
-    PostBreakDecisionAction, PostBreakTransitionPolicy, ScheduleStopState, SessionCompletedPayload,
-    SessionTransitionOutcome, SessionTransitionReason, SessionType, ShortBreakDurationSecs,
-    TimerSettings, TimerState, TimerStatus, TimerTickPayload, WeeklyAutoRunConfig,
-    WorkDurationSecs, WorkStartOrigin,
+    BreakAttendance, BreakSessionState, FullStatePayload, LongBreakDurationSecs,
+    LongBreakIntervalCount, PostBreakDecisionAction, PostBreakTransitionPolicy, ScheduleStopState,
+    SessionCompletedPayload, SessionTransitionOutcome, SessionTransitionReason, SessionType,
+    ShortBreakDurationSecs, TimerPhase, TimerSettings, TimerState, TimerStatus, TimerTickPayload,
+    WeeklyAutoRunConfig, WorkDurationSecs, WorkStartOrigin,
 };
 
 const INPUT_PENALTY_DEBOUNCE_DURATION: Duration = Duration::from_millis(100);
@@ -145,20 +145,15 @@ pub(crate) fn restore_saved_timer_session(
 
     RestoredTimerSession {
         timer_state: TimerState {
-            status: session.status,
+            phase: TimerPhase::restored(session.status, session.post_break_decision_pending),
             remaining_seconds,
             session_type: session.session_type,
             current_cycle: session.current_cycle,
             completed_pomodoros: session.completed_pomodoros,
-            break_interaction_count: 0,
-            last_penalty_time: None,
             settings: session.settings,
             auto_run_feature_enabled: session.auto_run_feature_enabled,
             weekly_auto_run_config: session.weekly_auto_run_config,
             schedule_stop_state,
-            post_break_decision_pending: session.post_break_decision_pending,
-            is_fullscreen_break: false,
-            break_attendance: BreakAttendance::AtDesk,
             last_transition: None,
         },
         pending_decision_normalization,
@@ -268,7 +263,7 @@ impl TimerStateManager {
         self.state = persisted_state;
         self.auto_run_boundary_publication
             .publish_if_scope_changed(AutoRunBoundaryScope::from_timer_state(&self.state));
-        if self.state.status != TimerStatus::Idle {
+        if self.state.status() != TimerStatus::Idle {
             return Some(self.state.to_tick_payload());
         }
         None
@@ -276,7 +271,7 @@ impl TimerStateManager {
 
     /// Get current timer status
     pub(crate) fn status(&self) -> TimerStatus {
-        self.state.status
+        self.state.status()
     }
 
     /// Get full state for frontend sync
@@ -299,17 +294,17 @@ impl TimerStateManager {
         settings: TimerSettings,
         work_start_origin: WorkStartOrigin,
     ) -> Result<(TimerTickPayload, u64)> {
-        if self.state.status != TimerStatus::Idle {
+        if self.state.status() != TimerStatus::Idle {
             log_warn_event(
                 BackendLogEvent::TimerStartRejected,
                 &[
                     ("reason", "invalid_state_transition".to_string()),
-                    ("current_state", format!("{:?}", self.state.status)),
+                    ("current_state", format!("{:?}", self.state.status())),
                 ],
             );
             return Err(PomoliceError::InvalidStateTransition {
                 action: "start work".to_string(),
-                current_state: self.state.status,
+                current_state: self.state.status(),
             });
         }
 
@@ -319,7 +314,7 @@ impl TimerStateManager {
                     BackendLogEvent::TimerStartRejected,
                     &[
                         ("reason", "rate_limited".to_string()),
-                        ("current_state", format!("{:?}", self.state.status)),
+                        ("current_state", format!("{:?}", self.state.status())),
                     ],
                 );
                 return Err(PomoliceError::RateLimited { remaining_ms });
@@ -332,10 +327,9 @@ impl TimerStateManager {
         self.state.settings = settings;
 
         // Initialize work session
-        self.state.status = TimerStatus::Working;
+        self.state.phase = TimerPhase::Working;
         self.state.session_type = SessionType::Work;
         self.state.remaining_seconds = work_duration_secs;
-        self.state.post_break_decision_pending = false;
         self.state.schedule_stop_state =
             schedule_stop_state_for_work_start_origin(work_start_origin);
 
@@ -365,38 +359,33 @@ impl TimerStateManager {
         &mut self,
         action: PostBreakDecisionAction,
     ) -> Result<TimerTickPayload> {
-        if self.state.status != TimerStatus::Idle || !self.state.post_break_decision_pending {
+        if !self.state.post_break_decision_pending() {
             log_warn_event(
                 BackendLogEvent::TimerTransitionRejected,
                 &[
                     ("action", "resolve_post_break_decision".to_string()),
-                    ("current_state", format!("{:?}", self.state.status)),
-                    (
-                        "pending",
-                        self.state.post_break_decision_pending.to_string(),
-                    ),
+                    ("current_state", format!("{:?}", self.state.status())),
+                    ("pending", "false".to_string()),
                 ],
             );
             return Err(PomoliceError::InvalidStateTransition {
                 action: "resolve post-break decision".to_string(),
-                current_state: self.state.status,
+                current_state: self.state.status(),
             });
         }
 
-        match action {
+        self.state.phase = match action {
             PostBreakDecisionAction::Continue => {
                 self.state.current_cycle += 1;
-                self.state.status = TimerStatus::Working;
+                TimerPhase::Working
             }
-            PostBreakDecisionAction::StopCycle => {
-                self.state.status = TimerStatus::Idle;
-            }
-        }
+            PostBreakDecisionAction::StopCycle => TimerPhase::Idle {
+                post_break_decision_pending: false,
+            },
+        };
 
         self.state.session_type = SessionType::Work;
         self.state.remaining_seconds = self.state.settings.work_duration_secs.get();
-        self.state.post_break_decision_pending = false;
-        self.state.is_fullscreen_break = false;
         self.state.schedule_stop_state = ScheduleStopState::NotControlledBySchedule;
         self.state.last_transition = Some(Instant::now());
 
@@ -405,26 +394,25 @@ impl TimerStateManager {
         Ok(self.state.to_tick_payload())
     }
 
-    /// Record whether the user is at the desk during the current break.
     pub(crate) fn set_break_attendance(
         &mut self,
         attendance: BreakAttendance,
     ) -> Result<TimerTickPayload> {
-        if self.state.status != TimerStatus::OnBreak {
+        let Some(current_break) = self.state.phase.current_break_mut() else {
             log_warn_event(
                 BackendLogEvent::TimerTransitionRejected,
                 &[
                     ("action", "set_break_attendance".to_string()),
-                    ("current_state", format!("{:?}", self.state.status)),
+                    ("current_state", format!("{:?}", self.state.status())),
                 ],
             );
             return Err(PomoliceError::InvalidStateTransition {
                 action: "set break attendance".to_string(),
-                current_state: self.state.status,
+                current_state: self.state.status(),
             });
-        }
+        };
 
-        self.state.break_attendance = attendance;
+        current_break.attendance = attendance;
         Ok(self.state.to_tick_payload())
     }
 
@@ -433,17 +421,17 @@ impl TimerStateManager {
     /// Returns `(was_fullscreen_break, tick_payload)`.
     /// The caller is responsible for emitting `"timer_tick"` and exiting fullscreen if needed.
     pub(crate) fn emergency_stop(&mut self) -> (bool, TimerTickPayload) {
-        let was_fullscreen_break = self.state.is_fullscreen_break;
+        let was_fullscreen_break = self
+            .state
+            .current_break()
+            .is_some_and(|current_break| current_break.is_fullscreen);
 
         // Reset state
-        self.state.status = TimerStatus::Idle;
+        self.state.phase = TimerPhase::Idle {
+            post_break_decision_pending: false,
+        };
         self.state.session_type = SessionType::Work;
         self.state.remaining_seconds = self.state.settings.work_duration_secs.get();
-        self.state.post_break_decision_pending = false;
-        self.state.is_fullscreen_break = false;
-        self.state.break_attendance = BreakAttendance::AtDesk;
-        self.state.break_interaction_count = 0;
-        self.state.last_penalty_time = None;
         self.state.schedule_stop_state = ScheduleStopState::NotControlledBySchedule;
         self.state.last_transition = Some(Instant::now());
 
@@ -474,7 +462,7 @@ impl TimerStateManager {
 
         log_info_event(
             BackendLogEvent::SettingsSyncApplied,
-            &[("timer_status", format!("{:?}", self.state.status))],
+            &[("timer_status", format!("{:?}", self.state.status()))],
         );
 
         Ok(self.state.to_tick_payload())
@@ -507,13 +495,12 @@ impl TimerStateManager {
     }
 
     fn apply_input_penalty_at(&mut self, now: Instant) -> Option<TimerTickPayload> {
+        let break_duration = self.state.get_break_duration();
         // Only apply penalty if on break
-        if self.state.status != TimerStatus::OnBreak {
-            return None;
-        }
+        let current_break = self.state.phase.current_break_mut()?;
 
         // Debounce: 100ms between penalties
-        if let Some(last) = self.state.last_penalty_time {
+        if let Some(last) = current_break.last_penalty_time {
             let elapsed_since_last_penalty = now.checked_duration_since(last)?;
             if elapsed_since_last_penalty < INPUT_PENALTY_DEBOUNCE_DURATION {
                 return None;
@@ -521,18 +508,20 @@ impl TimerStateManager {
         }
 
         // Increment interaction count
-        self.state.break_interaction_count += 1;
-        self.state.last_penalty_time = Some(now);
+        current_break.interaction_count += 1;
+        current_break.last_penalty_time = Some(now);
 
         // Reset break timer to full duration
-        self.state.remaining_seconds = self.state.get_break_duration();
+        self.state.remaining_seconds = break_duration;
 
         Some(self.state.to_tick_payload())
     }
 
     /// Set fullscreen break state
     pub(crate) fn set_fullscreen_break(&mut self, is_fullscreen: bool) {
-        self.state.is_fullscreen_break = is_fullscreen;
+        if let Some(current_break) = self.state.phase.current_break_mut() {
+            current_break.is_fullscreen = is_fullscreen;
+        }
     }
 
     /// Handle a timer tick (called every second)
@@ -573,10 +562,7 @@ impl TimerStateManager {
         };
 
         // Transition to break
-        self.state.status = TimerStatus::OnBreak;
-        self.state.post_break_decision_pending = false;
-        self.state.break_attendance = BreakAttendance::AtDesk;
-        self.state.break_interaction_count = 0;
+        self.state.phase = TimerPhase::OnBreak(BreakSessionState::default());
         self.state.last_transition = Some(Instant::now());
 
         let payload = SessionCompletedPayload::from_transition_outcome(
@@ -609,7 +595,11 @@ impl TimerStateManager {
             return self.execute_scheduled_stop_transition(completed_session_type);
         }
 
-        if self.state.break_attendance.is_away() {
+        let is_away = self
+            .state
+            .current_break()
+            .is_some_and(|current_break| current_break.attendance.is_away());
+        if is_away {
             return self.transition_to_idle_after_break();
         }
 
@@ -630,12 +620,11 @@ impl TimerStateManager {
         let completed_type = self.state.session_type;
 
         // Break finished. Enter manual decision waiting state with work session preview.
-        self.state.status = TimerStatus::Idle;
+        self.state.phase = TimerPhase::Idle {
+            post_break_decision_pending: true,
+        };
         self.state.session_type = SessionType::Work;
         self.state.remaining_seconds = self.state.settings.work_duration_secs.get();
-        self.state.post_break_decision_pending = true;
-        self.state.is_fullscreen_break = false;
-        self.state.break_attendance = BreakAttendance::AtDesk;
         self.state.schedule_stop_state = ScheduleStopState::NotControlledBySchedule;
         self.state.last_transition = Some(Instant::now());
 
@@ -663,12 +652,9 @@ impl TimerStateManager {
         self.state.current_cycle += 1;
 
         // Keep schedule control across automatic break-to-work transitions.
-        self.state.status = TimerStatus::Working;
+        self.state.phase = TimerPhase::Working;
         self.state.session_type = SessionType::Work;
         self.state.remaining_seconds = self.state.settings.work_duration_secs.get();
-        self.state.post_break_decision_pending = false;
-        self.state.is_fullscreen_break = false;
-        self.state.break_attendance = BreakAttendance::AtDesk;
         self.state.last_transition = Some(Instant::now());
 
         let payload = SessionCompletedPayload::from_transition_outcome(
@@ -693,12 +679,11 @@ impl TimerStateManager {
             self.state.current_cycle = 0;
         }
 
-        self.state.status = TimerStatus::Idle;
+        self.state.phase = TimerPhase::Idle {
+            post_break_decision_pending: false,
+        };
         self.state.session_type = SessionType::Work;
         self.state.remaining_seconds = self.state.settings.work_duration_secs.get();
-        self.state.post_break_decision_pending = false;
-        self.state.is_fullscreen_break = false;
-        self.state.break_attendance = BreakAttendance::AtDesk;
         self.state.schedule_stop_state = ScheduleStopState::NotControlledBySchedule;
         self.state.last_transition = Some(Instant::now());
 
@@ -728,7 +713,7 @@ impl TimerStateManager {
                 ),
                 (
                     "post_break_decision_pending",
-                    self.state.post_break_decision_pending.to_string(),
+                    self.state.post_break_decision_pending().to_string(),
                 ),
                 (
                     "schedule_stop_state",
@@ -757,7 +742,7 @@ impl TimerStateManager {
                 ),
                 (
                     "post_break_decision_pending",
-                    self.state.post_break_decision_pending.to_string(),
+                    self.state.post_break_decision_pending().to_string(),
                 ),
                 (
                     "schedule_stop_state",
@@ -781,10 +766,10 @@ impl TimerStateManager {
     }
 
     fn ensure_idle_for_duration_setting_sync(&self, action_name: &str) -> Result<()> {
-        if self.state.status != TimerStatus::Idle {
+        if self.state.status() != TimerStatus::Idle {
             return Err(PomoliceError::InvalidStateTransition {
                 action: action_name.to_string(),
-                current_state: self.state.status,
+                current_state: self.state.status(),
             });
         }
 
@@ -809,7 +794,7 @@ impl TimerStateManager {
 
         log_info_event(
             BackendLogEvent::SettingsSyncApplied,
-            &[("timer_status", format!("{:?}", self.state.status))],
+            &[("timer_status", format!("{:?}", self.state.status()))],
         );
 
         if !self.state.auto_run_feature_enabled {
@@ -821,7 +806,7 @@ impl TimerStateManager {
         &mut self,
     ) -> ScheduleEndBoundaryResult {
         if !matches!(
-            self.state.status,
+            self.state.status(),
             TimerStatus::Working | TimerStatus::OnBreak
         ) {
             return ScheduleEndBoundaryResult::Ignored;
@@ -1018,13 +1003,12 @@ mod tests {
     #[test]
     fn test_timer_state_initialization() {
         let state = TimerState::default();
-        assert_eq!(state.status, TimerStatus::Idle);
+        assert_eq!(state.status(), TimerStatus::Idle);
         assert_eq!(state.session_type, SessionType::Work);
         assert_eq!(state.current_cycle, 0);
         assert_eq!(state.completed_pomodoros, 0);
-        assert_eq!(state.break_interaction_count, 0);
-        assert!(!state.post_break_decision_pending);
-        assert!(!state.is_fullscreen_break);
+        assert!(state.current_break().is_none());
+        assert!(!state.post_break_decision_pending());
     }
 
     #[test]
@@ -1046,7 +1030,7 @@ mod tests {
     #[test]
     fn test_timer_state_to_tick_payload() {
         let state = TimerState {
-            status: TimerStatus::Working,
+            phase: TimerPhase::Working,
             remaining_seconds: 1500,
             session_type: SessionType::Work,
             current_cycle: 2,
@@ -1063,12 +1047,11 @@ mod tests {
     #[test]
     fn test_timer_state_to_full_payload() {
         let state = TimerState {
-            status: TimerStatus::OnBreak,
+            phase: TimerPhase::OnBreak(BreakSessionState::default()),
             remaining_seconds: 300,
             session_type: SessionType::ShortBreak,
             current_cycle: 1,
             completed_pomodoros: 1,
-            post_break_decision_pending: false,
             ..TimerState::default()
         };
 
@@ -1322,7 +1305,7 @@ mod tests {
     #[test]
     fn test_complete_work_session_transition_prioritizes_scheduled_stop() {
         let mut mgr = TimerStateManager::new(Some(TimerState {
-            status: TimerStatus::Working,
+            phase: TimerPhase::Working,
             session_type: SessionType::Work,
             completed_pomodoros: 3,
             current_cycle: 2,
@@ -1353,7 +1336,7 @@ mod tests {
     fn test_complete_break_session_transition_waits_for_manual_decision_when_policy_requires() {
         let expected_work_preview_secs = 1800;
         let mut mgr = TimerStateManager::new(Some(TimerState {
-            status: TimerStatus::OnBreak,
+            phase: TimerPhase::OnBreak(BreakSessionState::default()),
             session_type: SessionType::ShortBreak,
             current_cycle: 2,
             settings: make_settings(expected_work_preview_secs, 300, 900, 4),
@@ -1380,12 +1363,13 @@ mod tests {
     fn test_complete_break_session_transition_auto_starts_work_and_resets_long_break_cycle() {
         let expected_work_preview_secs = 1800;
         let mut mgr = TimerStateManager::new(Some(TimerState {
-            status: TimerStatus::OnBreak,
+            phase: TimerPhase::OnBreak(BreakSessionState {
+                is_fullscreen: true,
+                ..BreakSessionState::default()
+            }),
             session_type: SessionType::LongBreak,
             current_cycle: 4,
             settings: make_auto_start_settings(expected_work_preview_secs, 300, 900, 4),
-            post_break_decision_pending: true,
-            is_fullscreen_break: true,
             ..TimerState::default()
         }));
 
@@ -1411,7 +1395,7 @@ mod tests {
     #[test]
     fn test_break_auto_start_remains_controlled_by_schedule_end_boundary() {
         let mut mgr = TimerStateManager::new(Some(TimerState {
-            status: TimerStatus::OnBreak,
+            phase: TimerPhase::OnBreak(BreakSessionState::default()),
             session_type: SessionType::ShortBreak,
             auto_run_feature_enabled: true,
             schedule_stop_state: ScheduleStopState::WaitingForScheduleEnd,
@@ -1440,14 +1424,15 @@ mod tests {
     fn test_break_auto_start_progresses_on_next_work_tick() {
         let work_duration_secs = 1800;
         let mut mgr = TimerStateManager::new(Some(TimerState {
-            status: TimerStatus::OnBreak,
+            phase: TimerPhase::OnBreak(BreakSessionState {
+                is_fullscreen: true,
+                ..BreakSessionState::default()
+            }),
             session_type: SessionType::ShortBreak,
             current_cycle: 2,
             completed_pomodoros: 5,
             remaining_seconds: 0,
             settings: make_auto_start_settings(work_duration_secs, 300, 900, 4),
-            post_break_decision_pending: true,
-            is_fullscreen_break: true,
             ..TimerState::default()
         }));
 
@@ -1485,7 +1470,7 @@ mod tests {
     #[test]
     fn test_complete_break_session_transition_prioritizes_scheduled_stop_over_auto_policy() {
         let mut mgr = TimerStateManager::new(Some(TimerState {
-            status: TimerStatus::OnBreak,
+            phase: TimerPhase::OnBreak(BreakSessionState::default()),
             session_type: SessionType::ShortBreak,
             settings: make_auto_start_settings(1500, 300, 900, 4),
             schedule_stop_state: ScheduleStopState::StopAtNextSessionBoundary,
@@ -1512,8 +1497,9 @@ mod tests {
     #[test]
     fn test_resolve_post_break_decision_continue_starts_work() {
         let mut mgr = TimerStateManager::new(Some(TimerState {
-            status: TimerStatus::Idle,
-            post_break_decision_pending: true,
+            phase: TimerPhase::Idle {
+                post_break_decision_pending: true,
+            },
             current_cycle: 0,
             ..TimerState::default()
         }));
@@ -1534,8 +1520,9 @@ mod tests {
     fn test_resolve_post_break_decision_stop_cycle_returns_idle_preview() {
         let expected_work_preview_secs = 1800;
         let mut mgr = TimerStateManager::new(Some(TimerState {
-            status: TimerStatus::Idle,
-            post_break_decision_pending: true,
+            phase: TimerPhase::Idle {
+                post_break_decision_pending: true,
+            },
             current_cycle: 2,
             settings: make_settings(expected_work_preview_secs, 300, 900, 4),
             ..TimerState::default()
@@ -1557,8 +1544,9 @@ mod tests {
     #[test]
     fn test_resolve_post_break_decision_rejects_when_not_pending() {
         let mut mgr = TimerStateManager::new(Some(TimerState {
-            status: TimerStatus::Idle,
-            post_break_decision_pending: false,
+            phase: TimerPhase::Idle {
+                post_break_decision_pending: false,
+            },
             ..TimerState::default()
         }));
 
@@ -1580,7 +1568,7 @@ mod tests {
     fn test_apply_input_penalty_resets_break_timer() {
         // Restore a break with part of its time already spent.
         let mut mgr = TimerStateManager::new(Some(TimerState {
-            status: TimerStatus::OnBreak,
+            phase: TimerPhase::OnBreak(BreakSessionState::default()),
             session_type: SessionType::ShortBreak,
             remaining_seconds: 100,
             settings: make_settings(1500, 300, 900, 4),
@@ -1712,7 +1700,7 @@ mod tests {
     #[test]
     fn test_sync_timer_duration_settings_rejects_non_idle_state() {
         let mut mgr = TimerStateManager::new(Some(TimerState {
-            status: TimerStatus::Working,
+            phase: TimerPhase::Working,
             ..TimerState::default()
         }));
 
@@ -1918,7 +1906,7 @@ mod tests {
     fn test_scheduled_stop_at_work_boundary_cleans_up_and_skips_dialog() {
         let expected_work_preview_secs = 1800;
         let mut mgr = TimerStateManager::new(Some(TimerState {
-            status: TimerStatus::Working,
+            phase: TimerPhase::Working,
             session_type: SessionType::Work,
             remaining_seconds: 0,
             current_cycle: 2,
@@ -1954,7 +1942,7 @@ mod tests {
     #[test]
     fn test_scheduled_stop_at_long_break_boundary_resets_cycle() {
         let mut mgr = TimerStateManager::new(Some(TimerState {
-            status: TimerStatus::OnBreak,
+            phase: TimerPhase::OnBreak(BreakSessionState::default()),
             session_type: SessionType::LongBreak,
             current_cycle: 4,
             schedule_stop_state: ScheduleStopState::StopAtNextSessionBoundary,
@@ -1985,7 +1973,7 @@ mod tests {
     #[test]
     fn test_initialize_from_persisted_state_returns_payload_when_running() {
         let state = TimerState {
-            status: TimerStatus::Working,
+            phase: TimerPhase::Working,
             remaining_seconds: 900,
             ..TimerState::default()
         };
@@ -2184,17 +2172,6 @@ mod tests {
             completed.transition_reason,
             crate::types::SessionTransitionReason::BreakAutoStarted
         );
-    }
-
-    #[test]
-    fn test_emergency_stop_clears_away_flag() {
-        let mut mgr = make_manager();
-        start_auto_policy_break(&mut mgr);
-        mgr.set_break_attendance(BreakAttendance::Away).unwrap();
-
-        let (_, payload) = mgr.emergency_stop();
-
-        assert!(!payload.away_during_break);
     }
 
     #[test]
