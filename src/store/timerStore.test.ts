@@ -264,40 +264,10 @@ describe("timerStore", () => {
         "requests deferred duration reconciliation once when %s transitions to idle",
         assertDurationReconciliationAfterIdleTransition,
       );
-
-      it("exposes whether the user is away during the break", () => {
-        const breakTick = {
-          status: TimerStatus.ON_BREAK,
-          remaining_seconds: 300,
-          session_type: SessionType.SHORT_BREAK,
-          current_cycle: 1,
-          completed_pomodoros: 1,
-          break_interaction_count: 0,
-          is_fullscreen_break: true,
-        };
-
-        useTimerStore
-          .getState()
-          .handleTimerTick({ ...breakTick, away_during_break: true });
-        expect(useTimerStore.getState().isAwayDuringBreak).toBe(true);
-
-        useTimerStore
-          .getState()
-          .handleTimerTick({ ...breakTick, away_during_break: false });
-        expect(useTimerStore.getState().isAwayDuringBreak).toBe(false);
-      });
     });
 
     describe("setAwayDuringBreak()", () => {
-      it.each([true, false])("sends away=%s to the backend", async (away) => {
-        await useTimerStore.getState().setAwayDuringBreak(away);
-
-        expect(mockInvoke).toHaveBeenCalledWith("set_away_during_break", {
-          away,
-        });
-      });
-
-      it("reports a backend rejection and rethrows", async () => {
+      it("reports a backend rejection instead of swallowing it", async () => {
         mockInvoke.mockRejectedValueOnce({
           code: "invalid_state_transition",
           message: "invalid state",

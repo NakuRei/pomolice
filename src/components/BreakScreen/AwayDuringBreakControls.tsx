@@ -3,12 +3,9 @@ import { useSettingsStore } from "@/store/settingsStore";
 import { Button } from "../shared/Button";
 
 /**
- * Lets the user declare they are away from the desk during a break.
- *
  * The break keeps running and stays locked; only the automatic start of the
  * next work session is suspended, so an unattended machine does not run
- * through work sessions nobody is doing. Available only when the next work
- * would otherwise start automatically.
+ * through work sessions nobody is doing.
  */
 export function AwayDuringBreakControls(): React.ReactElement | null {
   const postBreakTransitionPolicy = useSettingsStore(

@@ -106,7 +106,7 @@ export function EmergencyShortcutHint(): React.ReactElement {
     }
   }
   return (
-    <p className="fixed bottom-4 left-3 text-xs text-text-muted">
+    <p className="text-xs text-text-muted">
       緊急解除：
       {guidance}
     </p>

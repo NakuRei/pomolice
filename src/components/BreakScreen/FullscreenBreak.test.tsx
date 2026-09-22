@@ -325,6 +325,19 @@ describe("FullscreenBreak", () => {
       });
     }
 
+    function receiveBreakTick(awayDuringBreak: boolean): void {
+      useTimerStore.getState().handleTimerTick({
+        status: TimerStatus.ON_BREAK,
+        remaining_seconds: 300,
+        session_type: SessionType.SHORT_BREAK,
+        current_cycle: 1,
+        completed_pomodoros: 1,
+        break_interaction_count: 0,
+        is_fullscreen_break: true,
+        away_during_break: awayDuringBreak,
+      });
+    }
+
     it("offers the away action only when the next work would start automatically", () => {
       useSettingsStore.setState({
         postBreakTransitionPolicy: "require_manual_continue",
@@ -357,7 +370,7 @@ describe("FullscreenBreak", () => {
 
     it("shows the away notice with a return action while away", async () => {
       enableAutomaticPostBreakPolicy();
-      useTimerStore.setState({ isAwayDuringBreak: true });
+      receiveBreakTick(true);
       const user = userEvent.setup();
       render(<FullscreenBreak />);
 
@@ -373,11 +386,20 @@ describe("FullscreenBreak", () => {
       expect(mockInvoke).toHaveBeenCalledWith("set_away_during_break", {
         away: false,
       });
+
+      act(() => {
+        receiveBreakTick(false);
+      });
+
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "離席する" }),
+      ).toBeInTheDocument();
     });
 
     it("keeps the skip flow reachable while away", async () => {
       enableAutomaticPostBreakPolicy();
-      useTimerStore.setState({ isAwayDuringBreak: true });
+      receiveBreakTick(true);
 
       await renderFullscreenBreakWithSkipFlowOpen();
 

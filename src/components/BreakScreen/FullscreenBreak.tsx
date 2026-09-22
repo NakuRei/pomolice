@@ -110,16 +110,15 @@ export function FullscreenBreak(): React.ReactElement {
         </div>
       </div>
 
-      <EmergencyShortcutHint />
-
-      {/* Away controls - bottom-left, apart from the deliberately small skip button */}
-      <div className="absolute bottom-3 left-3">
+      <div className="grid w-full shrink-0 grid-cols-[1fr_auto_1fr] items-end px-3 pb-3">
+        <div className="justify-self-start">
+          <EmergencyShortcutHint />
+        </div>
         <AwayDuringBreakControls />
-      </div>
-
-      {/* Skip button - positioned in bottom-right corner */}
-      <div className="absolute right-3 bottom-3">
-        <SkipButton onClick={handleSkipClick} />
+        {/* Skip button - positioned in bottom-right corner */}
+        <div className="justify-self-end">
+          <SkipButton onClick={handleSkipClick} />
+        </div>
       </div>
 
       {/* Multi-step skip confirmation flow */}
