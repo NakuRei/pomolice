@@ -3,26 +3,32 @@ import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 export type ButtonAppearance = "primary" | "secondary" | "danger" | "subtle";
 export type ButtonSize = "sm" | "md" | "lg";
 export type ButtonWidth = "auto" | "full";
+export type ButtonShape = "rounded" | "pill";
 
 const BUTTON_BASE_CLASS_NAME =
-  "inline-flex items-center justify-center font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed";
+  "inline-flex items-center justify-center border font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed";
 
 const BUTTON_APPEARANCE_CLASS_NAME_BY_VALUE: Record<ButtonAppearance, string> =
   {
     primary:
-      "bg-primary-700 text-on-primary hover:bg-primary-800 focus-visible:outline-primary-600 disabled:bg-disabled-bg disabled:text-disabled-text disabled:focus-visible:outline-disabled-border",
+      "border-transparent bg-primary-400 text-primary-950 hover:bg-primary-300 focus-visible:outline-primary-600 disabled:bg-disabled-bg disabled:text-disabled-text disabled:focus-visible:outline-disabled-border",
     secondary:
-      "border border-border bg-surface-raised text-on-surface hover:border-border-strong hover:bg-surface-hover focus-visible:outline-primary-600 disabled:border-disabled-border disabled:bg-disabled-bg disabled:text-disabled-text disabled:focus-visible:outline-disabled-border",
+      "border-border bg-surface-raised text-on-surface hover:border-border-strong hover:bg-surface-hover focus-visible:outline-primary-600 disabled:border-disabled-border disabled:bg-disabled-bg disabled:text-disabled-text disabled:focus-visible:outline-disabled-border",
     danger:
-      "bg-danger-600 text-on-danger hover:bg-danger-700 focus-visible:outline-danger-500 disabled:bg-disabled-bg disabled:text-disabled-text disabled:focus-visible:outline-disabled-border",
+      "border-transparent bg-danger-600 text-on-danger hover:bg-danger-700 focus-visible:outline-danger-500 disabled:bg-disabled-bg disabled:text-disabled-text disabled:focus-visible:outline-disabled-border",
     subtle:
-      "bg-transparent text-text-muted hover:bg-surface hover:text-text focus-visible:outline-primary-600 disabled:text-disabled-text disabled:hover:bg-transparent",
+      "border-transparent bg-transparent text-text-muted hover:bg-surface hover:text-text focus-visible:outline-primary-600 disabled:text-disabled-text disabled:hover:bg-transparent",
   };
 
 const BUTTON_SIZE_CLASS_NAME_BY_VALUE: Record<ButtonSize, string> = {
-  sm: "rounded-lg px-4 py-2 text-sm",
-  md: "rounded-lg px-6 py-3 text-base",
-  lg: "rounded-lg px-8 py-4 text-lg",
+  sm: "px-4 py-2 text-sm",
+  md: "px-6 py-3 text-base",
+  lg: "px-8 py-4 text-lg",
+};
+
+const BUTTON_SHAPE_CLASS_NAME_BY_VALUE: Record<ButtonShape, string> = {
+  rounded: "rounded-lg",
+  pill: "rounded-full",
 };
 
 const BUTTON_WIDTH_CLASS_NAME_BY_VALUE: Record<ButtonWidth, string> = {
@@ -34,6 +40,7 @@ function buildButtonClassName(
   appearance: ButtonAppearance,
   size: ButtonSize,
   width: ButtonWidth,
+  shape: ButtonShape,
   className: string,
 ): string {
   return [
@@ -41,6 +48,7 @@ function buildButtonClassName(
     BUTTON_APPEARANCE_CLASS_NAME_BY_VALUE[appearance],
     BUTTON_SIZE_CLASS_NAME_BY_VALUE[size],
     BUTTON_WIDTH_CLASS_NAME_BY_VALUE[width],
+    BUTTON_SHAPE_CLASS_NAME_BY_VALUE[shape],
     className,
   ]
     .filter(Boolean)
@@ -67,6 +75,8 @@ interface ButtonProps extends Omit<
   size?: ButtonSize;
   /** Shared width token for standard text buttons. */
   width?: ButtonWidth;
+  /** Corner treatment; `pill` is the fully rounded timer action. */
+  shape?: ButtonShape;
   /** Optional class name for layout-only adjustments such as `flex-1`. */
   className?: string;
   /** Optional test id mapped to `data-testid`. */
@@ -80,6 +90,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       appearance = "secondary",
       size = "md",
       width = "auto",
+      shape = "rounded",
       className = "",
       testId,
       type = "button",
@@ -92,6 +103,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       appearance,
       size,
       width,
+      shape,
       className,
     );
 
