@@ -71,8 +71,6 @@ export function FullscreenBreak(): React.ReactElement {
         <NotificationMuteToggleButton
           muted={notificationSoundMuted}
           onToggle={toggleNotificationSoundMuted}
-          className="md:size-12"
-          iconClassName="size-5 md:size-7"
         />
       </div>
 
@@ -109,8 +107,6 @@ export function FullscreenBreak(): React.ReactElement {
           <div className="flex items-center gap-3.5">
             <Button
               appearance="outline"
-              size="md"
-              shape="pill"
               onClick={handleSkipClick}
               aria-label="休憩をスキップ"
             >
@@ -120,8 +116,6 @@ export function FullscreenBreak(): React.ReactElement {
             {offersAway && (
               <Button
                 appearance="primary"
-                size="md"
-                shape="pill"
                 onClick={handleAwayToggle}
                 className="shadow-2xl shadow-accent-glow"
               >

@@ -99,7 +99,6 @@ export function ContinueDialog(): React.ReactElement | null {
         <DialogActionRow>
           <Button
             appearance="secondary"
-            size="md"
             onClick={handleEnd}
             className="flex-1"
             testId="continue-dialog-end"
@@ -109,7 +108,6 @@ export function ContinueDialog(): React.ReactElement | null {
           <Button
             ref={continueButtonReference}
             appearance="primary"
-            size="md"
             onClick={handleContinue}
             className="flex-1"
             testId="continue-dialog-continue"

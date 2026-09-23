@@ -4,15 +4,11 @@ import { ToggleIconButton } from "./ToggleIconButton";
 interface NotificationMuteToggleButtonProps {
   muted: boolean;
   onToggle: () => void;
-  iconClassName?: string;
-  className?: string;
 }
 
 export function NotificationMuteToggleButton({
   muted,
   onToggle,
-  iconClassName = "h-5 w-5",
-  className = "",
 }: NotificationMuteToggleButtonProps): React.ReactElement {
   const buttonTitle = muted ? "通知音ミュート中" : "通知音オン";
 
@@ -24,11 +20,10 @@ export function NotificationMuteToggleButton({
         onToggle();
       }}
       pressedAppearance="danger"
-      className={className}
       title={buttonTitle}
-      pressedChildren={<VolumeMutedIcon className={iconClassName} />}
+      pressedChildren={<VolumeMutedIcon className="h-5 w-5" />}
     >
-      <VolumeOnIcon className={iconClassName} />
+      <VolumeOnIcon className="h-5 w-5" />
     </ToggleIconButton>
   );
 }

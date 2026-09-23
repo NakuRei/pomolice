@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useRef } from "react";
+import { Button } from "../../shared/Button";
 
 interface FinalWarningProps {
   onConfirm: () => void;
@@ -77,19 +78,17 @@ export default function FinalWarning({
 
       {/* Action buttons */}
       <div className="flex justify-center space-x-4">
-        <button
+        <Button
           ref={cancelButtonReference}
+          appearance="primary"
           onClick={onCancel}
-          className="flex-1 rounded-lg bg-success-700 px-8 py-4 text-lg font-bold text-on-success transition-colors hover:bg-success-800 focus:ring-4 focus:ring-success-600 focus:ring-offset-2 focus:ring-offset-surface focus:outline-none"
+          className="flex-1"
         >
           No, Take the Break
-        </button>
-        <button
-          onClick={onConfirm}
-          className="flex-1 rounded-lg border-2 border-danger-500 bg-danger-950/50 px-8 py-4 text-lg font-bold text-danger-300 transition-colors hover:bg-danger-950/70 focus:ring-4 focus:ring-danger-500 focus:ring-offset-2 focus:ring-offset-surface focus:outline-none"
-        >
+        </Button>
+        <Button appearance="secondary" onClick={onConfirm} className="flex-1">
           Yes, Skip Anyway
-        </button>
+        </Button>
       </div>
 
       {/* Encouragement message */}

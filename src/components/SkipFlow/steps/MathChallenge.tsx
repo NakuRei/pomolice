@@ -18,6 +18,7 @@ import {
   validateAnswer,
   type MathProblem,
 } from "@/utils/mathGenerator";
+import { Button } from "../../shared/Button";
 import SkipFlowCancelButton from "../SkipFlowCancelButton";
 import SkipFlowStepFrame from "../SkipFlowStepFrame";
 
@@ -140,13 +141,13 @@ export default function MathChallenge({
                   : "border-border focus:ring-primary-600"
               }`}
             />
-            <button
+            <Button
               type="submit"
+              appearance="primary"
               disabled={showError || userAnswer.trim() === ""}
-              className="rounded-lg bg-primary-700 px-6 py-3 font-semibold text-on-primary transition-colors hover:bg-primary-800 focus:ring-2 focus:ring-primary-600 focus:ring-offset-2 focus:ring-offset-surface focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
             >
               Submit
-            </button>
+            </Button>
           </div>
         </form>
       </div>

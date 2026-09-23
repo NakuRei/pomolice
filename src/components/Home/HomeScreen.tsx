@@ -15,8 +15,6 @@ import { ToastStack } from "../shared/ToastStack";
 import { useTimerStore, SessionType } from "@/store/timerStore";
 
 const HEADER_LINE_CLASS_NAME = "text-sm tracking-widest md:text-lg";
-const ICON_BUTTON_SIZE_CLASS_NAME = "md:size-12";
-const ICON_SIZE_CLASS_NAME = "size-5 md:size-7";
 const SIDE_PADDING_CLASS_NAME = "px-8 md:px-20";
 const CONTENT_WIDTH_CLASS_NAME = "mx-auto w-full max-w-4xl";
 
@@ -105,17 +103,14 @@ export function HomeScreen({
             <NotificationMuteToggleButton
               muted={notificationSoundMuted}
               onToggle={onToggleNotificationSoundMuted}
-              className={ICON_BUTTON_SIZE_CLASS_NAME}
-              iconClassName={ICON_SIZE_CLASS_NAME}
             />
 
             <IconButton
               onClick={onOpenSettingsTopScreen}
               label="設定を開く"
               testId="settings-button"
-              className={ICON_BUTTON_SIZE_CLASS_NAME}
             >
-              <SettingsGearIcon className={ICON_SIZE_CLASS_NAME} />
+              <SettingsGearIcon className="size-5" />
             </IconButton>
           </div>
         </div>

@@ -42,7 +42,6 @@ export function SettingsSaveCancelFooter({
     <footer className={combinedFooterClassName} data-testid={footerTestId}>
       <Button
         appearance="secondary"
-        size="sm"
         onClick={onCancelButtonClick}
         className="flex-1"
         testId={cancelButtonTestId}
@@ -51,7 +50,6 @@ export function SettingsSaveCancelFooter({
       </Button>
       <Button
         appearance="primary"
-        size="sm"
         onClick={onSaveButtonClick}
         disabled={saveButtonDisabled}
         className="flex-1"

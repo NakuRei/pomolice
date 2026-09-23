@@ -80,7 +80,6 @@ export function AutoStartConfirmDialog(): React.ReactElement | null {
           <Button
             ref={startButtonRef}
             appearance="primary"
-            size="md"
             onClick={() => {
               void resolveBootAutoStartPrompt(true).catch(() => undefined);
             }}
@@ -91,7 +90,6 @@ export function AutoStartConfirmDialog(): React.ReactElement | null {
           </Button>
           <Button
             appearance="secondary"
-            size="md"
             onClick={() => {
               void resolveBootAutoStartPrompt(false).catch(() => undefined);
             }}

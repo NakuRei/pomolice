@@ -25,8 +25,6 @@ export function TimerControls(): React.ReactElement {
       {isIdle && (
         <Button
           appearance="primary"
-          size="md"
-          shape="pill"
           onClick={handleStart}
           testId="start-button"
           aria-label="タイマーを開始"

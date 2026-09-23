@@ -79,8 +79,6 @@ export function EmergencyStopButton(): React.ReactElement | null {
     <>
       <Button
         appearance="secondary"
-        size="md"
-        shape="pill"
         onClick={handleEmergencyStopClick}
         testId="emergency-stop-button"
         aria-label="緊急停止"
@@ -107,7 +105,6 @@ export function EmergencyStopButton(): React.ReactElement | null {
               <Button
                 ref={cancelButtonReference}
                 appearance="secondary"
-                size="sm"
                 onClick={handleCancel}
                 testId="emergency-stop-cancel"
               >
@@ -115,7 +112,6 @@ export function EmergencyStopButton(): React.ReactElement | null {
               </Button>
               <Button
                 appearance="danger"
-                size="sm"
                 onClick={handleConfirm}
                 testId="emergency-stop-confirm"
               >
