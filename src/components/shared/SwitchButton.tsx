@@ -1,7 +1,7 @@
 import type { ButtonHTMLAttributes } from "react";
 
 const SWITCH_TRACK_BASE_CLASS_NAME =
-  "inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-ring";
+  "inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-ring";
 
 const SWITCH_THUMB_BASE_CLASS_NAME =
   "pointer-events-none inline-block h-4 w-4 rounded-full shadow-sm transition-transform";

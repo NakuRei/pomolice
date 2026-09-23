@@ -120,4 +120,9 @@
   body {
     font-family: "JetBrains Mono", "Noto Sans JP", ui-monospace, monospace;
   }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
 }
