@@ -42,9 +42,7 @@ describe("SettingsAutoRunPage", () => {
       <SettingsAutoRunPage openSettingsTopScreen={openSettingsTopScreen} />,
     );
 
-    await user.click(
-      screen.getByRole("checkbox", { name: "曜日別自動実行の全体切り替え" }),
-    );
+    await user.click(screen.getByRole("switch", { name: "曜日別自動実行" }));
     await user.click(
       screen.getByRole("checkbox", { name: "月曜日の自動実行を有効にする" }),
     );
@@ -78,9 +76,7 @@ describe("SettingsAutoRunPage", () => {
       <SettingsAutoRunPage openSettingsTopScreen={openSettingsTopScreen} />,
     );
 
-    await user.click(
-      screen.getByRole("checkbox", { name: "曜日別自動実行の全体切り替え" }),
-    );
+    await user.click(screen.getByRole("switch", { name: "曜日別自動実行" }));
     await user.click(
       screen.getByRole("checkbox", { name: "月曜日の自動実行を有効にする" }),
     );
@@ -107,9 +103,7 @@ describe("SettingsAutoRunPage", () => {
       <SettingsAutoRunPage openSettingsTopScreen={openSettingsTopScreen} />,
     );
 
-    await user.click(
-      screen.getByRole("checkbox", { name: "曜日別自動実行の全体切り替え" }),
-    );
+    await user.click(screen.getByRole("switch", { name: "曜日別自動実行" }));
     await user.click(
       screen.getByRole("checkbox", { name: "月曜日の自動実行を有効にする" }),
     );

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useFocusHeadingOnMount } from "@/hooks/useFocusHeadingOnMount";
 import {
   useSettingsStore,
@@ -10,6 +10,7 @@ import {
   type WeekdayKey,
 } from "@/store/settingsStore";
 import { StatusNotice } from "../shared/StatusNotice";
+import { SwitchButton } from "../shared/SwitchButton";
 import { AutoRunDayRow } from "./AutoRunDayRow";
 import { SettingsPageHeader } from "./SettingsPageHeader";
 import { SettingsSaveCancelFooter } from "./SettingsSaveCancelFooter";
@@ -36,6 +37,7 @@ export function SettingsAutoRunPage({
   openSettingsTopScreen,
 }: SettingsAutoRunPageProps): React.ReactElement {
   const headingReference = useFocusHeadingOnMount();
+  const autoRunSectionHeadingId = useId();
 
   const autoRunFeatureEnabledFromStore = useSettingsStore(
     (state) => state.autoRunFeatureEnabled,
@@ -139,23 +141,21 @@ export function SettingsAutoRunPage({
       >
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-sm font-semibold text-text">曜日別自動実行</h2>
+            <h2
+              id={autoRunSectionHeadingId}
+              className="text-sm font-semibold text-text"
+            >
+              曜日別自動実行
+            </h2>
             <p className="text-xs text-text-muted">
               曜日ごとに開始時刻と終了時刻を設定します。
             </p>
           </div>
-          <label className="inline-flex items-center gap-2 text-sm text-text">
-            <input
-              type="checkbox"
-              checked={autoRunFeatureEnabledDraft}
-              onChange={(event) => {
-                setAutoRunFeatureEnabledDraft(event.target.checked);
-              }}
-              data-testid="settings-auto-run-feature-toggle"
-              aria-label="曜日別自動実行の全体切り替え"
-            />
-            有効化
-          </label>
+          <SwitchButton
+            aria-labelledby={autoRunSectionHeadingId}
+            checked={autoRunFeatureEnabledDraft}
+            onCheckedChange={setAutoRunFeatureEnabledDraft}
+          />
         </div>
 
         {weeklyScheduleValidationErrors.length > 0 && (
