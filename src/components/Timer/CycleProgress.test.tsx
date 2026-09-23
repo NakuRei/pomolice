@@ -3,6 +3,7 @@ import { render, screen, act } from "@testing-library/react";
 import { CycleProgress } from "./CycleProgress";
 import { SessionType, useTimerStore } from "@/store/timerStore";
 import { useSettingsStore } from "@/store/settingsStore";
+import { resetSettingsStoreForTest } from "@/test/resetSettingsStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 
 function segmentStates(): Record<string, string | null> {
@@ -25,7 +26,7 @@ function segmentStates(): Record<string, string | null> {
 describe("CycleProgress", () => {
   beforeEach(() => {
     resetTimerStoreForTest();
-    useSettingsStore.getState().resetToDefaults();
+    resetSettingsStoreForTest();
   });
 
   it("shows the whole cycle before the timer has ever started", () => {

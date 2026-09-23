@@ -21,6 +21,7 @@ import {
   useSettingsStore,
   type SettingsApplicationStatus,
 } from "./settingsStore";
+import { resetSettingsStoreForTest } from "@/test/resetSettingsStore";
 import { resetTimerStoreForTest } from "../test/resetTimerStore";
 import { useErrorStore } from "./errorStore";
 
@@ -135,7 +136,7 @@ describe("timerStore", () => {
     mockInvoke.mockReset();
     mockInvoke.mockResolvedValue(undefined);
     resetTimerStoreForTest();
-    useSettingsStore.getState().resetToDefaults();
+    resetSettingsStoreForTest();
     useSettingsStore.setState({
       durationSettingsApplicationStatus: "pending",
       automationSettingsApplicationStatus: "pending",

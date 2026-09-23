@@ -3,11 +3,12 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useSettingsStore } from "@/store/settingsStore";
 import { SessionType, TimerStatus, useTimerStore } from "@/store/timerStore";
+import { resetSettingsStoreForTest } from "@/test/resetSettingsStore";
 import { SettingsTimerPage } from "./SettingsTimerPage";
 
 describe("SettingsTimerPage", () => {
   beforeEach(() => {
-    useSettingsStore.getState().reset();
+    resetSettingsStoreForTest();
     useTimerStore.setState({
       status: TimerStatus.IDLE,
       remainingSeconds: 25 * 60,

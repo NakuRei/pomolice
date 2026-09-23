@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useSettingsStore } from "@/store/settingsStore";
 import { SessionType, TimerStatus, useTimerStore } from "@/store/timerStore";
+import { resetSettingsStoreForTest } from "@/test/resetSettingsStore";
 import { SettingsNotificationPage } from "./SettingsNotificationPage";
 import { SettingsTimerPage } from "./SettingsTimerPage";
 import { playNotificationSoundPreview } from "@/services/notifications";
@@ -15,7 +16,7 @@ vi.mock("@/services/notifications", () => ({
 
 describe("SettingsNotificationPage", () => {
   beforeEach(() => {
-    useSettingsStore.getState().reset();
+    resetSettingsStoreForTest();
     useTimerStore.setState({
       status: TimerStatus.IDLE,
       remainingSeconds: 25 * 60,

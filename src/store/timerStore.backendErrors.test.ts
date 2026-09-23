@@ -14,6 +14,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import { useErrorStore, type AppError } from "./errorStore";
+import { resetSettingsStoreForTest } from "@/test/resetSettingsStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { TimerStatus, useTimerStore } from "./timerStore";
 import {
@@ -118,7 +119,7 @@ describe("timerStore backend command errors", () => {
     mockInvoke.mockResolvedValue(undefined);
     useErrorStore.getState().clearAllErrors();
     resetTimerStoreForTest();
-    useSettingsStore.getState().resetToDefaults();
+    resetSettingsStoreForTest();
   });
 
   describe.each(settingsStatusCases)(

@@ -94,7 +94,9 @@ describe("notification volume gain", { concurrent: false }, () => {
 
   it("uses caller-provided volume percent instead of persisted settings", async () => {
     const { useSettingsStore } = await import("@/store/settingsStore");
-    useSettingsStore.getState().reset();
+    const { resetSettingsStoreForTest } =
+      await import("@/test/resetSettingsStore");
+    resetSettingsStoreForTest();
     useSettingsStore.setState({ notificationSoundVolumePercent: 100 });
 
     const silentPreviewAudio = await playPreviewAtVolumePercent(0);

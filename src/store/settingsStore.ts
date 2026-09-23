@@ -151,8 +151,6 @@ interface SettingsActions {
   ) => void;
   /** Reset all settings to default values */
   resetToDefaults: () => void;
-  /** Reset to defaults (alias for testing compatibility) */
-  reset: () => void;
 }
 
 /**
@@ -880,12 +878,6 @@ export const useSettingsStore = create<SettingsStore>()(
         },
 
         resetToDefaults: (): void => {
-          set((state) => {
-            resetSettingsStateToDefaults(state);
-          });
-        },
-
-        reset: (): void => {
           set((state) => {
             resetSettingsStateToDefaults(state);
           });

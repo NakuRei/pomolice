@@ -19,6 +19,7 @@ import { useEmergencyShortcutStore } from "@/store/emergencyShortcutStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useTimerStore, SessionType, TimerStatus } from "@/store/timerStore";
 import { useSkipFlowStore } from "@/store/skipFlowStore";
+import { resetSettingsStoreForTest } from "@/test/resetSettingsStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import {
   LONG_TYPING_PHRASES,
@@ -101,7 +102,7 @@ describe("FullscreenBreak", () => {
     mockInvoke.mockResolvedValue(undefined);
     resetTimerStoreForTest();
     useSkipFlowStore.getState().resetSkipFlow();
-    useSettingsStore.getState().resetToDefaults();
+    resetSettingsStoreForTest();
     useSettingsStore.setState({
       durationSettingsApplicationStatus: "confirmed",
       automationSettingsApplicationStatus: "confirmed",

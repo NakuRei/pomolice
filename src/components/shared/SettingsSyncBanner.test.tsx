@@ -13,6 +13,7 @@ import {
   useTimerStore,
   type FullStatePayload,
 } from "@/store/timerStore";
+import { resetSettingsStoreForTest } from "@/test/resetSettingsStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { SettingsSyncBanner } from "./SettingsSyncBanner";
 
@@ -60,7 +61,7 @@ describe("SettingsSyncBanner", () => {
     vi.mocked(invoke).mockReset().mockResolvedValue(undefined);
     resetTimerStoreForTest();
     useErrorStore.getState().clearAllErrors();
-    useSettingsStore.getState().resetToDefaults();
+    resetSettingsStoreForTest();
     setApplicationStatuses("confirmed", "confirmed");
     useTimerStore.setState({
       isConnected: true,

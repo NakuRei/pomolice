@@ -6,11 +6,12 @@ import {
   useSettingsStore,
 } from "@/store/settingsStore";
 import { SessionType, TimerStatus, useTimerStore } from "@/store/timerStore";
+import { resetSettingsStoreForTest } from "@/test/resetSettingsStore";
 import { SettingsTopPage } from "./SettingsTopPage";
 
 describe("SettingsTopPage", () => {
   beforeEach(() => {
-    useSettingsStore.getState().reset();
+    resetSettingsStoreForTest();
     useTimerStore.setState({
       status: TimerStatus.IDLE,
       remainingSeconds: 25 * 60,

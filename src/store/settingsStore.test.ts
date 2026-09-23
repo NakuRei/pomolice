@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { resetSettingsStoreForTest } from "@/test/resetSettingsStore";
 import {
   createWeeklyAutoRunConfigAllDaysDisabled,
   useSettingsStore,
@@ -10,7 +11,7 @@ import {
 describe("settingsStore", () => {
   beforeEach(() => {
     // Reset store to initial state before each test
-    useSettingsStore.getState().resetToDefaults();
+    resetSettingsStoreForTest();
   });
 
   describe("Initial State", () => {

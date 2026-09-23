@@ -9,7 +9,6 @@ import {
 } from "./settingsStore";
 
 type CandidateGroup = "duration" | "automation";
-type ResetAction = "resetToDefaults" | "reset";
 
 interface CandidateMutationCase {
   label: string;
@@ -18,7 +17,6 @@ interface CandidateMutationCase {
 }
 
 interface ResetMutationCase {
-  resetAction: ResetAction;
   changedGroup: CandidateGroup;
   prepare: () => void;
 }
@@ -51,15 +49,6 @@ function confirmCurrentCandidates(): void {
   const state = useSettingsStore.getState();
   state.confirmDurationSettingsCandidate(state);
   state.confirmAutomationSettingsCandidate(state);
-}
-
-function resetThroughAction(resetAction: ResetAction): void {
-  const state = useSettingsStore.getState();
-  if (resetAction === "resetToDefaults") {
-    state.resetToDefaults();
-    return;
-  }
-  state.reset();
 }
 
 function createWeekdayMutationCases(): CandidateMutationCase[] {
@@ -518,40 +507,24 @@ describe("settings application state", () => {
 
   it.each([
     {
-      resetAction: "resetToDefaults",
       changedGroup: "duration" as const,
       prepare: (): void => {
         useSettingsStore.getState().setWorkDuration(40);
       },
     },
     {
-      resetAction: "resetToDefaults",
-      changedGroup: "automation" as const,
-      prepare: (): void => {
-        useSettingsStore.getState().setAutoRunFeatureEnabled(true);
-      },
-    },
-    {
-      resetAction: "reset",
-      changedGroup: "duration" as const,
-      prepare: (): void => {
-        useSettingsStore.getState().setWorkDuration(40);
-      },
-    },
-    {
-      resetAction: "reset",
       changedGroup: "automation" as const,
       prepare: (): void => {
         useSettingsStore.getState().setAutoRunFeatureEnabled(true);
       },
     },
   ] satisfies ResetMutationCase[])(
-    "$resetAction marks only a changed $changedGroup candidate pending",
-    ({ resetAction, changedGroup, prepare }) => {
+    "resetToDefaults marks only a changed $changedGroup candidate pending",
+    ({ changedGroup, prepare }) => {
       prepare();
       confirmCurrentCandidates();
 
-      resetThroughAction(resetAction);
+      useSettingsStore.getState().resetToDefaults();
 
       const state = useSettingsStore.getState();
       expect(state.durationSettingsApplicationStatus).toBe(
@@ -563,20 +536,17 @@ describe("settings application state", () => {
     },
   );
 
-  it.each(["resetToDefaults", "reset"] as const)(
-    "%s preserves statuses for unchanged candidates",
-    (resetAction) => {
-      const initialState = useSettingsStore.getState();
-      initialState.confirmDurationSettingsCandidate(initialState);
-      initialState.markAutomationSettingsCandidateUnconfirmed(initialState);
+  it("resetToDefaults preserves statuses for unchanged candidates", () => {
+    const initialState = useSettingsStore.getState();
+    initialState.confirmDurationSettingsCandidate(initialState);
+    initialState.markAutomationSettingsCandidateUnconfirmed(initialState);
 
-      resetThroughAction(resetAction);
+    useSettingsStore.getState().resetToDefaults();
 
-      const state = useSettingsStore.getState();
-      expect(state.durationSettingsApplicationStatus).toBe("confirmed");
-      expect(state.automationSettingsApplicationStatus).toBe("unconfirmed");
-    },
-  );
+    const state = useSettingsStore.getState();
+    expect(state.durationSettingsApplicationStatus).toBe("confirmed");
+    expect(state.automationSettingsApplicationStatus).toBe("unconfirmed");
+  });
 
   it("discards a persisted snapshot with a malformed weekly schedule", async () => {
     useSettingsStore.setState({

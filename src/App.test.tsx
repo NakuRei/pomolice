@@ -12,6 +12,7 @@ import { listen } from "@tauri-apps/api/event";
 import App from "./App";
 import { useSettingsStore } from "./store/settingsStore";
 import { useTimerStore } from "./store/timerStore";
+import { resetSettingsStoreForTest } from "./test/resetSettingsStore";
 import { resetTimerStoreForTest } from "./test/resetTimerStore";
 
 vi.mock("@tauri-apps/api/event", () => ({
@@ -93,7 +94,7 @@ async function openNotificationSettings(user: UserEvent): Promise<void> {
 
 describe("App", () => {
   beforeEach(() => {
-    useSettingsStore.getState().reset();
+    resetSettingsStoreForTest();
     useSettingsStore.setState({
       durationSettingsApplicationStatus: "confirmed",
       automationSettingsApplicationStatus: "confirmed",

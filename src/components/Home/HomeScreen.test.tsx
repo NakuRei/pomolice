@@ -5,6 +5,7 @@ import { HomeScreen, type HomeScreenProps } from "./HomeScreen";
 import { useErrorStore } from "@/store/errorStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { SessionType, TimerStatus, useTimerStore } from "@/store/timerStore";
+import { resetSettingsStoreForTest } from "@/test/resetSettingsStore";
 
 function createProps(
   overrides: Partial<HomeScreenProps> = {},
@@ -24,7 +25,7 @@ describe("HomeScreen", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useErrorStore.getState().clearAllErrors();
-    useSettingsStore.getState().reset();
+    resetSettingsStoreForTest();
     useSettingsStore.setState({
       durationSettingsApplicationStatus: "confirmed",
       automationSettingsApplicationStatus: "confirmed",

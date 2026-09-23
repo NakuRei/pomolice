@@ -66,7 +66,9 @@ async function playWindowsManagedBreakCompleteNotificationAtVolumePercent(
   vi.mocked(resolveResource).mockResolvedValue("C:\\sounds\\work.wav");
 
   const { useSettingsStore } = await import("@/store/settingsStore");
-  useSettingsStore.getState().reset();
+  const { resetSettingsStoreForTest } =
+    await import("@/test/resetSettingsStore");
+  resetSettingsStoreForTest();
   useSettingsStore.setState({
     notificationSoundMuted: false,
     notificationSoundVolumePercent: volumePercent,
@@ -96,7 +98,9 @@ describe("session complete notifications", () => {
     vi.mocked(resolveResource).mockResolvedValueOnce("C:\\sounds\\work.wav");
 
     const { useSettingsStore } = await import("@/store/settingsStore");
-    useSettingsStore.getState().reset();
+    const { resetSettingsStoreForTest } =
+      await import("@/test/resetSettingsStore");
+    resetSettingsStoreForTest();
     useSettingsStore.setState({
       notificationSoundMuted: false,
       notificationSoundVolumePercent: 60,
@@ -154,7 +158,9 @@ describe("session complete notifications", () => {
     const previewVolume = getMockHtmlAudioInstance(0).volume;
 
     const { useSettingsStore } = await import("@/store/settingsStore");
-    useSettingsStore.getState().reset();
+    const { resetSettingsStoreForTest } =
+      await import("@/test/resetSettingsStore");
+    resetSettingsStoreForTest();
     useSettingsStore.setState({
       notificationSoundMuted: false,
       notificationSoundVolumePercent: 60,
@@ -171,7 +177,9 @@ describe("session complete notifications", () => {
     vi.mocked(resolveResource).mockResolvedValueOnce("C:\\sounds\\work.wav");
 
     const { useSettingsStore } = await import("@/store/settingsStore");
-    useSettingsStore.getState().reset();
+    const { resetSettingsStoreForTest } =
+      await import("@/test/resetSettingsStore");
+    resetSettingsStoreForTest();
     useSettingsStore.setState({
       notificationSoundMuted: false,
       notificationSoundVolumePercent: 60,
@@ -193,8 +201,9 @@ describe("session complete notifications", () => {
     vi.mocked(isPermissionGranted).mockResolvedValue(false);
     vi.mocked(requestPermission).mockResolvedValue("denied");
 
-    const { useSettingsStore } = await import("@/store/settingsStore");
-    useSettingsStore.getState().reset();
+    const { resetSettingsStoreForTest } =
+      await import("@/test/resetSettingsStore");
+    resetSettingsStoreForTest();
 
     const { notifyBreakComplete } = await import("./notifications");
     await notifyBreakComplete();
@@ -227,7 +236,9 @@ describe("session complete notifications", () => {
     vi.mocked(isPermissionGranted).mockResolvedValue(true);
 
     const { useSettingsStore } = await import("@/store/settingsStore");
-    useSettingsStore.getState().reset();
+    const { resetSettingsStoreForTest } =
+      await import("@/test/resetSettingsStore");
+    resetSettingsStoreForTest();
     useSettingsStore.setState({
       notificationSoundMuted: true,
       notificationSoundVolumePercent: 60,

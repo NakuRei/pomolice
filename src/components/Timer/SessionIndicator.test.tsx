@@ -3,6 +3,7 @@ import { render, screen, act } from "@testing-library/react";
 import { SessionIndicator } from "./SessionIndicator";
 import { useTimerStore } from "@/store/timerStore";
 import { useSettingsStore } from "@/store/settingsStore";
+import { resetSettingsStoreForTest } from "@/test/resetSettingsStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 
 function getSessionIndicator(): HTMLElement {
@@ -12,7 +13,7 @@ function getSessionIndicator(): HTMLElement {
 describe("SessionIndicator", () => {
   beforeEach(() => {
     resetTimerStoreForTest();
-    useSettingsStore.getState().resetToDefaults();
+    resetSettingsStoreForTest();
   });
 
   describe("Visibility", () => {
