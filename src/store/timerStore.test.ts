@@ -293,7 +293,6 @@ describe("timerStore", () => {
           next_status: TimerStatus.IDLE,
           next_session_type: SessionType.WORK,
           requires_manual_continue_decision: true,
-          post_break_decision_pending: true,
         });
 
         const state = useTimerStore.getState();
@@ -309,7 +308,6 @@ describe("timerStore", () => {
           next_status: TimerStatus.ON_BREAK,
           next_session_type: SessionType.SHORT_BREAK,
           requires_manual_continue_decision: false,
-          post_break_decision_pending: false,
         });
 
         const state = useTimerStore.getState();
@@ -326,7 +324,6 @@ describe("timerStore", () => {
           next_status: TimerStatus.WORKING,
           next_session_type: SessionType.WORK,
           requires_manual_continue_decision: false,
-          post_break_decision_pending: false,
         });
 
         const state = useTimerStore.getState();
@@ -343,7 +340,6 @@ describe("timerStore", () => {
           next_status: TimerStatus.IDLE,
           next_session_type: SessionType.WORK,
           requires_manual_continue_decision: false,
-          post_break_decision_pending: false,
         });
 
         const state = useTimerStore.getState();

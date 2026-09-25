@@ -70,10 +70,7 @@ export interface TimerTickPayload {
 /**
  * Payload received from backend session_completed events
  */
-export interface SessionCompletedPayload extends SessionTransitionOutcome {
-  // Temporary compatibility alias; mirrors requires_manual_continue_decision.
-  post_break_decision_pending: boolean;
-}
+export type SessionCompletedPayload = SessionTransitionOutcome;
 
 /**
  * Full state payload from backend get_full_state command

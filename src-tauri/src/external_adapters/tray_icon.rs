@@ -10,7 +10,7 @@ use std::sync::{
 use tauri::image::Image;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Runtime};
 
 use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
 use crate::tray_icon_renderer;
@@ -119,7 +119,7 @@ pub(crate) fn setup_tray(
 }
 
 /// Update the tray icon image and tooltip based on the current timer tick.
-pub(crate) fn update_tray_icon(app: &AppHandle, payload: &TimerTickPayload) {
+pub(crate) fn update_tray_icon<R: Runtime>(app: &AppHandle<R>, payload: &TimerTickPayload) {
     let visual_spec = compose_tray_visual_spec(payload.status, payload.remaining_seconds);
     let icon_pixels = render_icon_content(visual_spec.icon_content);
     let icon = Image::new_owned(icon_pixels.rgba, icon_pixels.width, icon_pixels.height);

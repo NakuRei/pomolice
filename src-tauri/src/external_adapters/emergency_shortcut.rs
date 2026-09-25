@@ -54,10 +54,10 @@ pub(crate) fn setup(app: &tauri::AppHandle) {
                     &app.config().identifier,
                     |status| publish_status(&app, status),
                     || {
-                        let app = app.clone();
-                        tauri::async_runtime::spawn(async move {
-                            crate::session_pipeline::lib_handle_escape_combo(app).await;
-                        });
+                        crate::app_effects::dispatch_from_callback(
+                            app.clone(),
+                            crate::timer_core::Event::EscapeComboPressed,
+                        );
                     },
                 )
                 .await

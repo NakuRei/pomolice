@@ -6,8 +6,25 @@ use thiserror::Error;
 /// Persisted state schema version currently supported by this binary.
 pub(crate) const PERSISTED_STATE_SCHEMA_VERSION: u32 = 1;
 
+/// Persisted timer state stored in `timer_state.json`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct PersistedState {
+    pub schema_version: u32,
+    pub status: TimerStatus,
+    pub remaining_seconds: u64,
+    pub session_type: SessionType,
+    pub current_cycle: u32,
+    pub completed_pomodoros: u32,
+    pub post_break_decision_pending: bool,
+    pub settings: TimerSettings,
+    pub saved_at: chrono::DateTime<chrono::Utc>,
+    pub auto_run_feature_enabled: bool,
+    pub weekly_auto_run_config: WeeklyAutoRunConfig,
+    pub schedule_stop_state: ScheduleStopState,
+}
+
 /// Timer status representing the current phase
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum TimerStatus {
     Idle,
@@ -16,7 +33,7 @@ pub(crate) enum TimerStatus {
 }
 
 /// Session type representing work or break sessions
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum SessionType {
     Work,
@@ -280,7 +297,7 @@ fn long_break_interval_count_or_panic(value: u32) -> LongBreakIntervalCount {
 }
 
 /// Timer settings synchronized from frontend
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct TimerSettings {
     pub work_duration_secs: WorkDurationSecs,
     pub short_break_duration_secs: ShortBreakDurationSecs,
@@ -710,9 +727,45 @@ pub(crate) enum SessionTransitionReason {
     ScheduledStopExecuted,
 }
 
-/// Unified contract for session-boundary transition results.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct SessionTransitionOutcome {
+/// Identifies one occurrence of a schedule boundary in logs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BoundaryOccurrenceId(String);
+
+impl BoundaryOccurrenceId {
+    pub(crate) fn for_schedule_boundary(
+        slot_key: &str,
+        boundary_kind: &str,
+        epoch_seconds: i64,
+    ) -> Self {
+        Self(format!("{slot_key}|{boundary_kind}|{epoch_seconds}"))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn epoch_seconds(&self) -> Option<i64> {
+        self.0.rsplit('|').next()?.parse::<i64>().ok()
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Payload sent to frontend on each timer tick
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct TimerTickPayload {
+    pub status: TimerStatus,
+    pub remaining_seconds: u64,
+    pub session_type: SessionType,
+    pub current_cycle: u32,
+    pub completed_pomodoros: u32,
+    pub break_interaction_count: u32,
+    pub is_fullscreen_break: bool,
+    pub away_during_break: bool,
+}
+
+/// Payload sent to frontend when a session completes
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct SessionCompletedPayload {
     pub transition_reason: SessionTransitionReason,
     pub completed_session_type: SessionType,
     pub next_status: TimerStatus,
@@ -720,17 +773,7 @@ pub(crate) struct SessionTransitionOutcome {
     pub requires_manual_continue_decision: bool,
 }
 
-impl SessionTransitionOutcome {
-    pub(crate) fn from_completed_payload(payload: &SessionCompletedPayload) -> Self {
-        Self {
-            transition_reason: payload.transition_reason,
-            completed_session_type: payload.completed_session_type,
-            next_status: payload.next_status,
-            next_session_type: payload.next_session_type,
-            requires_manual_continue_decision: payload.requires_manual_continue_decision,
-        }
-    }
-
+impl SessionCompletedPayload {
     pub(crate) fn work_to_break(next_session_type: SessionType) -> Self {
         debug_assert!(matches!(
             next_session_type,
@@ -784,74 +827,8 @@ impl SessionTransitionOutcome {
     }
 }
 
-/// Unique boundary identifier used to deduplicate processed schedule boundaries.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub(crate) struct BoundaryOccurrenceId(String);
-
-impl BoundaryOccurrenceId {
-    pub(crate) fn for_schedule_boundary(
-        slot_key: &str,
-        boundary_kind: &str,
-        epoch_seconds: i64,
-    ) -> Self {
-        Self(format!("{slot_key}|{boundary_kind}|{epoch_seconds}"))
-    }
-
-    pub(crate) fn epoch_seconds(&self) -> Option<i64> {
-        self.0.rsplit('|').next()?.parse::<i64>().ok()
-    }
-
-    pub(crate) fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    #[cfg(test)]
-    pub(crate) fn from_raw_for_tests(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-}
-
-/// Payload sent to frontend on each timer tick
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct TimerTickPayload {
-    pub status: TimerStatus,
-    pub remaining_seconds: u64,
-    pub session_type: SessionType,
-    pub current_cycle: u32,
-    pub completed_pomodoros: u32,
-    pub break_interaction_count: u32,
-    pub is_fullscreen_break: bool,
-    pub away_during_break: bool,
-}
-
-/// Payload sent to frontend when a session completes
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct SessionCompletedPayload {
-    pub transition_reason: SessionTransitionReason,
-    pub completed_session_type: SessionType,
-    pub next_status: TimerStatus,
-    pub next_session_type: SessionType,
-    pub requires_manual_continue_decision: bool,
-    /// Compatibility alias for already-migrated frontend fields.
-    /// This mirrors `requires_manual_continue_decision`.
-    pub post_break_decision_pending: bool,
-}
-
-impl SessionCompletedPayload {
-    pub(crate) fn from_transition_outcome(outcome: &SessionTransitionOutcome) -> Self {
-        Self {
-            transition_reason: outcome.transition_reason,
-            completed_session_type: outcome.completed_session_type,
-            next_status: outcome.next_status,
-            next_session_type: outcome.next_session_type,
-            requires_manual_continue_decision: outcome.requires_manual_continue_decision,
-            post_break_decision_pending: outcome.requires_manual_continue_decision,
-        }
-    }
-}
-
 /// Full timer state sent on initial sync
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct FullStatePayload {
     pub status: TimerStatus,
     pub remaining_seconds: u64,
@@ -863,8 +840,7 @@ pub(crate) struct FullStatePayload {
     pub away_during_break: bool,
     pub post_break_decision_pending: bool,
     pub settings: TimerSettings,
-    /// Set only by the first idle full-state sync; later syncs return `None`
-    /// even while the window is still active.
+    /// Present while the boot auto-start prompt is still waiting for a decision.
     pub boot_auto_start_prompt_window: Option<ActiveWindowSummaryPayload>,
     pub active_window_summary: Option<ActiveWindowSummaryPayload>,
 }
@@ -881,158 +857,6 @@ pub(crate) struct ActiveWindowSummaryPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct ActiveWindowChangedPayload {
     pub active_window_summary: Option<ActiveWindowSummaryPayload>,
-}
-
-/// Created with the break and dropped with it, so nothing here can leak into
-/// the next session.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct BreakSessionState {
-    pub is_fullscreen: bool,
-    pub interaction_count: u32,
-    pub last_penalty_time: Option<std::time::Instant>,
-    pub attendance: BreakAttendance,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum TimerPhase {
-    Idle { post_break_decision_pending: bool },
-    Working,
-    OnBreak(BreakSessionState),
-}
-
-impl TimerPhase {
-    /// Break-scoped values are not persisted, so a restored break starts with
-    /// a fresh `BreakSessionState`.
-    pub(crate) fn restored(status: TimerStatus, post_break_decision_pending: bool) -> Self {
-        match status {
-            TimerStatus::Idle => Self::Idle {
-                post_break_decision_pending,
-            },
-            TimerStatus::Working => Self::Working,
-            TimerStatus::OnBreak => Self::OnBreak(BreakSessionState::default()),
-        }
-    }
-
-    pub(crate) fn status(&self) -> TimerStatus {
-        match self {
-            Self::Idle { .. } => TimerStatus::Idle,
-            Self::Working => TimerStatus::Working,
-            Self::OnBreak(_) => TimerStatus::OnBreak,
-        }
-    }
-
-    pub(crate) fn post_break_decision_pending(&self) -> bool {
-        matches!(
-            self,
-            Self::Idle {
-                post_break_decision_pending: true
-            }
-        )
-    }
-
-    pub(crate) fn current_break(&self) -> Option<&BreakSessionState> {
-        match self {
-            Self::OnBreak(current_break) => Some(current_break),
-            Self::Idle { .. } | Self::Working => None,
-        }
-    }
-
-    pub(crate) fn current_break_mut(&mut self) -> Option<&mut BreakSessionState> {
-        match self {
-            Self::OnBreak(current_break) => Some(current_break),
-            Self::Idle { .. } | Self::Working => None,
-        }
-    }
-}
-
-/// Application state for timer management
-#[derive(Debug, Clone)]
-pub(crate) struct TimerState {
-    pub phase: TimerPhase,
-    pub remaining_seconds: u64,
-    pub session_type: SessionType,
-    pub current_cycle: u32,
-    pub completed_pomodoros: u32,
-    pub settings: TimerSettings,
-    pub auto_run_feature_enabled: bool,
-    pub weekly_auto_run_config: WeeklyAutoRunConfig,
-    pub schedule_stop_state: ScheduleStopState,
-    pub last_transition: Option<std::time::Instant>,
-}
-
-impl Default for TimerState {
-    fn default() -> Self {
-        let settings = TimerSettings::default();
-        Self {
-            phase: TimerPhase::Idle {
-                post_break_decision_pending: false,
-            },
-            remaining_seconds: settings.work_duration_secs.get(),
-            session_type: SessionType::Work,
-            current_cycle: 0,
-            completed_pomodoros: 0,
-            settings,
-            auto_run_feature_enabled: false,
-            weekly_auto_run_config: WeeklyAutoRunConfig::default(),
-            schedule_stop_state: ScheduleStopState::NotControlledBySchedule,
-            last_transition: None,
-        }
-    }
-}
-
-impl TimerState {
-    pub(crate) fn status(&self) -> TimerStatus {
-        self.phase.status()
-    }
-
-    pub(crate) fn post_break_decision_pending(&self) -> bool {
-        self.phase.post_break_decision_pending()
-    }
-
-    pub(crate) fn current_break(&self) -> Option<&BreakSessionState> {
-        self.phase.current_break()
-    }
-
-    pub(crate) fn to_tick_payload(&self) -> TimerTickPayload {
-        let current_break = self.current_break();
-        TimerTickPayload {
-            status: self.status(),
-            remaining_seconds: self.remaining_seconds,
-            session_type: self.session_type,
-            current_cycle: self.current_cycle,
-            completed_pomodoros: self.completed_pomodoros,
-            break_interaction_count: current_break.map_or(0, |b| b.interaction_count),
-            is_fullscreen_break: current_break.is_some_and(|b| b.is_fullscreen),
-            away_during_break: current_break.is_some_and(|b| b.attendance.is_away()),
-        }
-    }
-
-    pub(crate) fn to_full_payload(&self) -> FullStatePayload {
-        let current_break = self.current_break();
-        FullStatePayload {
-            status: self.status(),
-            remaining_seconds: self.remaining_seconds,
-            session_type: self.session_type,
-            current_cycle: self.current_cycle,
-            completed_pomodoros: self.completed_pomodoros,
-            break_interaction_count: current_break.map_or(0, |b| b.interaction_count),
-            is_fullscreen_break: current_break.is_some_and(|b| b.is_fullscreen),
-            away_during_break: current_break.is_some_and(|b| b.attendance.is_away()),
-            post_break_decision_pending: self.post_break_decision_pending(),
-            settings: self.settings.clone(),
-            boot_auto_start_prompt_window: None,
-            active_window_summary: None,
-        }
-    }
-
-    /// Get break duration based on session type
-    pub(crate) fn get_break_duration(&self) -> u64 {
-        match self.session_type {
-            SessionType::ShortBreak => self.settings.short_break_duration_secs.get(),
-            SessionType::LongBreak => self.settings.long_break_duration_secs.get(),
-            SessionType::Work => 0,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1230,20 +1054,6 @@ mod tests {
     }
 
     #[test]
-    fn test_timer_state_default() {
-        let state = TimerState::default();
-        assert_eq!(state.status(), TimerStatus::Idle);
-        assert_eq!(state.session_type, SessionType::Work);
-        assert_eq!(state.remaining_seconds, 25 * 60);
-        assert!(!state.auto_run_feature_enabled);
-        assert_eq!(state.weekly_auto_run_config, WeeklyAutoRunConfig::default());
-        assert_eq!(
-            state.schedule_stop_state,
-            ScheduleStopState::NotControlledBySchedule
-        );
-    }
-
-    #[test]
     fn test_timer_settings_default() {
         let settings = TimerSettings::default();
         assert_eq!(settings.work_duration_secs.get(), 25 * 60);
@@ -1328,33 +1138,26 @@ mod tests {
     }
 
     #[test]
-    fn test_session_transition_outcome_work_to_break_contract() {
-        let outcome = SessionTransitionOutcome::work_to_break(SessionType::LongBreak);
-
+    fn session_completed_payloads_carry_the_transition_contract() {
+        let work_to_break = SessionCompletedPayload::work_to_break(SessionType::LongBreak);
         assert_eq!(
-            outcome.transition_reason,
+            work_to_break.transition_reason,
             SessionTransitionReason::WorkToBreak
         );
-        assert_eq!(outcome.completed_session_type, SessionType::Work);
-        assert_eq!(outcome.next_status, TimerStatus::OnBreak);
-        assert_eq!(outcome.next_session_type, SessionType::LongBreak);
-        assert!(!outcome.requires_manual_continue_decision);
-    }
+        assert_eq!(work_to_break.completed_session_type, SessionType::Work);
+        assert_eq!(work_to_break.next_status, TimerStatus::OnBreak);
+        assert_eq!(work_to_break.next_session_type, SessionType::LongBreak);
+        assert!(!work_to_break.requires_manual_continue_decision);
 
-    #[test]
-    fn test_session_completed_payload_from_outcome_maps_manual_decision_flag() {
-        let outcome = SessionTransitionOutcome::break_waiting_decision(SessionType::ShortBreak);
-        let payload = SessionCompletedPayload::from_transition_outcome(&outcome);
-
+        let waiting = SessionCompletedPayload::break_waiting_decision(SessionType::ShortBreak);
         assert_eq!(
-            payload.transition_reason,
+            waiting.transition_reason,
             SessionTransitionReason::BreakWaitingDecision
         );
-        assert_eq!(payload.completed_session_type, SessionType::ShortBreak);
-        assert_eq!(payload.next_status, TimerStatus::Idle);
-        assert_eq!(payload.next_session_type, SessionType::Work);
-        assert!(payload.requires_manual_continue_decision);
-        assert!(payload.post_break_decision_pending);
+        assert_eq!(waiting.completed_session_type, SessionType::ShortBreak);
+        assert_eq!(waiting.next_status, TimerStatus::Idle);
+        assert_eq!(waiting.next_session_type, SessionType::Work);
+        assert!(waiting.requires_manual_continue_decision);
     }
 }
 

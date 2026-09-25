@@ -298,38 +298,6 @@ macro_rules! backend_log_event_spec_match {
                     "completed_pomodoros" => Public,
                 ]
             ),
-            BackendLogEvent::SchedulerStarted => spec!(
-                "scheduler.started",
-                Info,
-                "Weekly scheduler started",
-                [
-                    "previous_local" => Public,
-                    "blocked_until_idle" => Public,
-                ]
-            ),
-            BackendLogEvent::SchedulerReceivedCancellation => spec!(
-                "scheduler.received_cancellation",
-                Info,
-                "Weekly scheduler received cancellation",
-                []
-            ),
-            BackendLogEvent::SchedulerStopped => {
-                spec!("scheduler.stopped", Info, "Weekly scheduler stopped", [])
-            }
-            BackendLogEvent::SchedulerResumedStartBoundaryEvaluation => spec!(
-                "scheduler.resumed_start_boundary_evaluation",
-                Info,
-                "Weekly scheduler resumed start-boundary evaluation",
-                []
-            ),
-            BackendLogEvent::SchedulerConfigRevisionChanged => spec!(
-                "scheduler.config_revision_changed",
-                Info,
-                "Weekly scheduler detected config revision change",
-                [
-                    "config_revision" => Public,
-                ]
-            ),
             BackendLogEvent::SchedulerCrossedEndBoundary => spec!(
                 "scheduler.crossed_end_boundary",
                 Info,

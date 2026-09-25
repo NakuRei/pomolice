@@ -3,12 +3,6 @@ use log::Level;
 use crate::log_redaction::{redact_exception_message, RedactionClass};
 
 pub(crate) const PERSISTENCE_WRITE_TRIGGER_RUN_EVENT_EXIT: &str = "run_event_exit";
-pub(crate) const PERSISTENCE_WRITE_TRIGGER_SCHEDULER_STOP_PENDING: &str =
-    "scheduler_stop_pending_persist";
-pub(crate) const PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START: &str =
-    "scheduler_auto_start_persist";
-pub(crate) const PERSISTENCE_WRITE_TRIGGER_SESSION_COMPLETION: &str = "session_completion_persist";
-pub(crate) const PERSISTENCE_WRITE_TRIGGER_INPUT_PENALTY: &str = "input_penalty_persist";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackendLogEvent {
@@ -48,11 +42,6 @@ pub enum BackendLogEvent {
     StoragePersistenceParseFailed,
     StoragePersistenceSchemaVersionUnsupported,
     StoragePersistenceRestoreNormalized,
-    SchedulerStarted,
-    SchedulerReceivedCancellation,
-    SchedulerStopped,
-    SchedulerResumedStartBoundaryEvaluation,
-    SchedulerConfigRevisionChanged,
     SchedulerCrossedEndBoundary,
     SchedulerMarkedStopPending,
     SchedulerCrossedStartBoundary,

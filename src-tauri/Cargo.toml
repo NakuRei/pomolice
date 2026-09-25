@@ -32,7 +32,6 @@ parking_lot = "0.12"
 strum = { version = "0.27", features = ["derive"] }
 thiserror = "2"
 tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
-tokio-util = { version = "0.7", features = ["rt"] }
 # Standalone utility binary `src/bin/export_tray_icon_fixtures.rs` still uses tracing;
 # the application runtime under `src/` uses `log` via tauri-plugin-log.
 tracing = "0.1"

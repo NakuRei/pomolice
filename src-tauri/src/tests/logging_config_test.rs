@@ -94,7 +94,7 @@ fn test_default_logging_policy_keeps_operational_logs_bounded_and_readable() {
 
 #[test]
 fn test_should_log_allows_app_targets_and_filters_noisy_dependencies() {
-    assert!(should_log(&metadata("pomolice_lib::scheduler")));
+    assert!(should_log(&metadata("pomolice_lib::timer_core")));
     assert!(should_log(&metadata(WEBVIEW_TARGET)));
     assert!(!should_log(&metadata("rdev::listen")));
     assert!(!should_log(&metadata("hyper::client")));

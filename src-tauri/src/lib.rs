@@ -4,26 +4,26 @@ use tauri_plugin_notification::NotificationExt;
 
 type RunResult = std::result::Result<(), Box<dyn std::error::Error>>;
 
-mod app_handle_timer_effects;
+mod app_effects;
+mod break_lock;
 mod commands;
 mod error;
 mod external_adapters;
 mod log_redaction;
 mod logging_event;
 mod schedule_boundary;
-mod scheduler;
-mod session_pipeline;
 mod state;
-mod timer_state_transition;
+mod timer_core;
+mod timer_runtime;
 mod tray_icon_renderer;
 mod types;
-mod work_start;
 
 pub use crate::logging_event::{log_error_event, log_info_event, log_warn_event, BackendLogEvent};
 use crate::logging_event::{
     log_persistence_write_failure, PERSISTENCE_WRITE_TRIGGER_RUN_EVENT_EXIT,
 };
-pub use scheduler::lib_start_scheduler_task;
+use crate::timer_core::Event;
+
 fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
         if window.label() == "main" {
@@ -55,23 +55,16 @@ fn setup_app(app: &tauri::App) {
     let app_for_input = app.handle().clone();
     let app_for_input_failure = app.handle().clone();
     let on_escape_combo = move || {
-        let app = app_for_escape.clone();
-        async_runtime::spawn(async move {
-            session_pipeline::lib_handle_escape_combo(app).await;
-        });
+        app_effects::dispatch_from_callback(app_for_escape.clone(), Event::EscapeComboPressed);
     };
     let on_input_detected = move || {
-        let app = app_for_input.clone();
-        async_runtime::spawn(async move {
-            session_pipeline::lib_handle_input_detected(app).await;
-        });
+        app_effects::dispatch_from_callback(app_for_input.clone(), Event::InputDetected);
     };
     let clock: Arc<dyn external_adapters::clock::Clock + Send + Sync> =
         Arc::new(external_adapters::clock::SystemClock);
     let app_data_dir = app.handle().path().app_data_dir().ok();
-    let persistence =
-        external_adapters::persistence::PersistenceManager::new(Arc::clone(&clock), app_data_dir);
-    let (app_state, initialization_outcome) =
+    let persistence = external_adapters::persistence::PersistenceManager::new(app_data_dir);
+    let (app_state, restore_status) =
         async_runtime::block_on(state::AppState::build_startup_state_with_handlers(
             clock,
             persistence,
@@ -81,8 +74,7 @@ fn setup_app(app: &tauri::App) {
                 let _ = app_for_input_failure.emit_to("main", "input_monitor_failed", ());
             },
         ));
-    let has_persisted_state =
-        initialization_outcome.restore_status == state::AppRestoreStatus::Restored;
+    let has_persisted_state = restore_status == state::AppRestoreStatus::Restored;
 
     app.manage(app_state);
     external_adapters::emergency_shortcut::setup(app.handle());
@@ -95,28 +87,20 @@ fn setup_app(app: &tauri::App) {
         );
     }
 
+    let app_handle = app.handle().clone();
     async_runtime::block_on(async {
-        session_pipeline::lib_handle_startup_restore(
-            app.handle().clone(),
-            initialization_outcome.clone(),
-        )
-        .await;
+        let app_state = app_handle.state::<state::AppState>();
+        // Startup can only fail on persistence, which is logged where it fails.
+        let _ = app_state.timer.dispatch(&app_handle, Event::Started).await;
     });
-
-    let scheduler_app_handle = app.handle().clone();
-    async_runtime::spawn(async move {
-        lib_start_scheduler_task(scheduler_app_handle).await;
-    });
+    app_effects::spawn_ticker(app.handle().clone());
 
     log_info_event(
         BackendLogEvent::AppStartupCompleted,
         &[
             ("startup_phase", "setup".to_string()),
             ("has_persisted_state", has_persisted_state.to_string()),
-            (
-                "restored_state_status",
-                format!("{:?}", initialization_outcome.restore_status),
-            ),
+            ("restored_state_status", format!("{restore_status:?}")),
         ],
     );
 }
@@ -162,7 +146,7 @@ pub fn run() -> RunResult {
     app.run(|app_handle, event| {
         if matches!(event, tauri::RunEvent::Exit) {
             let state = app_handle.state::<state::AppState>();
-            if let Err(error) = state.flush_sync_on_exit() {
+            if let Err(error) = state.timer.flush_sync_on_exit() {
                 log_persistence_write_failure(PERSISTENCE_WRITE_TRIGGER_RUN_EVENT_EXIT, &error);
             }
         }
@@ -183,7 +167,10 @@ mod run_event_tests {
         render_persistence_write_failure_message, PERSISTENCE_WRITE_TRIGGER_RUN_EVENT_EXIT,
     };
     use crate::state;
-    use crate::types::{TimerPhase, TimerState, TimerStatus};
+    use crate::types::{
+        PersistedState, ScheduleStopState, SessionType, TimerSettings, TimerStatus,
+        WeeklyAutoRunConfig, PERSISTED_STATE_SCHEMA_VERSION,
+    };
     use chrono::{Local, TimeZone, Utc};
     use std::io;
     use std::path::{Path, PathBuf};
@@ -222,10 +209,28 @@ mod run_event_tests {
 
     fn build_test_app_state(dir: &Path) -> state::AppState {
         let clock = fixed_clock();
+        let persistence = PersistenceManager::new(Some(dir.to_path_buf()));
+        persistence
+            .save_state_sync(&PersistedState {
+                schema_version: PERSISTED_STATE_SCHEMA_VERSION,
+                status: TimerStatus::Working,
+                remaining_seconds: 321,
+                session_type: SessionType::Work,
+                current_cycle: 1,
+                completed_pomodoros: 0,
+                post_break_decision_pending: false,
+                settings: TimerSettings::default(),
+                saved_at: clock.now_utc(),
+                auto_run_feature_enabled: false,
+                weekly_auto_run_config: WeeklyAutoRunConfig::default(),
+                schedule_stop_state: ScheduleStopState::NotControlledBySchedule,
+            })
+            .expect("seed state should be saved");
+
         let runtime = tokio::runtime::Runtime::new().expect("test runtime should be created");
         let (app_state, _) = runtime.block_on(state::AppState::build_startup_state_for_tests(
             as_clock_trait(&clock),
-            PersistenceManager::new(as_clock_trait(&clock), Some(dir.to_path_buf())),
+            persistence,
         ));
         drop(runtime);
         app_state
@@ -248,25 +253,18 @@ mod run_event_tests {
     fn test_run_event_exit_triggers_final_flush() {
         let temp_dir = create_temp_dir("run-event-exit-final-flush");
         let app_state = build_test_app_state(&temp_dir);
-
-        {
-            let mut timer_manager = app_state.timer_manager.blocking_lock();
-            let state = TimerState {
-                phase: TimerPhase::Working,
-                remaining_seconds: 321,
-                ..TimerState::default()
-            };
-            let _ = timer_manager.apply_persisted_state(state);
-        }
+        std::fs::remove_file(temp_dir.join("timer_state.json"))
+            .expect("seed file should be removable");
 
         app_state
+            .timer
             .flush_sync_on_exit()
             .expect("exit event flush should succeed");
 
-        match app_state.persistence.load_state_sync() {
-            PersistenceLoadOutcome::Restored { timer_state, .. } => {
-                assert_eq!(timer_state.status(), TimerStatus::Working);
-                assert_eq!(timer_state.remaining_seconds, 321);
+        match PersistenceManager::new(Some(temp_dir.clone())).load_state_sync() {
+            PersistenceLoadOutcome::Restored(persisted_state) => {
+                assert_eq!(persisted_state.status, TimerStatus::Working);
+                assert_eq!(persisted_state.remaining_seconds, 321);
             }
             PersistenceLoadOutcome::NoState => panic!("expected restored state"),
             PersistenceLoadOutcome::UnsupportedSchemaFallback => {

@@ -1,0 +1,56 @@
+// Connects the timer runtime to the running Tauri application: the app
+// handle is the effect sink, and the ticker and input callbacks are the
+// event sources that have no command of their own.
+
+use std::time::Duration;
+
+use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tokio::time::MissedTickBehavior;
+
+use crate::break_lock;
+use crate::external_adapters::tray_icon;
+use crate::state::AppState;
+use crate::timer_core::Event;
+use crate::timer_runtime::EffectSink;
+use crate::types::TimerTickPayload;
+
+const TICK_INTERVAL: Duration = Duration::from_secs(1);
+
+impl<R: Runtime> EffectSink for AppHandle<R> {
+    fn emit(&self, event_name: &str, payload: &(impl serde::Serialize + Clone)) {
+        let _ = Emitter::emit(self, event_name, payload);
+    }
+
+    fn update_tray(&self, payload: &TimerTickPayload) {
+        tray_icon::update_tray_icon(self, payload);
+    }
+
+    async fn enter_break_lock(&self) -> Event {
+        break_lock::enter(&self.state::<AppState>(), self).await
+    }
+
+    async fn release_break_lock(&self) -> Event {
+        break_lock::release(&self.state::<AppState>(), self).await
+    }
+}
+
+pub(crate) fn spawn_ticker(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let mut interval = tokio::time::interval(TICK_INTERVAL);
+        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            let app_state = app.state::<AppState>();
+            // A tick can only fail on persistence, which is logged where it fails.
+            let _ = app_state.timer.dispatch(&app, Event::Tick).await;
+        }
+    });
+}
+
+pub(crate) fn dispatch_from_callback(app: AppHandle, event: Event) {
+    tauri::async_runtime::spawn(async move {
+        let app_state = app.state::<AppState>();
+        // Callback events can only fail on persistence, which is logged where it fails.
+        let _ = app_state.timer.dispatch(&app, event).await;
+    });
+}

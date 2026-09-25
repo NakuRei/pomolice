@@ -2,7 +2,7 @@ use std::io;
 
 use crate::log_redaction::RedactionClass;
 use crate::logging_event::{
-    render_event_message, BackendLogEvent, PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START,
+    render_event_message, BackendLogEvent, PERSISTENCE_WRITE_TRIGGER_RUN_EVENT_EXIT,
 };
 
 macro_rules! with_backend_log_event_variants {
@@ -45,11 +45,6 @@ macro_rules! with_backend_log_event_variants {
             StoragePersistenceParseFailed,
             StoragePersistenceSchemaVersionUnsupported,
             StoragePersistenceRestoreNormalized,
-            SchedulerStarted,
-            SchedulerReceivedCancellation,
-            SchedulerStopped,
-            SchedulerResumedStartBoundaryEvaluation,
-            SchedulerConfigRevisionChanged,
             SchedulerCrossedEndBoundary,
             SchedulerMarkedStopPending,
             SchedulerCrossedStartBoundary,
@@ -404,14 +399,14 @@ fn test_render_event_message_includes_persistence_trigger_context() {
         BackendLogEvent::StoragePersistenceWriteFailed,
         &[(
             "trigger",
-            PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START.to_string(),
+            PERSISTENCE_WRITE_TRIGGER_RUN_EVENT_EXIT.to_string(),
         )],
         Some(&error),
     );
 
     assert_rendered_event_identity(&rendered, "storage.persistence.write_failed");
     assert_rendered_field_names(&rendered, &["trigger", "error_message"]);
-    assert!(rendered.contains(PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START));
+    assert!(rendered.contains(PERSISTENCE_WRITE_TRIGGER_RUN_EVENT_EXIT));
     assert!(rendered.contains("disk"));
     assert!(rendered.contains("full"));
 }
@@ -426,7 +421,7 @@ fn test_render_persistence_write_failed_redacts_home_paths_from_path_and_error_m
         &[
             (
                 "trigger",
-                PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START.to_string(),
+                PERSISTENCE_WRITE_TRIGGER_RUN_EVENT_EXIT.to_string(),
             ),
             (
                 "path",
@@ -437,7 +432,7 @@ fn test_render_persistence_write_failed_redacts_home_paths_from_path_and_error_m
     );
 
     assert_rendered_event_identity(&rendered, "storage.persistence.write_failed");
-    assert!(rendered.contains(PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START));
+    assert!(rendered.contains(PERSISTENCE_WRITE_TRIGGER_RUN_EVENT_EXIT));
     assert!(!rendered.contains("Alice"));
     assert!(!rendered.contains("alice"));
     assert!(!rendered.contains(r"C:\Users\Alice"));
@@ -455,7 +450,7 @@ fn test_render_persistence_write_failed_redacts_home_paths_with_spaces() {
         &[
             (
                 "trigger",
-                PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START.to_string(),
+                PERSISTENCE_WRITE_TRIGGER_RUN_EVENT_EXIT.to_string(),
             ),
             (
                 "path",
@@ -466,7 +461,7 @@ fn test_render_persistence_write_failed_redacts_home_paths_with_spaces() {
     );
 
     assert_rendered_event_identity(&rendered, "storage.persistence.write_failed");
-    assert!(rendered.contains(PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START));
+    assert!(rendered.contains(PERSISTENCE_WRITE_TRIGGER_RUN_EVENT_EXIT));
     assert!(!rendered.contains("Jane"));
     assert!(!rendered.contains("Doe"));
     assert!(!rendered.contains("Jane Doe"));
@@ -485,7 +480,7 @@ fn test_render_persistence_write_failed_redacts_profile_path_suffix_username() {
         &[
             (
                 "trigger",
-                PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START.to_string(),
+                PERSISTENCE_WRITE_TRIGGER_RUN_EVENT_EXIT.to_string(),
             ),
             (
                 "path",
@@ -496,7 +491,7 @@ fn test_render_persistence_write_failed_redacts_profile_path_suffix_username() {
     );
 
     assert_rendered_event_identity(&rendered, "storage.persistence.write_failed");
-    assert!(rendered.contains(PERSISTENCE_WRITE_TRIGGER_SCHEDULER_AUTO_START));
+    assert!(rendered.contains(PERSISTENCE_WRITE_TRIGGER_RUN_EVENT_EXIT));
     assert!(!rendered.contains("Alice"));
     assert!(!rendered.contains("alice"));
     assert!(!rendered.contains(r"C:\Users\Alice"));

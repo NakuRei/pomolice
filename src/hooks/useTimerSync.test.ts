@@ -176,7 +176,6 @@ function emitSessionCompleted(
       next_status: TimerStatus.IDLE,
       next_session_type: SessionType.WORK,
       requires_manual_continue_decision: true,
-      post_break_decision_pending: true,
       ...overrides,
     },
   });
@@ -701,7 +700,6 @@ describe("useTimerSync", () => {
       next_status: TimerStatus.ON_BREAK,
       next_session_type: SessionType.LONG_BREAK,
       requires_manual_continue_decision: false,
-      post_break_decision_pending: false,
     });
 
     await waitFor(() => {
@@ -740,7 +738,6 @@ describe("useTimerSync", () => {
       transition_reason: "break_auto_started",
       next_status: TimerStatus.WORKING,
       requires_manual_continue_decision: false,
-      post_break_decision_pending: false,
     });
 
     await waitFor(() => {
@@ -761,7 +758,6 @@ describe("useTimerSync", () => {
     emitSessionCompleted(sessionHandler, {
       transition_reason: "scheduled_stop_executed",
       requires_manual_continue_decision: false,
-      post_break_decision_pending: false,
     });
 
     await vi.runOnlyPendingTimersAsync();

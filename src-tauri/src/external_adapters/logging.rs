@@ -96,7 +96,7 @@ pub(crate) fn module_log_overrides() -> &'static [(&'static str, LevelFilter)] {
             "pomolice_lib::external_adapters::input_monitor",
             LevelFilter::Debug,
         ),
-        ("pomolice_lib::scheduler", LevelFilter::Debug),
+        ("pomolice_lib::timer_core", LevelFilter::Debug),
         ("rdev", LevelFilter::Warn),
     ]
 }
