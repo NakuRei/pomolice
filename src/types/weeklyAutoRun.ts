@@ -43,7 +43,7 @@ export interface DayAutoRunSlot {
  *
  * Usage examples:
  * ```ts
- * const weeklyConfig = createWeeklyAutoRunConfigAllDaysDisabled();
+ * const weeklyConfig: WeeklyAutoRunConfig = { ...currentConfig };
  *
  * // Normal daytime schedule
  * weeklyConfig.mon = { enabled: true, startTime: "09:00", endTime: "18:00" };
@@ -69,65 +69,6 @@ export type TimerStartSource =
   | "manual_outside_window"
   | "manual_inside_window"
   | "scheduled_auto_start";
-
-/**
- * Validation errors scoped to one weekday slot.
- *
- * Usage example:
- * ```ts
- * const equalBoundaryError: DayScheduleValidationError = {
- *   code: "start_time_equals_end_time",
- *   weekday: "wed",
- *   startTime: "12:00",
- *   endTime: "12:00",
- *   message: "Start and end time cannot be identical.",
- * };
- * ```
- */
-export type DayScheduleValidationError =
-  | {
-      code: "start_time_format_invalid";
-      weekday: WeekdayKey;
-      invalidStartTimeText: string;
-      message: string;
-    }
-  | {
-      code: "end_time_format_invalid";
-      weekday: WeekdayKey;
-      invalidEndTimeText: string;
-      message: string;
-    }
-  | {
-      code: "start_time_equals_end_time";
-      weekday: WeekdayKey;
-      startTime: string;
-      endTime: string;
-      message: string;
-    };
-
-/**
- * Validation errors that require comparing multiple weekday slots.
- *
- * Usage example:
- * ```ts
- * const overlapError: WeeklyScheduleValidationError = {
- *   code: "overlapping_windows_between_days",
- *   primaryWeekday: "mon",
- *   secondaryWeekday: "tue",
- *   message: "Monday overnight range overlaps Tuesday daytime range.",
- * };
- * ```
- */
-export interface WeeklyScheduleValidationError {
-  /** Error kind used by UI to render stable messaging. */
-  code: "overlapping_windows_between_days";
-  /** First weekday participating in the overlap. */
-  primaryWeekday: WeekdayKey;
-  /** Second weekday participating in the overlap. */
-  secondaryWeekday: WeekdayKey;
-  /** Human-readable error text. */
-  message: string;
-}
 
 /**
  * Normalized weekday list used for deterministic iteration order.
@@ -187,27 +128,6 @@ const WEEKDAY_CONVERSION_MAPPER = {
   >;
   weekdayKeyToChronoWeekdayToken: Record<WeekdayKey, ChronoWeekdayToken>;
 };
-
-const DEFAULT_DAY_AUTO_RUN_SLOT: DayAutoRunSlot = {
-  enabled: false,
-  startTime: "09:00",
-  endTime: "18:00",
-};
-
-/**
- * Create a predictable default schedule with all weekdays disabled.
- */
-export function createWeeklyAutoRunConfigAllDaysDisabled(): WeeklyAutoRunConfig {
-  return {
-    mon: { ...DEFAULT_DAY_AUTO_RUN_SLOT },
-    tue: { ...DEFAULT_DAY_AUTO_RUN_SLOT },
-    wed: { ...DEFAULT_DAY_AUTO_RUN_SLOT },
-    thu: { ...DEFAULT_DAY_AUTO_RUN_SLOT },
-    fri: { ...DEFAULT_DAY_AUTO_RUN_SLOT },
-    sat: { ...DEFAULT_DAY_AUTO_RUN_SLOT },
-    sun: { ...DEFAULT_DAY_AUTO_RUN_SLOT },
-  };
-}
 
 /**
  * Convert `Date.getDay()` output (0-6, Sunday-first) to `WeekdayKey`.

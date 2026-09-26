@@ -6,10 +6,8 @@ const BASE_INPUT: CycleSegmentsInput = {
   currentCycle: 0,
   sessionType: SessionType.WORK,
   remainingSeconds: 1500,
+  sessionDurationSeconds: 1500,
   longBreakInterval: 4,
-  workDurationSeconds: 1500,
-  shortBreakDurationSeconds: 300,
-  longBreakDurationSeconds: 1200,
 };
 
 function segmentByKey(
@@ -85,6 +83,7 @@ describe("deriveCycleSegments", () => {
       currentCycle: 1,
       sessionType: SessionType.SHORT_BREAK,
       remainingSeconds: 150,
+      sessionDurationSeconds: 300,
     };
 
     const workSegment = segmentByKey(input, "work-1");
@@ -114,17 +113,39 @@ describe("deriveCycleSegments", () => {
     expect(segmentByKey(input, "break-3").state).toBe("upcoming");
   });
 
-  it("measures the long break against the long break duration", () => {
+  it("measures the running session against the duration it started with", () => {
     const input = {
       ...BASE_INPUT,
       currentCycle: 4,
       sessionType: SessionType.LONG_BREAK,
       remainingSeconds: 300,
+      sessionDurationSeconds: 1200,
     };
 
     const longBreakSegment = segmentByKey(input, "break-4");
     expect(longBreakSegment.state).toBe("active");
     expect(longBreakSegment.fillRatio).toBeCloseTo(0.75);
+  });
+
+  it("shows a cycle past the interval as the last cycle, before the long break", () => {
+    const input = {
+      ...BASE_INPUT,
+      currentCycle: 5,
+      sessionType: SessionType.WORK,
+      remainingSeconds: 750,
+      longBreakInterval: 3,
+    };
+
+    for (const key of ["work-1", "break-1", "work-2", "break-2"]) {
+      expect(segmentByKey(input, key).state).toBe("completed");
+    }
+    const lastWork = segmentByKey(input, "work-3");
+    expect(lastWork.state).toBe("active");
+    expect(lastWork.fillRatio).toBeCloseTo(0.5);
+    expect(segmentByKey(input, "break-3")).toMatchObject({
+      kind: "longBreak",
+      state: "upcoming",
+    });
   });
 
   it("follows the configured cycle count", () => {
@@ -161,13 +182,13 @@ describe("deriveCycleSegments", () => {
     expect(beforeStart.fillRatio).toBe(0);
   });
 
-  it("stays empty when the configured duration is zero", () => {
+  it("stays empty when the session duration is zero", () => {
     const segment = segmentByKey(
       {
         ...BASE_INPUT,
         currentCycle: 1,
         remainingSeconds: 0,
-        workDurationSeconds: 0,
+        sessionDurationSeconds: 0,
       },
       "work-1",
     );

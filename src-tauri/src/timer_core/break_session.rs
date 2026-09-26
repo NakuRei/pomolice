@@ -3,7 +3,6 @@
 
 use chrono::{DateTime, Duration as ChronoDuration, Local};
 
-use super::session::break_duration;
 use super::{Effect, TimerCore};
 use crate::error::{PomoliceError, Result};
 use crate::logging_event::{log_warn_event, BackendLogEvent};
@@ -38,8 +37,6 @@ impl TimerCore {
         let Some(current_break) = self.phase.current_break_mut() else {
             return Vec::new();
         };
-        let break_duration = break_duration(&self.settings, current_break.kind);
-
         if let Some(last_penalty_at) = current_break.last_penalty_at {
             let elapsed = now - last_penalty_at;
             if elapsed < ChronoDuration::zero() || elapsed < INPUT_PENALTY_DEBOUNCE {
@@ -49,7 +46,7 @@ impl TimerCore {
 
         current_break.interaction_count += 1;
         current_break.last_penalty_at = Some(now);
-        current_break.remaining_seconds = break_duration;
+        current_break.remaining_seconds = current_break.duration_secs.get();
 
         vec![self.publish(now), Effect::Persist]
     }

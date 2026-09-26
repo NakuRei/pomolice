@@ -1,8 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { SettingsValidationIssue } from "@/types/settings";
 import { AutoRunDayRow } from "./AutoRunDayRow";
-import type { DayScheduleValidationError } from "@/types/weeklyAutoRun";
+import {
+  summarizeDayIssues,
+  type DayIssueSummary,
+} from "./settingsIssueMessages";
+
+const NO_DAY_ISSUES: DayIssueSummary = summarizeDayIssues([], "mon");
+
+function mondayIssues(...issues: SettingsValidationIssue[]): DayIssueSummary {
+  return summarizeDayIssues(issues, "mon");
+}
 
 function getStartTimeInput(): HTMLElement {
   return screen.getByLabelText("月曜日の開始時刻");
@@ -12,9 +22,7 @@ function getEndTimeInput(): HTMLElement {
   return screen.getByLabelText("月曜日の終了時刻");
 }
 
-function renderEnabledMondayRow(
-  dayValidationError?: DayScheduleValidationError,
-): void {
+function renderEnabledMondayRow(dayIssues = NO_DAY_ISSUES): void {
   render(
     <AutoRunDayRow
       weekday="mon"
@@ -24,7 +32,7 @@ function renderEnabledMondayRow(
         startTime: "09:00",
         endTime: "18:00",
       }}
-      dayValidationError={dayValidationError}
+      dayIssues={dayIssues}
       onEnabledChange={() => undefined}
       onStartTimeChange={() => undefined}
       onEndTimeChange={() => undefined}
@@ -43,6 +51,7 @@ describe("AutoRunDayRow", () => {
           startTime: "09:00",
           endTime: "18:00",
         }}
+        dayIssues={NO_DAY_ISSUES}
         onEnabledChange={() => undefined}
         onStartTimeChange={() => undefined}
         onEndTimeChange={() => undefined}
@@ -66,6 +75,7 @@ describe("AutoRunDayRow", () => {
           startTime: "09:00",
           endTime: "18:00",
         }}
+        dayIssues={NO_DAY_ISSUES}
         onEnabledChange={() => undefined}
         onStartTimeChange={() => undefined}
         onEndTimeChange={() => undefined}
@@ -87,6 +97,7 @@ describe("AutoRunDayRow", () => {
           startTime: "09:00",
           endTime: "18:00",
         }}
+        dayIssues={NO_DAY_ISSUES}
         onEnabledChange={() => undefined}
         onStartTimeChange={() => undefined}
         onEndTimeChange={() => undefined}
@@ -115,6 +126,7 @@ describe("AutoRunDayRow", () => {
           startTime: "09:00",
           endTime: "18:00",
         }}
+        dayIssues={NO_DAY_ISSUES}
         onEnabledChange={onEnabledChange}
         onStartTimeChange={onStartTimeChange}
         onEndTimeChange={onEndTimeChange}
@@ -136,23 +148,17 @@ describe("AutoRunDayRow", () => {
     expect(onEndTimeChange).toHaveBeenCalledWith("19:00");
   });
 
-  it("shows a day validation message only when requested", () => {
-    const dayValidationError: DayScheduleValidationError = {
-      code: "start_time_format_invalid",
-      weekday: "mon",
-      invalidStartTimeText: "invalid-time",
-      message: "Start time for mon must use HH:MM (24-hour).",
-    };
-
+  it("shows the day's issue messages only when there are issues", () => {
     const { rerender } = render(
       <AutoRunDayRow
         weekday="mon"
         autoRunFeatureEnabled={true}
         daySlot={{
           enabled: true,
-          startTime: "23:00",
-          endTime: "02:00",
+          startTime: "09:00",
+          endTime: "18:00",
         }}
+        dayIssues={NO_DAY_ISSUES}
         onEnabledChange={() => undefined}
         onStartTimeChange={() => undefined}
         onEndTimeChange={() => undefined}
@@ -170,7 +176,11 @@ describe("AutoRunDayRow", () => {
           startTime: "09:00",
           endTime: "18:00",
         }}
-        dayValidationError={dayValidationError}
+        dayIssues={mondayIssues({
+          code: "invalid_time",
+          weekday: "mon",
+          boundary: "start",
+        })}
         onEnabledChange={() => undefined}
         onStartTimeChange={() => undefined}
         onEndTimeChange={() => undefined}
@@ -178,25 +188,8 @@ describe("AutoRunDayRow", () => {
     );
 
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Start time for mon must use HH:MM (24-hour).",
+      "月曜日の開始時刻を HH:MM 形式で入力してください。",
     );
-
-    rerender(
-      <AutoRunDayRow
-        weekday="mon"
-        autoRunFeatureEnabled={true}
-        daySlot={{
-          enabled: true,
-          startTime: "09:00",
-          endTime: "18:00",
-        }}
-        onEnabledChange={() => undefined}
-        onStartTimeChange={() => undefined}
-        onEndTimeChange={() => undefined}
-      />,
-    );
-
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("does not announce validation errors when the day has no error", () => {
@@ -211,35 +204,25 @@ describe("AutoRunDayRow", () => {
     expect(endTimeInput).not.toHaveAccessibleDescription();
   });
 
-  it("marks only the start time input invalid for start time format errors", () => {
-    const dayValidationError: DayScheduleValidationError = {
-      code: "start_time_format_invalid",
-      weekday: "mon",
-      invalidStartTimeText: "invalid-time",
-      message: "Start time for mon must use HH:MM (24-hour).",
-    };
-
-    renderEnabledMondayRow(dayValidationError);
+  it("marks only the start time input invalid for an unusable start time", () => {
+    renderEnabledMondayRow(
+      mondayIssues({ code: "invalid_time", weekday: "mon", boundary: "start" }),
+    );
 
     const startTimeInput = getStartTimeInput();
     const endTimeInput = getEndTimeInput();
     expect(startTimeInput).toHaveAttribute("aria-invalid", "true");
     expect(endTimeInput).not.toHaveAttribute("aria-invalid", "true");
     expect(startTimeInput).toHaveAccessibleDescription(
-      dayValidationError.message,
+      "月曜日の開始時刻を HH:MM 形式で入力してください。",
     );
     expect(endTimeInput).not.toHaveAccessibleDescription();
   });
 
-  it("marks only the end time input invalid for end time format errors", () => {
-    const dayValidationError: DayScheduleValidationError = {
-      code: "end_time_format_invalid",
-      weekday: "mon",
-      invalidEndTimeText: "invalid-time",
-      message: "End time for mon must use HH:MM (24-hour).",
-    };
-
-    renderEnabledMondayRow(dayValidationError);
+  it("marks only the end time input invalid for an unusable end time", () => {
+    renderEnabledMondayRow(
+      mondayIssues({ code: "invalid_time", weekday: "mon", boundary: "end" }),
+    );
 
     const startTimeInput = getStartTimeInput();
     const endTimeInput = getEndTimeInput();
@@ -247,30 +230,20 @@ describe("AutoRunDayRow", () => {
     expect(endTimeInput).toHaveAttribute("aria-invalid", "true");
     expect(startTimeInput).not.toHaveAccessibleDescription();
     expect(endTimeInput).toHaveAccessibleDescription(
-      dayValidationError.message,
+      "月曜日の終了時刻を HH:MM 形式で入力してください。",
     );
   });
 
   it("marks both time inputs invalid when start and end times match", () => {
-    const dayValidationError: DayScheduleValidationError = {
-      code: "start_time_equals_end_time",
-      weekday: "mon",
-      startTime: "09:00",
-      endTime: "09:00",
-      message: "Start and end time cannot be identical for mon.",
-    };
-
-    renderEnabledMondayRow(dayValidationError);
-
-    const startTimeInput = getStartTimeInput();
-    const endTimeInput = getEndTimeInput();
-    expect(startTimeInput).toHaveAttribute("aria-invalid", "true");
-    expect(endTimeInput).toHaveAttribute("aria-invalid", "true");
-    expect(startTimeInput).toHaveAccessibleDescription(
-      dayValidationError.message,
+    renderEnabledMondayRow(
+      mondayIssues({ code: "empty_time_range", weekday: "mon" }),
     );
-    expect(endTimeInput).toHaveAccessibleDescription(
-      dayValidationError.message,
-    );
+
+    const expectedMessage =
+      "月曜日の開始時刻と終了時刻は別の時刻にしてください。";
+    expect(getStartTimeInput()).toHaveAttribute("aria-invalid", "true");
+    expect(getEndTimeInput()).toHaveAttribute("aria-invalid", "true");
+    expect(getStartTimeInput()).toHaveAccessibleDescription(expectedMessage);
+    expect(getEndTimeInput()).toHaveAccessibleDescription(expectedMessage);
   });
 });

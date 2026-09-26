@@ -9,10 +9,10 @@ fn work_completion_announces_the_break_and_asks_for_the_lock() {
     start_work(
         &mut core,
         started_at,
-        timer_settings(Durations {
+        Durations {
             work: 2,
             ..Durations::default()
-        }),
+        },
     );
 
     let at_work_end = apply(&mut core, Event::Tick, seconds_after(started_at, 2));
@@ -193,13 +193,13 @@ fn a_long_break_resets_the_cycle() {
     start_work(
         &mut core,
         started_at,
-        timer_settings(Durations {
+        Durations {
             work: 1,
             short_break: 1,
             long_break: 1,
             long_break_interval: 2,
             policy: PostBreakTransitionPolicy::StartNextWorkAutomatically,
-        }),
+        },
     );
     apply(&mut core, Event::Tick, seconds_after(started_at, 1)); // work 1 -> short break
     apply(&mut core, Event::Tick, seconds_after(started_at, 2)); // short break -> work 2

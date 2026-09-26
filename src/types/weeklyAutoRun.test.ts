@@ -5,7 +5,6 @@ import {
   convertDateDayIndexToWeekdayKey,
   convertWeekdayKeyToChronoWeekdayToken,
   convertWeekdayKeyToDateDayIndex,
-  createWeeklyAutoRunConfigAllDaysDisabled,
 } from "./weeklyAutoRun";
 
 describe("weeklyAutoRun types", () => {
@@ -19,53 +18,6 @@ describe("weeklyAutoRun types", () => {
       "sat",
       "sun",
     ]);
-  });
-
-  it("should create disabled slots for all weekdays", () => {
-    const config = createWeeklyAutoRunConfigAllDaysDisabled();
-
-    expect(config.mon).toEqual({
-      enabled: false,
-      startTime: "09:00",
-      endTime: "18:00",
-    });
-    expect(config.tue).toEqual({
-      enabled: false,
-      startTime: "09:00",
-      endTime: "18:00",
-    });
-    expect(config.wed).toEqual({
-      enabled: false,
-      startTime: "09:00",
-      endTime: "18:00",
-    });
-    expect(config.thu).toEqual({
-      enabled: false,
-      startTime: "09:00",
-      endTime: "18:00",
-    });
-    expect(config.fri).toEqual({
-      enabled: false,
-      startTime: "09:00",
-      endTime: "18:00",
-    });
-    expect(config.sat).toEqual({
-      enabled: false,
-      startTime: "09:00",
-      endTime: "18:00",
-    });
-    expect(config.sun).toEqual({
-      enabled: false,
-      startTime: "09:00",
-      endTime: "18:00",
-    });
-  });
-
-  it("should return independent slot objects for each weekday", () => {
-    const config = createWeeklyAutoRunConfigAllDaysDisabled();
-    config.mon.enabled = true;
-
-    expect(config.tue.enabled).toBe(false);
   });
 
   it("should convert Date.getDay() index to weekday key", () => {

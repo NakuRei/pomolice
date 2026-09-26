@@ -11,7 +11,6 @@ import {
   isPermissionGranted,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
-import { resetSettingsStoreForTest } from "@/test/resetSettingsStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import {
   useTimerStore,
@@ -23,9 +22,9 @@ import {
 } from "@/store/timerStore";
 import { useErrorStore } from "@/store/errorStore";
 import {
-  useSettingsStore,
-  type SettingsApplicationStatus,
-} from "@/store/settingsStore";
+  createSettingsForTest,
+  settingsPayloadForTest,
+} from "@/test/settingsFixture";
 import {
   TIMER_SYNC_MAX_CONNECTION_RETRIES,
   timerSyncRetryDelayMs,
@@ -79,17 +78,13 @@ vi.mock("@tauri-apps/api/path", () => ({
 // Import after mocking
 import { useTimerSync } from "./useTimerSync";
 
-type FullStateOverrides = Omit<Partial<FullStatePayload>, "settings"> & {
-  settings?: Partial<FullStatePayload["settings"]>;
-};
-
 function createFullStatePayload(
-  overrides: FullStateOverrides = {},
+  overrides: Partial<FullStatePayload> = {},
 ): FullStatePayload {
-  const { settings, ...stateOverrides } = overrides;
   return {
     status: TimerStatus.IDLE,
     remaining_seconds: 1500,
+    session_duration_secs: 1500,
     session_type: SessionType.WORK,
     current_cycle: 0,
     completed_pomodoros: 0,
@@ -99,15 +94,9 @@ function createFullStatePayload(
     post_break_decision_pending: false,
     boot_auto_start_prompt_window: null,
     active_window_summary: null,
-    ...stateOverrides,
-    settings: {
-      work_duration_secs: 1500,
-      short_break_duration_secs: 300,
-      long_break_duration_secs: 900,
-      long_break_interval: 4,
-      post_break_transition_policy: "require_manual_continue",
-      ...settings,
-    },
+    settings: settingsPayloadForTest(createSettingsForTest()),
+    settings_file_status: "ok",
+    ...overrides,
   };
 }
 
@@ -154,6 +143,7 @@ function emitTimerTick(
     payload: {
       status: TimerStatus.WORKING,
       remaining_seconds: 1499,
+      session_duration_secs: 1500,
       session_type: SessionType.WORK,
       current_cycle: 1,
       completed_pomodoros: 0,
@@ -208,30 +198,8 @@ function getFullStateInvokeCount(): number {
   ).length;
 }
 
-function settingsCommandNames(): string[] {
-  return mockInvoke.mock.calls
-    .map(([command]) => command)
-    .filter(
-      (command) =>
-        command === "sync_timer_duration_settings" ||
-        command === "sync_automation_policies",
-    );
-}
-
-function setApplicationStatuses(
-  durationStatus: SettingsApplicationStatus,
-  automationStatus: SettingsApplicationStatus,
-): void {
-  useSettingsStore.setState({
-    durationSettingsApplicationStatus: durationStatus,
-    automationSettingsApplicationStatus: automationStatus,
-  });
-}
-
-function confirmCurrentCandidates(): void {
-  const state = useSettingsStore.getState();
-  state.confirmDurationSettingsCandidate(state);
-  state.confirmAutomationSettingsCandidate(state);
+function invokedCommandNames(): string[] {
+  return mockInvoke.mock.calls.map(([command]) => command);
 }
 
 describe("useTimerSync", () => {
@@ -242,7 +210,6 @@ describe("useTimerSync", () => {
     useErrorStore.getState().clearAllErrors();
 
     resetTimerStoreForTest();
-    resetSettingsStoreForTest();
 
     // Default mock implementations
     mockListen.mockResolvedValue(noopUnlisten);
@@ -254,54 +221,23 @@ describe("useTimerSync", () => {
     vi.restoreAllMocks();
   });
 
-  it("starts backend setup from the settled synchronous hydration result", async () => {
+  it("connects by reading the backend state and adopts its settings without sending any", async () => {
     vi.useFakeTimers();
-    vi.spyOn(useSettingsStore.persist, "hasHydrated").mockReturnValue(true);
+    const backendSettings = createSettingsForTest({
+      workDurationSecs: 50 * 60,
+    });
+    mockInvoke.mockResolvedValue(
+      createFullStatePayload({
+        settings: settingsPayloadForTest(backendSettings),
+      }),
+    );
+
     renderTimerSync();
     await flushTimerSyncSetup();
 
     expect(useTimerStore.getState().isConnected).toBe(true);
-    expect(settingsCommandNames()).toEqual([
-      "sync_timer_duration_settings",
-      "sync_automation_policies",
-    ]);
-  });
-
-  it("keeps timer use available without automatically sending settings after terminal hydration failure", async () => {
-    vi.useFakeTimers();
-    vi.spyOn(useSettingsStore.persist, "hasHydrated").mockReturnValue(false);
-    renderTimerSync();
-    await flushTimerSyncSetup();
-
-    expect(useTimerStore.getState().isConnected).toBe(true);
-    expect(settingsCommandNames()).toEqual([]);
-    expect(useSettingsStore.getState().durationSettingsApplicationStatus).toBe(
-      "pending",
-    );
-    expect(
-      useSettingsStore.getState().automationSettingsApplicationStatus,
-    ).toBe("pending");
-  });
-
-  it("allows explicit settings recovery after terminal hydration failure", async () => {
-    vi.useFakeTimers();
-    vi.spyOn(useSettingsStore.persist, "hasHydrated").mockReturnValue(false);
-    renderTimerSync();
-    await flushTimerSyncSetup();
-    expect(settingsCommandNames()).toEqual([]);
-
-    await useTimerStore.getState().syncSettings();
-
-    expect(settingsCommandNames()).toEqual([
-      "sync_timer_duration_settings",
-      "sync_automation_policies",
-    ]);
-    expect(useSettingsStore.getState().durationSettingsApplicationStatus).toBe(
-      "confirmed",
-    );
-    expect(
-      useSettingsStore.getState().automationSettingsApplicationStatus,
-    ).toBe("confirmed");
+    expect(useTimerStore.getState().settings).toEqual(backendSettings);
+    expect(invokedCommandNames()).toEqual(["get_full_state"]);
   });
 
   it("receives session completion events while the initial full state is pending", async () => {
@@ -529,7 +465,6 @@ describe("useTimerSync", () => {
 
   it("should reconnect successfully when manual retry setup succeeds", async () => {
     vi.useFakeTimers();
-    setApplicationStatuses("confirmed", "unconfirmed");
     mockListen.mockRejectedValue(new Error("listen failed"));
 
     renderTimerSync();
@@ -553,7 +488,6 @@ describe("useTimerSync", () => {
     expect(mockListen.mock.calls.map(([event]) => event)).toContain(
       "timer_tick",
     );
-    expect(settingsCommandNames()).toEqual(["sync_automation_policies"]);
   });
 
   it("restores the running timer and marks the connection available", async () => {
@@ -575,103 +509,6 @@ describe("useTimerSync", () => {
       });
     });
   });
-
-  it("applies duration readback before starting settings reconciliation", async () => {
-    confirmCurrentCandidates();
-    let synchronizationObservation:
-      | {
-          durationStatus: SettingsApplicationStatus;
-          remainingSeconds: number;
-          isConnected: boolean;
-        }
-      | undefined = undefined;
-    mockInvoke.mockImplementation((command) => {
-      if (command === "get_full_state") {
-        return Promise.resolve({
-          status: "idle",
-          remaining_seconds: 777,
-          session_type: "work",
-          current_cycle: 0,
-          completed_pomodoros: 0,
-          break_interaction_count: 0,
-          is_fullscreen_break: false,
-          away_during_break: false,
-          post_break_decision_pending: false,
-          boot_auto_start_prompt_window: null,
-          active_window_summary: null,
-          settings: {
-            work_duration_secs: 1200,
-            short_break_duration_secs: 300,
-            long_break_duration_secs: 900,
-            long_break_interval: 4,
-            post_break_transition_policy: "require_manual_continue",
-          },
-        });
-      }
-      if (command === "sync_timer_duration_settings") {
-        const timerState = useTimerStore.getState();
-        synchronizationObservation = {
-          durationStatus:
-            useSettingsStore.getState().durationSettingsApplicationStatus,
-          remainingSeconds: timerState.remainingSeconds,
-          isConnected: timerState.isConnected,
-        };
-      }
-      return Promise.resolve(undefined);
-    });
-
-    renderTimerSync();
-
-    await waitFor(() => {
-      expect(synchronizationObservation).toBeDefined();
-    });
-    expect(synchronizationObservation).toEqual({
-      durationStatus: "pending",
-      remainingSeconds: 777,
-      isConnected: true,
-    });
-  });
-
-  it.each([
-    {
-      label: "both confirmed",
-      durationStatus: "confirmed" as const,
-      automationStatus: "confirmed" as const,
-      expectedCommands: [],
-    },
-    {
-      label: "only duration pending",
-      durationStatus: "pending" as const,
-      automationStatus: "confirmed" as const,
-      expectedCommands: ["sync_timer_duration_settings"],
-    },
-    {
-      label: "only automation unconfirmed",
-      durationStatus: "confirmed" as const,
-      automationStatus: "unconfirmed" as const,
-      expectedCommands: ["sync_automation_policies"],
-    },
-    {
-      label: "both unresolved",
-      durationStatus: "unconfirmed" as const,
-      automationStatus: "pending" as const,
-      expectedCommands: [
-        "sync_timer_duration_settings",
-        "sync_automation_policies",
-      ],
-    },
-  ])(
-    "synchronizes only eligible unresolved groups at startup when $label",
-    async ({ durationStatus, automationStatus, expectedCommands }) => {
-      setApplicationStatuses(durationStatus, automationStatus);
-      renderTimerSync();
-
-      await waitFor(() => {
-        expect(useTimerStore.getState().isConnected).toBe(true);
-        expect(settingsCommandNames()).toEqual(expectedCommands);
-      });
-    },
-  );
 
   it("should handle timer_tick events", async () => {
     const tickHandler = await renderAndGetTimerEventHandler("timer_tick");
@@ -807,9 +644,6 @@ describe("useTimerSync", () => {
   });
 
   it("releases every listener and ignores full state resolved after unmount", async () => {
-    vi.spyOn(useSettingsStore.persist, "hasHydrated").mockReturnValue(true);
-    setApplicationStatuses("pending", "pending");
-
     const acquiredUnlisteners: ReturnType<typeof vi.fn>[] = [];
     mockListen.mockImplementation(() => {
       const unlisten = vi.fn();
@@ -860,7 +694,7 @@ describe("useTimerSync", () => {
       remainingSecondsBeforeUnmount,
     );
     expect(useTimerStore.getState().isConnected).toBe(false);
-    expect(settingsCommandNames()).toEqual([]);
+    expect(useTimerStore.getState().settings).toBeNull();
   });
 
   it("should show stop-pending info on auto_run_stop_pending events", async () => {
@@ -882,67 +716,20 @@ describe("useTimerSync", () => {
     expect(useTimerStore.getState().infoMessage?.id).toBe("auto_run_stopped");
   });
 
-  it("defers restored duration reconciliation while non-idle and recovers on idle", async () => {
-    vi.useFakeTimers();
-    setApplicationStatuses("unconfirmed", "confirmed");
-    mockInvoke.mockImplementation((command) => {
-      if (command === "get_full_state") {
-        return Promise.resolve(
-          createFullStatePayload({
-            status: TimerStatus.WORKING,
-            remaining_seconds: 900,
-            current_cycle: 1,
-          }),
-        );
-      }
-      return Promise.resolve(undefined);
+  it("takes the settings announced by settings_changed events", async () => {
+    const settingsListener =
+      await renderAndGetTimerEventHandler("settings_changed");
+    const savedSettings = createSettingsForTest({
+      notificationSoundMuted: true,
     });
 
-    const tickHandler = await renderAndGetTimerEventHandler("timer_tick");
-    await vi.waitFor(() => {
-      expect(useTimerStore.getState().isConnected).toBe(true);
-    });
-    await vi.runOnlyPendingTimersAsync();
-    expect(settingsCommandNames()).toEqual([]);
-    expect(useSettingsStore.getState().durationSettingsApplicationStatus).toBe(
-      "unconfirmed",
-    );
-
-    emitTimerTick(tickHandler, {
-      status: TimerStatus.IDLE,
-      remaining_seconds: 1500,
+    settingsListener({
+      payload: {
+        settings: settingsPayloadForTest(savedSettings),
+        settings_file_status: "ok",
+      },
     });
 
-    await vi.waitFor(() => {
-      expect(settingsCommandNames()).toEqual(["sync_timer_duration_settings"]);
-    });
-    expect(useSettingsStore.getState().durationSettingsApplicationStatus).toBe(
-      "confirmed",
-    );
-  });
-
-  it("keeps the connection established when settings synchronization rejects", async () => {
-    setApplicationStatuses("pending", "confirmed");
-    mockInvoke.mockImplementation((command) => {
-      if (command === "get_full_state") {
-        return Promise.resolve(createFullStatePayload());
-      }
-      if (command === "sync_timer_duration_settings") {
-        return Promise.reject(new Error("failed to persist duration settings"));
-      }
-      return Promise.resolve(undefined);
-    });
-
-    renderTimerSync();
-
-    await waitFor(() => {
-      expect(
-        useSettingsStore.getState().durationSettingsApplicationStatus,
-      ).toBe("unconfirmed");
-    });
-    expect(useTimerStore.getState().isConnected).toBe(true);
-    expect(useErrorStore.getState().errors.connection).toBeUndefined();
-    expect(getFullStateInvokeCount()).toBe(1);
-    expect(settingsCommandNames()).toEqual(["sync_timer_duration_settings"]);
+    expect(useTimerStore.getState().settings).toEqual(savedSettings);
   });
 });

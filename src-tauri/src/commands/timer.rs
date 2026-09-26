@@ -3,38 +3,19 @@ use tauri::{Manager, State, WebviewWindow};
 use crate::commands::input_rejection::ObservedCommandArg;
 use crate::error::{PomoliceError, Result};
 use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
+use crate::settings::SettingsChanges;
 use crate::state::AppState;
 use crate::timer_core::{Event, TimerCore};
-use crate::types::{
-    BreakAttendance, FullStatePayload, LongBreakDurationSecs, LongBreakIntervalCount,
-    PostBreakDecisionAction, PostBreakTransitionPolicy, ShortBreakDurationSecs, TimerSettings,
-    WeeklyAutoRunConfig, WorkDurationSecs,
-};
+use crate::types::{BreakAttendance, FullStatePayload, PostBreakDecisionAction};
 
-/// Start a work session with settings
+/// Start a work session with the saved settings.
 #[tauri::command]
-pub(crate) async fn start_work(
-    window: WebviewWindow,
-    state: State<'_, AppState>,
-    work_duration_secs: ObservedCommandArg<WorkDurationSecs>,
-    short_break_duration_secs: ObservedCommandArg<ShortBreakDurationSecs>,
-    long_break_duration_secs: ObservedCommandArg<LongBreakDurationSecs>,
-    long_break_interval: ObservedCommandArg<LongBreakIntervalCount>,
-    post_break_transition_policy: ObservedCommandArg<PostBreakTransitionPolicy>,
-) -> Result<()> {
+pub(crate) async fn start_work(window: WebviewWindow, state: State<'_, AppState>) -> Result<()> {
     log_command_invoked("start_work", &window);
     authorize_main_window(&window, "start_work")?;
-
-    let settings = TimerSettings::new(
-        work_duration_secs.into_inner(),
-        short_break_duration_secs.into_inner(),
-        long_break_duration_secs.into_inner(),
-        long_break_interval.into_inner(),
-        post_break_transition_policy.into_inner(),
-    );
     state
         .timer
-        .dispatch(window.app_handle(), Event::StartWorkRequested { settings })
+        .dispatch(window.app_handle(), Event::StartWorkRequested)
         .await
 }
 
@@ -91,51 +72,21 @@ pub(crate) async fn emergency_stop(
         .await
 }
 
-/// Sync timer duration settings from frontend (idle only)
+/// Change the given user settings; the rest keep their values. Accepted in
+/// any timer state; a running session keeps its duration and new durations
+/// apply from the next one. A rejected save changes nothing and names every
+/// input to fix.
 #[tauri::command]
-pub(crate) async fn sync_timer_duration_settings(
+pub(crate) async fn update_settings(
     window: WebviewWindow,
     state: State<'_, AppState>,
-    work_duration_secs: ObservedCommandArg<WorkDurationSecs>,
-    short_break_duration_secs: ObservedCommandArg<ShortBreakDurationSecs>,
-    long_break_duration_secs: ObservedCommandArg<LongBreakDurationSecs>,
-    long_break_interval: ObservedCommandArg<LongBreakIntervalCount>,
+    changes: ObservedCommandArg<SettingsChanges>,
 ) -> Result<()> {
-    authorize_main_window(&window, "sync_timer_duration_settings")?;
+    log_command_invoked("update_settings", &window);
+    authorize_main_window(&window, "update_settings")?;
     state
         .timer
-        .dispatch(
-            window.app_handle(),
-            Event::TimerDurationSettingsChanged {
-                work_duration_secs: work_duration_secs.into_inner(),
-                short_break_duration_secs: short_break_duration_secs.into_inner(),
-                long_break_duration_secs: long_break_duration_secs.into_inner(),
-                long_break_interval: long_break_interval.into_inner(),
-            },
-        )
-        .await
-}
-
-/// Sync automation policies from frontend
-#[tauri::command]
-pub(crate) async fn sync_automation_policies(
-    window: WebviewWindow,
-    state: State<'_, AppState>,
-    auto_run_feature_enabled: ObservedCommandArg<bool>,
-    weekly_auto_run_config: ObservedCommandArg<WeeklyAutoRunConfig>,
-    post_break_transition_policy: ObservedCommandArg<PostBreakTransitionPolicy>,
-) -> Result<()> {
-    authorize_main_window(&window, "sync_automation_policies")?;
-    state
-        .timer
-        .dispatch(
-            window.app_handle(),
-            Event::AutomationPoliciesChanged {
-                auto_run_feature_enabled: auto_run_feature_enabled.into_inner(),
-                weekly_auto_run_config: weekly_auto_run_config.into_inner(),
-                post_break_transition_policy: post_break_transition_policy.into_inner(),
-            },
-        )
+        .update_settings(window.app_handle(), changes.into_inner())
         .await
 }
 

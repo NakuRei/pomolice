@@ -1,9 +1,11 @@
 import type { ErrorSeverity } from "../store/errorStore";
+import type { SettingsValidationIssue } from "../types/settings";
 
 export type BackendErrorCode =
   | "unauthorized_window"
   | "invalid_state_transition"
   | "rate_limited"
+  | "invalid_settings"
   | "window_control_error"
   | "persistence_error"
   | "invalid_command_input";
@@ -40,6 +42,11 @@ const CODE_CLASSIFICATIONS: Readonly<
     userMessage: "少々お待ちください",
     severity: "recoverable",
     canRetry: true,
+  },
+  invalid_settings: {
+    userMessage: "設定内容を確認してください",
+    severity: "recoverable",
+    canRetry: false,
   },
   window_control_error: {
     userMessage: "ウィンドウ操作に失敗しました",
@@ -83,6 +90,24 @@ export function isBackendErrorResponse(
   return (
     isBackendErrorCode(response.code) && typeof response.message === "string"
   );
+}
+
+/**
+ * The issues of a rejected settings save, or `null` for any other error.
+ * A rejection without issues names nothing to fix, so it is treated as an
+ * ordinary failure rather than as a rejection.
+ */
+export function settingsValidationIssuesOf(
+  error: unknown,
+): SettingsValidationIssue[] | null {
+  if (!isBackendErrorResponse(error) || error.code !== "invalid_settings") {
+    return null;
+  }
+
+  const { issues } = error as BackendErrorResponse & { issues?: unknown };
+  return Array.isArray(issues) && issues.length > 0
+    ? (issues as SettingsValidationIssue[])
+    : null;
 }
 
 export function formatBackendErrorDetail(error: unknown): string {

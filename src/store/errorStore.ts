@@ -14,13 +14,11 @@ export type ErrorSeverity = "critical" | "recoverable" | "silent";
  * Where the error originated, used for retry strategy decisions:
  * - "backend_command"    → user-initiated invoke() call (start, stop, etc.)
  * - "backend_connection" → initial sync / event listener setup
- * - "settings_sync"      → syncSettings invoke (intentionally silent)
  * - "notification"       → Tauri notification API (intentionally silent)
  */
 export type ErrorOrigin =
   | "backend_command"
   | "backend_connection"
-  | "settings_sync"
   | "notification";
 
 /**

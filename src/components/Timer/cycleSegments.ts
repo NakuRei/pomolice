@@ -37,8 +37,8 @@ export interface CycleSegment {
 /**
  * Display state needed to lay out the cycle bar.
  *
- * Durations are the configured session lengths in seconds; they set the
- * denominator for the in-progress segment's fill.
+ * `sessionDurationSeconds` is the length the running session started with;
+ * it sets the denominator for the in-progress segment's fill.
  *
  * Usage example:
  * ```ts
@@ -46,10 +46,8 @@ export interface CycleSegment {
  *   currentCycle: 2,
  *   sessionType: "work",
  *   remainingSeconds: 900,
+ *   sessionDurationSeconds: 1500,
  *   longBreakInterval: 4,
- *   workDurationSeconds: 1500,
- *   shortBreakDurationSeconds: 300,
- *   longBreakDurationSeconds: 1200,
  * };
  * ```
  */
@@ -57,10 +55,8 @@ export interface CycleSegmentsInput {
   currentCycle: number;
   sessionType: SessionTypeValue;
   remainingSeconds: number;
+  sessionDurationSeconds: number;
   longBreakInterval: number;
-  workDurationSeconds: number;
-  shortBreakDurationSeconds: number;
-  longBreakDurationSeconds: number;
 }
 
 const WORK_SEGMENT_FLEX_GROW = 5;
@@ -72,18 +68,8 @@ interface SegmentProgress {
   state: CycleSegmentState;
 }
 
-function activeSessionDurationSeconds(input: CycleSegmentsInput): number {
-  const durationSecondsBySessionType: Record<SessionTypeValue, number> = {
-    [SessionType.WORK]: input.workDurationSeconds,
-    [SessionType.SHORT_BREAK]: input.shortBreakDurationSeconds,
-    [SessionType.LONG_BREAK]: input.longBreakDurationSeconds,
-  };
-
-  return durationSecondsBySessionType[input.sessionType];
-}
-
 function activeSessionElapsedRatio(input: CycleSegmentsInput): number {
-  const totalSeconds = activeSessionDurationSeconds(input);
+  const totalSeconds = input.sessionDurationSeconds;
   if (totalSeconds <= 0) {
     return 0;
   }
@@ -141,7 +127,9 @@ function buildBreakSegment(
  *
  * Each cycle contributes a work segment followed by its break; the break of the
  * last cycle is the long break. Before the first start (`currentCycle` is 0)
- * every segment is upcoming and empty.
+ * every segment is upcoming and empty. A cycle past the interval, left by
+ * lowering the interval mid-cycle, is shown as the last one because the next
+ * break is the long break.
  *
  * Usage example:
  * ```ts
@@ -149,16 +137,15 @@ function buildBreakSegment(
  *   currentCycle: 1,
  *   sessionType: "work",
  *   remainingSeconds: 750,
+ *   sessionDurationSeconds: 1500,
  *   longBreakInterval: 4,
- *   workDurationSeconds: 1500,
- *   shortBreakDurationSeconds: 300,
- *   longBreakDurationSeconds: 1200,
  * });
  * ```
  */
 export function deriveCycleSegments(input: CycleSegmentsInput): CycleSegment[] {
   const elapsedRatio = activeSessionElapsedRatio(input);
   const isWorkSession = input.sessionType === SessionType.WORK;
+  const currentCycle = Math.min(input.currentCycle, input.longBreakInterval);
   const segments: CycleSegment[] = [];
 
   for (
@@ -166,8 +153,8 @@ export function deriveCycleSegments(input: CycleSegmentsInput): CycleSegment[] {
     cycleNumber <= input.longBreakInterval;
     cycleNumber++
   ) {
-    const isPastCycle = cycleNumber < input.currentCycle;
-    const isCurrentCycle = cycleNumber === input.currentCycle;
+    const isPastCycle = cycleNumber < currentCycle;
+    const isCurrentCycle = cycleNumber === currentCycle;
 
     segments.push(
       buildWorkSegment(

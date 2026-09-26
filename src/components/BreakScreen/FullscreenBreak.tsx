@@ -1,5 +1,4 @@
 import { useTimerStore, SessionType } from "@/store/timerStore";
-import { useSettingsStore } from "@/store/settingsStore";
 import { useSkipFlowStore } from "@/store/skipFlowStore";
 import { FootprintsIcon, SkipForwardIcon } from "@/components/icons/AppIcons";
 import { CycleProgress } from "@/components/Timer/CycleProgress";
@@ -7,8 +6,8 @@ import { TimerNumber } from "@/components/Timer/TimerNumber";
 import { TimerPhaseLabel } from "@/components/Timer/TimerPhaseLabel";
 import SkipFlowModal from "../SkipFlow/SkipFlowModal";
 import { Button } from "../shared/Button";
+import { InlineError } from "../shared/InlineError";
 import { NotificationMuteToggleButton } from "../shared/NotificationMuteToggleButton";
-import { SettingsSyncBanner } from "../shared/SettingsSyncBanner";
 import { EmergencyShortcutHint } from "../shared/EmergencyShortcutNotice";
 
 const SIDE_PADDING_CLASS_NAME = "px-8 md:px-24";
@@ -19,14 +18,9 @@ const SIDE_PADDING_CLASS_NAME = "px-8 md:px-24";
  */
 export function FullscreenBreak(): React.ReactElement {
   const sessionType = useTimerStore((state) => state.sessionType);
-  const notificationSoundMuted = useSettingsStore(
-    (state) => state.notificationSoundMuted,
-  );
-  const toggleNotificationSoundMuted = useSettingsStore(
+  const settings = useTimerStore((state) => state.settings);
+  const toggleNotificationSoundMuted = useTimerStore(
     (state) => state.toggleNotificationSoundMuted,
-  );
-  const postBreakTransitionPolicy = useSettingsStore(
-    (state) => state.postBreakTransitionPolicy,
   );
   const isAwayDuringBreak = useTimerStore((state) => state.isAwayDuringBreak);
   const setAwayDuringBreak = useTimerStore((state) => state.setAwayDuringBreak);
@@ -55,7 +49,7 @@ export function FullscreenBreak(): React.ReactElement {
   // an unattended machine does not run through work sessions nobody is doing.
   // The break itself keeps running and stays locked.
   const offersAway =
-    postBreakTransitionPolicy === "start_next_work_automatically";
+    settings?.postBreakTransitionPolicy === "start_next_work_automatically";
 
   const handleAwayToggle = (): void => {
     setAwayDuringBreak(!isAwayDuringBreak).catch(() => undefined);
@@ -63,15 +57,20 @@ export function FullscreenBreak(): React.ReactElement {
 
   return (
     <div className="absolute inset-0 z-50 flex flex-col overflow-hidden bg-break-base bg-[radial-gradient(70%_80%_at_50%_100%,var(--color-break-glow)_0%,var(--color-break-mid)_55%,var(--color-break-base)_100%)] text-on-background accent-break">
-      <SettingsSyncBanner />
-
       <div
         className={`flex shrink-0 items-center justify-end pt-6 md:pt-7 ${SIDE_PADDING_CLASS_NAME}`}
       >
-        <NotificationMuteToggleButton
-          muted={notificationSoundMuted}
-          onToggle={toggleNotificationSoundMuted}
-        />
+        {settings !== null && (
+          <NotificationMuteToggleButton
+            muted={settings.notificationSoundMuted}
+            onToggle={() => {
+              void toggleNotificationSoundMuted();
+            }}
+          />
+        )}
+      </div>
+      <div className={SIDE_PADDING_CLASS_NAME}>
+        <InlineError errorId="update_settings" />
       </div>
 
       <div

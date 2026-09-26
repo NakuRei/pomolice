@@ -10,10 +10,9 @@ import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import App from "./App";
-import { useSettingsStore } from "./store/settingsStore";
 import { useTimerStore } from "./store/timerStore";
-import { resetSettingsStoreForTest } from "./test/resetSettingsStore";
 import { resetTimerStoreForTest } from "./test/resetTimerStore";
+import { createSettingsForTest } from "./test/settingsFixture";
 
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(vi.fn()),
@@ -22,6 +21,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 const IDLE_FULL_STATE = vi.hoisted(() => ({
   status: "idle",
   remaining_seconds: 1500,
+  session_duration_secs: 1500,
   session_type: "work",
   current_cycle: 0,
   completed_pomodoros: 0,
@@ -37,7 +37,20 @@ const IDLE_FULL_STATE = vi.hoisted(() => ({
     long_break_duration_secs: 900,
     long_break_interval: 4,
     post_break_transition_policy: "require_manual_continue",
+    auto_run_feature_enabled: false,
+    weekly_auto_run_config: {
+      mon: { enabled: false, start_time: "09:00", end_time: "18:00" },
+      tue: { enabled: false, start_time: "09:00", end_time: "18:00" },
+      wed: { enabled: false, start_time: "09:00", end_time: "18:00" },
+      thu: { enabled: false, start_time: "09:00", end_time: "18:00" },
+      fri: { enabled: false, start_time: "09:00", end_time: "18:00" },
+      sat: { enabled: false, start_time: "09:00", end_time: "18:00" },
+      sun: { enabled: false, start_time: "09:00", end_time: "18:00" },
+    },
+    notification_sound_volume_percent: 50,
+    notification_sound_muted: false,
   },
+  settings_file_status: "ok",
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -94,13 +107,12 @@ async function openNotificationSettings(user: UserEvent): Promise<void> {
 
 describe("App", () => {
   beforeEach(() => {
-    resetSettingsStoreForTest();
-    useSettingsStore.setState({
-      durationSettingsApplicationStatus: "confirmed",
-      automationSettingsApplicationStatus: "confirmed",
-    });
     resetTimerStoreForTest();
-    useTimerStore.setState({ isConnected: true });
+    useTimerStore.setState({
+      isConnected: true,
+      settings: createSettingsForTest(),
+    });
+    vi.mocked(invoke).mockResolvedValue(IDLE_FULL_STATE);
     vi.mocked(listen).mockResolvedValue(vi.fn());
   });
 
@@ -217,48 +229,56 @@ describe("App", () => {
     },
   );
 
-  it("keeps unresolved settings visible across every settings route", async () => {
+  it("keeps the unreadable-settings notice visible across every settings route", async () => {
     const user = userEvent.setup();
-    useTimerStore.setState({ isConnected: false });
+    vi.mocked(invoke).mockResolvedValue({
+      ...IDLE_FULL_STATE,
+      settings_file_status: "unusable",
+    });
 
     render(<App />);
 
-    await waitFor(() => {
-      expect(useTimerStore.getState().isConnected).toBe(true);
-    });
-    act(() => {
-      useSettingsStore.setState({
-        durationSettingsApplicationStatus: "pending",
-        automationSettingsApplicationStatus: "confirmed",
-      });
-    });
-
-    const expectUnresolvedSettingsNotice = (): void => {
-      expect(screen.getByRole("status")).toHaveTextContent(
-        /適用はまだ確認されていません/u,
+    const expectSettingsFileNotice = async (): Promise<void> => {
+      expect(await screen.findByRole("status")).toHaveTextContent(
+        /保存済みの設定を読み込めなかった/u,
       );
     };
 
-    expectUnresolvedSettingsNotice();
+    await expectSettingsFileNotice();
     await openSettingsTop(user);
-    expectUnresolvedSettingsNotice();
+    await expectSettingsFileNotice();
 
     await user.click(
       screen.getByRole("button", { name: settingsTopTimerButtonName }),
     );
-    expectUnresolvedSettingsNotice();
+    await expectSettingsFileNotice();
     await user.click(screen.getByRole("button", { name: "設定一覧へ戻る" }));
 
     await user.click(
       screen.getByRole("button", { name: settingsTopAutoRunButtonName }),
     );
-    expectUnresolvedSettingsNotice();
+    await expectSettingsFileNotice();
     await user.click(screen.getByRole("button", { name: "設定一覧へ戻る" }));
 
     await user.click(
       screen.getByRole("button", { name: settingsTopNotificationButtonName }),
     );
-    expectUnresolvedSettingsNotice();
+    await expectSettingsFileNotice();
+  });
+
+  it("saves the flipped mute setting when the home mute toggle is clicked", async () => {
+    const user = userEvent.setup();
+
+    render(<App />);
+    await waitFor(() => {
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("get_full_state");
+    });
+
+    await user.click(screen.getByRole("button", { name: "通知音" }));
+
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("update_settings", {
+      changes: { notification_sound_muted: true },
+    });
   });
 
   it("returns to home screen after fullscreen break ends while settings top is open", async () => {

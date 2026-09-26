@@ -113,10 +113,13 @@ describe("createLogger()", () => {
     const { createLogger } = await import("./logger");
 
     expect(() => {
-      createLogger("settings_sync").warn("settings.sync.failed", {
-        timer_status: "idle",
-        unknown_field: "boom",
-      } as never);
+      createLogger("notifications").warn(
+        "notification.sound_preview_playback_failed",
+        {
+          notification_sound_type: "work",
+          unknown_field: "boom",
+        } as never,
+      );
     }).toThrow(/Unknown frontend log field\(s\)/u);
 
     expect(warnLog).not.toHaveBeenCalled();
@@ -128,16 +131,19 @@ describe("createLogger()", () => {
     setProductionEnvironmentOverrideForTest(true);
     const { createLogger } = await import("./logger");
 
-    createLogger("settings_sync").warn("settings.sync.failed", {
-      timer_status: "idle",
-      unknown_field: "boom",
-    } as never);
+    createLogger("notifications").warn(
+      "notification.sound_preview_playback_failed",
+      {
+        notification_sound_type: "work",
+        unknown_field: "boom",
+      } as never,
+    );
 
     expect(warnLog).toHaveBeenCalledTimes(1);
 
     const [, keyValues] = getFirstPluginWriteCall(warnLog);
-    expect(keyValues.logger_scope).toBe("settings_sync");
-    expect(keyValues.timer_status).toBe("idle");
+    expect(keyValues.logger_scope).toBe("notifications");
+    expect(keyValues.notification_sound_type).toBe("work");
     expect(keyValues.unknown_field).toBeUndefined();
   });
 

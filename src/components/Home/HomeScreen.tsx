@@ -2,6 +2,7 @@ import { AutoStartConfirmDialog } from "../AutoStartConfirmDialog";
 import { ContinueDialog } from "@/components/ContinueDialog/ContinueDialog";
 import { SettingsGearIcon } from "@/components/icons/AppIcons";
 import { CycleProgress } from "@/components/Timer/CycleProgress";
+import { SessionDurationNotice } from "@/components/Timer/SessionDurationNotice";
 import { TimerControls } from "@/components/Timer/TimerControls";
 import { TimerNumber } from "@/components/Timer/TimerNumber";
 import { TimerPhaseLabel } from "@/components/Timer/TimerPhaseLabel";
@@ -10,7 +11,7 @@ import { IconButton } from "../shared/IconButton";
 import { InfoMessageBanner } from "../shared/InfoMessageBanner";
 import { InlineError } from "../shared/InlineError";
 import { NotificationMuteToggleButton } from "../shared/NotificationMuteToggleButton";
-import { SettingsSyncBanner } from "../shared/SettingsSyncBanner";
+import { SettingsFileNotice } from "../shared/SettingsFileNotice";
 import { ToastStack } from "../shared/ToastStack";
 import { useTimerStore, SessionType } from "@/store/timerStore";
 
@@ -40,7 +41,8 @@ const SESSION_PHASE_LABEL = {
  * ```
  */
 export interface HomeScreenProps {
-  notificationSoundMuted: boolean;
+  /** Null until the backend has sent the settings; the mute toggle is hidden until then. */
+  notificationSoundMuted: boolean | null;
   isAutoRunWindowActive: boolean;
   isAutoContinueEnabled: boolean;
   requiresManualContinue: boolean;
@@ -63,7 +65,7 @@ export function HomeScreen({
     // the whole viewport and pushing its own footer off-screen.
     <div className="flex h-full flex-col overflow-hidden bg-background bg-[radial-gradient(110%_65%_at_50%_0%,var(--color-primary-950)_0%,var(--color-background)_62%)] text-on-background">
       <ConnectionBanner />
-      <SettingsSyncBanner />
+      <SettingsFileNotice />
 
       <div
         className={`grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(min-content,1fr)_auto_minmax(min-content,1fr)] gap-y-1 py-4 md:py-6 ${SIDE_PADDING_CLASS_NAME}`}
@@ -100,10 +102,12 @@ export function HomeScreen({
           </div>
 
           <div className="flex shrink-0 items-center gap-1.5">
-            <NotificationMuteToggleButton
-              muted={notificationSoundMuted}
-              onToggle={onToggleNotificationSoundMuted}
-            />
+            {notificationSoundMuted !== null && (
+              <NotificationMuteToggleButton
+                muted={notificationSoundMuted}
+                onToggle={onToggleNotificationSoundMuted}
+              />
+            )}
 
             <IconButton
               onClick={onOpenSettingsTopScreen}
@@ -128,6 +132,7 @@ export function HomeScreen({
             </TimerPhaseLabel>
           </div>
           <CycleProgress />
+          <SessionDurationNotice />
         </div>
 
         <div
@@ -141,6 +146,7 @@ export function HomeScreen({
         <InfoMessageBanner />
         {/* Shown when start_work fails; auto-clears after 5 seconds */}
         <InlineError errorId="start_work" />
+        <InlineError errorId="update_settings" />
       </ToastStack>
 
       <ContinueDialog />

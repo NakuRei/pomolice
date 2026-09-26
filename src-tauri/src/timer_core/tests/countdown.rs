@@ -6,7 +6,7 @@ use super::*;
 fn work_remaining_time_follows_the_wall_clock_across_skipped_ticks() {
     let started_at = monday(10, 0, 0);
     let mut core = idle_without_schedule(started_at);
-    start_work(&mut core, started_at, TimerSettings::default());
+    start_work(&mut core, started_at, Durations::default());
 
     apply(&mut core, Event::Tick, seconds_after(started_at, 3));
 

@@ -4,11 +4,10 @@ use super::phase::{BreakKind, BreakSessionState, TimerPhase};
 use super::{Effect, TimerCore};
 use crate::error::{PomoliceError, Result};
 use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
+use crate::settings::UserSettings;
 use crate::types::{
-    LongBreakDurationSecs, LongBreakIntervalCount, PostBreakDecisionAction,
-    PostBreakTransitionPolicy, ScheduleStopState, SessionCompletedPayload, SessionTransitionReason,
-    SessionType, ShortBreakDurationSecs, TimerSettings, TimerStatus, WorkDurationSecs,
-    WorkStartOrigin,
+    PostBreakDecisionAction, PostBreakTransitionPolicy, ScheduleStopState, SessionCompletedPayload,
+    SessionDurationSecs, SessionTransitionReason, SessionType, TimerStatus, WorkStartOrigin,
 };
 
 const MANUAL_START_RATE_LIMIT: ChronoDuration = ChronoDuration::milliseconds(300);
@@ -21,25 +20,22 @@ enum FinishedSession {
 impl TimerCore {
     pub(super) fn apply_started(&mut self, now: DateTime<Local>) -> Vec<Effect> {
         match self.phase {
-            TimerPhase::Working { ends_at } if ends_at <= now => self.complete_work_session(now),
+            TimerPhase::Working { ends_at, .. } if ends_at <= now => {
+                self.complete_work_session(now)
+            }
             TimerPhase::Working { .. } => vec![self.publish(now)],
             TimerPhase::OnBreak(_) => vec![Effect::EnterBreakLock],
             TimerPhase::Idle { .. } => Vec::new(),
         }
     }
 
-    pub(super) fn start_work_requested(
-        &mut self,
-        settings: TimerSettings,
-        now: DateTime<Local>,
-    ) -> Result<Vec<Effect>> {
-        self.start_work(settings, self.manual_start_origin(now), now)?;
+    pub(super) fn start_work_requested(&mut self, now: DateTime<Local>) -> Result<Vec<Effect>> {
+        self.start_work(self.manual_start_origin(now), now)?;
         Ok(vec![self.publish(now), Effect::Persist])
     }
 
     pub(super) fn start_work(
         &mut self,
-        settings: TimerSettings,
         origin: WorkStartOrigin,
         now: DateTime<Local>,
     ) -> Result<()> {
@@ -70,8 +66,7 @@ impl TimerCore {
             }
         }
 
-        let work_duration_secs = settings.work_duration_secs.get();
-        self.settings = settings;
+        let work_duration_secs = self.settings.work_duration_secs.into();
         self.schedule.stop_state = match origin {
             WorkStartOrigin::ManualOutsideScheduleWindow => {
                 ScheduleStopState::NotControlledBySchedule
@@ -87,17 +82,18 @@ impl TimerCore {
         log_info_event(
             BackendLogEvent::TimerWorkSessionStarted,
             &[
-                ("duration_secs", work_duration_secs.to_string()),
+                ("duration_secs", work_duration_secs.get().to_string()),
                 ("work_start_origin", format!("{origin:?}")),
             ],
         );
         Ok(())
     }
 
-    fn begin_work_session(&mut self, work_duration_secs: u64, now: DateTime<Local>) {
+    fn begin_work_session(&mut self, duration_secs: SessionDurationSecs, now: DateTime<Local>) {
         self.phase = TimerPhase::Working {
             ends_at: now
-                + ChronoDuration::seconds(i64::try_from(work_duration_secs).unwrap_or(i64::MAX)),
+                + ChronoDuration::seconds(i64::try_from(duration_secs.get()).unwrap_or(i64::MAX)),
+            duration_secs,
         };
         self.last_transition_at = Some(now);
     }
@@ -131,7 +127,7 @@ impl TimerCore {
             });
         }
 
-        let work_duration_secs = self.settings.work_duration_secs.get();
+        let work_duration_secs = self.settings.work_duration_secs.into();
         self.schedule.stop_state = ScheduleStopState::NotControlledBySchedule;
         match action {
             PostBreakDecisionAction::Continue => {
@@ -194,40 +190,15 @@ impl TimerCore {
         }
     }
 
-    pub(super) fn change_timer_durations(
-        &mut self,
-        work_duration_secs: WorkDurationSecs,
-        short_break_duration_secs: ShortBreakDurationSecs,
-        long_break_duration_secs: LongBreakDurationSecs,
-        long_break_interval: LongBreakIntervalCount,
-        now: DateTime<Local>,
-    ) -> Result<Vec<Effect>> {
-        if self.status() != TimerStatus::Idle {
-            return Err(PomoliceError::InvalidStateTransition {
-                action: "sync timer duration settings".to_string(),
-                current_state: self.status(),
-            });
-        }
-
-        self.settings.work_duration_secs = work_duration_secs;
-        self.settings.short_break_duration_secs = short_break_duration_secs;
-        self.settings.long_break_duration_secs = long_break_duration_secs;
-        self.settings.long_break_interval = long_break_interval;
-
-        log_info_event(
-            BackendLogEvent::SettingsSyncApplied,
-            &[("timer_status", format!("{:?}", self.status()))],
-        );
-        Ok(vec![self.publish(now), Effect::Persist])
-    }
-
     /// Countdown step for the current session. Work derives from the wall
     /// clock; breaks count ticks, so seconds the app did not enforce are not
     /// consumed.
     pub(super) fn count_down(&mut self, now: DateTime<Local>) -> Vec<Effect> {
         let finished = match &mut self.phase {
             TimerPhase::Idle { .. } => return Vec::new(),
-            TimerPhase::Working { ends_at } => (*ends_at <= now).then_some(FinishedSession::Work),
+            TimerPhase::Working { ends_at, .. } => {
+                (*ends_at <= now).then_some(FinishedSession::Work)
+            }
             TimerPhase::OnBreak(current_break) => {
                 current_break.remaining_seconds = current_break.remaining_seconds.saturating_sub(1);
                 (current_break.remaining_seconds == 0).then_some(FinishedSession::Break)
@@ -244,7 +215,7 @@ impl TimerCore {
     }
 
     fn complete_work_session(&mut self, now: DateTime<Local>) -> Vec<Effect> {
-        if self.schedule.stop_state == ScheduleStopState::StopAtNextSessionBoundary {
+        if self.scheduled_stop_is_due() {
             let payload = self.execute_scheduled_stop(SessionType::Work, now);
             return vec![
                 Effect::EmitSessionCompleted(payload),
@@ -257,9 +228,11 @@ impl TimerCore {
         self.completed_pomodoros += 1;
         let break_kind =
             break_kind_for_cycle(self.current_cycle, self.settings.long_break_interval.get());
+        let break_duration_secs = break_duration(&self.settings, break_kind);
         self.phase = TimerPhase::OnBreak(BreakSessionState::starting(
             break_kind,
-            break_duration(&self.settings, break_kind),
+            break_duration_secs,
+            break_duration_secs.get(),
         ));
         self.last_transition_at = Some(now);
 
@@ -277,7 +250,7 @@ impl TimerCore {
             .current_break()
             .is_some_and(|current_break| current_break.attendance.is_away());
 
-        if self.schedule.stop_state == ScheduleStopState::StopAtNextSessionBoundary {
+        if self.scheduled_stop_is_due() {
             let payload = self.execute_scheduled_stop(completed_session_type, now);
             return vec![
                 Effect::EmitSessionCompleted(payload),
@@ -326,7 +299,7 @@ impl TimerCore {
         }
         self.current_cycle += 1;
         // Schedule control carries over an automatic break-to-work transition.
-        self.begin_work_session(self.settings.work_duration_secs.get(), now);
+        self.begin_work_session(self.settings.work_duration_secs.into(), now);
 
         let payload = SessionCompletedPayload::break_auto_started(completed_session_type);
         self.log_transition(
@@ -385,15 +358,18 @@ impl TimerCore {
     }
 }
 
-pub(super) fn break_duration(settings: &TimerSettings, kind: BreakKind) -> u64 {
+fn break_duration(settings: &UserSettings, kind: BreakKind) -> SessionDurationSecs {
     match kind {
-        BreakKind::Short => settings.short_break_duration_secs.get(),
-        BreakKind::Long => settings.long_break_duration_secs.get(),
+        BreakKind::Short => settings.short_break_duration_secs.into(),
+        BreakKind::Long => settings.long_break_duration_secs.into(),
     }
 }
 
+/// The cycle counts work sessions since the last long break. Reaching the
+/// interval, rather than landing on a multiple of it, keeps a long break from
+/// being postponed when the interval is lowered past the current cycle.
 fn break_kind_for_cycle(cycle: u32, long_break_interval: u32) -> BreakKind {
-    if cycle > 0 && cycle.is_multiple_of(long_break_interval) {
+    if cycle >= long_break_interval {
         BreakKind::Long
     } else {
         BreakKind::Short

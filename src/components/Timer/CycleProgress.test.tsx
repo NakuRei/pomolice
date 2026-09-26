@@ -2,9 +2,8 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { CycleProgress } from "./CycleProgress";
 import { SessionType, useTimerStore } from "@/store/timerStore";
-import { useSettingsStore } from "@/store/settingsStore";
-import { resetSettingsStoreForTest } from "@/test/resetSettingsStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
+import { createSettingsForTest } from "@/test/settingsFixture";
 
 function segmentStates(): Record<string, string | null> {
   const bar = screen.getByTestId("cycle-progress");
@@ -26,7 +25,15 @@ function segmentStates(): Record<string, string | null> {
 describe("CycleProgress", () => {
   beforeEach(() => {
     resetTimerStoreForTest();
-    resetSettingsStoreForTest();
+    useTimerStore.setState({ settings: createSettingsForTest() });
+  });
+
+  it("shows nothing until the settings have arrived", () => {
+    useTimerStore.setState({ settings: null });
+
+    render(<CycleProgress />);
+
+    expect(screen.queryByTestId("cycle-progress")).not.toBeInTheDocument();
   });
 
   it("shows the whole cycle before the timer has ever started", () => {
@@ -41,7 +48,9 @@ describe("CycleProgress", () => {
   });
 
   it("draws one work span and one break span per configured cycle", () => {
-    useSettingsStore.getState().setLongBreakInterval(6);
+    useTimerStore.setState({
+      settings: createSettingsForTest({ longBreakInterval: 6 }),
+    });
 
     render(<CycleProgress />);
 
@@ -110,12 +119,55 @@ describe("CycleProgress", () => {
     expect(Object.keys(segmentStates())).toHaveLength(8);
 
     act(() => {
-      useSettingsStore.getState().setLongBreakInterval(5);
+      useTimerStore.setState({
+        settings: createSettingsForTest({ longBreakInterval: 5 }),
+      });
     });
 
     expect(Object.keys(segmentStates())).toHaveLength(10);
     expect(
       screen.getByRole("img", { name: "ポモドーロ 1 / 5" }),
+    ).toBeInTheDocument();
+  });
+
+  it("fills the running session against the length it started with", () => {
+    act(() => {
+      useTimerStore.setState({
+        settings: createSettingsForTest({ workDurationSecs: 50 * 60 }),
+        currentCycle: 1,
+        sessionType: SessionType.WORK,
+        remainingSeconds: 750,
+        sessionDurationSeconds: 1500,
+      });
+    });
+
+    render(<CycleProgress />);
+
+    const fill = screen.getByTestId("cycle-segment-work-1").firstElementChild;
+    expect(fill).toHaveStyle({ width: "50%" });
+  });
+
+  it("shows a cycle past a lowered interval as the last cycle", () => {
+    act(() => {
+      useTimerStore.setState({
+        settings: createSettingsForTest({ longBreakInterval: 2 }),
+        currentCycle: 3,
+        sessionType: SessionType.WORK,
+        remainingSeconds: 750,
+        sessionDurationSeconds: 1500,
+      });
+    });
+
+    render(<CycleProgress />);
+
+    expect(segmentStates()).toEqual({
+      "work-1": "completed",
+      "break-1": "completed",
+      "work-2": "active",
+      "break-2": "upcoming",
+    });
+    expect(
+      screen.getByRole("img", { name: "ポモドーロ 2 / 2" }),
     ).toBeInTheDocument();
   });
 });

@@ -3,23 +3,26 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-/// Persisted state schema version currently supported by this binary.
-pub(crate) const PERSISTED_STATE_SCHEMA_VERSION: u32 = 1;
+use crate::settings::{SettingsFileStatus, UserSettings};
 
-/// Persisted timer state stored in `timer_state.json`.
+/// Persisted state schema version currently supported by this binary.
+pub(crate) const PERSISTED_STATE_SCHEMA_VERSION: u32 = 2;
+
+/// What the timer was doing, stored in `timer_state.json`. User settings live
+/// in their own file so that discarding this state never discards them.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct PersistedState {
     pub schema_version: u32,
     pub status: TimerStatus,
     pub remaining_seconds: u64,
+    /// Length the running session started with; settings saved later do not
+    /// change it.
+    pub session_duration_secs: SessionDurationSecs,
     pub session_type: SessionType,
     pub current_cycle: u32,
     pub completed_pomodoros: u32,
     pub post_break_decision_pending: bool,
-    pub settings: TimerSettings,
     pub saved_at: chrono::DateTime<chrono::Utc>,
-    pub auto_run_feature_enabled: bool,
-    pub weekly_auto_run_config: WeeklyAutoRunConfig,
     pub schedule_stop_state: ScheduleStopState,
 }
 
@@ -76,18 +79,14 @@ impl IntegerRangeValidationError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub(crate) enum ScheduleValidationError {
-    #[error("start_time and end_time must differ")]
-    EmptyRange,
-    #[error("overlapping schedule windows between {primary_weekday} and {secondary_weekday}")]
-    Overlap {
-        primary_weekday: &'static str,
-        secondary_weekday: &'static str,
-    },
-}
+#[error("start_time and end_time of an enabled slot must differ")]
+pub(crate) struct EmptyTimeRangeError;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("enabled schedule windows overlap: {0:?}")]
+pub(crate) struct OverlappingSlotsError(pub Vec<(WeekdayKey, WeekdayKey)>);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct HhMm {
     hour: u8,
     minute: u8,
@@ -146,12 +145,6 @@ impl TryFrom<String> for HhMm {
     }
 }
 
-impl From<HhMm> for String {
-    fn from(value: HhMm) -> Self {
-        value.to_string()
-    }
-}
-
 impl std::fmt::Display for HhMm {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(formatter, "{:02}:{:02}", self.hour(), self.minute())
@@ -165,6 +158,9 @@ macro_rules! bounded_u64_newtype {
         pub(crate) struct $name(u64);
 
         impl $name {
+            pub(crate) const MIN: u64 = $min;
+            pub(crate) const MAX: u64 = $max;
+
             pub(crate) fn try_new(
                 value: u64,
             ) -> std::result::Result<Self, IntegerRangeValidationError> {
@@ -209,6 +205,9 @@ macro_rules! bounded_u32_newtype {
         pub(crate) struct $name(u32);
 
         impl $name {
+            pub(crate) const MIN: u32 = $min;
+            pub(crate) const MAX: u32 = $max;
+
             pub(crate) fn try_new(
                 value: u32,
             ) -> std::result::Result<Self, IntegerRangeValidationError> {
@@ -251,15 +250,59 @@ macro_rules! bounded_u32_newtype {
     };
 }
 
-bounded_u64_newtype!(WorkDurationSecs, "work_duration_secs", 1, 86_400);
+// The 1-second minimums let a developer reach a break without waiting;
+// raise them before release.
+bounded_u64_newtype!(WorkDurationSecs, "work_duration_secs", 1, 7_200);
 bounded_u64_newtype!(
     ShortBreakDurationSecs,
     "short_break_duration_secs",
     1,
-    86_400
+    3_600
 );
-bounded_u64_newtype!(LongBreakDurationSecs, "long_break_duration_secs", 1, 86_400);
-bounded_u32_newtype!(LongBreakIntervalCount, "long_break_interval", 1, 100);
+bounded_u64_newtype!(LongBreakDurationSecs, "long_break_duration_secs", 1, 3_600);
+bounded_u32_newtype!(LongBreakIntervalCount, "long_break_interval", 2, 10);
+bounded_u32_newtype!(
+    NotificationSoundVolumePercent,
+    "notification_sound_volume_percent",
+    0,
+    100
+);
+// Covers every session kind, so it is bounded by the longest one.
+bounded_u64_newtype!(
+    SessionDurationSecs,
+    "session_duration_secs",
+    1,
+    WorkDurationSecs::MAX
+);
+
+// The conversions below are infallible only while every session kind fits
+// inside the session range.
+const _: () = assert!(
+    SessionDurationSecs::MIN <= WorkDurationSecs::MIN
+        && WorkDurationSecs::MAX <= SessionDurationSecs::MAX
+        && SessionDurationSecs::MIN <= ShortBreakDurationSecs::MIN
+        && ShortBreakDurationSecs::MAX <= SessionDurationSecs::MAX
+        && SessionDurationSecs::MIN <= LongBreakDurationSecs::MIN
+        && LongBreakDurationSecs::MAX <= SessionDurationSecs::MAX
+);
+
+impl From<WorkDurationSecs> for SessionDurationSecs {
+    fn from(value: WorkDurationSecs) -> Self {
+        Self(value.get())
+    }
+}
+
+impl From<ShortBreakDurationSecs> for SessionDurationSecs {
+    fn from(value: ShortBreakDurationSecs) -> Self {
+        Self(value.get())
+    }
+}
+
+impl From<LongBreakDurationSecs> for SessionDurationSecs {
+    fn from(value: LongBreakDurationSecs) -> Self {
+        Self(value.get())
+    }
+}
 
 fn hh_mm_or_panic(hour: u8, minute: u8) -> HhMm {
     match HhMm::try_new(hour, minute) {
@@ -268,104 +311,45 @@ fn hh_mm_or_panic(hour: u8, minute: u8) -> HhMm {
     }
 }
 
-fn work_duration_secs_or_panic(value: u64) -> WorkDurationSecs {
-    match WorkDurationSecs::try_new(value) {
-        Ok(duration) => duration,
-        Err(error) => panic!("default work duration should be valid: {error}"),
-    }
+/// Monday-first weekday keys shared by the schedule and its validation issues.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum WeekdayKey {
+    Mon,
+    Tue,
+    Wed,
+    Thu,
+    Fri,
+    Sat,
+    Sun,
 }
 
-fn short_break_duration_secs_or_panic(value: u64) -> ShortBreakDurationSecs {
-    match ShortBreakDurationSecs::try_new(value) {
-        Ok(duration) => duration,
-        Err(error) => panic!("default short break duration should be valid: {error}"),
-    }
-}
+impl WeekdayKey {
+    pub(crate) const ALL: [Self; 7] = [
+        Self::Mon,
+        Self::Tue,
+        Self::Wed,
+        Self::Thu,
+        Self::Fri,
+        Self::Sat,
+        Self::Sun,
+    ];
 
-fn long_break_duration_secs_or_panic(value: u64) -> LongBreakDurationSecs {
-    match LongBreakDurationSecs::try_new(value) {
-        Ok(duration) => duration,
-        Err(error) => panic!("default long break duration should be valid: {error}"),
-    }
-}
-
-fn long_break_interval_count_or_panic(value: u32) -> LongBreakIntervalCount {
-    match LongBreakIntervalCount::try_new(value) {
-        Ok(interval) => interval,
-        Err(error) => panic!("default long break interval should be valid: {error}"),
-    }
-}
-
-/// Timer settings synchronized from frontend
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct TimerSettings {
-    pub work_duration_secs: WorkDurationSecs,
-    pub short_break_duration_secs: ShortBreakDurationSecs,
-    pub long_break_duration_secs: LongBreakDurationSecs,
-    pub long_break_interval: LongBreakIntervalCount,
-    #[serde(default)]
-    pub post_break_transition_policy: PostBreakTransitionPolicy,
-}
-
-impl TimerSettings {
-    pub(crate) fn new(
-        work_duration_secs: WorkDurationSecs,
-        short_break_duration_secs: ShortBreakDurationSecs,
-        long_break_duration_secs: LongBreakDurationSecs,
-        long_break_interval: LongBreakIntervalCount,
-        post_break_transition_policy: PostBreakTransitionPolicy,
-    ) -> Self {
-        Self {
-            work_duration_secs,
-            short_break_duration_secs,
-            long_break_duration_secs,
-            long_break_interval,
-            post_break_transition_policy,
+    fn index_from_monday(self) -> u32 {
+        match self {
+            Self::Mon => 0,
+            Self::Tue => 1,
+            Self::Wed => 2,
+            Self::Thu => 3,
+            Self::Fri => 4,
+            Self::Sat => 5,
+            Self::Sun => 6,
         }
     }
-
-    #[cfg(test)]
-    pub(crate) fn try_from_raw(
-        work_duration_secs: u64,
-        short_break_duration_secs: u64,
-        long_break_duration_secs: u64,
-        long_break_interval: u32,
-        post_break_transition_policy: PostBreakTransitionPolicy,
-    ) -> std::result::Result<Self, IntegerRangeValidationError> {
-        Ok(Self::new(
-            WorkDurationSecs::try_new(work_duration_secs)?,
-            ShortBreakDurationSecs::try_new(short_break_duration_secs)?,
-            LongBreakDurationSecs::try_new(long_break_duration_secs)?,
-            LongBreakIntervalCount::try_new(long_break_interval)?,
-            post_break_transition_policy,
-        ))
-    }
-}
-
-impl Default for TimerSettings {
-    fn default() -> Self {
-        Self {
-            work_duration_secs: work_duration_secs_or_panic(25 * 60),
-            short_break_duration_secs: short_break_duration_secs_or_panic(5 * 60),
-            long_break_duration_secs: long_break_duration_secs_or_panic(15 * 60),
-            long_break_interval: long_break_interval_count_or_panic(4),
-            post_break_transition_policy: PostBreakTransitionPolicy::RequireManualContinue,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-struct RawDayAutoRunSlot {
-    enabled: bool,
-    #[serde(alias = "startTime")]
-    start_time: HhMm,
-    #[serde(alias = "endTime")]
-    end_time: HhMm,
 }
 
 /// A single weekday schedule slot for automatic timer execution.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "RawDayAutoRunSlot", into = "RawDayAutoRunSlot")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct DayAutoRunSlot {
     enabled: bool,
     start_time: HhMm,
@@ -373,13 +357,15 @@ pub(crate) struct DayAutoRunSlot {
 }
 
 impl DayAutoRunSlot {
+    /// A disabled slot keeps its times only so they can be edited later, so
+    /// it is never checked for an empty range.
     pub(crate) fn try_new(
         enabled: bool,
         start_time: HhMm,
         end_time: HhMm,
-    ) -> std::result::Result<Self, ScheduleValidationError> {
-        if start_time == end_time {
-            return Err(ScheduleValidationError::EmptyRange);
+    ) -> std::result::Result<Self, EmptyTimeRangeError> {
+        if enabled && start_time == end_time {
+            return Err(EmptyTimeRangeError);
         }
 
         Ok(Self {
@@ -424,35 +410,6 @@ impl Default for DayAutoRunSlot {
     }
 }
 
-impl TryFrom<RawDayAutoRunSlot> for DayAutoRunSlot {
-    type Error = ScheduleValidationError;
-
-    fn try_from(raw: RawDayAutoRunSlot) -> std::result::Result<Self, Self::Error> {
-        Self::try_new(raw.enabled, raw.start_time, raw.end_time)
-    }
-}
-
-impl From<DayAutoRunSlot> for RawDayAutoRunSlot {
-    fn from(value: DayAutoRunSlot) -> Self {
-        Self {
-            enabled: value.enabled,
-            start_time: value.start_time,
-            end_time: value.end_time,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct RawWeeklyAutoRunConfig {
-    mon: DayAutoRunSlot,
-    tue: DayAutoRunSlot,
-    wed: DayAutoRunSlot,
-    thu: DayAutoRunSlot,
-    fri: DayAutoRunSlot,
-    sat: DayAutoRunSlot,
-    sun: DayAutoRunSlot,
-}
-
 #[derive(Debug, Clone, Copy)]
 struct WeekMinuteRange {
     start_minute_of_week: u32,
@@ -460,8 +417,7 @@ struct WeekMinuteRange {
 }
 
 /// Weekly schedule configuration normalized to Monday-Sunday keys.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "RawWeeklyAutoRunConfig", into = "RawWeeklyAutoRunConfig")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WeeklyAutoRunConfig {
     mon: DayAutoRunSlot,
     tue: DayAutoRunSlot,
@@ -473,6 +429,8 @@ pub(crate) struct WeeklyAutoRunConfig {
 }
 
 impl WeeklyAutoRunConfig {
+    /// Rejects a schedule whose enabled slots overlap, reporting every
+    /// overlapping pair.
     pub(crate) fn try_new(
         mon: DayAutoRunSlot,
         tue: DayAutoRunSlot,
@@ -481,7 +439,7 @@ impl WeeklyAutoRunConfig {
         fri: DayAutoRunSlot,
         sat: DayAutoRunSlot,
         sun: DayAutoRunSlot,
-    ) -> std::result::Result<Self, ScheduleValidationError> {
+    ) -> std::result::Result<Self, OverlappingSlotsError> {
         let config = Self {
             mon,
             tue,
@@ -492,16 +450,24 @@ impl WeeklyAutoRunConfig {
             sun,
         };
 
-        if let Some((primary_weekday, secondary_weekday)) =
-            find_first_overlapping_weekday_pair(&config)
-        {
-            return Err(ScheduleValidationError::Overlap {
-                primary_weekday,
-                secondary_weekday,
-            });
+        let overlapping_pairs = find_overlapping_weekday_pairs(&config);
+        if !overlapping_pairs.is_empty() {
+            return Err(OverlappingSlotsError(overlapping_pairs));
         }
 
         Ok(config)
+    }
+
+    pub(crate) fn slot(&self, weekday: WeekdayKey) -> DayAutoRunSlot {
+        match weekday {
+            WeekdayKey::Mon => self.mon,
+            WeekdayKey::Tue => self.tue,
+            WeekdayKey::Wed => self.wed,
+            WeekdayKey::Thu => self.thu,
+            WeekdayKey::Fri => self.fri,
+            WeekdayKey::Sat => self.sat,
+            WeekdayKey::Sun => self.sun,
+        }
     }
 
     pub(crate) fn mon(&self) -> DayAutoRunSlot {
@@ -533,49 +499,38 @@ impl WeeklyAutoRunConfig {
     }
 }
 
-fn find_first_overlapping_weekday_pair(
-    config: &WeeklyAutoRunConfig,
-) -> Option<(&'static str, &'static str)> {
-    let weekday_ranges: Vec<(&'static str, Vec<WeekMinuteRange>)> = [
-        ("mon", 0_u32, config.mon),
-        ("tue", 1, config.tue),
-        ("wed", 2, config.wed),
-        ("thu", 3, config.thu),
-        ("fri", 4, config.fri),
-        ("sat", 5, config.sat),
-        ("sun", 6, config.sun),
-    ]
-    .into_iter()
-    .filter(|(_, _, slot)| slot.enabled())
-    .map(|(weekday_key, weekday_index, slot)| {
-        (
-            weekday_key,
-            build_week_minute_ranges(
-                weekday_index,
-                slot.start_time().minutes_since_midnight(),
-                slot.end_time().minutes_since_midnight(),
-                slot.crosses_midnight(),
-            ),
-        )
-    })
-    .collect();
+fn find_overlapping_weekday_pairs(config: &WeeklyAutoRunConfig) -> Vec<(WeekdayKey, WeekdayKey)> {
+    let weekday_ranges: Vec<(WeekdayKey, Vec<WeekMinuteRange>)> = WeekdayKey::ALL
+        .into_iter()
+        .filter(|weekday| config.slot(*weekday).enabled())
+        .map(|weekday| {
+            let slot = config.slot(weekday);
+            (
+                weekday,
+                build_week_minute_ranges(
+                    weekday.index_from_monday(),
+                    slot.start_time().minutes_since_midnight(),
+                    slot.end_time().minutes_since_midnight(),
+                    slot.crosses_midnight(),
+                ),
+            )
+        })
+        .collect();
 
-    for primary_index in 0..weekday_ranges.len() {
-        for secondary_index in (primary_index + 1)..weekday_ranges.len() {
-            let (primary_weekday, primary_ranges) = &weekday_ranges[primary_index];
-            let (secondary_weekday, secondary_ranges) = &weekday_ranges[secondary_index];
-
-            for primary_range in primary_ranges {
-                for secondary_range in secondary_ranges {
-                    if week_minute_ranges_overlap(*primary_range, *secondary_range) {
-                        return Some((primary_weekday, secondary_weekday));
-                    }
-                }
+    let mut overlapping_pairs = Vec::new();
+    for (primary_index, (primary_weekday, primary_ranges)) in weekday_ranges.iter().enumerate() {
+        for (secondary_weekday, secondary_ranges) in &weekday_ranges[primary_index + 1..] {
+            let overlaps = primary_ranges.iter().any(|primary_range| {
+                secondary_ranges.iter().any(|secondary_range| {
+                    week_minute_ranges_overlap(*primary_range, *secondary_range)
+                })
+            });
+            if overlaps {
+                overlapping_pairs.push((*primary_weekday, *secondary_weekday));
             }
         }
     }
-
-    None
+    overlapping_pairs
 }
 
 impl Default for WeeklyAutoRunConfig {
@@ -589,30 +544,6 @@ impl Default for WeeklyAutoRunConfig {
             fri: slot,
             sat: slot,
             sun: slot,
-        }
-    }
-}
-
-impl TryFrom<RawWeeklyAutoRunConfig> for WeeklyAutoRunConfig {
-    type Error = ScheduleValidationError;
-
-    fn try_from(raw: RawWeeklyAutoRunConfig) -> std::result::Result<Self, Self::Error> {
-        Self::try_new(
-            raw.mon, raw.tue, raw.wed, raw.thu, raw.fri, raw.sat, raw.sun,
-        )
-    }
-}
-
-impl From<WeeklyAutoRunConfig> for RawWeeklyAutoRunConfig {
-    fn from(value: WeeklyAutoRunConfig) -> Self {
-        Self {
-            mon: value.mon,
-            tue: value.tue,
-            wed: value.wed,
-            thu: value.thu,
-            fri: value.fri,
-            sat: value.sat,
-            sun: value.sun,
         }
     }
 }
@@ -755,6 +686,9 @@ impl BoundaryOccurrenceId {
 pub(crate) struct TimerTickPayload {
     pub status: TimerStatus,
     pub remaining_seconds: u64,
+    /// Total length of the current session; while idle, the length the next
+    /// work session will have.
+    pub session_duration_secs: u64,
     pub session_type: SessionType,
     pub current_cycle: u32,
     pub completed_pomodoros: u32,
@@ -832,6 +766,7 @@ impl SessionCompletedPayload {
 pub(crate) struct FullStatePayload {
     pub status: TimerStatus,
     pub remaining_seconds: u64,
+    pub session_duration_secs: u64,
     pub session_type: SessionType,
     pub current_cycle: u32,
     pub completed_pomodoros: u32,
@@ -839,7 +774,8 @@ pub(crate) struct FullStatePayload {
     pub is_fullscreen_break: bool,
     pub away_during_break: bool,
     pub post_break_decision_pending: bool,
-    pub settings: TimerSettings,
+    pub settings: UserSettings,
+    pub settings_file_status: SettingsFileStatus,
     /// Present while the boot auto-start prompt is still waiting for a decision.
     pub boot_auto_start_prompt_window: Option<ActiveWindowSummaryPayload>,
     pub active_window_summary: Option<ActiveWindowSummaryPayload>,
@@ -857,6 +793,13 @@ pub(crate) struct ActiveWindowSummaryPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct ActiveWindowChangedPayload {
     pub active_window_summary: Option<ActiveWindowSummaryPayload>,
+}
+
+/// Payload sent to frontend when the settings in effect change
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct SettingsChangedPayload {
+    pub settings: UserSettings,
+    pub settings_file_status: SettingsFileStatus,
 }
 
 #[cfg(test)]
@@ -885,7 +828,7 @@ mod tests {
 
     #[test]
     fn test_hh_mm_accepts_valid_zero_padded_time() {
-        let value: HhMm = serde_json::from_str(r#""08:05""#).expect("HH:MM should deserialize");
+        let value = HhMm::try_from("08:05".to_string()).expect("HH:MM should parse");
         assert_eq!(value.hour(), 8);
         assert_eq!(value.minute(), 5);
         assert_eq!(value.minutes_since_midnight(), 485);
@@ -894,7 +837,7 @@ mod tests {
 
     #[test]
     fn test_hh_mm_rejects_malformed_value() {
-        let result = serde_json::from_str::<HhMm>(r#""8:5""#);
+        let result = HhMm::try_from("8:5".to_string());
         assert!(result.is_err());
     }
 
@@ -913,23 +856,14 @@ mod tests {
         let end_time = HhMm::try_new(9, 0).expect("end time should be valid");
 
         let result = DayAutoRunSlot::try_new(true, start_time, end_time);
-        assert!(matches!(result, Err(ScheduleValidationError::EmptyRange)));
+        assert_eq!(result, Err(EmptyTimeRangeError));
     }
 
     #[test]
-    fn test_day_auto_run_slot_deserialize_accepts_camel_case_aliases() {
-        let slot: DayAutoRunSlot =
-            serde_json::from_str(r#"{"enabled":true,"startTime":"08:00","endTime":"17:00"}"#)
-                .expect("day slot should deserialize from camelCase aliases");
-        assert!(slot.enabled());
-        assert_eq!(slot.start_time().to_string(), "08:00");
-        assert_eq!(slot.end_time().to_string(), "17:00");
-    }
+    fn test_day_auto_run_slot_try_new_accepts_equal_times_on_disabled_slot() {
+        let time = HhMm::try_new(9, 0).expect("time should be valid");
 
-    #[test]
-    fn test_day_auto_run_slot_deserialize_rejects_missing_fields() {
-        let result = serde_json::from_str::<DayAutoRunSlot>(r#"{"enabled":true}"#);
-        assert!(result.is_err());
+        assert!(DayAutoRunSlot::try_new(false, time, time).is_ok());
     }
 
     #[test]
@@ -945,25 +879,6 @@ mod tests {
     }
 
     #[test]
-    fn test_weekly_auto_run_config_deserialize_rejects_empty_object() {
-        let result = serde_json::from_str::<WeeklyAutoRunConfig>("{}");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_weekly_auto_run_config_deserialize_rejects_missing_weekday() {
-        let result = serde_json::from_value::<WeeklyAutoRunConfig>(json!({
-            "mon": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
-            "tue": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
-            "wed": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
-            "thu": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
-            "fri": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
-            "sat": {"enabled": false, "startTime": "09:00", "endTime": "18:00"}
-        }));
-        assert!(result.is_err());
-    }
-
-    #[test]
     fn test_weekly_auto_run_config_try_new_rejects_overlapping_enabled_windows() {
         let result = WeeklyAutoRunConfig::try_new(
             enabled_slot("22:00", "02:00"),
@@ -975,10 +890,34 @@ mod tests {
             DayAutoRunSlot::default(),
         );
 
-        assert!(matches!(
+        assert_eq!(
             result,
-            Err(ScheduleValidationError::Overlap { .. })
-        ));
+            Err(OverlappingSlotsError(vec![(
+                WeekdayKey::Mon,
+                WeekdayKey::Tue
+            )]))
+        );
+    }
+
+    #[test]
+    fn test_weekly_auto_run_config_try_new_reports_every_overlapping_pair() {
+        let result = WeeklyAutoRunConfig::try_new(
+            enabled_slot("00:00", "18:00"),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            DayAutoRunSlot::default(),
+            enabled_slot("22:00", "02:00"),
+            enabled_slot("01:00", "00:30"),
+        );
+
+        assert_eq!(
+            result,
+            Err(OverlappingSlotsError(vec![
+                (WeekdayKey::Mon, WeekdayKey::Sun),
+                (WeekdayKey::Sat, WeekdayKey::Sun),
+            ]))
+        );
     }
 
     #[test]
@@ -993,10 +932,13 @@ mod tests {
             enabled_slot("22:00", "02:00"),
         );
 
-        assert!(matches!(
+        assert_eq!(
             result,
-            Err(ScheduleValidationError::Overlap { .. })
-        ));
+            Err(OverlappingSlotsError(vec![(
+                WeekdayKey::Mon,
+                WeekdayKey::Sun
+            )]))
+        );
     }
 
     #[test]
@@ -1045,25 +987,24 @@ mod tests {
     }
 
     #[test]
-    fn test_duration_newtypes_reject_out_of_range_values() {
-        assert!(serde_json::from_value::<WorkDurationSecs>(json!(0)).is_err());
-        assert!(serde_json::from_value::<ShortBreakDurationSecs>(json!(90_000)).is_err());
-        assert!(serde_json::from_value::<LongBreakDurationSecs>(json!(90_000)).is_err());
-        assert!(serde_json::from_value::<LongBreakIntervalCount>(json!(0)).is_err());
-        assert!(serde_json::from_value::<LongBreakIntervalCount>(json!(101)).is_err());
-    }
-
-    #[test]
-    fn test_timer_settings_default() {
-        let settings = TimerSettings::default();
-        assert_eq!(settings.work_duration_secs.get(), 25 * 60);
-        assert_eq!(settings.short_break_duration_secs.get(), 5 * 60);
-        assert_eq!(settings.long_break_duration_secs.get(), 15 * 60);
-        assert_eq!(settings.long_break_interval.get(), 4);
-        assert_eq!(
-            settings.post_break_transition_policy,
-            PostBreakTransitionPolicy::RequireManualContinue
-        );
+    fn test_bounded_newtypes_accept_their_bounds_and_reject_values_outside() {
+        assert!(WorkDurationSecs::try_new(1).is_ok());
+        assert!(WorkDurationSecs::try_new(7_200).is_ok());
+        assert!(WorkDurationSecs::try_new(0).is_err());
+        assert!(WorkDurationSecs::try_new(7_201).is_err());
+        assert!(ShortBreakDurationSecs::try_new(3_600).is_ok());
+        assert!(ShortBreakDurationSecs::try_new(3_601).is_err());
+        assert!(LongBreakDurationSecs::try_new(3_600).is_ok());
+        assert!(LongBreakDurationSecs::try_new(3_601).is_err());
+        assert!(LongBreakIntervalCount::try_new(2).is_ok());
+        assert!(LongBreakIntervalCount::try_new(10).is_ok());
+        assert!(LongBreakIntervalCount::try_new(1).is_err());
+        assert!(LongBreakIntervalCount::try_new(11).is_err());
+        assert!(NotificationSoundVolumePercent::try_new(0).is_ok());
+        assert!(NotificationSoundVolumePercent::try_new(100).is_ok());
+        assert!(NotificationSoundVolumePercent::try_new(101).is_err());
+        assert!(serde_json::from_value::<SessionDurationSecs>(json!(0)).is_err());
+        assert!(serde_json::from_value::<SessionDurationSecs>(json!(7_201)).is_err());
     }
 
     #[test]
@@ -1158,61 +1099,5 @@ mod tests {
         assert_eq!(waiting.next_status, TimerStatus::Idle);
         assert_eq!(waiting.next_session_type, SessionType::Work);
         assert!(waiting.requires_manual_continue_decision);
-    }
-}
-
-#[cfg(test)]
-mod timer_command_validation_tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn test_work_duration_secs_deserialize_rejects_zero() {
-        let result = serde_json::from_value::<WorkDurationSecs>(json!(0));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_long_break_interval_deserialize_rejects_zero() {
-        let result = serde_json::from_value::<LongBreakIntervalCount>(json!(0));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_day_auto_run_slot_deserialize_rejects_equal_start_and_end() {
-        let result = serde_json::from_value::<DayAutoRunSlot>(json!({
-            "enabled": true,
-            "startTime": "09:00",
-            "endTime": "09:00"
-        }));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_weekly_auto_run_config_deserialize_rejects_overlap() {
-        let result = serde_json::from_value::<WeeklyAutoRunConfig>(json!({
-            "mon": {"enabled": true, "startTime": "22:00", "endTime": "02:00"},
-            "tue": {"enabled": true, "startTime": "01:00", "endTime": "05:00"},
-            "wed": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
-            "thu": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
-            "fri": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
-            "sat": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
-            "sun": {"enabled": false, "startTime": "09:00", "endTime": "18:00"}
-        }));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_weekly_auto_run_config_deserialize_rejects_invalid_start_time() {
-        let result = serde_json::from_value::<WeeklyAutoRunConfig>(json!({
-            "mon": {"enabled": true, "startTime": "24:00", "endTime": "02:00"},
-            "tue": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
-            "wed": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
-            "thu": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
-            "fri": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
-            "sat": {"enabled": false, "startTime": "09:00", "endTime": "18:00"},
-            "sun": {"enabled": false, "startTime": "09:00", "endTime": "18:00"}
-        }));
-        assert!(result.is_err());
     }
 }

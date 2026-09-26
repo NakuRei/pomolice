@@ -13,6 +13,17 @@ import {
   installMockHtmlAudio,
   resetMockHtmlAudio,
 } from "@/test/mockHtmlAudio";
+import type { Settings } from "@/types/settings";
+
+async function setSavedSettings(
+  overrides: Partial<Settings> | null,
+): Promise<void> {
+  const { useTimerStore } = await import("@/store/timerStore");
+  const { createSettingsForTest } = await import("@/test/settingsFixture");
+  useTimerStore.setState({
+    settings: overrides === null ? null : createSettingsForTest(overrides),
+  });
+}
 
 const mockNotificationsLogger = {
   trace: vi.fn(),
@@ -65,11 +76,7 @@ async function playWindowsManagedBreakCompleteNotificationAtVolumePercent(
   vi.mocked(isPermissionGranted).mockResolvedValue(true);
   vi.mocked(resolveResource).mockResolvedValue("C:\\sounds\\work.wav");
 
-  const { useSettingsStore } = await import("@/store/settingsStore");
-  const { resetSettingsStoreForTest } =
-    await import("@/test/resetSettingsStore");
-  resetSettingsStoreForTest();
-  useSettingsStore.setState({
+  await setSavedSettings({
     notificationSoundMuted: false,
     notificationSoundVolumePercent: volumePercent,
   });
@@ -97,11 +104,7 @@ describe("session complete notifications", () => {
     vi.mocked(isPermissionGranted).mockResolvedValue(true);
     vi.mocked(resolveResource).mockResolvedValueOnce("C:\\sounds\\work.wav");
 
-    const { useSettingsStore } = await import("@/store/settingsStore");
-    const { resetSettingsStoreForTest } =
-      await import("@/test/resetSettingsStore");
-    resetSettingsStoreForTest();
-    useSettingsStore.setState({
+    await setSavedSettings({
       notificationSoundMuted: false,
       notificationSoundVolumePercent: 60,
     });
@@ -157,11 +160,7 @@ describe("session complete notifications", () => {
     expect(previewResult).toEqual({ status: "played" });
     const previewVolume = getMockHtmlAudioInstance(0).volume;
 
-    const { useSettingsStore } = await import("@/store/settingsStore");
-    const { resetSettingsStoreForTest } =
-      await import("@/test/resetSettingsStore");
-    resetSettingsStoreForTest();
-    useSettingsStore.setState({
+    await setSavedSettings({
       notificationSoundMuted: false,
       notificationSoundVolumePercent: 60,
     });
@@ -176,11 +175,7 @@ describe("session complete notifications", () => {
     vi.mocked(isPermissionGranted).mockResolvedValue(true);
     vi.mocked(resolveResource).mockResolvedValueOnce("C:\\sounds\\work.wav");
 
-    const { useSettingsStore } = await import("@/store/settingsStore");
-    const { resetSettingsStoreForTest } =
-      await import("@/test/resetSettingsStore");
-    resetSettingsStoreForTest();
-    useSettingsStore.setState({
+    await setSavedSettings({
       notificationSoundMuted: false,
       notificationSoundVolumePercent: 60,
     });
@@ -201,9 +196,7 @@ describe("session complete notifications", () => {
     vi.mocked(isPermissionGranted).mockResolvedValue(false);
     vi.mocked(requestPermission).mockResolvedValue("denied");
 
-    const { resetSettingsStoreForTest } =
-      await import("@/test/resetSettingsStore");
-    resetSettingsStoreForTest();
+    await setSavedSettings({});
 
     const { notifyBreakComplete } = await import("./notifications");
     await notifyBreakComplete();
@@ -235,11 +228,7 @@ describe("session complete notifications", () => {
   it("keeps the Windows banner but suppresses all notification sound when muted", async () => {
     vi.mocked(isPermissionGranted).mockResolvedValue(true);
 
-    const { useSettingsStore } = await import("@/store/settingsStore");
-    const { resetSettingsStoreForTest } =
-      await import("@/test/resetSettingsStore");
-    resetSettingsStoreForTest();
-    useSettingsStore.setState({
+    await setSavedSettings({
       notificationSoundMuted: true,
       notificationSoundVolumePercent: 60,
     });
@@ -253,6 +242,21 @@ describe("session complete notifications", () => {
       body: "休憩が終わりました。次のポモドーロを始めましょう。",
     });
     expect(resolveResource).not.toHaveBeenCalled();
+    expect(getMockHtmlAudioInstanceCount()).toBe(0);
+  });
+
+  it("keeps the banner but plays no sound before the settings have arrived", async () => {
+    vi.mocked(isPermissionGranted).mockResolvedValue(true);
+    vi.mocked(resolveResource).mockResolvedValue("C:\\sounds\\work.wav");
+    await setSavedSettings(null);
+
+    const { notifyBreakComplete } = await import("./notifications");
+    await notifyBreakComplete();
+
+    expect(sendNotification).toHaveBeenCalledWith({
+      title: "作業に戻りましょう！",
+      body: "休憩が終わりました。次のポモドーロを始めましょう。",
+    });
     expect(getMockHtmlAudioInstanceCount()).toBe(0);
   });
 

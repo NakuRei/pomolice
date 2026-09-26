@@ -1,4 +1,6 @@
-use crate::types::{ActiveWindowChangedPayload, SessionCompletedPayload, TimerTickPayload};
+use crate::types::{
+    ActiveWindowChangedPayload, SessionCompletedPayload, SettingsChangedPayload, TimerTickPayload,
+};
 
 /// Every side effect a transition can request. The shell runs them in order
 /// while holding the dispatch permit, so their order is the observable order.
@@ -9,6 +11,7 @@ pub(crate) enum Effect {
     EmitAutoRunStopPending,
     EmitAutoRunStopped,
     EmitActiveWindowChanged(ActiveWindowChangedPayload),
+    EmitSettingsChanged(SettingsChangedPayload),
     Persist,
     /// Start input monitoring and lock every monitor. Reports back as
     /// `Event::BreakLockEntered` or `Event::BreakLockEnterFailed`.

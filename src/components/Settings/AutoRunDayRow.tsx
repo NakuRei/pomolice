@@ -1,16 +1,14 @@
 import { useId } from "react";
 import { WEEKDAY_LABELS_BY_KEY } from "@/constants/weekdayLabels";
-import {
-  type DayAutoRunSlot,
-  type DayScheduleValidationError,
-  type WeekdayKey,
-} from "@/types/weeklyAutoRun";
+import { type DayAutoRunSlot, type WeekdayKey } from "@/types/weeklyAutoRun";
+import type { DayIssueSummary } from "./settingsIssueMessages";
 
 interface AutoRunDayRowProps {
   weekday: WeekdayKey;
   autoRunFeatureEnabled: boolean;
   daySlot: DayAutoRunSlot;
-  dayValidationError?: DayScheduleValidationError;
+  /** What the backend rejected about this day on the last save. */
+  dayIssues: DayIssueSummary;
   onEnabledChange: (enabled: boolean) => void;
   onStartTimeChange: (timeText: string) => void;
   onEndTimeChange: (timeText: string) => void;
@@ -44,25 +42,6 @@ function daySlotCrossesMidnight(daySlot: DayAutoRunSlot): boolean {
   return startMinutesSinceStartOfDay > endMinutesSinceStartOfDay;
 }
 
-interface TimeInputInvalidity {
-  start: boolean;
-  end: boolean;
-}
-
-const TIME_INPUT_INVALIDITY_NONE = {
-  start: false,
-  end: false,
-} as const satisfies TimeInputInvalidity;
-
-const TIME_INPUT_INVALIDITY_BY_ERROR_CODE = {
-  start_time_format_invalid: { start: true, end: false },
-  end_time_format_invalid: { start: false, end: true },
-  start_time_equals_end_time: { start: true, end: true },
-} as const satisfies Record<
-  DayScheduleValidationError["code"],
-  TimeInputInvalidity
->;
-
 interface TimeInputAccessibilityAttributes {
   "aria-invalid"?: true;
   "aria-describedby"?: string;
@@ -82,32 +61,11 @@ function getTimeInputAccessibilityAttributes(
   };
 }
 
-function getTimeInputAccessibilityAttributesBySlot(
-  dayValidationError: DayScheduleValidationError | undefined,
-  dayErrorId: string,
-): Record<"start" | "end", TimeInputAccessibilityAttributes> {
-  const timeInputInvalidity =
-    dayValidationError === undefined
-      ? TIME_INPUT_INVALIDITY_NONE
-      : TIME_INPUT_INVALIDITY_BY_ERROR_CODE[dayValidationError.code];
-
-  return {
-    start: getTimeInputAccessibilityAttributes(
-      timeInputInvalidity.start,
-      dayErrorId,
-    ),
-    end: getTimeInputAccessibilityAttributes(
-      timeInputInvalidity.end,
-      dayErrorId,
-    ),
-  };
-}
-
 export function AutoRunDayRow({
   weekday,
   autoRunFeatureEnabled,
   daySlot,
-  dayValidationError,
+  dayIssues,
   onEnabledChange,
   onStartTimeChange,
   onEndTimeChange,
@@ -122,8 +80,6 @@ export function AutoRunDayRow({
       : "border-border bg-surface-raised text-on-surface"
   }`;
   const dayErrorId = `${generatedElementId}-error`;
-  const timeInputAccessibilityAttributesBySlot =
-    getTimeInputAccessibilityAttributesBySlot(dayValidationError, dayErrorId);
 
   return (
     <div
@@ -160,7 +116,10 @@ export function AutoRunDayRow({
           className={dayTimeInputClassName}
           data-testid={`settings-auto-run-day-start-${weekday}`}
           aria-label={`${WEEKDAY_LABELS_BY_KEY[weekday].full}の開始時刻`}
-          {...timeInputAccessibilityAttributesBySlot.start}
+          {...getTimeInputAccessibilityAttributes(
+            dayIssues.startTimeIsInvalid,
+            dayErrorId,
+          )}
         />
 
         <input
@@ -174,7 +133,10 @@ export function AutoRunDayRow({
           className={dayTimeInputClassName}
           data-testid={`settings-auto-run-day-end-${weekday}`}
           aria-label={`${WEEKDAY_LABELS_BY_KEY[weekday].full}の終了時刻`}
-          {...timeInputAccessibilityAttributesBySlot.end}
+          {...getTimeInputAccessibilityAttributes(
+            dayIssues.endTimeIsInvalid,
+            dayErrorId,
+          )}
         />
 
         <span
@@ -186,14 +148,14 @@ export function AutoRunDayRow({
           翌日まで
         </span>
       </div>
-      {dayValidationError && (
+      {dayIssues.messages.length > 0 && (
         <p
           id={dayErrorId}
           className="mt-1 text-xs text-danger-300"
           data-testid={`settings-auto-run-day-error-${weekday}`}
           role="alert"
         >
-          {dayValidationError.message}
+          {dayIssues.messages.join(" ")}
         </p>
       )}
     </div>

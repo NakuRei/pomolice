@@ -1,6 +1,6 @@
 use chrono::{DateTime, Local};
 
-use crate::types::{BreakAttendance, SessionType, TimerStatus};
+use crate::types::{BreakAttendance, SessionDurationSecs, SessionType, TimerStatus};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum BreakKind {
@@ -22,6 +22,9 @@ impl BreakKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct BreakSessionState {
     pub(super) kind: BreakKind,
+    /// Fixed when the break starts; settings saved during the break do not
+    /// change it, so they cannot shorten the break.
+    pub(super) duration_secs: SessionDurationSecs,
     /// Counts down one per observed tick.
     pub(super) remaining_seconds: u64,
     pub(super) is_fullscreen: bool,
@@ -31,9 +34,14 @@ pub(super) struct BreakSessionState {
 }
 
 impl BreakSessionState {
-    pub(super) fn starting(kind: BreakKind, remaining_seconds: u64) -> Self {
+    pub(super) fn starting(
+        kind: BreakKind,
+        duration_secs: SessionDurationSecs,
+        remaining_seconds: u64,
+    ) -> Self {
         Self {
             kind,
+            duration_secs,
             remaining_seconds,
             is_fullscreen: false,
             interaction_count: 0,
@@ -49,9 +57,11 @@ pub(super) enum TimerPhase {
     Idle {
         post_break_decision_pending: bool,
     },
-    /// Remaining time is measured against the wall clock.
+    /// Remaining time is measured against the wall clock. The duration is
+    /// fixed when the session starts.
     Working {
         ends_at: DateTime<Local>,
+        duration_secs: SessionDurationSecs,
     },
     OnBreak(BreakSessionState),
 }

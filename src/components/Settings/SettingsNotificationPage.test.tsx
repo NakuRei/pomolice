@@ -1,12 +1,18 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useSettingsStore } from "@/store/settingsStore";
-import { SessionType, TimerStatus, useTimerStore } from "@/store/timerStore";
-import { resetSettingsStoreForTest } from "@/test/resetSettingsStore";
-import { SettingsNotificationPage } from "./SettingsNotificationPage";
-import { SettingsTimerPage } from "./SettingsTimerPage";
-import { playNotificationSoundPreview } from "@/services/notifications";
+
+type InvokeCommand = (
+  command: string,
+  args?: Record<string, unknown>,
+) => Promise<unknown>;
+
+const mockInvoke = vi.fn<InvokeCommand>();
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (command: string, args?: Record<string, unknown>): Promise<unknown> =>
+    mockInvoke(command, args),
+}));
 
 vi.mock("@/services/notifications", () => ({
   playNotificationSoundPreview: vi.fn(() =>
@@ -14,68 +20,119 @@ vi.mock("@/services/notifications", () => ({
   ),
 }));
 
+import {
+  createSettingsForTest,
+  answerSettingsSavesForTest,
+} from "@/test/settingsFixture";
+import { resetTimerStoreForTest } from "@/test/resetTimerStore";
+import type { Settings, SettingsPayload } from "@/types/settings";
+import { playNotificationSoundPreview } from "@/services/notifications";
+import { SettingsNotificationPage } from "./SettingsNotificationPage";
+
+function savedSettingsChanges(): Partial<SettingsPayload>[] {
+  return mockInvoke.mock.calls
+    .filter(([command]) => command === "update_settings")
+    .map(([, args]) => args?.changes as Partial<SettingsPayload>);
+}
+
+function renderNotificationPage(
+  settings: Settings = createSettingsForTest(),
+  openSettingsTopScreen = vi.fn(),
+): ReturnType<typeof vi.fn> {
+  render(
+    <SettingsNotificationPage
+      settings={settings}
+      openSettingsTopScreen={openSettingsTopScreen}
+    />,
+  );
+  return openSettingsTopScreen;
+}
+
 describe("SettingsNotificationPage", () => {
   beforeEach(() => {
-    resetSettingsStoreForTest();
-    useTimerStore.setState({
-      status: TimerStatus.IDLE,
-      remainingSeconds: 25 * 60,
-      sessionType: SessionType.WORK,
-      currentCycle: 0,
-      completedPomodoros: 0,
-      breakInteractionCount: 0,
-      isFullscreenBreak: false,
-      requiresManualContinueDecision: false,
-      isConnected: true,
-      bootAutoStartPromptWindow: null,
-      activeWindowSummary: null,
-      infoMessage: null,
-      infoMessageShownAtById: {},
-    });
+    mockInvoke.mockReset();
+    mockInvoke.mockImplementation(answerSettingsSavesForTest);
+    resetTimerStoreForTest();
     vi.mocked(playNotificationSoundPreview).mockResolvedValue({
       status: "played",
     });
   });
 
-  it("saves notification settings and keeps timer settings unchanged", async () => {
+  it("saves only the notification settings", async () => {
     const user = userEvent.setup();
-    const openSettingsTopScreen = vi.fn();
-
-    useSettingsStore.setState({
-      workDuration: 27,
-      notificationSoundMuted: false,
-      notificationSoundVolumePercent: 50,
-    });
-
-    render(
-      <SettingsNotificationPage
-        openSettingsTopScreen={openSettingsTopScreen}
-      />,
+    const openSettingsTopScreen = renderNotificationPage(
+      createSettingsForTest({ workDurationSecs: 27 * 60 }),
     );
 
     const volumeSlider = screen.getByRole("slider", { name: "通知音量" });
     fireEvent.change(volumeSlider, { target: { value: "35" } });
     await user.click(screen.getByRole("button", { name: "保存" }));
 
-    expect(useSettingsStore.getState().notificationSoundVolumePercent).toBe(35);
-    expect(useSettingsStore.getState().workDuration).toBe(27);
-    expect(openSettingsTopScreen).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(openSettingsTopScreen).toHaveBeenCalledTimes(1);
+    });
+    expect(savedSettingsChanges()).toEqual([
+      {
+        notification_sound_volume_percent: 35,
+        notification_sound_muted: false,
+      },
+    ]);
+  });
+
+  it("shows the backend's volume range error and stays on the page", async () => {
+    const user = userEvent.setup();
+    mockInvoke.mockRejectedValue({
+      code: "invalid_settings",
+      message: "Invalid settings",
+      issues: [
+        {
+          code: "out_of_range",
+          field: "notification_sound_volume_percent",
+          min: 0,
+          max: 100,
+        },
+      ],
+    });
+    const openSettingsTopScreen = renderNotificationPage();
+
+    await user.click(screen.getByRole("button", { name: "保存" }));
+
+    expect(
+      await screen.findByText("0〜100%の範囲で入力してください。"),
+    ).toBeInTheDocument();
+    expect(openSettingsTopScreen).not.toHaveBeenCalled();
+  });
+
+  it("clears the volume error once the volume is changed", async () => {
+    const user = userEvent.setup();
+    mockInvoke.mockRejectedValue({
+      code: "invalid_settings",
+      message: "Invalid settings",
+      issues: [
+        {
+          code: "out_of_range",
+          field: "notification_sound_volume_percent",
+          min: 0,
+          max: 100,
+        },
+      ],
+    });
+    renderNotificationPage();
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    await screen.findByText("0〜100%の範囲で入力してください。");
+
+    fireEvent.change(screen.getByRole("slider", { name: "通知音量" }), {
+      target: { value: "40" },
+    });
+
+    expect(
+      screen.queryByText("0〜100%の範囲で入力してください。"),
+    ).not.toBeInTheDocument();
   });
 
   it("discards notification draft on cancel", async () => {
     const user = userEvent.setup();
-    const openSettingsTopScreen = vi.fn();
-
-    useSettingsStore.setState({
-      notificationSoundMuted: false,
-      notificationSoundVolumePercent: 50,
-    });
-
-    render(
-      <SettingsNotificationPage
-        openSettingsTopScreen={openSettingsTopScreen}
-      />,
-    );
+    const openSettingsTopScreen = renderNotificationPage();
 
     await user.click(screen.getByRole("button", { name: "通知音" }));
     const volumeSlider = screen.getByRole("slider", { name: "通知音量" });
@@ -83,17 +140,14 @@ describe("SettingsNotificationPage", () => {
     fireEvent.change(volumeSlider, { target: { value: "80" } });
     await user.click(screen.getByRole("button", { name: "キャンセル" }));
 
-    expect(useSettingsStore.getState().notificationSoundMuted).toBe(false);
-    expect(useSettingsStore.getState().notificationSoundVolumePercent).toBe(50);
+    expect(savedSettingsChanges()).toEqual([]);
     expect(openSettingsTopScreen).toHaveBeenCalledTimes(1);
   });
 
   it("disables volume and preview button when notification is muted", async () => {
     const user = userEvent.setup();
 
-    render(
-      <SettingsNotificationPage openSettingsTopScreen={() => undefined} />,
-    );
+    renderNotificationPage();
 
     await user.click(screen.getByRole("button", { name: "通知音" }));
 
@@ -110,7 +164,10 @@ describe("SettingsNotificationPage", () => {
     const user = userEvent.setup();
 
     const firstRender = render(
-      <SettingsNotificationPage openSettingsTopScreen={() => undefined} />,
+      <SettingsNotificationPage
+        settings={createSettingsForTest()}
+        openSettingsTopScreen={() => undefined}
+      />,
     );
     await user.selectOptions(
       screen.getByRole("combobox", { name: "テストする通知音の種類" }),
@@ -119,9 +176,7 @@ describe("SettingsNotificationPage", () => {
     await user.click(screen.getByRole("button", { name: "通知音" }));
     firstRender.unmount();
 
-    render(
-      <SettingsNotificationPage openSettingsTopScreen={() => undefined} />,
-    );
+    renderNotificationPage();
 
     const previewTypeSelect = screen.getByRole("combobox", {
       name: "テストする通知音の種類",
@@ -141,9 +196,7 @@ describe("SettingsNotificationPage", () => {
       status: "unavailable",
     });
 
-    render(
-      <SettingsNotificationPage openSettingsTopScreen={() => undefined} />,
-    );
+    renderNotificationPage();
 
     await user.click(
       screen.getByRole("button", { name: "通知音をテスト再生する" }),
@@ -158,41 +211,10 @@ describe("SettingsNotificationPage", () => {
   });
 
   it("focuses the notification heading on mount", async () => {
-    render(
-      <SettingsNotificationPage openSettingsTopScreen={() => undefined} />,
-    );
+    renderNotificationPage();
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "通知設定" })).toHaveFocus();
     });
-  });
-
-  it("does not persist unsaved timer draft when notification settings are saved", async () => {
-    const user = userEvent.setup();
-
-    useSettingsStore.setState({
-      workDuration: 25,
-      notificationSoundMuted: false,
-      notificationSoundVolumePercent: 50,
-    });
-
-    const timerPageRenderResult = render(
-      <SettingsTimerPage openSettingsTopScreen={() => undefined} />,
-    );
-    const workInput = screen.getByRole("spinbutton", { name: "作業時間" });
-    await user.clear(workInput);
-    await user.type(workInput, "40");
-    await user.click(screen.getByRole("button", { name: "キャンセル" }));
-    timerPageRenderResult.unmount();
-
-    render(
-      <SettingsNotificationPage openSettingsTopScreen={() => undefined} />,
-    );
-    const volumeSlider = screen.getByRole("slider", { name: "通知音量" });
-    fireEvent.change(volumeSlider, { target: { value: "30" } });
-    await user.click(screen.getByRole("button", { name: "保存" }));
-
-    expect(useSettingsStore.getState().workDuration).toBe(25);
-    expect(useSettingsStore.getState().notificationSoundVolumePercent).toBe(30);
   });
 });

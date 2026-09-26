@@ -12,6 +12,7 @@ mod external_adapters;
 mod log_redaction;
 mod logging_event;
 mod schedule_boundary;
+mod settings;
 mod state;
 mod timer_core;
 mod timer_runtime;
@@ -63,11 +64,15 @@ fn setup_app(app: &tauri::App) {
     let clock: Arc<dyn external_adapters::clock::Clock + Send + Sync> =
         Arc::new(external_adapters::clock::SystemClock);
     let app_data_dir = app.handle().path().app_data_dir().ok();
-    let persistence = external_adapters::persistence::PersistenceManager::new(app_data_dir);
+    let timer_state_persistence =
+        external_adapters::persistence::PersistenceManager::new(app_data_dir.clone());
+    let settings_persistence =
+        external_adapters::persistence::PersistenceManager::new(app_data_dir);
     let (app_state, restore_status) =
         async_runtime::block_on(state::AppState::build_startup_state_with_handlers(
             clock,
-            persistence,
+            timer_state_persistence,
+            settings_persistence,
             on_escape_combo,
             on_input_detected,
             move || {
@@ -136,8 +141,7 @@ pub fn run() -> RunResult {
             commands::timer::resolve_post_break_decision,
             commands::timer::set_away_during_break,
             commands::timer::emergency_stop,
-            commands::timer::sync_timer_duration_settings,
-            commands::timer::sync_automation_policies,
+            commands::timer::update_settings,
             commands::timer::get_full_state,
             commands::timer::resolve_boot_auto_start_prompt,
         ])
@@ -166,10 +170,13 @@ mod run_event_tests {
     use crate::logging_event::{
         render_persistence_write_failure_message, PERSISTENCE_WRITE_TRIGGER_RUN_EVENT_EXIT,
     };
+    use crate::settings::{
+        PersistedSettings, SettingsFileStatus, UserSettings, SETTINGS_SCHEMA_VERSION,
+    };
     use crate::state;
     use crate::types::{
-        PersistedState, ScheduleStopState, SessionType, TimerSettings, TimerStatus,
-        WeeklyAutoRunConfig, PERSISTED_STATE_SCHEMA_VERSION,
+        PersistedState, ScheduleStopState, SessionDurationSecs, SessionType, TimerStatus,
+        WorkDurationSecs, PERSISTED_STATE_SCHEMA_VERSION,
     };
     use chrono::{Local, TimeZone, Utc};
     use std::io;
@@ -209,31 +216,39 @@ mod run_event_tests {
 
     fn build_test_app_state(dir: &Path) -> state::AppState {
         let clock = fixed_clock();
-        let persistence = PersistenceManager::new(Some(dir.to_path_buf()));
-        persistence
-            .save_state_sync(&PersistedState {
+        PersistenceManager::new(Some(dir.to_path_buf()))
+            .save_sync(&PersistedState {
                 schema_version: PERSISTED_STATE_SCHEMA_VERSION,
                 status: TimerStatus::Working,
                 remaining_seconds: 321,
+                session_duration_secs: SessionDurationSecs::try_new(25 * 60)
+                    .expect("valid session duration"),
                 session_type: SessionType::Work,
                 current_cycle: 1,
                 completed_pomodoros: 0,
                 post_break_decision_pending: false,
-                settings: TimerSettings::default(),
                 saved_at: clock.now_utc(),
-                auto_run_feature_enabled: false,
-                weekly_auto_run_config: WeeklyAutoRunConfig::default(),
                 schedule_stop_state: ScheduleStopState::NotControlledBySchedule,
             })
             .expect("seed state should be saved");
 
+        start_app_state(dir)
+    }
+
+    fn start_app_state(dir: &Path) -> state::AppState {
+        let clock = fixed_clock();
         let runtime = tokio::runtime::Runtime::new().expect("test runtime should be created");
         let (app_state, _) = runtime.block_on(state::AppState::build_startup_state_for_tests(
             as_clock_trait(&clock),
-            persistence,
+            PersistenceManager::new(Some(dir.to_path_buf())),
+            PersistenceManager::new(Some(dir.to_path_buf())),
         ));
         drop(runtime);
         app_state
+    }
+
+    fn full_state_at_startup(dir: &Path) -> crate::types::FullStatePayload {
+        start_app_state(dir).timer.read_full_state_for_tests()
     }
 
     #[test]
@@ -261,16 +276,74 @@ mod run_event_tests {
             .flush_sync_on_exit()
             .expect("exit event flush should succeed");
 
-        match PersistenceManager::new(Some(temp_dir.clone())).load_state_sync() {
+        let persistence: PersistenceManager<PersistedState> =
+            PersistenceManager::new(Some(temp_dir.clone()));
+        match persistence.load_sync() {
             PersistenceLoadOutcome::Restored(persisted_state) => {
                 assert_eq!(persisted_state.status, TimerStatus::Working);
                 assert_eq!(persisted_state.remaining_seconds, 321);
             }
-            PersistenceLoadOutcome::NoState => panic!("expected restored state"),
-            PersistenceLoadOutcome::UnsupportedSchemaFallback => {
+            PersistenceLoadOutcome::NoState | PersistenceLoadOutcome::Discarded => {
                 panic!("expected restored state")
             }
         }
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_startup_uses_saved_settings() {
+        let temp_dir = create_temp_dir("startup-saved-settings");
+        let settings = UserSettings {
+            work_duration_secs: WorkDurationSecs::try_new(50 * 60).expect("valid work duration"),
+            ..UserSettings::default()
+        };
+        PersistenceManager::new(Some(temp_dir.clone()))
+            .save_sync(&PersistedSettings {
+                schema_version: SETTINGS_SCHEMA_VERSION,
+                settings: settings.clone(),
+            })
+            .expect("seed settings should be saved");
+
+        let full_state = full_state_at_startup(&temp_dir);
+
+        assert_eq!(full_state.settings, settings);
+        assert_eq!(full_state.remaining_seconds, 50 * 60);
+        assert_eq!(full_state.settings_file_status, SettingsFileStatus::Ok);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_first_startup_uses_defaults_without_reporting_a_failure() {
+        let temp_dir = create_temp_dir("startup-no-settings");
+
+        let full_state = full_state_at_startup(&temp_dir);
+
+        assert_eq!(full_state.settings, UserSettings::default());
+        assert_eq!(full_state.settings_file_status, SettingsFileStatus::Ok);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_unusable_settings_file_falls_back_to_defaults_and_is_reported() {
+        let temp_dir = create_temp_dir("startup-broken-settings");
+        std::fs::write(temp_dir.join("settings.json"), "{ not json")
+            .expect("broken settings should be writable");
+
+        let full_state = full_state_at_startup(&temp_dir);
+
+        assert_eq!(full_state.settings, UserSettings::default());
+        assert_eq!(
+            full_state.settings_file_status,
+            SettingsFileStatus::Unusable
+        );
+        assert_eq!(
+            std::fs::read_to_string(temp_dir.join("settings.json"))
+                .expect("broken settings should still exist"),
+            "{ not json"
+        );
 
         cleanup_temp_dir(&temp_dir);
     }

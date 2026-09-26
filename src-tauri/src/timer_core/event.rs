@@ -1,8 +1,5 @@
-use crate::types::{
-    BreakAttendance, LongBreakDurationSecs, LongBreakIntervalCount, PostBreakDecisionAction,
-    PostBreakTransitionPolicy, ShortBreakDurationSecs, TimerSettings, WeeklyAutoRunConfig,
-    WorkDurationSecs,
-};
+use crate::settings::UserSettings;
+use crate::types::{BreakAttendance, PostBreakDecisionAction};
 
 /// Every input that can change timer state. The shell turns commands, the
 /// ticker, input-monitor callbacks and break-lock outcomes into one of these.
@@ -11,9 +8,7 @@ pub(crate) enum Event {
     /// Applied once after restore, before the ticker starts.
     Started,
     Tick,
-    StartWorkRequested {
-        settings: TimerSettings,
-    },
+    StartWorkRequested,
     /// The frontend fetched the full state. Only the first observation decides
     /// whether the boot auto-start prompt is offered.
     FirstFullStateObserved,
@@ -27,16 +22,10 @@ pub(crate) enum Event {
         attendance: BreakAttendance,
     },
     EmergencyStopRequested,
-    TimerDurationSettingsChanged {
-        work_duration_secs: WorkDurationSecs,
-        short_break_duration_secs: ShortBreakDurationSecs,
-        long_break_duration_secs: LongBreakDurationSecs,
-        long_break_interval: LongBreakIntervalCount,
-    },
-    AutomationPoliciesChanged {
-        auto_run_feature_enabled: bool,
-        weekly_auto_run_config: WeeklyAutoRunConfig,
-        post_break_transition_policy: PostBreakTransitionPolicy,
+    /// Accepted in any state. A session already running keeps the duration
+    /// it started with; the new durations apply from the next session.
+    SettingsChanged {
+        settings: UserSettings,
     },
     InputDetected,
     EscapeComboPressed,

@@ -13,7 +13,6 @@ export type FrontendScope =
   | "bootstrap"
   | "error_boundary"
   | "notifications"
-  | "settings_sync"
   | "timer_sync";
 
 type NoFields = Record<string, never>;
@@ -69,10 +68,6 @@ export interface FrontendFieldsByEvent {
   "notification.sound_preview_playback_failed": {
     failure_message?: string;
     notification_sound_type?: string;
-  };
-  "settings.sync.failed": {
-    failure_message?: string;
-    timer_status?: string;
   };
   "timer.sync.setup_failed": {
     failure_message?: string;
@@ -197,16 +192,6 @@ export const frontendLogEventCatalog = {
       notification_sound_type: "public",
     },
   },
-  "settings.sync.failed": {
-    eventId: "settings.sync.failed",
-    severity: "warn",
-    messageTemplate: "settings sync failed",
-    allowedFields: ["failure_message", "timer_status"],
-    redactionClassification: {
-      failure_message: "sensitive",
-      timer_status: "public",
-    },
-  },
   "timer.sync.setup_failed": {
     eventId: "timer.sync.setup_failed",
     severity: "error",
@@ -240,7 +225,6 @@ export const FRONTEND_LOG_EVENT_IDS = {
     "notification.sound_path_resolution_failed",
   notificationSoundPreviewPlaybackFailed:
     "notification.sound_preview_playback_failed",
-  settingsSyncFailed: "settings.sync.failed",
   timerSyncSetupFailed: "timer.sync.setup_failed",
 } as const satisfies Record<string, FrontendEventId>;
 

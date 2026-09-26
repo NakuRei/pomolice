@@ -1,62 +1,81 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+
+type InvokeCommand = (
+  command: string,
+  args?: Record<string, unknown>,
+) => Promise<unknown>;
+
+const mockInvoke = vi.fn<InvokeCommand>();
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (command: string, args?: Record<string, unknown>): Promise<unknown> =>
+    mockInvoke(command, args),
+}));
+
+import { useTimerStore } from "@/store/timerStore";
 import {
-  createWeeklyAutoRunConfigAllDaysDisabled,
-  useSettingsStore,
-} from "@/store/settingsStore";
-import { SessionType, TimerStatus, useTimerStore } from "@/store/timerStore";
-import { resetSettingsStoreForTest } from "@/test/resetSettingsStore";
+  createSettingsForTest,
+  createWeeklyAutoRunConfigForTest,
+  answerSettingsSavesForTest,
+} from "@/test/settingsFixture";
+import { resetTimerStoreForTest } from "@/test/resetTimerStore";
+import type { Settings, SettingsPayload } from "@/types/settings";
 import { SettingsTopPage } from "./SettingsTopPage";
+
+function savedSettingsChanges(): Partial<SettingsPayload>[] {
+  return mockInvoke.mock.calls
+    .filter(([command]) => command === "update_settings")
+    .map(([, args]) => args?.changes as Partial<SettingsPayload>);
+}
+
+/** Renders the page the way the settings screen does: from the store. */
+function SettingsTopPageFromStore({
+  openHomeScreen = (): void => undefined,
+}: {
+  openHomeScreen?: () => void;
+}): React.ReactElement {
+  const settings = useTimerStore((state) => state.settings);
+  return (
+    <SettingsTopPage
+      settings={settings}
+      openHomeScreen={openHomeScreen}
+      openTimerSettings={() => undefined}
+      openAutoRunSettings={() => undefined}
+      openNotificationSettings={() => undefined}
+    />
+  );
+}
+
+function renderWithSettings(settings: Settings | null): void {
+  useTimerStore.setState({ settings });
+  render(<SettingsTopPageFromStore />);
+}
 
 describe("SettingsTopPage", () => {
   beforeEach(() => {
-    resetSettingsStoreForTest();
-    useTimerStore.setState({
-      status: TimerStatus.IDLE,
-      remainingSeconds: 25 * 60,
-      sessionType: SessionType.WORK,
-      currentCycle: 0,
-      completedPomodoros: 0,
-      breakInteractionCount: 0,
-      isFullscreenBreak: false,
-      requiresManualContinueDecision: false,
-      isConnected: true,
-      bootAutoStartPromptWindow: null,
-      activeWindowSummary: null,
-      infoMessage: null,
-      infoMessageShownAtById: {},
-    });
+    mockInvoke.mockReset();
+    mockInvoke.mockImplementation(answerSettingsSavesForTest);
+    resetTimerStoreForTest();
   });
 
   it("renders timer and auto-run summaries on settings top", () => {
-    const weeklyAutoRunConfig = createWeeklyAutoRunConfigAllDaysDisabled();
-    weeklyAutoRunConfig.mon.enabled = true;
-    weeklyAutoRunConfig.mon.startTime = "09:00";
-    weeklyAutoRunConfig.mon.endTime = "18:00";
-    weeklyAutoRunConfig.tue.enabled = true;
-    weeklyAutoRunConfig.tue.startTime = "09:00";
-    weeklyAutoRunConfig.tue.endTime = "18:00";
-
-    useSettingsStore.setState({
-      workDuration: 30,
-      shortBreakDuration: 6,
-      longBreakDuration: 20,
-      longBreakInterval: 5,
-      autoRunFeatureEnabled: true,
-      weeklyAutoRunConfig,
-      postBreakTransitionPolicy: "start_next_work_automatically",
-      notificationSoundMuted: true,
-      notificationSoundVolumePercent: 35,
-    });
-
-    render(
-      <SettingsTopPage
-        openHomeScreen={() => undefined}
-        openTimerSettings={() => undefined}
-        openAutoRunSettings={() => undefined}
-        openNotificationSettings={() => undefined}
-      />,
+    renderWithSettings(
+      createSettingsForTest({
+        workDurationSecs: 30 * 60,
+        shortBreakDurationSecs: 6 * 60,
+        longBreakDurationSecs: 20 * 60,
+        longBreakInterval: 5,
+        autoRunFeatureEnabled: true,
+        weeklyAutoRunConfig: createWeeklyAutoRunConfigForTest({
+          mon: { enabled: true, startTime: "09:00", endTime: "18:00" },
+          tue: { enabled: true, startTime: "09:00", endTime: "18:00" },
+        }),
+        postBreakTransitionPolicy: "start_next_work_automatically",
+        notificationSoundMuted: true,
+        notificationSoundVolumePercent: 35,
+      }),
     );
 
     expect(
@@ -73,15 +92,32 @@ describe("SettingsTopPage", () => {
     );
   });
 
+  it("shows durations that are not whole minutes with seconds", () => {
+    renderWithSettings(createSettingsForTest({ shortBreakDurationSecs: 90 }));
+
+    expect(
+      screen.getByRole("button", { name: /^タイマー設定/u }),
+    ).toHaveTextContent("短休憩1分30秒");
+  });
+
+  it("shows placeholders and disables every editor until the backend has sent settings", () => {
+    renderWithSettings(null);
+
+    expect(
+      screen.getByRole("button", { name: /^タイマー設定/u }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /^曜日別自動実行/u }),
+    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^通知/u })).toBeDisabled();
+    expect(
+      screen.getByTestId("settings-top-post-break-policy-toggle"),
+    ).toBeDisabled();
+    expect(screen.getAllByText("読み込み中").length).toBeGreaterThan(0);
+  });
+
   it("focuses the settings top heading on mount", async () => {
-    render(
-      <SettingsTopPage
-        openHomeScreen={() => undefined}
-        openTimerSettings={() => undefined}
-        openAutoRunSettings={() => undefined}
-        openNotificationSettings={() => undefined}
-      />,
-    );
+    renderWithSettings(createSettingsForTest());
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "設定" })).toHaveFocus();
@@ -91,44 +127,23 @@ describe("SettingsTopPage", () => {
   it("renders the shared back button on settings top and calls home navigation", async () => {
     const user = userEvent.setup();
     const openHomeScreen = vi.fn();
+    useTimerStore.setState({ settings: createSettingsForTest() });
+    render(<SettingsTopPageFromStore openHomeScreen={openHomeScreen} />);
 
-    render(
-      <SettingsTopPage
-        openHomeScreen={openHomeScreen}
-        openTimerSettings={() => undefined}
-        openAutoRunSettings={() => undefined}
-        openNotificationSettings={() => undefined}
-      />,
-    );
-
-    const backButton = screen.getByRole("button", { name: "ホームへ戻る" });
-
-    await user.click(backButton);
+    await user.click(screen.getByRole("button", { name: "ホームへ戻る" }));
 
     expect(openHomeScreen).toHaveBeenCalledTimes(1);
   });
 
   it("shows compact auto-run summary when enabled weekdays have multiple windows", () => {
-    const weeklyAutoRunConfig = createWeeklyAutoRunConfigAllDaysDisabled();
-    weeklyAutoRunConfig.mon.enabled = true;
-    weeklyAutoRunConfig.mon.startTime = "09:00";
-    weeklyAutoRunConfig.mon.endTime = "18:00";
-    weeklyAutoRunConfig.tue.enabled = true;
-    weeklyAutoRunConfig.tue.startTime = "10:00";
-    weeklyAutoRunConfig.tue.endTime = "19:00";
-
-    useSettingsStore.setState({
-      autoRunFeatureEnabled: true,
-      weeklyAutoRunConfig,
-    });
-
-    render(
-      <SettingsTopPage
-        openHomeScreen={() => undefined}
-        openTimerSettings={() => undefined}
-        openAutoRunSettings={() => undefined}
-        openNotificationSettings={() => undefined}
-      />,
+    renderWithSettings(
+      createSettingsForTest({
+        autoRunFeatureEnabled: true,
+        weeklyAutoRunConfig: createWeeklyAutoRunConfigForTest({
+          mon: { enabled: true, startTime: "09:00", endTime: "18:00" },
+          tue: { enabled: true, startTime: "10:00", endTime: "19:00" },
+        }),
+      }),
     );
 
     expect(
@@ -136,20 +151,13 @@ describe("SettingsTopPage", () => {
     ).toHaveTextContent("有効2日（詳細参照）");
   });
 
-  it("switches post-break transition policy on settings top", async () => {
+  it("saves the switched post-break transition policy and shows the saved value", async () => {
     const user = userEvent.setup();
-
-    useSettingsStore.setState({
-      postBreakTransitionPolicy: "require_manual_continue",
-    });
-
-    render(
-      <SettingsTopPage
-        openHomeScreen={() => undefined}
-        openTimerSettings={() => undefined}
-        openAutoRunSettings={() => undefined}
-        openNotificationSettings={() => undefined}
-      />,
+    renderWithSettings(
+      createSettingsForTest({
+        postBreakTransitionPolicy: "require_manual_continue",
+        notificationSoundVolumePercent: 35,
+      }),
     );
 
     expect(screen.getByText("毎回確認する")).toBeInTheDocument();
@@ -158,14 +166,14 @@ describe("SettingsTopPage", () => {
       screen.getByRole("button", { name: "自動継続をONにする" }),
     );
 
-    expect(useSettingsStore.getState().postBreakTransitionPolicy).toBe(
-      "start_next_work_automatically",
-    );
     expect(
-      screen.getByRole("button", { name: "毎回確認に戻す" }),
+      await screen.findByRole("button", { name: "毎回確認に戻す" }),
     ).toHaveAttribute("aria-pressed", "true");
     expect(
       screen.getByText("休憩後に自動で次の作業を開始する"),
     ).toBeInTheDocument();
+    expect(savedSettingsChanges()).toEqual([
+      { post_break_transition_policy: "start_next_work_automatically" },
+    ]);
   });
 });

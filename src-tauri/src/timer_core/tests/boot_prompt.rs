@@ -5,7 +5,7 @@ use super::*;
 #[test]
 fn boot_prompt_resolution_before_the_first_full_state_is_ignored() {
     let mut core = idle_without_schedule(monday(9, 30, 0));
-    apply(&mut core, schedule_enabled(workday()), monday(9, 30, 0));
+    enable_schedule(&mut core, workday(), monday(9, 30, 0));
 
     let answered = core.apply(
         Event::BootPromptResolved { start_now: true },
@@ -25,7 +25,7 @@ fn boot_prompt_resolution_before_the_first_full_state_is_ignored() {
 #[test]
 fn the_first_full_state_inside_the_window_offers_the_boot_prompt_until_answered() {
     let mut core = idle_without_schedule(monday(9, 30, 0));
-    apply(&mut core, schedule_enabled(workday()), monday(9, 30, 0));
+    enable_schedule(&mut core, workday(), monday(9, 30, 0));
 
     apply(&mut core, Event::FirstFullStateObserved, monday(9, 30, 0));
 
@@ -46,7 +46,7 @@ fn the_first_full_state_inside_the_window_offers_the_boot_prompt_until_answered(
 #[test]
 fn the_first_full_state_outside_the_window_offers_no_prompt() {
     let mut core = idle_without_schedule(monday(8, 0, 0));
-    apply(&mut core, schedule_enabled(workday()), monday(8, 0, 0));
+    enable_schedule(&mut core, workday(), monday(8, 0, 0));
 
     apply(&mut core, Event::FirstFullStateObserved, monday(8, 0, 0));
 
@@ -56,15 +56,11 @@ fn the_first_full_state_outside_the_window_offers_no_prompt() {
 #[test]
 fn scheduled_starts_wait_while_the_boot_prompt_is_pending() {
     let mut core = idle_without_schedule(monday(9, 30, 0));
-    apply(&mut core, schedule_enabled(workday()), monday(9, 30, 0));
+    enable_schedule(&mut core, workday(), monday(9, 30, 0));
     apply(&mut core, Event::FirstFullStateObserved, monday(9, 30, 0));
     assert!(boot_prompt_is_offered(&core, monday(9, 30, 0)));
 
-    apply(
-        &mut core,
-        schedule_enabled(monday_slot((9, 45), (18, 0))),
-        monday(9, 40, 0),
-    );
+    enable_schedule(&mut core, monday_slot((9, 45), (18, 0)), monday(9, 40, 0));
     let at_new_start = apply(&mut core, Event::Tick, monday(9, 45, 0));
 
     assert_eq!(core.status(), TimerStatus::Idle);
@@ -74,7 +70,7 @@ fn scheduled_starts_wait_while_the_boot_prompt_is_pending() {
 #[test]
 fn answering_the_boot_prompt_with_later_keeps_idle_and_the_next_boundary_still_fires() {
     let mut core = idle_without_schedule(monday(9, 30, 0));
-    apply(&mut core, schedule_enabled(workday()), monday(9, 30, 0));
+    enable_schedule(&mut core, workday(), monday(9, 30, 0));
     apply(&mut core, Event::FirstFullStateObserved, monday(9, 30, 0));
 
     let answered = apply(
@@ -85,11 +81,7 @@ fn answering_the_boot_prompt_with_later_keeps_idle_and_the_next_boundary_still_f
     assert!(!starts_work(&answered));
     assert_eq!(core.status(), TimerStatus::Idle);
 
-    apply(
-        &mut core,
-        schedule_enabled(monday_slot((9, 45), (18, 0))),
-        monday(9, 40, 0),
-    );
+    enable_schedule(&mut core, monday_slot((9, 45), (18, 0)), monday(9, 40, 0));
     let at_new_start = apply(&mut core, Event::Tick, monday(9, 45, 0));
     assert!(starts_work(&at_new_start));
 }
@@ -97,11 +89,7 @@ fn answering_the_boot_prompt_with_later_keeps_idle_and_the_next_boundary_still_f
 #[test]
 fn answering_the_boot_prompt_with_start_begins_work_under_schedule_control() {
     let mut core = idle_without_schedule(seconds_before(workday_end(), 120));
-    apply(
-        &mut core,
-        schedule_enabled(workday()),
-        seconds_before(workday_end(), 120),
-    );
+    enable_schedule(&mut core, workday(), seconds_before(workday_end(), 120));
     apply(
         &mut core,
         Event::FirstFullStateObserved,
@@ -126,15 +114,15 @@ fn answering_the_boot_prompt_with_start_begins_work_under_schedule_control() {
 #[test]
 fn a_stale_boot_prompt_resolution_does_not_replace_a_running_session() {
     let mut core = idle_without_schedule(monday(9, 30, 0));
-    apply(&mut core, schedule_enabled(workday()), monday(9, 30, 0));
+    enable_schedule(&mut core, workday(), monday(9, 30, 0));
     apply(&mut core, Event::FirstFullStateObserved, monday(9, 30, 0));
     start_work(
         &mut core,
         monday(9, 31, 0),
-        timer_settings(Durations {
+        Durations {
             work: 600,
             ..Durations::default()
-        }),
+        },
     );
 
     let answered = core.apply(
@@ -155,15 +143,25 @@ fn a_stale_boot_prompt_resolution_does_not_replace_a_running_session() {
 fn restored_session_that_ends_after_the_start_boundary() -> (TimerCore, Vec<Effect>) {
     let saved_before_the_boundary = seconds_before(workday_start(), 10);
     let restarted_after_the_boundary = seconds_after(workday_start(), 30);
-    let mut saved = saved_state(TimerStatus::Working, 5, saved_before_the_boundary);
-    saved.settings = timer_settings(Durations {
-        work: 5,
-        short_break: 1,
-        ..Durations::default()
-    });
-    saved.auto_run_feature_enabled = true;
-    saved.weekly_auto_run_config = workday();
-    let mut core = TimerCore::restore(Some(saved), restarted_after_the_boundary);
+    let saved = saved_state(TimerStatus::Working, 5, saved_before_the_boundary);
+    let settings = UserSettings {
+        auto_run_feature_enabled: true,
+        weekly_auto_run_config: workday(),
+        ..with_durations(
+            UserSettings::default(),
+            Durations {
+                work: 5,
+                short_break: 1,
+                ..Durations::default()
+            },
+        )
+    };
+    let mut core = TimerCore::restore(
+        Some(saved),
+        settings,
+        SettingsFileStatus::Ok,
+        restarted_after_the_boundary,
+    );
     apply(&mut core, Event::Started, restarted_after_the_boundary);
     assert_eq!(core.status(), TimerStatus::OnBreak);
     dismiss_boot_prompt(&mut core, restarted_after_the_boundary);
@@ -194,9 +192,9 @@ fn a_start_boundary_that_passed_while_the_app_was_closed_does_not_restart_a_rest
 fn a_later_start_boundary_still_fires_after_a_restored_session_has_ended() {
     let (mut core, _) = restored_session_that_ends_after_the_start_boundary();
 
-    apply(
+    enable_schedule(
         &mut core,
-        schedule_enabled(monday_slot((9, 2), (18, 0))),
+        monday_slot((9, 2), (18, 0)),
         seconds_after(workday_start(), 60),
     );
     let at_next_boundary = apply(

@@ -49,25 +49,47 @@ fn the_active_window_is_published_when_it_changes_and_only_then() {
 }
 
 #[test]
-fn disabling_the_schedule_tells_the_frontend_no_window_is_active() {
+fn disabling_the_schedule_tells_the_frontend_at_once_that_no_window_is_active() {
     let mut core = idle_with_schedule(seconds_before(workday_start(), 1), workday());
     apply(&mut core, Event::Tick, workday_start());
 
-    // Whether the change itself or the next tick carries the news is not part
-    // of the contract; the frontend must have it by the next tick.
-    let mut after_disable = apply(
-        &mut core,
-        schedule_disabled(),
-        seconds_after(workday_start(), 1),
-    );
-    after_disable.extend(apply(
-        &mut core,
-        Event::Tick,
-        seconds_after(workday_start(), 2),
-    ));
+    let after_disable = disable_schedule(&mut core, seconds_after(workday_start(), 1));
 
     assert_eq!(
         published_active_window(&after_disable),
         PublishedWindow::NoneActive
+    );
+}
+
+#[test]
+fn enabling_a_schedule_whose_window_is_open_tells_the_frontend_at_once() {
+    let mut core = idle_without_schedule(seconds_after(workday_start(), 60));
+    dismiss_boot_prompt(&mut core, seconds_after(workday_start(), 60));
+
+    let after_enable = enable_schedule(&mut core, workday(), seconds_after(workday_start(), 61));
+
+    assert_eq!(
+        published_active_window(&after_enable),
+        PublishedWindow::Weekday("mon".to_string())
+    );
+}
+
+#[test]
+fn a_settings_change_that_keeps_the_window_publishes_nothing_about_it() {
+    let mut core = idle_with_schedule(seconds_before(workday_start(), 1), workday());
+    apply(&mut core, Event::Tick, workday_start());
+
+    let after_duration_change = change_durations(
+        &mut core,
+        Durations {
+            work: 600,
+            ..Durations::default()
+        },
+        seconds_after(workday_start(), 1),
+    );
+
+    assert_eq!(
+        published_active_window(&after_duration_change),
+        PublishedWindow::NotPublished
     );
 }

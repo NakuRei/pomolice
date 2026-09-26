@@ -3,6 +3,7 @@
 
 use thiserror::Error;
 
+use crate::settings::SettingsValidationErrors;
 use crate::types::TimerStatus;
 
 /// Main error type for the Pomolice application
@@ -20,6 +21,9 @@ pub(crate) enum PomoliceError {
 
     #[error("Rate limited: please wait {remaining_ms}ms")]
     RateLimited { remaining_ms: u64 },
+
+    #[error("Invalid settings: {0}")]
+    InvalidSettings(SettingsValidationErrors),
 
     #[error("Window control error: {0}")]
     WindowControl(String),
@@ -69,7 +73,9 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
 
+    use crate::settings::SettingsValidationIssue;
     use crate::shared_tests::join_error::join_error_from_panic;
+    use crate::types::WeekdayKey;
     use strum::IntoEnumIterator;
 
     fn assert_all_pomolice_error_variants_are_represented(
@@ -105,6 +111,14 @@ mod tests {
                 &["Invalid state transition", "start work", "Working"],
             ),
             (PomoliceError::RateLimited { remaining_ms: 500 }, &["500"]),
+            (
+                PomoliceError::InvalidSettings(SettingsValidationErrors::from_issues(vec![
+                    SettingsValidationIssue::EmptyTimeRange {
+                        weekday: WeekdayKey::Wed,
+                    },
+                ])),
+                &["Invalid settings", "EmptyTimeRange", "Wed"],
+            ),
             (
                 PomoliceError::WindowControl("Failed to enter fullscreen".to_string()),
                 &["Failed to enter fullscreen"],

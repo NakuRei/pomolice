@@ -1,15 +1,18 @@
 // Persistence Manager
-// Saves and loads timer state without global statics
+// Saves and loads one typed JSON document without global statics
 
 use atomic_write_file::AtomicWriteFile;
-use serde::Deserialize;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
 use crate::logging_event::{log_error_event, log_info_event, log_warn_event, BackendLogEvent};
+use crate::settings::{PersistedSettings, SETTINGS_SCHEMA_VERSION};
 use crate::types::{PersistedState, PERSISTED_STATE_SCHEMA_VERSION};
 
 #[cfg(test)]
@@ -18,15 +21,34 @@ type InjectedSaveErrorHook = Arc<dyn Fn() -> Option<SaveError> + Send + Sync>;
 #[cfg(test)]
 type BeforePublishSaveErrorHook = Arc<dyn Fn(&Path) -> Option<SaveError> + Send + Sync>;
 
+/// A document stored as its own JSON file in the application data directory.
+pub(crate) trait PersistedDocument: Serialize + DeserializeOwned {
+    const FILE_NAME: &'static str;
+    const SCHEMA_VERSION: u32;
+}
+
+impl PersistedDocument for PersistedState {
+    const FILE_NAME: &'static str = "timer_state.json";
+    const SCHEMA_VERSION: u32 = PERSISTED_STATE_SCHEMA_VERSION;
+}
+
+impl PersistedDocument for PersistedSettings {
+    const FILE_NAME: &'static str = "settings.json";
+    const SCHEMA_VERSION: u32 = SETTINGS_SCHEMA_VERSION;
+}
+
 #[derive(Debug, Clone, Copy, Deserialize)]
 struct PersistedSchemaEnvelope {
     schema_version: u32,
 }
 
-pub(crate) enum PersistenceLoadOutcome {
+pub(crate) enum PersistenceLoadOutcome<T> {
+    /// No file exists yet.
     NoState,
-    Restored(PersistedState),
-    UnsupportedSchemaFallback,
+    Restored(T),
+    /// A file exists but could not be used: unreadable, malformed, from an
+    /// unsupported schema, or holding values the application rejects.
+    Discarded,
 }
 
 #[derive(Debug, Error)]
@@ -38,7 +60,7 @@ pub(crate) enum SaveError {
         source: std::io::Error,
     },
 
-    #[error("failed to serialize persisted timer state: {source}")]
+    #[error("failed to serialize persisted document: {source}")]
     Serialize {
         #[source]
         source: serde_json::Error,
@@ -66,57 +88,47 @@ pub(crate) enum SaveError {
     },
 }
 
-/// Manager for state persistence.
-#[derive(Clone)]
-pub(crate) struct PersistenceManager {
-    state_file_path: Option<PathBuf>,
+/// Reads and writes the file of one `PersistedDocument` type.
+pub(crate) struct PersistenceManager<T> {
+    file_path: Option<PathBuf>,
     save_lock: Arc<Mutex<()>>,
     #[cfg(test)]
     injected_save_error_hook: Option<InjectedSaveErrorHook>,
     #[cfg(test)]
     before_publish_save_error_hook: Option<BeforePublishSaveErrorHook>,
+    document: PhantomData<fn() -> T>,
 }
 
-impl PersistenceManager {
-    pub(crate) fn new(app_data_dir: Option<PathBuf>) -> Self {
-        let state_file_path = app_data_dir.map(|path| path.join("timer_state.json"));
+impl<T> Clone for PersistenceManager<T> {
+    fn clone(&self) -> Self {
         Self {
-            state_file_path,
+            file_path: self.file_path.clone(),
+            save_lock: Arc::clone(&self.save_lock),
+            #[cfg(test)]
+            injected_save_error_hook: self.injected_save_error_hook.clone(),
+            #[cfg(test)]
+            before_publish_save_error_hook: self.before_publish_save_error_hook.clone(),
+            document: PhantomData,
+        }
+    }
+}
+
+impl<T: PersistedDocument> PersistenceManager<T> {
+    pub(crate) fn new(app_data_dir: Option<PathBuf>) -> Self {
+        let file_path = app_data_dir.map(|path| path.join(T::FILE_NAME));
+        Self {
+            file_path,
             save_lock: Arc::new(Mutex::new(())),
             #[cfg(test)]
             injected_save_error_hook: None,
             #[cfg(test)]
             before_publish_save_error_hook: None,
+            document: PhantomData,
         }
     }
 
-    pub(crate) fn save_state_sync(
-        &self,
-        persisted_state: &PersistedState,
-    ) -> Result<(), SaveError> {
-        Self::save_state_sync_with_context(
-            self.state_file_path.as_deref(),
-            self.save_lock.as_ref(),
-            #[cfg(test)]
-            self.injected_save_error_hook.as_ref(),
-            #[cfg(test)]
-            self.before_publish_save_error_hook.as_ref(),
-            persisted_state,
-        )
-    }
-
-    pub(crate) fn load_state_sync(&self) -> PersistenceLoadOutcome {
-        Self::load_state_sync_with_context(self.state_file_path.as_deref())
-    }
-
-    fn save_state_sync_with_context(
-        state_file_path: Option<&Path>,
-        save_lock: &Mutex<()>,
-        #[cfg(test)] injected_save_error_hook: Option<&InjectedSaveErrorHook>,
-        #[cfg(test)] before_publish_save_error_hook: Option<&BeforePublishSaveErrorHook>,
-        persisted_state: &PersistedState,
-    ) -> Result<(), SaveError> {
-        let Some(path) = state_file_path else {
+    pub(crate) fn save_sync(&self, document: &T) -> Result<(), SaveError> {
+        let Some(path) = self.file_path.as_deref() else {
             log_warn_event(BackendLogEvent::StoragePersistencePathUnavailable, &[]);
             return Ok(());
         };
@@ -127,7 +139,7 @@ impl PersistenceManager {
         );
 
         #[cfg(test)]
-        if let Some(hook) = injected_save_error_hook {
+        if let Some(hook) = &self.injected_save_error_hook {
             if let Some(error) = hook() {
                 log_error_event(
                     BackendLogEvent::StoragePersistenceWriteFailed,
@@ -143,14 +155,15 @@ impl PersistenceManager {
 
         // The exit-time save runs outside the dispatch permit and may overlap a dispatch's
         // save; this lock keeps the two file commits from interleaving.
-        let _save_guard = save_lock
+        let _save_guard = self
+            .save_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let save_result = Self::save_persisted_state_to_path(
-            persisted_state,
+        let save_result = Self::save_document_to_path(
+            document,
             path,
             #[cfg(test)]
-            before_publish_save_error_hook,
+            self.before_publish_save_error_hook.as_ref(),
         );
 
         match save_result {
@@ -175,17 +188,17 @@ impl PersistenceManager {
         }
     }
 
-    fn load_state_sync_with_context(state_file_path: Option<&Path>) -> PersistenceLoadOutcome {
-        let Some(path) = state_file_path else {
+    pub(crate) fn load_sync(&self) -> PersistenceLoadOutcome<T> {
+        let Some(path) = self.file_path.as_deref() else {
             log_warn_event(BackendLogEvent::StoragePersistencePathUnavailable, &[]);
             return PersistenceLoadOutcome::NoState;
         };
 
-        Self::load_state_from_path(path)
+        Self::load_document_from_path(path)
     }
 
-    fn save_persisted_state_to_path(
-        persisted_state: &PersistedState,
+    fn save_document_to_path(
+        document: &T,
         path: &Path,
         #[cfg(test)] before_publish_save_error_hook: Option<&BeforePublishSaveErrorHook>,
     ) -> Result<(), SaveError> {
@@ -196,7 +209,7 @@ impl PersistenceManager {
             })?;
         }
 
-        let serialized_json = serde_json::to_string_pretty(persisted_state)
+        let serialized_json = serde_json::to_string_pretty(document)
             .map_err(|source| SaveError::Serialize { source })?;
 
         let mut temp_file =
@@ -229,7 +242,7 @@ impl PersistenceManager {
         Ok(())
     }
 
-    fn load_state_from_path(path: &Path) -> PersistenceLoadOutcome {
+    fn load_document_from_path(path: &Path) -> PersistenceLoadOutcome<T> {
         if !path.exists() {
             log_info_event(
                 BackendLogEvent::StoragePersistenceNoStateFile,
@@ -251,7 +264,7 @@ impl PersistenceManager {
                     &[("path", path.display().to_string())],
                     Some(&read_error),
                 );
-                return PersistenceLoadOutcome::NoState;
+                return PersistenceLoadOutcome::Discarded;
             }
         };
 
@@ -265,25 +278,23 @@ impl PersistenceManager {
                         ("error_message", deserialize_error.to_string()),
                     ],
                 );
-                return PersistenceLoadOutcome::NoState;
+                return PersistenceLoadOutcome::Discarded;
             }
         };
 
-        if envelope.schema_version != PERSISTED_STATE_SCHEMA_VERSION {
+        if envelope.schema_version != T::SCHEMA_VERSION {
             log_warn_event(
                 BackendLogEvent::StoragePersistenceSchemaVersionUnsupported,
                 &[
+                    ("file_name", T::FILE_NAME.to_string()),
                     ("schema_version", envelope.schema_version.to_string()),
-                    (
-                        "expected_schema_version",
-                        PERSISTED_STATE_SCHEMA_VERSION.to_string(),
-                    ),
+                    ("expected_schema_version", T::SCHEMA_VERSION.to_string()),
                 ],
             );
-            return PersistenceLoadOutcome::UnsupportedSchemaFallback;
+            return PersistenceLoadOutcome::Discarded;
         }
 
-        let persisted_state = match serde_json::from_str::<PersistedState>(&raw_json) {
+        let document = match serde_json::from_str::<T>(&raw_json) {
             Ok(parsed) => parsed,
             Err(deserialize_error) => {
                 log_warn_event(
@@ -293,12 +304,15 @@ impl PersistenceManager {
                         ("error_message", deserialize_error.to_string()),
                     ],
                 );
-                return PersistenceLoadOutcome::NoState;
+                return PersistenceLoadOutcome::Discarded;
             }
         };
 
-        log_info_event(BackendLogEvent::StoragePersistenceLoaded, &[]);
-        PersistenceLoadOutcome::Restored(persisted_state)
+        log_info_event(
+            BackendLogEvent::StoragePersistenceLoaded,
+            &[("file_name", T::FILE_NAME.to_string())],
+        );
+        PersistenceLoadOutcome::Restored(document)
     }
 
     #[cfg(test)]
@@ -320,10 +334,8 @@ impl PersistenceManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{
-        DayAutoRunSlot, HhMm, PostBreakTransitionPolicy, ScheduleStopState, SessionType,
-        TimerSettings, TimerStatus, WeeklyAutoRunConfig,
-    };
+    use crate::settings::UserSettings;
+    use crate::types::{ScheduleStopState, SessionDurationSecs, SessionType, TimerStatus};
     use chrono::{DateTime, TimeZone, Utc};
     use serde_json::json;
     use std::sync::{
@@ -366,34 +378,8 @@ mod tests {
             .expect("valid UTC datetime")
     }
 
-    fn default_weekly_config_json() -> serde_json::Value {
-        json!({
-            "mon": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
-            "tue": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
-            "wed": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
-            "thu": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
-            "fri": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
-            "sat": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
-            "sun": { "enabled": false, "start_time": "09:00", "end_time": "18:00" }
-        })
-    }
-
-    fn hh_mm(hour: u8, minute: u8) -> HhMm {
-        HhMm::try_new(hour, minute).expect("contract time should be valid")
-    }
-
-    fn contract_weekly_auto_run_config() -> WeeklyAutoRunConfig {
-        WeeklyAutoRunConfig::try_new(
-            DayAutoRunSlot::try_new(true, hh_mm(8, 30), hh_mm(12, 15))
-                .expect("contract schedule slot should be valid"),
-            DayAutoRunSlot::default(),
-            DayAutoRunSlot::default(),
-            DayAutoRunSlot::default(),
-            DayAutoRunSlot::default(),
-            DayAutoRunSlot::default(),
-            DayAutoRunSlot::default(),
-        )
-        .expect("contract schedule should be valid")
+    fn session_duration_secs(value: u64) -> SessionDurationSecs {
+        SessionDurationSecs::try_new(value).expect("contract session duration should be valid")
     }
 
     fn contract_persisted_state(saved_at: DateTime<Utc>) -> PersistedState {
@@ -401,21 +387,12 @@ mod tests {
             schema_version: PERSISTED_STATE_SCHEMA_VERSION,
             status: TimerStatus::Working,
             remaining_seconds: 1234,
+            session_duration_secs: session_duration_secs(2700),
             session_type: SessionType::Work,
             current_cycle: 3,
             completed_pomodoros: 2,
             post_break_decision_pending: false,
-            settings: TimerSettings::try_from_raw(
-                2700,
-                420,
-                1200,
-                3,
-                PostBreakTransitionPolicy::StartNextWorkAutomatically,
-            )
-            .expect("contract settings should be valid"),
             saved_at,
-            auto_run_feature_enabled: true,
-            weekly_auto_run_config: contract_weekly_auto_run_config(),
             schedule_stop_state: ScheduleStopState::StopAtNextSessionBoundary,
         }
     }
@@ -425,21 +402,12 @@ mod tests {
             schema_version: PERSISTED_STATE_SCHEMA_VERSION,
             status: TimerStatus::Working,
             remaining_seconds: 678,
+            session_duration_secs: session_duration_secs(1800),
             session_type: SessionType::Work,
             current_cycle: 9,
             completed_pomodoros: 5,
             post_break_decision_pending: false,
-            settings: TimerSettings::try_from_raw(
-                1800,
-                600,
-                1500,
-                5,
-                PostBreakTransitionPolicy::RequireManualContinue,
-            )
-            .expect("alternate contract settings should be valid"),
             saved_at,
-            auto_run_feature_enabled: false,
-            weekly_auto_run_config: WeeklyAutoRunConfig::default(),
             schedule_stop_state: ScheduleStopState::NotControlledBySchedule,
         }
     }
@@ -449,28 +417,12 @@ mod tests {
             "schema_version": PERSISTED_STATE_SCHEMA_VERSION,
             "status": "working",
             "remaining_seconds": 1234,
+            "session_duration_secs": 2700,
             "session_type": "work",
             "current_cycle": 3,
             "completed_pomodoros": 2,
             "post_break_decision_pending": false,
-            "settings": {
-                "work_duration_secs": 2700,
-                "short_break_duration_secs": 420,
-                "long_break_duration_secs": 1200,
-                "long_break_interval": 3,
-                "post_break_transition_policy": "start_next_work_automatically"
-            },
             "saved_at": saved_at_utc,
-            "auto_run_feature_enabled": true,
-            "weekly_auto_run_config": {
-                "mon": { "enabled": true, "start_time": "08:30", "end_time": "12:15" },
-                "tue": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
-                "wed": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
-                "thu": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
-                "fri": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
-                "sat": { "enabled": false, "start_time": "09:00", "end_time": "18:00" },
-                "sun": { "enabled": false, "start_time": "09:00", "end_time": "18:00" }
-            },
             "schedule_stop_state": "stop_at_next_session_boundary"
         })
     }
@@ -483,20 +435,12 @@ mod tests {
             "schema_version": schema_version,
             "status": "working",
             "remaining_seconds": 1200,
+            "session_duration_secs": 1500,
             "session_type": "work",
             "current_cycle": 2,
             "completed_pomodoros": 1,
             "post_break_decision_pending": false,
-            "settings": {
-                "work_duration_secs": 1500,
-                "short_break_duration_secs": 300,
-                "long_break_duration_secs": 900,
-                "long_break_interval": 4,
-                "post_break_transition_policy": "require_manual_continue"
-            },
             "saved_at": saved_at_utc,
-            "auto_run_feature_enabled": true,
-            "weekly_auto_run_config": default_weekly_config_json(),
             "schedule_stop_state": "stop_at_next_session_boundary"
         })
     }
@@ -514,14 +458,22 @@ mod tests {
             .expect("state file content should be writable");
     }
 
-    fn load_restored(persistence: &PersistenceManager) -> PersistedState {
-        match persistence.load_state_sync() {
-            PersistenceLoadOutcome::Restored(persisted_state) => persisted_state,
-            PersistenceLoadOutcome::NoState => panic!("expected restored state, got no state"),
-            PersistenceLoadOutcome::UnsupportedSchemaFallback => {
-                panic!("expected restored state, got unsupported schema fallback")
+    fn load_restored<T: PersistedDocument>(persistence: &PersistenceManager<T>) -> T {
+        match persistence.load_sync() {
+            PersistenceLoadOutcome::Restored(document) => document,
+            PersistenceLoadOutcome::NoState => panic!("expected a restored document, got no file"),
+            PersistenceLoadOutcome::Discarded => {
+                panic!("expected a restored document, got a discarded file")
             }
         }
+    }
+
+    fn timer_state_persistence(temp_dir: &Path) -> PersistenceManager<PersistedState> {
+        PersistenceManager::new(Some(temp_dir.to_path_buf()))
+    }
+
+    fn settings_persistence(temp_dir: &Path) -> PersistenceManager<PersistedSettings> {
+        PersistenceManager::new(Some(temp_dir.to_path_buf()))
     }
 
     fn build_one_shot_before_publish_save_failure_hook() -> BeforePublishSaveErrorHook {
@@ -541,13 +493,13 @@ mod tests {
     }
 
     #[test]
-    fn test_save_state_sync_writes_persisted_state_contract() {
+    fn test_save_sync_writes_persisted_state_contract() {
         let temp_dir = create_temp_dir("save-contract");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
-        let persistence = PersistenceManager::new(Some(temp_dir.clone()));
+        let persistence = timer_state_persistence(&temp_dir);
 
         persistence
-            .save_state_sync(&contract_persisted_state(saved_at_utc))
+            .save_sync(&contract_persisted_state(saved_at_utc))
             .expect("sync save should succeed");
 
         let raw_json = fs::read_to_string(temp_dir.join("timer_state.json"))
@@ -561,10 +513,10 @@ mod tests {
     }
 
     #[test]
-    fn test_load_state_sync_restores_persisted_state_contract() {
+    fn test_load_sync_restores_persisted_state_contract() {
         let temp_dir = create_temp_dir("load-contract");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
-        let persistence = PersistenceManager::new(Some(temp_dir.clone()));
+        let persistence = timer_state_persistence(&temp_dir);
 
         write_timer_state_json(&temp_dir, &contract_persisted_state_json(saved_at_utc));
 
@@ -574,11 +526,7 @@ mod tests {
         assert_eq!(restored.remaining_seconds, 1234);
         assert_eq!(restored.current_cycle, 3);
         assert_eq!(restored.completed_pomodoros, 2);
-        assert_eq!(restored.settings.work_duration_secs.get(), 2700);
-        assert_eq!(
-            restored.weekly_auto_run_config,
-            contract_weekly_auto_run_config()
-        );
+        assert_eq!(restored.session_duration_secs.get(), 2700);
         assert_eq!(
             restored.schedule_stop_state,
             ScheduleStopState::StopAtNextSessionBoundary
@@ -588,13 +536,13 @@ mod tests {
     }
 
     #[test]
-    fn test_save_then_load_state_sync_round_trips_all_persisted_fields() {
+    fn test_save_then_load_sync_round_trips_all_persisted_fields() {
         let temp_dir = create_temp_dir("save-load-contract");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
-        let persistence = PersistenceManager::new(Some(temp_dir.clone()));
+        let persistence = timer_state_persistence(&temp_dir);
 
         persistence
-            .save_state_sync(&contract_persisted_state(saved_at_utc))
+            .save_sync(&contract_persisted_state(saved_at_utc))
             .expect("sync save should succeed");
 
         let restored = load_restored(&persistence);
@@ -611,13 +559,12 @@ mod tests {
         let temp_dir = create_temp_dir("failed-save-preserves-existing-state");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
         let attempted_saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 1, 0);
-        let persistence = PersistenceManager::new(Some(temp_dir.clone()))
+        let persistence = timer_state_persistence(&temp_dir)
             .with_before_publish_save_error_hook(build_one_shot_before_publish_save_failure_hook());
 
         write_timer_state_json(&temp_dir, &contract_persisted_state_json(saved_at_utc));
 
-        let save_result =
-            persistence.save_state_sync(&alternate_persisted_state(attempted_saved_at_utc));
+        let save_result = persistence.save_sync(&alternate_persisted_state(attempted_saved_at_utc));
 
         assert!(save_result.is_err());
         let restored = load_restored(&persistence);
@@ -631,14 +578,14 @@ mod tests {
     fn test_failed_initial_save_does_not_publish_partial_state() {
         let temp_dir = create_temp_dir("failed-initial-save-no-partial-state");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
-        let persistence = PersistenceManager::new(Some(temp_dir.clone()))
+        let persistence = timer_state_persistence(&temp_dir)
             .with_before_publish_save_error_hook(build_one_shot_before_publish_save_failure_hook());
 
-        let save_result = persistence.save_state_sync(&contract_persisted_state(saved_at_utc));
+        let save_result = persistence.save_sync(&contract_persisted_state(saved_at_utc));
 
         assert!(save_result.is_err());
         assert!(matches!(
-            persistence.load_state_sync(),
+            persistence.load_sync(),
             PersistenceLoadOutcome::NoState
         ));
 
@@ -650,18 +597,18 @@ mod tests {
         let temp_dir = create_temp_dir("save-succeeds-after-failed-attempt");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
         let successful_saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 1, 0);
-        let persistence = PersistenceManager::new(Some(temp_dir.clone()))
+        let persistence = timer_state_persistence(&temp_dir)
             .with_before_publish_save_error_hook(build_one_shot_before_publish_save_failure_hook());
 
         write_timer_state_json(&temp_dir, &contract_persisted_state_json(saved_at_utc));
 
         let first_save_result =
-            persistence.save_state_sync(&alternate_persisted_state(successful_saved_at_utc));
+            persistence.save_sync(&alternate_persisted_state(successful_saved_at_utc));
         assert!(first_save_result.is_err());
         assert_eq!(load_restored(&persistence).saved_at, saved_at_utc);
 
         persistence
-            .save_state_sync(&alternate_persisted_state(successful_saved_at_utc))
+            .save_sync(&alternate_persisted_state(successful_saved_at_utc))
             .expect("sync save should succeed after a failed save attempt");
 
         let restored = load_restored(&persistence);
@@ -673,10 +620,10 @@ mod tests {
     }
 
     #[test]
-    fn test_save_state_sync_serializes_concurrent_writes_without_corrupting_timer_state_file() {
+    fn test_save_sync_serializes_concurrent_writes_without_corrupting_timer_state_file() {
         let temp_dir = create_temp_dir("save-sync-concurrent");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
-        let persistence = Arc::new(PersistenceManager::new(Some(temp_dir.clone())));
+        let persistence = Arc::new(timer_state_persistence(&temp_dir));
         let start_barrier = Arc::new(Barrier::new(3));
         let expected_states = [(301_u64, 1_u32), (907_u64, 2_u32)];
 
@@ -693,7 +640,7 @@ mod tests {
                         current_cycle,
                         ..alternate_persisted_state(saved_at_utc)
                     };
-                    persistence.save_state_sync(&persisted_state)
+                    persistence.save_sync(&persisted_state)
                 })
             })
             .collect();
@@ -726,10 +673,10 @@ mod tests {
     }
 
     #[test]
-    fn test_load_mismatched_schema_file_returns_unsupported_schema_fallback() {
+    fn test_load_mismatched_schema_file_is_discarded() {
         let temp_dir = create_temp_dir("load-mismatched-schema");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
-        let persistence = PersistenceManager::new(Some(temp_dir.clone()));
+        let persistence = timer_state_persistence(&temp_dir);
 
         write_timer_state_json(
             &temp_dir,
@@ -737,91 +684,130 @@ mod tests {
         );
 
         assert!(matches!(
-            persistence.load_state_sync(),
-            PersistenceLoadOutcome::UnsupportedSchemaFallback
+            persistence.load_sync(),
+            PersistenceLoadOutcome::Discarded
         ));
 
         cleanup_temp_dir(&temp_dir);
     }
 
     #[test]
-    fn test_load_malformed_state_file_returns_no_state() {
+    fn test_load_malformed_state_file_is_discarded() {
         let temp_dir = create_temp_dir("malformed-state-file");
-        let persistence = PersistenceManager::new(Some(temp_dir.clone()));
+        let persistence = timer_state_persistence(&temp_dir);
 
         write_timer_state_raw(&temp_dir, "{ invalid json");
 
         assert!(matches!(
-            persistence.load_state_sync(),
-            PersistenceLoadOutcome::NoState
+            persistence.load_sync(),
+            PersistenceLoadOutcome::Discarded
         ));
 
         cleanup_temp_dir(&temp_dir);
     }
 
     #[test]
-    fn test_load_empty_state_file_returns_no_state() {
+    fn test_load_empty_state_file_is_discarded() {
         let temp_dir = create_temp_dir("empty-state-file");
-        let persistence = PersistenceManager::new(Some(temp_dir.clone()));
+        let persistence = timer_state_persistence(&temp_dir);
 
         write_timer_state_raw(&temp_dir, "");
 
         assert!(matches!(
-            persistence.load_state_sync(),
-            PersistenceLoadOutcome::NoState
+            persistence.load_sync(),
+            PersistenceLoadOutcome::Discarded
         ));
 
         cleanup_temp_dir(&temp_dir);
     }
 
     #[test]
-    fn test_load_unreadable_state_path_returns_no_state() {
+    fn test_load_unreadable_state_path_is_discarded() {
         let temp_dir = create_temp_dir("unreadable-state-path");
-        let persistence = PersistenceManager::new(Some(temp_dir.clone()));
+        let persistence = timer_state_persistence(&temp_dir);
 
         fs::create_dir(temp_dir.join("timer_state.json"))
             .expect("state path fixture directory should be creatable");
 
         assert!(matches!(
-            persistence.load_state_sync(),
-            PersistenceLoadOutcome::NoState
+            persistence.load_sync(),
+            PersistenceLoadOutcome::Discarded
         ));
 
         cleanup_temp_dir(&temp_dir);
     }
 
     #[test]
-    fn test_load_invalid_schedule_data_returns_no_state() {
-        let temp_dir = create_temp_dir("invalid-schedule");
+    fn test_load_out_of_range_session_duration_is_discarded() {
+        let temp_dir = create_temp_dir("invalid-session-duration");
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
-        let persistence = PersistenceManager::new(Some(temp_dir.clone()));
+        let persistence = timer_state_persistence(&temp_dir);
 
         let mut persisted_json =
             base_persisted_state_json(PERSISTED_STATE_SCHEMA_VERSION, saved_at_utc);
-        persisted_json["weekly_auto_run_config"]["mon"]["start_time"] = json!("24:00");
+        persisted_json["session_duration_secs"] = json!(0);
         write_timer_state_json(&temp_dir, &persisted_json);
 
         assert!(matches!(
-            persistence.load_state_sync(),
-            PersistenceLoadOutcome::NoState
+            persistence.load_sync(),
+            PersistenceLoadOutcome::Discarded
         ));
 
         cleanup_temp_dir(&temp_dir);
     }
 
     #[test]
-    fn test_load_invalid_duration_data_returns_no_state() {
-        let temp_dir = create_temp_dir("invalid-duration");
-        let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
-        let persistence = PersistenceManager::new(Some(temp_dir.clone()));
+    fn test_settings_are_saved_to_their_own_file_and_restored() {
+        let temp_dir = create_temp_dir("settings-round-trip");
+        let persistence = settings_persistence(&temp_dir);
+        let persisted_settings = PersistedSettings {
+            schema_version: SETTINGS_SCHEMA_VERSION,
+            settings: UserSettings::default(),
+        };
 
-        let mut persisted_json =
-            base_persisted_state_json(PERSISTED_STATE_SCHEMA_VERSION, saved_at_utc);
-        persisted_json["settings"]["work_duration_secs"] = json!(0);
-        write_timer_state_json(&temp_dir, &persisted_json);
+        persistence
+            .save_sync(&persisted_settings)
+            .expect("settings save should succeed");
+
+        assert!(temp_dir.join("settings.json").is_file());
+        assert!(!temp_dir.join("timer_state.json").exists());
+        assert_eq!(load_restored(&persistence), persisted_settings);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_settings_file_breaking_a_settings_rule_is_discarded() {
+        let temp_dir = create_temp_dir("settings-rule-violation");
+        let persistence = settings_persistence(&temp_dir);
+        let mut settings_json = serde_json::to_value(PersistedSettings {
+            schema_version: SETTINGS_SCHEMA_VERSION,
+            settings: UserSettings::default(),
+        })
+        .expect("settings should serialize");
+        settings_json["settings"]["weekly_auto_run_config"]["mon"] =
+            json!({ "enabled": true, "start_time": "09:00", "end_time": "09:00" });
+        fs::write(
+            temp_dir.join("settings.json"),
+            serde_json::to_string(&settings_json).expect("json should serialize"),
+        )
+        .expect("settings file should be writable");
 
         assert!(matches!(
-            persistence.load_state_sync(),
+            persistence.load_sync(),
+            PersistenceLoadOutcome::Discarded
+        ));
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_missing_settings_file_is_no_state() {
+        let temp_dir = create_temp_dir("settings-missing");
+        let persistence = settings_persistence(&temp_dir);
+
+        assert!(matches!(
+            persistence.load_sync(),
             PersistenceLoadOutcome::NoState
         ));
 
@@ -830,14 +816,14 @@ mod tests {
 
     #[test]
     fn test_new_with_none_disables_persistence_deterministically() {
-        let persistence = PersistenceManager::new(None);
+        let persistence: PersistenceManager<PersistedState> = PersistenceManager::new(None);
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
 
         persistence
-            .save_state_sync(&contract_persisted_state(saved_at_utc))
+            .save_sync(&contract_persisted_state(saved_at_utc))
             .expect("sync save without a path should be a no-op success");
         assert!(matches!(
-            persistence.load_state_sync(),
+            persistence.load_sync(),
             PersistenceLoadOutcome::NoState
         ));
     }

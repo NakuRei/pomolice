@@ -11,12 +11,12 @@ import { createLogger } from "../logging/logger";
 import { FRONTEND_LOG_EVENT_IDS } from "../logging/logEvents";
 import {
   type ActiveWindowChangedPayload,
+  type SettingsChangedPayload,
   type TimerTickPayload,
   type SessionCompletedPayload,
   type FullStatePayload,
   useTimerStore,
 } from "../store/timerStore";
-import { useSettingsStore } from "../store/settingsStore";
 import {
   notifyWorkComplete,
   notifyBreakAutoStarted,
@@ -54,8 +54,8 @@ export function useTimerSync(): void {
   const handleActiveWindowChanged = useTimerStore(
     (s) => s.handleActiveWindowChanged,
   );
+  const handleSettingsChanged = useTimerStore((s) => s.handleSettingsChanged);
   const setConnected = useTimerStore((s) => s.setConnected);
-  const syncSettings = useTimerStore((s) => s.syncSettings);
   const showAutoRunStopPendingInfo = useTimerStore(
     (s) => s.showAutoRunStopPendingInfo,
   );
@@ -65,7 +65,6 @@ export function useTimerSync(): void {
     const listeners: UnlistenFn[] = [];
     let mounted = true;
     let retryTimeoutId: ReturnType<typeof setTimeout> | null = null;
-    const settingsHydrationSucceeded = useSettingsStore.persist.hasHydrated();
 
     function clearRetryTimeout(): void {
       if (retryTimeoutId !== null) {
@@ -158,7 +157,19 @@ export function useTimerSync(): void {
             }
           },
         );
-      return registerActiveListener(unlistenActiveWindowChanged);
+      if (!registerActiveListener(unlistenActiveWindowChanged)) {
+        return false;
+      }
+
+      const unlistenSettingsChanged = await listen<SettingsChangedPayload>(
+        "settings_changed",
+        (event) => {
+          if (mounted) {
+            handleSettingsChanged(event.payload);
+          }
+        },
+      );
+      return registerActiveListener(unlistenSettingsChanged);
     }
 
     function shouldRetryTimerSyncSetupFailure(
@@ -239,11 +250,6 @@ export function useTimerSync(): void {
             failureSource,
           );
         }
-        return;
-      }
-
-      if (settingsHydrationSucceeded) {
-        await syncSettings();
       }
     }
 
@@ -259,9 +265,9 @@ export function useTimerSync(): void {
     handleSessionCompleted,
     handleFullState,
     handleActiveWindowChanged,
+    handleSettingsChanged,
     setConnected,
     showAutoRunStopPendingInfo,
     showAutoRunStoppedInfo,
-    syncSettings,
   ]);
 }

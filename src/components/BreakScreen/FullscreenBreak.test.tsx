@@ -16,15 +16,23 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 import { FullscreenBreak } from "./FullscreenBreak";
 import { useEmergencyShortcutStore } from "@/store/emergencyShortcutStore";
-import { useSettingsStore } from "@/store/settingsStore";
+import { useErrorStore } from "@/store/errorStore";
 import { useTimerStore, SessionType, TimerStatus } from "@/store/timerStore";
 import { useSkipFlowStore } from "@/store/skipFlowStore";
-import { resetSettingsStoreForTest } from "@/test/resetSettingsStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
+import {
+  createSettingsForTest,
+  answerSettingsSavesForTest,
+} from "@/test/settingsFixture";
+import type { Settings } from "@/types/settings";
 import {
   LONG_TYPING_PHRASES,
   SHORT_TYPING_PHRASES,
 } from "@/data/typingPhrases";
+
+function setSettings(overrides: Partial<Settings> = {}): void {
+  useTimerStore.setState({ settings: createSettingsForTest(overrides) });
+}
 
 function getBreakTimerDisplay(timeText: string): HTMLElement {
   return screen.getByText(timeText);
@@ -102,18 +110,14 @@ describe("FullscreenBreak", () => {
     mockInvoke.mockResolvedValue(undefined);
     resetTimerStoreForTest();
     useSkipFlowStore.getState().resetSkipFlow();
-    resetSettingsStoreForTest();
-    useSettingsStore.setState({
-      durationSettingsApplicationStatus: "confirmed",
-      automationSettingsApplicationStatus: "confirmed",
-    });
+    useErrorStore.getState().clearAllErrors();
+    setSettings();
     useTimerStore.setState({
       sessionType: SessionType.SHORT_BREAK,
       remainingSeconds: 300,
       status: TimerStatus.ON_BREAK,
       isFullscreenBreak: true,
       isConnected: true,
-      isSettingsSynchronizationInFlight: false,
     });
   });
 
@@ -158,8 +162,9 @@ describe("FullscreenBreak", () => {
       expect(screen.getByLabelText("長い休憩")).toBeInTheDocument();
     });
 
-    it("toggles the notification sound mute from the break screen", async () => {
+    it("saves the notification sound mute from the break screen", async () => {
       const user = userEvent.setup();
+      mockInvoke.mockImplementation(answerSettingsSavesForTest);
       render(<FullscreenBreak />);
 
       const muteToggle = screen.getByRole("button", { name: "通知音" });
@@ -167,34 +172,42 @@ describe("FullscreenBreak", () => {
 
       await user.click(muteToggle);
 
-      expect(useSettingsStore.getState().notificationSoundMuted).toBe(true);
+      expect(mockInvoke).toHaveBeenCalledWith("update_settings", {
+        changes: { notification_sound_muted: true },
+      });
       expect(muteToggle).toHaveAttribute("aria-pressed", "true");
     });
 
-    it("keeps unresolved settings visible without blocking the skip flow", async () => {
-      useSettingsStore.setState({
-        automationSettingsApplicationStatus: "unconfirmed",
-      });
+    it("hides the mute toggle until the settings have arrived", () => {
+      useTimerStore.setState({ settings: null });
 
-      await renderFullscreenBreakWithSkipFlowOpen();
+      render(<FullscreenBreak />);
 
-      expect(screen.getByRole("alert")).toHaveTextContent(
-        /適用を確認できませんでした/u,
-      );
       expect(
-        screen.queryByRole("button", { name: "設定の同期を再試行" }),
+        screen.queryByRole("button", { name: "通知音" }),
       ).not.toBeInTheDocument();
-      expect(screen.getByText(/Step/iu)).toBeInTheDocument();
-      expect(screen.getByText(/No, Take Break/iu)).toBeInTheDocument();
     });
 
-    it("keeps settings recovery informational while fullscreen remains enforced", () => {
-      useSettingsStore.setState({
-        automationSettingsApplicationStatus: "unconfirmed",
+    it("shows why a settings save from the break screen failed", async () => {
+      const user = userEvent.setup();
+      mockInvoke.mockRejectedValue({
+        code: "persistence_error",
+        message: "Persistence error",
       });
+      render(<FullscreenBreak />);
+
+      await user.click(screen.getByRole("button", { name: "通知音" }));
+
+      expect(
+        await screen.findByText("データの保存に失敗しました"),
+      ).toBeInTheDocument();
+    });
+
+    it("keeps the break screen while fullscreen remains enforced", () => {
       useTimerStore.getState().handleTimerTick({
         status: TimerStatus.IDLE,
         remaining_seconds: 300,
+        session_duration_secs: 300,
         session_type: SessionType.SHORT_BREAK,
         current_cycle: 1,
         completed_pomodoros: 0,
@@ -206,20 +219,13 @@ describe("FullscreenBreak", () => {
       render(<FullscreenBreak />);
 
       expect(useTimerStore.getState().status).toBe(TimerStatus.ON_BREAK);
-      expect(screen.getByRole("alert")).toHaveTextContent(/休憩終了後/u);
-      expect(
-        screen.queryByRole("button", { name: "設定の同期を再試行" }),
-      ).not.toBeInTheDocument();
       expect(
         screen.getByRole("button", { name: "休憩をスキップ" }),
       ).toBeInTheDocument();
     });
 
-    it("keeps the complete skip flow usable while settings remain unresolved", () => {
+    it("ends the break with an emergency stop once the whole skip flow is done", () => {
       vi.useFakeTimers();
-      useSettingsStore.setState({
-        automationSettingsApplicationStatus: "unconfirmed",
-      });
       render(<FullscreenBreak />);
 
       fireEvent.click(screen.getByRole("button", { name: "休憩をスキップ" }));
@@ -244,9 +250,6 @@ describe("FullscreenBreak", () => {
       });
 
       expect(screen.getByText("Final Warning")).toBeInTheDocument();
-      expect(screen.getByRole("alert")).toHaveTextContent(
-        /適用を確認できませんでした/u,
-      );
       fireEvent.click(screen.getByRole("button", { name: "Yes, Skip Anyway" }));
 
       expect(mockInvoke).toHaveBeenCalledTimes(1);
@@ -307,7 +310,7 @@ describe("FullscreenBreak", () => {
 
   describe("Away During Break", () => {
     function enableAutomaticPostBreakPolicy(): void {
-      useSettingsStore.setState({
+      setSettings({
         postBreakTransitionPolicy: "start_next_work_automatically",
       });
     }
@@ -316,6 +319,7 @@ describe("FullscreenBreak", () => {
       useTimerStore.getState().handleTimerTick({
         status: TimerStatus.ON_BREAK,
         remaining_seconds: 300,
+        session_duration_secs: 300,
         session_type: SessionType.SHORT_BREAK,
         current_cycle: 1,
         completed_pomodoros: 1,
@@ -326,7 +330,7 @@ describe("FullscreenBreak", () => {
     }
 
     it("offers the away action only when the next work would start automatically", () => {
-      useSettingsStore.setState({
+      setSettings({
         postBreakTransitionPolicy: "require_manual_continue",
       });
       const { unmount } = render(<FullscreenBreak />);

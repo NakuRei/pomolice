@@ -4,7 +4,6 @@ import { FullscreenBreak } from "./components/BreakScreen/FullscreenBreak";
 import { HomeScreen } from "./components/Home/HomeScreen";
 import { SettingsScreenContent } from "./components/Settings/SettingsScreenContent";
 import { useTimerSync } from "./hooks/useTimerSync";
-import { useSettingsStore } from "./store/settingsStore";
 import { useTimerStore } from "./store/timerStore";
 import type { AppScreen, SettingsScreen } from "./types/appScreen";
 
@@ -24,22 +23,17 @@ function App(): React.ReactElement {
   const isFullscreenBreak = useTimerStore((state) => state.isFullscreenBreak);
   const [previousFullscreenBreakState, setPreviousFullscreenBreakState] =
     useState(isFullscreenBreak);
-  const notificationSoundMuted = useSettingsStore(
-    (state) => state.notificationSoundMuted,
-  );
+  const settings = useTimerStore((state) => state.settings);
   const activeWindowSummary = useTimerStore(
     (state) => state.activeWindowSummary,
   );
-  const postBreakTransitionPolicy = useSettingsStore(
-    (state) => state.postBreakTransitionPolicy,
-  );
-  const toggleNotificationSoundMuted = useSettingsStore(
+  const toggleNotificationSoundMuted = useTimerStore(
     (state) => state.toggleNotificationSoundMuted,
   );
   const isAutoContinueEnabled =
-    postBreakTransitionPolicy === "start_next_work_automatically";
+    settings?.postBreakTransitionPolicy === "start_next_work_automatically";
   const requiresManualContinue =
-    postBreakTransitionPolicy === "require_manual_continue";
+    settings?.postBreakTransitionPolicy === "require_manual_continue";
 
   const moveToScreen = (nextScreen: AppScreen): void => {
     setCurrentScreen(nextScreen);
@@ -82,11 +76,13 @@ function App(): React.ReactElement {
       }}
       renderHomeScreen={() => (
         <HomeScreen
-          notificationSoundMuted={notificationSoundMuted}
+          notificationSoundMuted={settings?.notificationSoundMuted ?? null}
           isAutoRunWindowActive={activeWindowSummary !== null}
           isAutoContinueEnabled={isAutoContinueEnabled}
           requiresManualContinue={requiresManualContinue}
-          onToggleNotificationSoundMuted={toggleNotificationSoundMuted}
+          onToggleNotificationSoundMuted={() => {
+            void toggleNotificationSoundMuted();
+          }}
           onOpenSettingsTopScreen={() => {
             moveToScreen("settingsTop");
           }}

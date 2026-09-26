@@ -77,16 +77,8 @@ describe("TimerControls", () => {
 
       const { command, payload } = getInvokeCall(0);
       expect(command).toBe("start_work");
-      expect(payload).toBeDefined();
-      if (!payload) {
-        throw new Error("Expected start_work payload");
-      }
-
-      expect(typeof payload.workDurationSecs).toBe("number");
-      expect(typeof payload.shortBreakDurationSecs).toBe("number");
-      expect(typeof payload.longBreakDurationSecs).toBe("number");
-      expect(typeof payload.longBreakInterval).toBe("number");
-      expect(payload.postBreakTransitionPolicy).toBe("require_manual_continue");
+      // The backend starts the session with the settings it owns.
+      expect(payload).toBeUndefined();
     });
   });
 

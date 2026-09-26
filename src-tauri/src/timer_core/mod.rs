@@ -26,16 +26,18 @@ use schedule::{BootPromptGate, ScheduleState};
 
 use crate::error::Result;
 use crate::schedule_boundary::{is_now_inside_schedule_window, ActiveWindow};
+use crate::settings::{SettingsFileStatus, UserSettings};
 use crate::types::{
-    FullStatePayload, PersistedState, SessionType, TimerSettings, TimerStatus, TimerTickPayload,
-    PERSISTED_STATE_SCHEMA_VERSION,
+    FullStatePayload, PersistedState, SessionDurationSecs, SessionType, TimerStatus,
+    TimerTickPayload, PERSISTED_STATE_SCHEMA_VERSION,
 };
 
 pub(crate) struct TimerCore {
     phase: TimerPhase,
     current_cycle: u32,
     completed_pomodoros: u32,
-    settings: TimerSettings,
+    settings: UserSettings,
+    settings_file_status: SettingsFileStatus,
     last_transition_at: Option<DateTime<Local>>,
     schedule: ScheduleState,
 }
@@ -46,7 +48,7 @@ impl TimerCore {
         match event {
             Event::Started => Ok(self.apply_started(now)),
             Event::Tick => Ok(self.apply_tick(now)),
-            Event::StartWorkRequested { settings } => self.start_work_requested(settings, now),
+            Event::StartWorkRequested => self.start_work_requested(now),
             Event::FirstFullStateObserved => {
                 self.observe_first_full_state(now);
                 Ok(Vec::new())
@@ -57,28 +59,7 @@ impl TimerCore {
             }
             Event::BreakAttendanceSet { attendance } => self.set_break_attendance(attendance, now),
             Event::EmergencyStopRequested => Ok(self.emergency_stop(now)),
-            Event::TimerDurationSettingsChanged {
-                work_duration_secs,
-                short_break_duration_secs,
-                long_break_duration_secs,
-                long_break_interval,
-            } => self.change_timer_durations(
-                work_duration_secs,
-                short_break_duration_secs,
-                long_break_duration_secs,
-                long_break_interval,
-                now,
-            ),
-            Event::AutomationPoliciesChanged {
-                auto_run_feature_enabled,
-                weekly_auto_run_config,
-                post_break_transition_policy,
-            } => Ok(self.change_automation_policies(
-                auto_run_feature_enabled,
-                weekly_auto_run_config,
-                post_break_transition_policy,
-                now,
-            )),
+            Event::SettingsChanged { settings } => Ok(self.change_settings(settings, now)),
             Event::InputDetected => Ok(self.apply_input_penalty(now)),
             Event::EscapeComboPressed => Ok(self.escape_combo_pressed()),
             Event::BreakLockEntered => Ok(self.break_lock_entered(now)),
@@ -109,6 +90,10 @@ impl TimerCore {
         self.phase.status()
     }
 
+    pub(crate) fn settings(&self) -> &UserSettings {
+        &self.settings
+    }
+
     pub(crate) fn post_break_decision_pending(&self) -> bool {
         self.phase.post_break_decision_pending()
     }
@@ -118,10 +103,10 @@ impl TimerCore {
     }
 
     fn active_window_at(&self, now: DateTime<Local>) -> Option<ActiveWindow> {
-        if !self.schedule.enabled {
+        if !self.settings.auto_run_feature_enabled {
             return None;
         }
-        is_now_inside_schedule_window(now, &self.schedule.config)
+        is_now_inside_schedule_window(now, &self.settings.weekly_auto_run_config)
     }
 
     pub(crate) fn tick_payload(&self, now: DateTime<Local>) -> TimerTickPayload {
@@ -129,6 +114,7 @@ impl TimerCore {
         TimerTickPayload {
             status: self.status(),
             remaining_seconds: self.remaining_seconds_at(now),
+            session_duration_secs: self.session_duration_secs().get(),
             session_type: self.session_type(),
             current_cycle: self.current_cycle,
             completed_pomodoros: self.completed_pomodoros,
@@ -158,6 +144,7 @@ impl TimerCore {
         FullStatePayload {
             status: tick.status,
             remaining_seconds: tick.remaining_seconds,
+            session_duration_secs: tick.session_duration_secs,
             session_type: tick.session_type,
             current_cycle: tick.current_cycle,
             completed_pomodoros: tick.completed_pomodoros,
@@ -166,6 +153,7 @@ impl TimerCore {
             away_during_break: tick.away_during_break,
             post_break_decision_pending: self.post_break_decision_pending(),
             settings: self.settings.clone(),
+            settings_file_status: self.settings_file_status,
             boot_auto_start_prompt_window,
             active_window_summary,
         }
@@ -180,14 +168,12 @@ impl TimerCore {
             schema_version: PERSISTED_STATE_SCHEMA_VERSION,
             status: self.status(),
             remaining_seconds: self.remaining_seconds_at(now),
+            session_duration_secs: self.session_duration_secs(),
             session_type: self.session_type(),
             current_cycle: self.current_cycle,
             completed_pomodoros: self.completed_pomodoros,
             post_break_decision_pending: self.post_break_decision_pending(),
-            settings: self.settings.clone(),
             saved_at,
-            auto_run_feature_enabled: self.schedule.enabled,
-            weekly_auto_run_config: self.schedule.config.clone(),
             schedule_stop_state: self.schedule.stop_state,
         }
     }
@@ -199,10 +185,18 @@ impl TimerCore {
         }
     }
 
+    fn session_duration_secs(&self) -> SessionDurationSecs {
+        match &self.phase {
+            TimerPhase::Idle { .. } => self.settings.work_duration_secs.into(),
+            TimerPhase::Working { duration_secs, .. } => *duration_secs,
+            TimerPhase::OnBreak(current_break) => current_break.duration_secs,
+        }
+    }
+
     fn remaining_seconds_at(&self, now: DateTime<Local>) -> u64 {
         match &self.phase {
             TimerPhase::Idle { .. } => self.settings.work_duration_secs.get(),
-            TimerPhase::Working { ends_at } => whole_seconds_until(*ends_at, now),
+            TimerPhase::Working { ends_at, .. } => whole_seconds_until(*ends_at, now),
             TimerPhase::OnBreak(current_break) => current_break.remaining_seconds,
         }
     }

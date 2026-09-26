@@ -6,9 +6,10 @@ use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
 use crate::schedule_boundary::{
     collect_crossed_end_boundaries, collect_crossed_start_boundaries, ActiveWindow,
 };
+use crate::settings::{SettingsFileStatus, UserSettings};
 use crate::types::{
-    ActiveWindowChangedPayload, BoundaryOccurrenceId, PostBreakTransitionPolicy, ScheduleStopState,
-    TimerStatus, WeeklyAutoRunConfig, WorkStartOrigin,
+    ActiveWindowChangedPayload, BoundaryOccurrenceId, ScheduleStopState, SettingsChangedPayload,
+    TimerStatus, WorkStartOrigin,
 };
 
 /// Gate that keeps schedule starts closed until the frontend has had the
@@ -20,10 +21,9 @@ pub(super) enum BootPromptGate {
     Open,
 }
 
-/// Everything the weekly schedule needs to decide on a tick.
+/// What the weekly schedule tracks between ticks. Whether it is enabled
+/// and its slots are part of the user settings.
 pub(super) struct ScheduleState {
-    pub(super) enabled: bool,
-    pub(super) config: WeeklyAutoRunConfig,
     /// How the running session relates to the schedule window it started in.
     pub(super) stop_state: ScheduleStopState,
     pub(super) last_boundary_check_local: DateTime<Local>,
@@ -61,7 +61,7 @@ impl TimerCore {
             return Ok(Vec::new());
         }
 
-        self.start_work(self.settings.clone(), self.manual_start_origin(now), now)?;
+        self.start_work(self.manual_start_origin(now), now)?;
         Ok(vec![self.publish(now), Effect::Persist])
     }
 
@@ -73,28 +73,37 @@ impl TimerCore {
         }
     }
 
-    pub(super) fn change_automation_policies(
+    pub(super) fn change_settings(
         &mut self,
-        auto_run_feature_enabled: bool,
-        weekly_auto_run_config: WeeklyAutoRunConfig,
-        post_break_transition_policy: PostBreakTransitionPolicy,
+        settings: UserSettings,
         now: DateTime<Local>,
     ) -> Vec<Effect> {
-        self.schedule.enabled = auto_run_feature_enabled;
-        self.schedule.config = weekly_auto_run_config;
-        self.settings.post_break_transition_policy = post_break_transition_policy;
-        if !auto_run_feature_enabled {
-            self.schedule.stop_state = ScheduleStopState::NotControlledBySchedule;
-        }
-        // Boundaries that passed under the previous schedule must not replay
-        // under the new one.
-        self.schedule.last_boundary_check_local = self.schedule.last_boundary_check_local.max(now);
+        self.settings = settings;
+        self.settings_file_status = SettingsFileStatus::Ok;
 
         log_info_event(
-            BackendLogEvent::SettingsSyncApplied,
+            BackendLogEvent::SettingsUpdateApplied,
             &[("timer_status", format!("{:?}", self.status()))],
         );
-        vec![self.publish(now), Effect::Persist]
+        let mut effects = vec![
+            Effect::EmitSettingsChanged(SettingsChangedPayload {
+                settings: self.settings.clone(),
+                settings_file_status: self.settings_file_status,
+            }),
+            self.publish(now),
+        ];
+        // The schedule decides which window is active, so a new schedule is
+        // announced right away rather than on the next tick.
+        effects.extend(self.publish_active_window_if_changed(now));
+        effects
+    }
+
+    /// Whether the session in progress ends at this boundary because the
+    /// schedule window it belongs to is over. A disabled schedule controls
+    /// nothing, whatever stop state was recorded before it was disabled.
+    pub(super) fn scheduled_stop_is_due(&self) -> bool {
+        self.settings.auto_run_feature_enabled
+            && self.schedule.stop_state == ScheduleStopState::StopAtNextSessionBoundary
     }
 
     pub(super) fn cross_end_boundaries(
@@ -102,14 +111,16 @@ impl TimerCore {
         previous_local: DateTime<Local>,
         now: DateTime<Local>,
     ) -> Vec<Effect> {
-        if !self.schedule.enabled {
+        if !self.settings.auto_run_feature_enabled {
             return Vec::new();
         }
 
         let mut effects = Vec::new();
-        for end_boundary in
-            collect_crossed_end_boundaries(previous_local, now, &self.schedule.config)
-        {
+        for end_boundary in collect_crossed_end_boundaries(
+            previous_local,
+            now,
+            &self.settings.weekly_auto_run_config,
+        ) {
             log_info_event(
                 BackendLogEvent::SchedulerCrossedEndBoundary,
                 &[("boundary_id", end_boundary.as_str().to_string())],
@@ -149,14 +160,18 @@ impl TimerCore {
             self.schedule.starts_blocked_until_idle = false;
             return Vec::new();
         }
-        if !self.schedule.enabled || self.schedule.boot_prompt_gate != BootPromptGate::Open {
+        if !self.settings.auto_run_feature_enabled
+            || self.schedule.boot_prompt_gate != BootPromptGate::Open
+        {
             return Vec::new();
         }
 
         let mut effects = Vec::new();
-        for start_boundary in
-            collect_crossed_start_boundaries(previous_local, now, &self.schedule.config)
-        {
+        for start_boundary in collect_crossed_start_boundaries(
+            previous_local,
+            now,
+            &self.settings.weekly_auto_run_config,
+        ) {
             log_info_event(
                 BackendLogEvent::SchedulerCrossedStartBoundary,
                 &[("boundary_id", start_boundary.as_str().to_string())],
@@ -178,11 +193,7 @@ impl TimerCore {
             return false;
         }
         if self
-            .start_work(
-                self.settings.clone(),
-                WorkStartOrigin::ScheduleStartBoundary,
-                now,
-            )
+            .start_work(WorkStartOrigin::ScheduleStartBoundary, now)
             .is_err()
         {
             log_warn_event(

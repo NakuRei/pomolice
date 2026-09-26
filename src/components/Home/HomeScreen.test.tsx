@@ -3,9 +3,9 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HomeScreen, type HomeScreenProps } from "./HomeScreen";
 import { useErrorStore } from "@/store/errorStore";
-import { useSettingsStore } from "@/store/settingsStore";
 import { SessionType, TimerStatus, useTimerStore } from "@/store/timerStore";
-import { resetSettingsStoreForTest } from "@/test/resetSettingsStore";
+import { resetTimerStoreForTest } from "@/test/resetTimerStore";
+import { createSettingsForTest } from "@/test/settingsFixture";
 
 function createProps(
   overrides: Partial<HomeScreenProps> = {},
@@ -25,12 +25,9 @@ describe("HomeScreen", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useErrorStore.getState().clearAllErrors();
-    resetSettingsStoreForTest();
-    useSettingsStore.setState({
-      durationSettingsApplicationStatus: "confirmed",
-      automationSettingsApplicationStatus: "confirmed",
-    });
+    resetTimerStoreForTest();
     useTimerStore.setState({
+      settings: createSettingsForTest(),
       status: TimerStatus.IDLE,
       remainingSeconds: 25 * 60,
       sessionType: SessionType.WORK,
@@ -44,7 +41,6 @@ describe("HomeScreen", () => {
       activeWindowSummary: null,
       infoMessage: null,
       infoMessageShownAtById: {},
-      isSettingsSynchronizationInFlight: false,
     });
   });
 
@@ -88,39 +84,23 @@ describe("HomeScreen", () => {
     expect(screen.getByText("FOCUS")).toBeInTheDocument();
   });
 
-  it("keeps the timer visible while settings remain unresolved", () => {
-    useSettingsStore.setState({
-      durationSettingsApplicationStatus: "pending",
-      automationSettingsApplicationStatus: "unconfirmed",
-    });
+  it("tells the user when the saved settings could not be read", () => {
+    useTimerStore.setState({ settingsFileStatus: "unusable" });
 
     render(<HomeScreen {...createProps()} />);
 
     expect(screen.getByTestId("timer-display")).toHaveTextContent("25:00");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      /保存済みの設定を読み込めなかった/u,
+    );
   });
 
-  it("shows unresolved settings and hides the notice after confirmation", () => {
-    useSettingsStore.setState({
-      durationSettingsApplicationStatus: "pending",
-      automationSettingsApplicationStatus: "confirmed",
-    });
-    useTimerStore.setState({ isConnected: true });
+  it("shows no settings notice while the settings file is usable", () => {
+    render(<HomeScreen {...createProps()} />);
 
-    const { rerender } = render(<HomeScreen {...createProps()} />);
-
-    expect(screen.getByRole("status")).toHaveTextContent(
-      /適用はまだ確認されていません/u,
-    );
-
-    act(() => {
-      useSettingsStore.setState({
-        durationSettingsApplicationStatus: "confirmed",
-      });
-    });
-    rerender(<HomeScreen {...createProps()} />);
-
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("settings-file-notice"),
+    ).not.toBeInTheDocument();
   });
 
   it("renders the timer and top-level controls", () => {
@@ -162,6 +142,30 @@ describe("HomeScreen", () => {
     await user.click(screen.getByRole("button", { name: "通知音" }));
 
     expect(onToggleNotificationSoundMuted).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the mute toggle until the settings have arrived", () => {
+    render(<HomeScreen {...createProps({ notificationSoundMuted: null })} />);
+
+    expect(
+      screen.queryByRole("button", { name: "通知音" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows why a settings save failed", () => {
+    useErrorStore.getState().reportError({
+      id: "update_settings",
+      message: "データの保存に失敗しました",
+      technicalDetail: "persistence_error",
+      severity: "recoverable",
+      origin: "backend_command",
+      canRetry: false,
+      retryFn: null,
+    });
+
+    render(<HomeScreen {...createProps()} />);
+
+    expect(screen.getByText("データの保存に失敗しました")).toBeInTheDocument();
   });
 
   it("shows the scheduled auto-run state alongside the continue mode", () => {

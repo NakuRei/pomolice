@@ -6,10 +6,15 @@ import {
   type TimerTickPayload,
 } from "./timerStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
+import {
+  createSettingsForTest,
+  settingsPayloadForTest,
+} from "@/test/settingsFixture";
 
 const breakTick: TimerTickPayload = {
   status: TimerStatus.ON_BREAK,
   remaining_seconds: 300,
+  session_duration_secs: 300,
   session_type: SessionType.SHORT_BREAK,
   current_cycle: 1,
   completed_pomodoros: 1,
@@ -66,13 +71,9 @@ describe("backend penalty state", () => {
       post_break_decision_pending: false,
       boot_auto_start_prompt_window: null,
       active_window_summary: null,
-      settings: {
-        work_duration_secs: 1500,
-        short_break_duration_secs: 300,
-        long_break_duration_secs: 900,
-        long_break_interval: 4,
-        post_break_transition_policy: "require_manual_continue",
-      },
+      session_duration_secs: 900,
+      settings: settingsPayloadForTest(createSettingsForTest()),
+      settings_file_status: "ok",
     });
 
     expect(useTimerStore.getState()).toMatchObject({
@@ -91,6 +92,7 @@ describe("backend penalty state", () => {
       ...breakTick,
       status: TimerStatus.WORKING,
       remaining_seconds: 1500,
+      session_duration_secs: 1500,
       session_type: SessionType.WORK,
       current_cycle: 2,
       is_fullscreen_break: false,

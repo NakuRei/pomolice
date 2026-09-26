@@ -1,21 +1,40 @@
 import { useId, useState } from "react";
 import { useFocusHeadingOnMount } from "@/hooks/useFocusHeadingOnMount";
+import { useSettingsSave } from "@/hooks/useSettingsSave";
+import type { Settings, SettingsValidationIssue } from "@/types/settings";
 import {
-  useSettingsStore,
   WEEKDAY_KEYS,
-  validateWeeklyAutoRunConfig,
-  type DayScheduleValidationError,
   type WeeklyAutoRunConfig,
-  type WeeklyScheduleValidationError,
   type WeekdayKey,
-} from "@/store/settingsStore";
+} from "@/types/weeklyAutoRun";
 import { StatusNotice } from "../shared/StatusNotice";
 import { SwitchButton } from "../shared/SwitchButton";
 import { AutoRunDayRow } from "./AutoRunDayRow";
 import { SettingsPageHeader } from "./SettingsPageHeader";
 import { SettingsSaveCancelFooter } from "./SettingsSaveCancelFooter";
+import {
+  overlapIssueMessages,
+  summarizeDayIssues,
+} from "./settingsIssueMessages";
+
+/** Editing a weekday settles what the last save said about that day. */
+function issueConcernsWeekday(
+  issue: SettingsValidationIssue,
+  weekday: WeekdayKey,
+): boolean {
+  if (issue.code === "invalid_time" || issue.code === "empty_time_range") {
+    return issue.weekday === weekday;
+  }
+  if (issue.code === "overlapping_time_ranges") {
+    return (
+      issue.primary_weekday === weekday || issue.secondary_weekday === weekday
+    );
+  }
+  return false;
+}
 
 interface SettingsAutoRunPageProps {
+  settings: Settings;
   openSettingsTopScreen: () => void;
 }
 
@@ -34,40 +53,24 @@ function cloneWeeklyAutoRunConfigForDraft(
 }
 
 export function SettingsAutoRunPage({
+  settings,
   openSettingsTopScreen,
 }: SettingsAutoRunPageProps): React.ReactElement {
   const headingReference = useFocusHeadingOnMount();
   const autoRunSectionHeadingId = useId();
-
-  const autoRunFeatureEnabledFromStore = useSettingsStore(
-    (state) => state.autoRunFeatureEnabled,
-  );
-  const weeklyAutoRunConfigFromStore = useSettingsStore(
-    (state) => state.weeklyAutoRunConfig,
-  );
-  const updateSettings = useSettingsStore((state) => state.updateSettings);
-
-  const weeklyAutoRunDraftInitialValue = cloneWeeklyAutoRunConfigForDraft(
-    weeklyAutoRunConfigFromStore,
-  );
-  const validationResultAtPageOpen = validateWeeklyAutoRunConfig(
-    weeklyAutoRunDraftInitialValue,
+  const { issues, isSaving, save, settleIssues } = useSettingsSave(
+    openSettingsTopScreen,
   );
 
   const [autoRunFeatureEnabledDraft, setAutoRunFeatureEnabledDraft] =
-    useState<boolean>(autoRunFeatureEnabledFromStore);
+    useState<boolean>(settings.autoRunFeatureEnabled);
   const [weeklyAutoRunConfigDraft, setWeeklyAutoRunConfigDraft] =
-    useState<WeeklyAutoRunConfig>(weeklyAutoRunDraftInitialValue);
-  const [dayScheduleValidationErrors, setDayScheduleValidationErrors] =
-    useState<Partial<Record<WeekdayKey, DayScheduleValidationError>>>(
-      validationResultAtPageOpen.dayScheduleValidationErrors,
-    );
-  const [weeklyScheduleValidationErrors, setWeeklyScheduleValidationErrors] =
-    useState<WeeklyScheduleValidationError[]>(
-      validationResultAtPageOpen.weeklyScheduleValidationErrors,
+    useState<WeeklyAutoRunConfig>(() =>
+      cloneWeeklyAutoRunConfigForDraft(settings.weeklyAutoRunConfig),
     );
 
   const updateWeeklyAutoRunDraft = (
+    weekday: WeekdayKey,
     updateDraftSchedule: (
       draftWeeklyAutoRunConfig: WeeklyAutoRunConfig,
     ) => void,
@@ -75,51 +78,12 @@ export function SettingsAutoRunPage({
     setWeeklyAutoRunConfigDraft((previousDraft) => {
       const nextDraft = cloneWeeklyAutoRunConfigForDraft(previousDraft);
       updateDraftSchedule(nextDraft);
-
-      const draftValidationResult = validateWeeklyAutoRunConfig(nextDraft);
-      setDayScheduleValidationErrors(
-        draftValidationResult.dayScheduleValidationErrors,
-      );
-      setWeeklyScheduleValidationErrors(
-        draftValidationResult.weeklyScheduleValidationErrors,
-      );
-
       return nextDraft;
     });
+    settleIssues((issue) => issueConcernsWeekday(issue, weekday));
   };
 
-  const autoRunDraftHasValidationErrors =
-    Object.keys(dayScheduleValidationErrors).length > 0 ||
-    weeklyScheduleValidationErrors.length > 0;
-
-  const saveAutoRunSettingsPage = (): void => {
-    const validationResultBeforeSave = validateWeeklyAutoRunConfig(
-      weeklyAutoRunConfigDraft,
-    );
-    setDayScheduleValidationErrors(
-      validationResultBeforeSave.dayScheduleValidationErrors,
-    );
-    setWeeklyScheduleValidationErrors(
-      validationResultBeforeSave.weeklyScheduleValidationErrors,
-    );
-    if (
-      Object.keys(validationResultBeforeSave.dayScheduleValidationErrors)
-        .length > 0 ||
-      validationResultBeforeSave.weeklyScheduleValidationErrors.length > 0
-    ) {
-      return;
-    }
-
-    updateSettings({
-      autoRunFeatureEnabled: autoRunFeatureEnabledDraft,
-      weeklyAutoRunConfig: weeklyAutoRunConfigDraft,
-    });
-    openSettingsTopScreen();
-  };
-
-  const cancelAutoRunSettingsPage = (): void => {
-    openSettingsTopScreen();
-  };
+  const overlapMessages = overlapIssueMessages(issues);
 
   return (
     <section
@@ -158,7 +122,7 @@ export function SettingsAutoRunPage({
           />
         </div>
 
-        {weeklyScheduleValidationErrors.length > 0 && (
+        {overlapMessages.length > 0 && (
           <StatusNotice
             tone="danger"
             role="alert"
@@ -166,12 +130,9 @@ export function SettingsAutoRunPage({
             testId="settings-auto-run-weekly-errors"
           >
             <div className="space-y-1">
-              {weeklyScheduleValidationErrors.map((weeklyValidationError) => (
-                <p
-                  key={`${weeklyValidationError.primaryWeekday}-${weeklyValidationError.secondaryWeekday}`}
-                  className="text-xs text-danger-200"
-                >
-                  {weeklyValidationError.message}
+              {overlapMessages.map(({ key, message }) => (
+                <p key={key} className="text-xs text-danger-200">
+                  {message}
                 </p>
               ))}
             </div>
@@ -181,7 +142,6 @@ export function SettingsAutoRunPage({
         <div className="grid gap-2">
           {WEEKDAY_KEYS.map((weekday) => {
             const daySlot = weeklyAutoRunConfigDraft[weekday];
-            const dayValidationError = dayScheduleValidationErrors[weekday];
 
             return (
               <AutoRunDayRow
@@ -189,21 +149,30 @@ export function SettingsAutoRunPage({
                 weekday={weekday}
                 autoRunFeatureEnabled={autoRunFeatureEnabledDraft}
                 daySlot={daySlot}
-                dayValidationError={dayValidationError}
+                dayIssues={summarizeDayIssues(issues, weekday)}
                 onEnabledChange={(enabled) => {
-                  updateWeeklyAutoRunDraft((draftWeeklyAutoRunConfig) => {
-                    draftWeeklyAutoRunConfig[weekday].enabled = enabled;
-                  });
+                  updateWeeklyAutoRunDraft(
+                    weekday,
+                    (draftWeeklyAutoRunConfig) => {
+                      draftWeeklyAutoRunConfig[weekday].enabled = enabled;
+                    },
+                  );
                 }}
                 onStartTimeChange={(timeText) => {
-                  updateWeeklyAutoRunDraft((draftWeeklyAutoRunConfig) => {
-                    draftWeeklyAutoRunConfig[weekday].startTime = timeText;
-                  });
+                  updateWeeklyAutoRunDraft(
+                    weekday,
+                    (draftWeeklyAutoRunConfig) => {
+                      draftWeeklyAutoRunConfig[weekday].startTime = timeText;
+                    },
+                  );
                 }}
                 onEndTimeChange={(timeText) => {
-                  updateWeeklyAutoRunDraft((draftWeeklyAutoRunConfig) => {
-                    draftWeeklyAutoRunConfig[weekday].endTime = timeText;
-                  });
+                  updateWeeklyAutoRunDraft(
+                    weekday,
+                    (draftWeeklyAutoRunConfig) => {
+                      draftWeeklyAutoRunConfig[weekday].endTime = timeText;
+                    },
+                  );
                 }}
               />
             );
@@ -212,9 +181,14 @@ export function SettingsAutoRunPage({
       </section>
 
       <SettingsSaveCancelFooter
-        onCancelButtonClick={cancelAutoRunSettingsPage}
-        onSaveButtonClick={saveAutoRunSettingsPage}
-        saveButtonDisabled={autoRunDraftHasValidationErrors}
+        onCancelButtonClick={openSettingsTopScreen}
+        onSaveButtonClick={() => {
+          void save({
+            autoRunFeatureEnabled: autoRunFeatureEnabledDraft,
+            weeklyAutoRunConfig: weeklyAutoRunConfigDraft,
+          });
+        }}
+        saveButtonDisabled={isSaving}
         footerTestId="settings-auto-run-footer"
         footerClassName="mt-4"
       />

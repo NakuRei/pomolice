@@ -2,21 +2,21 @@ import { create } from "zustand";
 import { devtools } from "zustand/middleware";
 import { immer } from "zustand/middleware/immer";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  automationSettingsCandidatesEqual,
-  durationSettingsCandidatesEqual,
-  useSettingsStore,
-  VALIDATION_RULES,
-  type DurationSettingsCandidate,
-} from "./settingsStore";
 import { useErrorStore } from "./errorStore";
 import {
   classifyBackendError,
-  formatBackendErrorDetail,
   formatPublicCommandErrorDetail,
+  settingsValidationIssuesOf,
 } from "../errors/classifyBackendError";
-import { createLogger } from "../logging/logger";
-import { FRONTEND_LOG_EVENT_IDS } from "../logging/logEvents";
+import {
+  settingsChangesToPayload,
+  settingsFromPayload,
+  type Settings,
+  type SettingsChanges,
+  type SettingsFileStatus,
+  type SettingsPayload,
+  type SettingsValidationIssue,
+} from "../types/settings";
 import type { WeekdayKey } from "../types/weeklyAutoRun";
 import type {
   PostBreakDecisionAction,
@@ -59,6 +59,8 @@ export type SessionTypeValue = (typeof SessionType)[keyof typeof SessionType];
 export interface TimerTickPayload {
   status: TimerStatus;
   remaining_seconds: number;
+  /** Total length of the current session; while idle, of the next work session. */
+  session_duration_secs: number;
   session_type: SessionTypeValue;
   current_cycle: number;
   completed_pomodoros: number;
@@ -77,13 +79,8 @@ export type SessionCompletedPayload = SessionTransitionOutcome;
  */
 export interface FullStatePayload extends TimerTickPayload {
   post_break_decision_pending: boolean;
-  settings: {
-    work_duration_secs: number;
-    short_break_duration_secs: number;
-    long_break_duration_secs: number;
-    long_break_interval: number;
-    post_break_transition_policy: PostBreakTransitionPolicy;
-  };
+  settings: SettingsPayload;
+  settings_file_status: SettingsFileStatus;
   boot_auto_start_prompt_window: ActiveWindowSummaryPayload | null;
   active_window_summary: ActiveWindowSummaryPayload | null;
 }
@@ -103,6 +100,15 @@ export interface ActiveWindowChangedPayload {
   active_window_summary: ActiveWindowSummaryPayload | null;
 }
 
+/**
+ * Payload received from backend settings_changed events, sent whenever the
+ * settings in effect change.
+ */
+export interface SettingsChangedPayload {
+  settings: SettingsPayload;
+  settings_file_status: SettingsFileStatus;
+}
+
 export type InfoMessageId = "auto_run_stop_pending" | "auto_run_stopped";
 
 export interface InfoMessage {
@@ -119,6 +125,9 @@ interface TimerState {
   // Display state (received from backend events)
   status: TimerStatus;
   remainingSeconds: number;
+  /** Total length of the current session; it keeps the length the session
+   * started with even after settings are saved. */
+  sessionDurationSeconds: number;
   sessionType: SessionTypeValue;
   currentCycle: number;
   completedPomodoros: number;
@@ -135,9 +144,21 @@ interface TimerState {
   activeWindowSummary: ActiveWindowSummaryPayload | null;
   infoMessage: InfoMessage | null;
   infoMessageShownAtById: Partial<Record<InfoMessageId, number>>;
-  isSettingsSynchronizationInFlight: boolean;
-  settingsSynchronizationFollowUpRequested: boolean;
+
+  // Settings owned by the backend; null until the first full state arrives.
+  settings: Settings | null;
+  settingsFileStatus: SettingsFileStatus;
 }
+
+/**
+ * Outcome of saving settings. `rejected` carries every input the backend
+ * refused; `failed` means the save did not happen for another reason, which
+ * is reported to the error store.
+ */
+export type SettingsSaveResult =
+  | { status: "saved" }
+  | { status: "rejected"; issues: SettingsValidationIssue[] }
+  | { status: "failed" };
 
 /**
  * Timer actions interface
@@ -149,7 +170,13 @@ interface TimerActions {
   resolvePostBreakDecision: (action: PostBreakDecisionAction) => Promise<void>;
   emergencyStop: () => Promise<void>;
   setAwayDuringBreak: (away: boolean) => Promise<void>;
-  syncSettings: () => Promise<void>;
+  saveSettings: (changes: SettingsChanges) => Promise<SettingsSaveResult>;
+  /** Saves the settings with the notification sound muted or unmuted. */
+  toggleNotificationSoundMuted: () => Promise<void>;
+  /** Saves the settings with another post-break transition policy. */
+  savePostBreakTransitionPolicy: (
+    policy: PostBreakTransitionPolicy,
+  ) => Promise<void>;
   resolveBootAutoStartPrompt: (startNow: boolean) => Promise<void>;
   showAutoRunStopPendingInfo: () => void;
   showAutoRunStoppedInfo: () => void;
@@ -160,125 +187,11 @@ interface TimerActions {
   handleSessionCompleted: (payload: SessionCompletedPayload) => void;
   handleFullState: (payload: FullStatePayload) => void;
   handleActiveWindowChanged: (payload: ActiveWindowChangedPayload) => void;
+  handleSettingsChanged: (payload: SettingsChangedPayload) => void;
   setConnected: (connected: boolean) => void;
 }
 
 type TimerStore = TimerState & TimerActions;
-
-type TimerDurationSettingsCommandPayload = Record<string, unknown> & {
-  workDurationSecs: number;
-  shortBreakDurationSecs: number;
-  longBreakDurationSecs: number;
-  longBreakInterval: number;
-};
-
-const logger = createLogger("settings_sync");
-
-function clampWithinRange(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
-}
-
-function normalizeDurationMinutesToWholeSeconds(
-  durationMinutes: number,
-  minMinutes: number,
-  maxMinutes: number,
-): number {
-  const clampedMinutes = clampWithinRange(
-    durationMinutes,
-    minMinutes,
-    maxMinutes,
-  );
-  return Math.max(1, Math.round(clampedMinutes * 60));
-}
-
-function normalizeLongBreakInterval(intervalCount: number): number {
-  const clampedInterval = clampWithinRange(
-    intervalCount,
-    VALIDATION_RULES.longBreakInterval.min,
-    VALIDATION_RULES.longBreakInterval.max,
-  );
-
-  return Math.round(clampedInterval);
-}
-
-function createTimerDurationSettingsCommandPayload(
-  settings: DurationSettingsCandidate,
-): TimerDurationSettingsCommandPayload {
-  return {
-    workDurationSecs: normalizeDurationMinutesToWholeSeconds(
-      settings.workDuration,
-      VALIDATION_RULES.workDuration.min,
-      VALIDATION_RULES.workDuration.max,
-    ),
-    shortBreakDurationSecs: normalizeDurationMinutesToWholeSeconds(
-      settings.shortBreakDuration,
-      VALIDATION_RULES.shortBreakDuration.min,
-      VALIDATION_RULES.shortBreakDuration.max,
-    ),
-    longBreakDurationSecs: normalizeDurationMinutesToWholeSeconds(
-      settings.longBreakDuration,
-      VALIDATION_RULES.longBreakDuration.min,
-      VALIDATION_RULES.longBreakDuration.max,
-    ),
-    longBreakInterval: normalizeLongBreakInterval(settings.longBreakInterval),
-  };
-}
-
-async function runSettingsSynchronizationPass(
-  timerStatus: TimerStatus,
-  isConnected: boolean,
-): Promise<void> {
-  if (!isConnected) {
-    return;
-  }
-
-  const settings = useSettingsStore.getState();
-  const shouldSynchronizeDuration =
-    timerStatus === TimerStatus.IDLE &&
-    settings.durationSettingsApplicationStatus !== "confirmed";
-  const shouldSynchronizeAutomation =
-    settings.automationSettingsApplicationStatus !== "confirmed";
-
-  if (shouldSynchronizeDuration) {
-    try {
-      await invoke(
-        "sync_timer_duration_settings",
-        createTimerDurationSettingsCommandPayload(settings),
-      );
-      useSettingsStore.getState().confirmDurationSettingsCandidate(settings);
-    } catch (error) {
-      useSettingsStore
-        .getState()
-        .markDurationSettingsCandidateUnconfirmed(settings);
-      logger.warn(FRONTEND_LOG_EVENT_IDS.settingsSyncFailed, {
-        failure_message: formatBackendErrorDetail(error),
-        timer_status: timerStatus,
-      });
-      return;
-    }
-  }
-
-  if (!shouldSynchronizeAutomation) {
-    return;
-  }
-
-  try {
-    await invoke("sync_automation_policies", {
-      postBreakTransitionPolicy: settings.postBreakTransitionPolicy,
-      autoRunFeatureEnabled: settings.autoRunFeatureEnabled,
-      weeklyAutoRunConfig: settings.weeklyAutoRunConfig,
-    });
-    useSettingsStore.getState().confirmAutomationSettingsCandidate(settings);
-  } catch (error) {
-    useSettingsStore
-      .getState()
-      .markAutomationSettingsCandidateUnconfirmed(settings);
-    logger.warn(FRONTEND_LOG_EVENT_IDS.settingsSyncFailed, {
-      failure_message: formatBackendErrorDetail(error),
-      timer_status: timerStatus,
-    });
-  }
-}
 
 const AUTO_RUN_STOP_PENDING_INFO_MESSAGE: InfoMessage = {
   id: "auto_run_stop_pending",
@@ -310,6 +223,7 @@ function shouldSuppressInfoMessageByTtl(
 const initialState: TimerState = {
   status: TimerStatus.IDLE,
   remainingSeconds: 25 * 60, // Will be updated from backend
+  sessionDurationSeconds: 25 * 60, // Will be updated from backend
   sessionType: SessionType.WORK,
   currentCycle: 0,
   completedPomodoros: 0,
@@ -322,8 +236,8 @@ const initialState: TimerState = {
   activeWindowSummary: null,
   infoMessage: null,
   infoMessageShownAtById: {},
-  isSettingsSynchronizationInFlight: false,
-  settingsSynchronizationFollowUpRequested: false,
+  settings: null,
+  settingsFileStatus: "ok",
 };
 
 /**
@@ -344,12 +258,8 @@ export const useTimerStore = create<TimerStore>()(
       // Start work session.
       // Backend decides manual_inside_window/manual_outside_window from server-side clock and schedule.
       start: async (): Promise<void> => {
-        const settings = useSettingsStore.getState();
         try {
-          await invoke("start_work", {
-            ...createTimerDurationSettingsCommandPayload(settings),
-            postBreakTransitionPolicy: settings.postBreakTransitionPolicy,
-          });
+          await invoke("start_work");
           useErrorStore.getState().clearError("start_work");
         } catch (error) {
           const detail = formatPublicCommandErrorDetail(error);
@@ -428,44 +338,56 @@ export const useTimerStore = create<TimerStore>()(
         }
       },
 
-      // Sync settings to backend
-      syncSettings: (): Promise<void> => {
-        if (get().isSettingsSynchronizationInFlight) {
-          set((state) => {
-            state.settingsSynchronizationFollowUpRequested = true;
+      saveSettings: async (
+        changes: SettingsChanges,
+      ): Promise<SettingsSaveResult> => {
+        try {
+          // The saved settings arrive as a settings_changed event, in order
+          // with the timer events, so nothing is taken from the reply.
+          await invoke("update_settings", {
+            changes: settingsChangesToPayload(changes),
           });
-          return Promise.resolve();
-        }
-
-        set((state) => {
-          state.isSettingsSynchronizationInFlight = true;
-          state.settingsSynchronizationFollowUpRequested = false;
-        });
-
-        async function runNextSynchronizationPass(): Promise<void> {
-          const { status: timerStatus, isConnected } = get();
-          await runSettingsSynchronizationPass(timerStatus, isConnected);
-          if (get().settingsSynchronizationFollowUpRequested) {
-            set((state) => {
-              state.settingsSynchronizationFollowUpRequested = false;
-            });
-            return runNextSynchronizationPass();
+          useErrorStore.getState().clearError("update_settings");
+          return { status: "saved" };
+        } catch (error) {
+          const issues = settingsValidationIssuesOf(error);
+          if (issues !== null) {
+            return { status: "rejected", issues };
           }
 
-          set((state) => {
-            state.isSettingsSynchronizationInFlight = false;
+          const { userMessage, severity, canRetry } =
+            classifyBackendError(error);
+          useErrorStore.getState().reportError({
+            id: "update_settings",
+            message: userMessage,
+            technicalDetail: formatPublicCommandErrorDetail(error),
+            severity,
+            origin: "backend_command",
+            canRetry,
+            retryFn: canRetry
+              ? async (): Promise<void> => {
+                  await get().saveSettings(changes);
+                }
+              : null,
           });
+          return { status: "failed" };
         }
+      },
 
-        return runNextSynchronizationPass().catch((error: unknown) => {
-          set((state) => {
-            state.isSettingsSynchronizationInFlight = false;
-          });
-          logger.warn(FRONTEND_LOG_EVENT_IDS.settingsSyncFailed, {
-            failure_message: formatBackendErrorDetail(error),
-            timer_status: get().status,
-          });
+      toggleNotificationSoundMuted: async (): Promise<void> => {
+        const { settings } = get();
+        if (settings === null) {
+          return;
+        }
+        await get().saveSettings({
+          notificationSoundMuted: !settings.notificationSoundMuted,
         });
+      },
+
+      savePostBreakTransitionPolicy: async (
+        policy: PostBreakTransitionPolicy,
+      ): Promise<void> => {
+        await get().saveSettings({ postBreakTransitionPolicy: policy });
       },
 
       setAwayDuringBreak: async (away: boolean): Promise<void> => {
@@ -571,22 +493,13 @@ export const useTimerStore = create<TimerStore>()(
 
       // Handle timer tick event from backend
       handleTimerTick: (payload: TimerTickPayload): void => {
-        const { status: previousStatus, isConnected } = get();
-        const nextStatus = timerStatusWithFullscreenEnforcement(
-          payload.status,
-          payload.is_fullscreen_break,
-        );
-        const shouldRequestDurationReconciliation =
-          (previousStatus === TimerStatus.WORKING ||
-            previousStatus === TimerStatus.ON_BREAK) &&
-          nextStatus === TimerStatus.IDLE &&
-          isConnected &&
-          useSettingsStore.getState().durationSettingsApplicationStatus !==
-            "confirmed";
-
         set((state) => {
-          state.status = nextStatus;
+          state.status = timerStatusWithFullscreenEnforcement(
+            payload.status,
+            payload.is_fullscreen_break,
+          );
           state.remainingSeconds = payload.remaining_seconds;
+          state.sessionDurationSeconds = payload.session_duration_secs;
           state.sessionType = payload.session_type;
           state.currentCycle = payload.current_cycle;
           state.completedPomodoros = payload.completed_pomodoros;
@@ -594,10 +507,6 @@ export const useTimerStore = create<TimerStore>()(
           state.isFullscreenBreak = payload.is_fullscreen_break;
           state.isAwayDuringBreak = payload.away_during_break;
         });
-
-        if (shouldRequestDurationReconciliation) {
-          void get().syncSettings();
-        }
       },
 
       // Handle session completed event from backend
@@ -611,35 +520,21 @@ export const useTimerStore = create<TimerStore>()(
 
       // Handle full state from backend (initial sync)
       handleFullState: (payload: FullStatePayload): void => {
-        const settings = useSettingsStore.getState();
-        const durationCommandPayload =
-          createTimerDurationSettingsCommandPayload(settings);
-        const readbackMatchesDurationCandidate =
-          payload.settings.work_duration_secs ===
-            durationCommandPayload.workDurationSecs &&
-          payload.settings.short_break_duration_secs ===
-            durationCommandPayload.shortBreakDurationSecs &&
-          payload.settings.long_break_duration_secs ===
-            durationCommandPayload.longBreakDurationSecs &&
-          payload.settings.long_break_interval ===
-            durationCommandPayload.longBreakInterval;
-        settings.reconcileDurationSettingsCandidateReadback(
-          settings,
-          readbackMatchesDurationCandidate,
-        );
-
         set((state) => {
           state.status = timerStatusWithFullscreenEnforcement(
             payload.status,
             payload.is_fullscreen_break,
           );
           state.remainingSeconds = payload.remaining_seconds;
+          state.sessionDurationSeconds = payload.session_duration_secs;
           state.sessionType = payload.session_type;
           state.currentCycle = payload.current_cycle;
           state.completedPomodoros = payload.completed_pomodoros;
           state.breakInteractionCount = payload.break_interaction_count;
           state.isFullscreenBreak = payload.is_fullscreen_break;
           state.isAwayDuringBreak = payload.away_during_break;
+          state.settings = settingsFromPayload(payload.settings);
+          state.settingsFileStatus = payload.settings_file_status;
           state.requiresManualContinueDecision =
             payload.post_break_decision_pending;
           state.bootAutoStartPromptWindow =
@@ -657,6 +552,13 @@ export const useTimerStore = create<TimerStore>()(
         });
       },
 
+      handleSettingsChanged: (payload: SettingsChangedPayload): void => {
+        set((state) => {
+          state.settings = settingsFromPayload(payload.settings);
+          state.settingsFileStatus = payload.settings_file_status;
+        });
+      },
+
       // Set connection status
       setConnected: (connected: boolean): void => {
         set((state) => {
@@ -667,25 +569,3 @@ export const useTimerStore = create<TimerStore>()(
     { name: "TimerStore" },
   ),
 );
-
-useSettingsStore.subscribe((settings, previousSettings) => {
-  const timerState = useTimerStore.getState();
-  if (!timerState.isConnected) {
-    return;
-  }
-
-  const durationCandidateChanged = !durationSettingsCandidatesEqual(
-    previousSettings,
-    settings,
-  );
-  const automationCandidateChanged = !automationSettingsCandidatesEqual(
-    previousSettings,
-    settings,
-  );
-
-  if (!durationCandidateChanged && !automationCandidateChanged) {
-    return;
-  }
-
-  void timerState.syncSettings();
-});

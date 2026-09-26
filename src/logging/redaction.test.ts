@@ -10,10 +10,10 @@ describe("buildSanitizedFrontendLogRecord()", () => {
 
     expect(() => {
       buildSanitizedFrontendLogRecord(
-        "settings.sync.failed",
-        "settings_sync",
+        "notification.sound_preview_playback_failed",
+        "notifications",
         {
-          timer_status: "idle",
+          notification_sound_type: "work",
           unknown_field: "boom",
         } as never,
         undefined,
@@ -29,10 +29,10 @@ describe("buildSanitizedFrontendLogRecord()", () => {
     setProductionEnvironmentOverrideForTest(true);
 
     const record = buildSanitizedFrontendLogRecord(
-      "settings.sync.failed",
-      "settings_sync",
+      "notification.sound_preview_playback_failed",
+      "notifications",
       {
-        timer_status: "idle",
+        notification_sound_type: "work",
         unknown_field: "boom",
       } as never,
       undefined,
@@ -40,8 +40,8 @@ describe("buildSanitizedFrontendLogRecord()", () => {
 
     expect(record).toEqual({
       keyValues: {
-        logger_scope: "settings_sync",
-        timer_status: "idle",
+        logger_scope: "notifications",
+        notification_sound_type: "work",
       },
     });
   });

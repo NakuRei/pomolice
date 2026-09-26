@@ -7,6 +7,17 @@ import {
   type MockHtmlAudio,
   resetMockHtmlAudio,
 } from "@/test/mockHtmlAudio";
+import type { Settings } from "@/types/settings";
+
+async function setSavedSettings(
+  overrides: Partial<Settings> | null,
+): Promise<void> {
+  const { useTimerStore } = await import("@/store/timerStore");
+  const { createSettingsForTest } = await import("@/test/settingsFixture");
+  useTimerStore.setState({
+    settings: overrides === null ? null : createSettingsForTest(overrides),
+  });
+}
 
 vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: vi.fn((path: string) => `asset://${path}`),
@@ -93,11 +104,7 @@ describe("notification volume gain", { concurrent: false }, () => {
   });
 
   it("uses caller-provided volume percent instead of persisted settings", async () => {
-    const { useSettingsStore } = await import("@/store/settingsStore");
-    const { resetSettingsStoreForTest } =
-      await import("@/test/resetSettingsStore");
-    resetSettingsStoreForTest();
-    useSettingsStore.setState({ notificationSoundVolumePercent: 100 });
+    await setSavedSettings({ notificationSoundVolumePercent: 100 });
 
     const silentPreviewAudio = await playPreviewAtVolumePercent(0);
     const audiblePreviewAudio = await playPreviewAtVolumePercent(60);

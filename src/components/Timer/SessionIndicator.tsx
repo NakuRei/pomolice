@@ -1,5 +1,4 @@
 import { useTimerStore } from "@/store/timerStore";
-import { useSettingsStore } from "@/store/settingsStore";
 
 /**
  * SessionIndicator Component
@@ -13,17 +12,20 @@ import { useSettingsStore } from "@/store/settingsStore";
  */
 export function SessionIndicator(): React.ReactElement | null {
   const currentCycle = useTimerStore((state) => state.currentCycle);
-  const longBreakInterval = useSettingsStore(
-    (state) => state.longBreakInterval,
+  const longBreakInterval = useTimerStore(
+    (state) => state.settings?.longBreakInterval ?? null,
   );
-  const ariaLabel = `ポモドーロ ${String(currentCycle)} / ${String(
-    longBreakInterval,
-  )}`;
 
   // Don't show if cycle hasn't started yet
-  if (currentCycle === 0) {
+  if (currentCycle === 0 || longBreakInterval === null) {
     return null;
   }
+
+  // Past the interval, the next break is long; show it as the last cycle.
+  const displayedCycle = Math.min(currentCycle, longBreakInterval);
+  const ariaLabel = `ポモドーロ ${String(displayedCycle)} / ${String(
+    longBreakInterval,
+  )}`;
 
   return (
     <div
@@ -31,7 +33,7 @@ export function SessionIndicator(): React.ReactElement | null {
       data-testid="session-indicator"
       aria-label={ariaLabel}
     >
-      ポモドーロ {currentCycle}/{longBreakInterval}
+      ポモドーロ {displayedCycle}/{longBreakInterval}
     </div>
   );
 }

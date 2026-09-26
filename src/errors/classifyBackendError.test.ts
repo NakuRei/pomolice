@@ -3,6 +3,7 @@ import {
   classifyBackendError,
   formatBackendErrorDetail,
   formatPublicCommandErrorDetail,
+  settingsValidationIssuesOf,
   type BackendErrorClassification,
   type BackendErrorCode,
 } from "./classifyBackendError";
@@ -60,6 +61,13 @@ describe("classifyBackendError", () => {
       },
       {
         code: "invalid_command_input",
+        expected: {
+          severity: "recoverable",
+          canRetry: false,
+        },
+      },
+      {
+        code: "invalid_settings",
         expected: {
           severity: "recoverable",
           canRetry: false,
@@ -242,5 +250,53 @@ describe("formatBackendErrorDetail", () => {
     expect(formatBackendErrorDetail(Symbol("backend"))).toBe(
       "Unexpected backend error",
     );
+  });
+});
+
+describe("settingsValidationIssuesOf", () => {
+  it("returns every issue of a rejected settings save", () => {
+    const issues = [
+      {
+        code: "out_of_range",
+        field: "long_break_interval",
+        min: 2,
+        max: 10,
+      },
+      { code: "empty_time_range", weekday: "wed" },
+    ];
+
+    expect(
+      settingsValidationIssuesOf({
+        code: "invalid_settings",
+        message: "Invalid settings",
+        issues,
+      }),
+    ).toEqual(issues);
+  });
+
+  it("returns null for any other failure", () => {
+    expect(
+      settingsValidationIssuesOf({
+        code: "persistence_error",
+        message: "Persistence error",
+      }),
+    ).toBeNull();
+    expect(settingsValidationIssuesOf(new Error("boom"))).toBeNull();
+  });
+
+  it("returns null for a rejection that names no input", () => {
+    expect(
+      settingsValidationIssuesOf({
+        code: "invalid_settings",
+        message: "Invalid settings",
+      }),
+    ).toBeNull();
+    expect(
+      settingsValidationIssuesOf({
+        code: "invalid_settings",
+        message: "Invalid settings",
+        issues: [],
+      }),
+    ).toBeNull();
   });
 });

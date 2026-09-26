@@ -6,15 +6,10 @@ use super::*;
 fn a_manual_start_right_after_the_last_transition_is_rate_limited() {
     let stopped_at = monday(10, 0, 5);
     let mut core = idle_without_schedule(monday(10, 0, 0));
-    start_work(&mut core, monday(10, 0, 0), TimerSettings::default());
+    start_work(&mut core, monday(10, 0, 0), Durations::default());
     apply(&mut core, Event::EmergencyStopRequested, stopped_at);
 
-    let rejected = core.apply(
-        Event::StartWorkRequested {
-            settings: TimerSettings::default(),
-        },
-        millis_after(stopped_at, 1),
-    );
+    let rejected = core.apply(Event::StartWorkRequested, millis_after(stopped_at, 1));
 
     assert!(matches!(
         rejected,
@@ -29,7 +24,7 @@ fn a_scheduled_start_is_not_rate_limited() {
     start_work(
         &mut core,
         seconds_before(workday_start(), 60),
-        TimerSettings::default(),
+        Durations::default(),
     );
     let stopped_just_before_the_boundary = millis_before(workday_start(), 100);
     apply(
@@ -46,15 +41,10 @@ fn a_scheduled_start_is_not_rate_limited() {
 #[test]
 fn a_clock_rollback_does_not_rate_limit_forever() {
     let mut core = idle_without_schedule(monday(10, 0, 0));
-    start_work(&mut core, monday(10, 0, 0), TimerSettings::default());
+    start_work(&mut core, monday(10, 0, 0), Durations::default());
     apply(&mut core, Event::EmergencyStopRequested, monday(10, 0, 5));
 
-    let started = core.apply(
-        Event::StartWorkRequested {
-            settings: TimerSettings::default(),
-        },
-        monday(9, 0, 0),
-    );
+    let started = core.apply(Event::StartWorkRequested, monday(9, 0, 0));
 
     assert!(started.is_ok());
     assert_eq!(core.status(), TimerStatus::Working);
@@ -112,7 +102,7 @@ fn input_outside_a_break_changes_nothing() {
     apply(&mut core, Event::InputDetected, monday(10, 0, 1));
     assert_eq!(core.tick_payload(monday(10, 0, 1)), while_idle);
 
-    start_work(&mut core, monday(10, 0, 1), TimerSettings::default());
+    start_work(&mut core, monday(10, 0, 1), Durations::default());
     let while_working = core.tick_payload(monday(10, 0, 2));
     apply(&mut core, Event::InputDetected, monday(10, 0, 2));
     assert_eq!(core.tick_payload(monday(10, 0, 2)), while_working);
@@ -153,51 +143,31 @@ fn break_attendance_is_rejected_outside_a_break() {
 }
 
 #[test]
-fn duration_changes_and_new_starts_are_rejected_while_working() {
+fn a_new_start_is_rejected_while_working() {
     let mut core = idle_without_schedule(monday(10, 0, 0));
-    start_work(&mut core, monday(10, 0, 0), TimerSettings::default());
+    start_work(&mut core, monday(10, 0, 0), Durations::default());
 
-    let durations_rejected = core.apply(
-        durations_changed(Durations {
-            work: 600,
-            ..Durations::default()
-        }),
-        monday(10, 0, 1),
-    );
-    let start_rejected = core.apply(
-        Event::StartWorkRequested {
-            settings: TimerSettings::default(),
-        },
-        monday(10, 0, 1),
-    );
+    let start_rejected = core.apply(Event::StartWorkRequested, monday(10, 0, 1));
 
-    assert!(matches!(
-        durations_rejected,
-        Err(PomoliceError::InvalidStateTransition { .. })
-    ));
     assert!(matches!(
         start_rejected,
         Err(PomoliceError::InvalidStateTransition { .. })
     ));
-    let settings_in_effect = core.full_state_payload(monday(10, 0, 1)).settings;
-    assert_eq!(
-        settings_in_effect.work_duration_secs.get(),
-        default_work_secs()
-    );
 }
 
 #[test]
 fn duration_changes_while_idle_update_the_work_preview() {
     let mut core = idle_without_schedule(monday(10, 0, 0));
 
-    let changed = apply(
+    let changed = change_durations(
         &mut core,
-        durations_changed(Durations {
+        Durations {
             work: 600,
             ..Durations::default()
-        }),
+        },
         monday(10, 0, 0),
     );
 
     assert_eq!(last_published(&changed).remaining_seconds, 600);
+    assert_eq!(last_published(&changed).session_duration_secs, 600);
 }

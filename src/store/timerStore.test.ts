@@ -17,42 +17,20 @@ import {
   SessionType,
   type FullStatePayload,
 } from "./timerStore";
-import {
-  useSettingsStore,
-  type SettingsApplicationStatus,
-} from "./settingsStore";
-import { resetSettingsStoreForTest } from "@/test/resetSettingsStore";
 import { resetTimerStoreForTest } from "../test/resetTimerStore";
 import { useErrorStore } from "./errorStore";
-
-function createDeferredInvoke(): {
-  promise: Promise<unknown>;
-  resolve: () => void;
-} {
-  let resolvePromise: (() => void) | undefined = undefined;
-  const promise = new Promise<unknown>((resolve) => {
-    resolvePromise = (): void => {
-      resolve(undefined);
-    };
-  });
-
-  return {
-    promise,
-    resolve: (): void => {
-      if (!resolvePromise) {
-        throw new Error("Expected deferred invoke resolver");
-      }
-      resolvePromise();
-    },
-  };
-}
+import {
+  createSettingsForTest,
+  settingsPayloadForTest,
+} from "@/test/settingsFixture";
 
 function createFullStatePayload(
-  settingsOverrides: Partial<FullStatePayload["settings"]> = {},
+  overrides: Partial<FullStatePayload> = {},
 ): FullStatePayload {
   return {
     status: TimerStatus.IDLE,
     remaining_seconds: 1500,
+    session_duration_secs: 1500,
     session_type: SessionType.WORK,
     current_cycle: 0,
     completed_pomodoros: 0,
@@ -62,73 +40,10 @@ function createFullStatePayload(
     post_break_decision_pending: false,
     boot_auto_start_prompt_window: null,
     active_window_summary: null,
-    settings: {
-      work_duration_secs: 1500,
-      short_break_duration_secs: 300,
-      long_break_duration_secs: 900,
-      long_break_interval: 4,
-      post_break_transition_policy: "require_manual_continue",
-      ...settingsOverrides,
-    },
+    settings: settingsPayloadForTest(createSettingsForTest()),
+    settings_file_status: "ok",
+    ...overrides,
   };
-}
-
-function applyFullStateSettingsReadback(payload: FullStatePayload): void {
-  useTimerStore.getState().handleFullState(payload);
-}
-
-function recordDurationStatusWhenConnectionIsEstablished(
-  recordedStatuses: SettingsApplicationStatus[],
-): () => void {
-  return useTimerStore.subscribe((state, previousState) => {
-    if (!previousState.isConnected && state.isConnected) {
-      recordedStatuses.push(
-        useSettingsStore.getState().durationSettingsApplicationStatus,
-      );
-    }
-  });
-}
-
-async function assertDurationReconciliationAfterIdleTransition(
-  previousStatus: TimerStatus,
-): Promise<void> {
-  const deferredDurationCommand = createDeferredInvoke();
-  mockInvoke.mockReturnValueOnce(deferredDurationCommand.promise);
-  useSettingsStore.setState({
-    durationSettingsApplicationStatus: "unconfirmed",
-    automationSettingsApplicationStatus: "confirmed",
-  });
-  useTimerStore.setState({
-    status: previousStatus,
-    isConnected: true,
-  });
-  const idleTick = {
-    status: TimerStatus.IDLE,
-    remaining_seconds: 1500,
-    session_type: SessionType.WORK,
-    current_cycle: 0,
-    completed_pomodoros: 0,
-    break_interaction_count: 0,
-    is_fullscreen_break: false,
-    away_during_break: false,
-  };
-
-  useTimerStore.getState().handleTimerTick(idleTick);
-
-  expect(mockInvoke).toHaveBeenCalledTimes(1);
-  expect(mockInvoke).toHaveBeenCalledWith(
-    "sync_timer_duration_settings",
-    expect.any(Object),
-  );
-  useTimerStore.getState().handleTimerTick(idleTick);
-  expect(mockInvoke).toHaveBeenCalledTimes(1);
-
-  deferredDurationCommand.resolve();
-  await vi.waitFor(() => {
-    expect(useSettingsStore.getState().durationSettingsApplicationStatus).toBe(
-      "confirmed",
-    );
-  });
 }
 
 describe("timerStore", () => {
@@ -136,11 +51,6 @@ describe("timerStore", () => {
     mockInvoke.mockReset();
     mockInvoke.mockResolvedValue(undefined);
     resetTimerStoreForTest();
-    resetSettingsStoreForTest();
-    useSettingsStore.setState({
-      durationSettingsApplicationStatus: "pending",
-      automationSettingsApplicationStatus: "pending",
-    });
   });
 
   describe("Initial State", () => {
@@ -197,6 +107,7 @@ describe("timerStore", () => {
         handleTimerTick({
           status: TimerStatus.WORKING,
           remaining_seconds: 1234,
+          session_duration_secs: 1500,
           session_type: SessionType.WORK,
           current_cycle: 2,
           completed_pomodoros: 1,
@@ -208,6 +119,7 @@ describe("timerStore", () => {
         const state = useTimerStore.getState();
         expect(state.status).toBe(TimerStatus.WORKING);
         expect(state.remainingSeconds).toBe(1234);
+        expect(state.sessionDurationSeconds).toBe(1500);
         expect(state.sessionType).toBe(SessionType.WORK);
         expect(state.currentCycle).toBe(2);
         expect(state.completedPomodoros).toBe(1);
@@ -219,6 +131,7 @@ describe("timerStore", () => {
         handleTimerTick({
           status: TimerStatus.ON_BREAK,
           remaining_seconds: 300,
+          session_duration_secs: 300,
           session_type: SessionType.SHORT_BREAK,
           current_cycle: 1,
           completed_pomodoros: 1,
@@ -234,11 +147,7 @@ describe("timerStore", () => {
         expect(state.isFullscreenBreak).toBe(true);
       });
 
-      it("keeps the effective status on break and defers duration synchronization while fullscreen remains active", () => {
-        useSettingsStore.setState({
-          durationSettingsApplicationStatus: "pending",
-          automationSettingsApplicationStatus: "confirmed",
-        });
+      it("keeps the effective status on break while fullscreen remains active", () => {
         useTimerStore.setState({
           status: TimerStatus.WORKING,
           isConnected: true,
@@ -247,6 +156,7 @@ describe("timerStore", () => {
         useTimerStore.getState().handleTimerTick({
           status: TimerStatus.IDLE,
           remaining_seconds: 0,
+          session_duration_secs: 1500,
           session_type: SessionType.WORK,
           current_cycle: 1,
           completed_pomodoros: 1,
@@ -258,13 +168,7 @@ describe("timerStore", () => {
         const state = useTimerStore.getState();
         expect(state.status).toBe(TimerStatus.ON_BREAK);
         expect(state.isFullscreenBreak).toBe(true);
-        expect(mockInvoke).not.toHaveBeenCalled();
       });
-
-      it.each([TimerStatus.WORKING, TimerStatus.ON_BREAK])(
-        "requests deferred duration reconciliation once when %s transitions to idle",
-        assertDurationReconciliationAfterIdleTransition,
-      );
     });
 
     describe("setAwayDuringBreak()", () => {
@@ -348,149 +252,39 @@ describe("timerStore", () => {
     });
 
     describe("handleFullState()", () => {
-      it("reconciles the duration readback before exposing the connection", () => {
-        useSettingsStore.setState({
-          durationSettingsApplicationStatus: "confirmed",
-        });
-        const durationStatusesAtConnection: SettingsApplicationStatus[] = [];
-        const unsubscribe = recordDurationStatusWhenConnectionIsEstablished(
-          durationStatusesAtConnection,
-        );
-
-        try {
-          useTimerStore
-            .getState()
-            .handleFullState(
-              createFullStatePayload({ work_duration_secs: 1499 }),
-            );
-        } finally {
-          unsubscribe();
-        }
-
-        expect(durationStatusesAtConnection).toEqual(["pending"]);
-      });
-
-      it.each([
-        ["work_duration_secs", 1499],
-        ["short_break_duration_secs", 299],
-        ["long_break_duration_secs", 899],
-        ["long_break_interval", 5],
-      ] as const)(
-        "marks confirmed duration settings pending when %s mismatches",
-        (fieldName, mismatchedValue) => {
-          useSettingsStore.setState({
-            durationSettingsApplicationStatus: "confirmed",
-          });
-
-          applyFullStateSettingsReadback(
-            createFullStatePayload({ [fieldName]: mismatchedValue }),
-          );
-
-          expect(
-            useSettingsStore.getState().durationSettingsApplicationStatus,
-          ).toBe("pending");
-        },
-      );
-
-      it("preserves confirmed duration settings when normalized readback matches", () => {
-        useSettingsStore.setState({
-          durationSettingsApplicationStatus: "confirmed",
-        });
-
-        applyFullStateSettingsReadback(createFullStatePayload());
-
-        expect(
-          useSettingsStore.getState().durationSettingsApplicationStatus,
-        ).toBe("confirmed");
-      });
-
-      it.each([
-        {
-          status: "pending" as const,
-          readback: "matches",
-          settingsOverrides: {},
-        },
-        {
-          status: "pending" as const,
-          readback: "mismatches",
-          settingsOverrides: { work_duration_secs: 1499 },
-        },
-        {
-          status: "unconfirmed" as const,
-          readback: "matches",
-          settingsOverrides: {},
-        },
-        {
-          status: "unconfirmed" as const,
-          readback: "mismatches",
-          settingsOverrides: { work_duration_secs: 1499 },
-        },
-      ])(
-        "keeps $status duration settings unresolved when readback $readback",
-        ({ status, settingsOverrides }) => {
-          useSettingsStore.setState({
-            durationSettingsApplicationStatus: status,
-          });
-
-          applyFullStateSettingsReadback(
-            createFullStatePayload(settingsOverrides),
-          );
-
-          expect(
-            useSettingsStore.getState().durationSettingsApplicationStatus,
-          ).toBe(status);
-        },
-      );
-
-      it.each(["pending", "confirmed", "unconfirmed"] as const)(
-        "keeps %s automation status when full-state policy disagrees",
-        (status) => {
-          useSettingsStore.setState({
-            automationSettingsApplicationStatus: status,
-          });
-
-          useTimerStore.getState().handleFullState(
-            createFullStatePayload({
-              post_break_transition_policy: "start_next_work_automatically",
-            }),
-          );
-
-          expect(
-            useSettingsStore.getState().automationSettingsApplicationStatus,
-          ).toBe(status);
-        },
-      );
-
       it("should update all state from full payload", () => {
-        const { handleFullState } = useTimerStore.getState();
+        const settings = createSettingsForTest({ workDurationSecs: 50 * 60 });
 
-        handleFullState({
-          status: TimerStatus.WORKING,
-          remaining_seconds: 1500,
-          session_type: SessionType.WORK,
-          current_cycle: 3,
-          completed_pomodoros: 2,
-          break_interaction_count: 0,
-          is_fullscreen_break: false,
-          away_during_break: false,
-          post_break_decision_pending: false,
-          boot_auto_start_prompt_window: null,
-          active_window_summary: null,
-          settings: {
-            work_duration_secs: 1500,
-            short_break_duration_secs: 300,
-            long_break_duration_secs: 900,
-            long_break_interval: 4,
-            post_break_transition_policy: "require_manual_continue",
-          },
-        });
+        useTimerStore.getState().handleFullState(
+          createFullStatePayload({
+            status: TimerStatus.WORKING,
+            remaining_seconds: 1200,
+            session_duration_secs: 1500,
+            current_cycle: 3,
+            completed_pomodoros: 2,
+            settings: settingsPayloadForTest(settings),
+          }),
+        );
 
         const state = useTimerStore.getState();
         expect(state.status).toBe(TimerStatus.WORKING);
-        expect(state.remainingSeconds).toBe(1500);
+        expect(state.remainingSeconds).toBe(1200);
+        expect(state.sessionDurationSeconds).toBe(1500);
         expect(state.currentCycle).toBe(3);
         expect(state.completedPomodoros).toBe(2);
+        expect(state.settings).toEqual(settings);
+        expect(state.settingsFileStatus).toBe("ok");
         expect(state.isConnected).toBe(true);
+      });
+
+      it("exposes that the settings file could not be used", () => {
+        useTimerStore
+          .getState()
+          .handleFullState(
+            createFullStatePayload({ settings_file_status: "unusable" }),
+          );
+
+        expect(useTimerStore.getState().settingsFileStatus).toBe("unusable");
       });
 
       it("keeps the full-state status on break while fullscreen enforcement remains active", () => {
@@ -509,15 +303,7 @@ describe("timerStore", () => {
         const { handleFullState } = useTimerStore.getState();
 
         handleFullState({
-          status: TimerStatus.IDLE,
-          remaining_seconds: 1500,
-          session_type: SessionType.WORK,
-          current_cycle: 1,
-          completed_pomodoros: 0,
-          break_interaction_count: 0,
-          is_fullscreen_break: false,
-          away_during_break: false,
-          post_break_decision_pending: false,
+          ...createFullStatePayload({ current_cycle: 1 }),
           boot_auto_start_prompt_window: {
             weekday_key: "mon",
             start_time: "09:00",
@@ -529,13 +315,6 @@ describe("timerStore", () => {
             start_time: "09:00",
             end_time: "18:00",
             crosses_midnight: false,
-          },
-          settings: {
-            work_duration_secs: 1500,
-            short_break_duration_secs: 300,
-            long_break_duration_secs: 900,
-            long_break_interval: 4,
-            post_break_transition_policy: "require_manual_continue",
           },
         });
 

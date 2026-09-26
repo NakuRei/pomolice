@@ -19,15 +19,24 @@ macro_rules! backend_log_event_spec_match {
                 Info,
                 "Persisted application state restored",
                 [
-                    "state_status" => Public,
-                    "saved_at" => Public,
+                    "file_name" => Public,
                 ]
             ),
             BackendLogEvent::AppStateUsingDefaults => spec!(
                 "app.state.using_defaults",
                 Info,
                 "Application state initialized from defaults",
-                []
+                [
+                    "file_name" => Public,
+                ]
+            ),
+            BackendLogEvent::AppStateDiscardedUnusableFile => spec!(
+                "app.state.discarded_unusable_file",
+                Warn,
+                "Unusable persisted file ignored; defaults are in effect",
+                [
+                    "file_name" => Public,
+                ]
             ),
             BackendLogEvent::AppStateInitializationStarted => spec!(
                 "app.state.initialization.started",
@@ -189,21 +198,20 @@ macro_rules! backend_log_event_spec_match {
                     "next_session_type" => Public,
                 ]
             ),
-            BackendLogEvent::SettingsSyncApplied => spec!(
-                "settings.sync.applied",
+            BackendLogEvent::SettingsUpdateApplied => spec!(
+                "settings.update.applied",
                 Info,
-                "Settings sync applied",
+                "Settings update applied",
                 [
                     "timer_status" => Public,
                 ]
             ),
-            BackendLogEvent::SettingsSyncFailed => spec!(
-                "settings.sync.failed",
+            BackendLogEvent::SettingsUpdateRejected => spec!(
+                "settings.update.rejected",
                 Warn,
-                "Settings sync failed",
+                "Settings update rejected",
                 [
-                    "timer_status" => Public,
-                    "error_message" => Sensitive,
+                    "issue_count" => Public,
                 ]
             ),
             BackendLogEvent::StoragePersistenceWriteStarted => spec!(
@@ -267,7 +275,9 @@ macro_rules! backend_log_event_spec_match {
                 "storage.persistence.loaded",
                 Info,
                 "Persistence state loaded",
-                []
+                [
+                    "file_name" => Public,
+                ]
             ),
             BackendLogEvent::StoragePersistenceParseFailed => spec!(
                 "storage.persistence.parse_failed",
@@ -283,6 +293,7 @@ macro_rules! backend_log_event_spec_match {
                 Warn,
                 "Unsupported persisted schema version",
                 [
+                    "file_name" => Public,
                     "schema_version" => Public,
                     "expected_schema_version" => Public,
                 ]

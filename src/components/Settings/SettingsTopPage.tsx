@@ -1,28 +1,26 @@
 import { WEEKDAY_LABELS_BY_KEY } from "@/constants/weekdayLabels";
 import { useFocusHeadingOnMount } from "@/hooks/useFocusHeadingOnMount";
-import {
-  useSettingsStore,
-  WEEKDAY_KEYS,
-  type WeeklyAutoRunConfig,
-} from "@/store/settingsStore";
+import { useTimerStore } from "@/store/timerStore";
 import type { PostBreakTransitionPolicy } from "@/types/sessionTransitionPolicy";
+import type { Settings } from "@/types/settings";
+import { WEEKDAY_KEYS, type WeeklyAutoRunConfig } from "@/types/weeklyAutoRun";
 import { Button } from "../shared/Button";
+import { formatDurationText } from "../shared/durationText";
 import { SettingsPageHeader } from "./SettingsPageHeader";
 
+/** Shown in place of every value until the backend has sent the settings. */
+const SETTINGS_NOT_LOADED_TEXT = "読み込み中";
+
 interface SettingsTopPageProps {
+  settings: Settings | null;
   openHomeScreen: () => void;
   openTimerSettings: () => void;
   openAutoRunSettings: () => void;
   openNotificationSettings: () => void;
 }
 
-function buildTimerSummaryText(
-  workDuration: number,
-  shortBreakDuration: number,
-  longBreakDuration: number,
-  longBreakInterval: number,
-): string {
-  return `作業${String(workDuration)}分 / 短休憩${String(shortBreakDuration)}分 / 長休憩${String(longBreakDuration)}分 / 間隔${String(longBreakInterval)}回`;
+function buildTimerSummaryText(settings: Settings): string {
+  return `作業${formatDurationText(settings.workDurationSecs)} / 短休憩${formatDurationText(settings.shortBreakDurationSecs)} / 長休憩${formatDurationText(settings.longBreakDurationSecs)} / 間隔${String(settings.longBreakInterval)}回`;
 }
 
 function buildAutoRunSummaryText(
@@ -98,6 +96,7 @@ interface SettingsTopRowButtonProps {
   summaryText: string;
   testId: string;
   openCategoryPage: () => void;
+  disabled: boolean;
 }
 
 function SettingsTopRowButton({
@@ -105,13 +104,15 @@ function SettingsTopRowButton({
   summaryText,
   testId,
   openCategoryPage,
+  disabled,
 }: SettingsTopRowButtonProps): React.ReactElement {
   return (
     <button
       type="button"
       onClick={openCategoryPage}
+      disabled={disabled}
       data-testid={testId}
-      className="w-full rounded-lg border border-border bg-surface px-4 py-3 text-left transition-colors hover:border-border-strong hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-ring"
+      className="w-full rounded-lg border border-border bg-surface px-4 py-3 text-left transition-colors hover:border-border-strong hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-ring disabled:cursor-not-allowed disabled:border-disabled-border disabled:bg-disabled-bg disabled:text-disabled-text"
     >
       <span className="block text-sm font-semibold text-text">{label}</span>
       <span className="mt-1 block truncate text-sm text-text-muted">
@@ -123,7 +124,7 @@ function SettingsTopRowButton({
 
 interface SettingsTopPostBreakPolicyRowProps {
   postBreakPolicySummaryText: string;
-  postBreakTransitionPolicy: PostBreakTransitionPolicy;
+  postBreakTransitionPolicy: PostBreakTransitionPolicy | null;
   switchPostBreakPolicyOnTopScreen: () => void;
 }
 
@@ -156,6 +157,7 @@ function SettingsTopPostBreakPolicyRow({
           appearance="secondary"
           size="sm"
           onClick={switchPostBreakPolicyOnTopScreen}
+          disabled={postBreakTransitionPolicy === null}
           testId="settings-top-post-break-policy-toggle"
           aria-pressed={autoContinueIsEnabled}
           className="shrink-0"
@@ -168,65 +170,47 @@ function SettingsTopPostBreakPolicyRow({
 }
 
 export function SettingsTopPage({
+  settings,
   openHomeScreen,
   openTimerSettings,
   openAutoRunSettings,
   openNotificationSettings,
 }: SettingsTopPageProps): React.ReactElement {
   const topHeadingReference = useFocusHeadingOnMount();
-
-  const workDuration = useSettingsStore((state) => state.workDuration);
-  const shortBreakDuration = useSettingsStore(
-    (state) => state.shortBreakDuration,
-  );
-  const longBreakDuration = useSettingsStore(
-    (state) => state.longBreakDuration,
-  );
-  const longBreakInterval = useSettingsStore(
-    (state) => state.longBreakInterval,
-  );
-  const autoRunFeatureEnabled = useSettingsStore(
-    (state) => state.autoRunFeatureEnabled,
-  );
-  const weeklyAutoRunConfig = useSettingsStore(
-    (state) => state.weeklyAutoRunConfig,
-  );
-  const postBreakTransitionPolicy = useSettingsStore(
-    (state) => state.postBreakTransitionPolicy,
-  );
-  const setPostBreakTransitionPolicy = useSettingsStore(
-    (state) => state.setPostBreakTransitionPolicy,
-  );
-  const notificationSoundMuted = useSettingsStore(
-    (state) => state.notificationSoundMuted,
-  );
-  const notificationSoundVolumePercent = useSettingsStore(
-    (state) => state.notificationSoundVolumePercent,
+  const savePostBreakTransitionPolicy = useTimerStore(
+    (state) => state.savePostBreakTransitionPolicy,
   );
 
-  const timerSummaryText = buildTimerSummaryText(
-    workDuration,
-    shortBreakDuration,
-    longBreakDuration,
-    longBreakInterval,
-  );
-  const autoRunSummaryText = buildAutoRunSummaryText(
-    autoRunFeatureEnabled,
-    weeklyAutoRunConfig,
-  );
-  const postBreakPolicySummaryText = buildPostBreakPolicySummaryText(
-    postBreakTransitionPolicy,
-  );
+  const timerSummaryText =
+    settings === null
+      ? SETTINGS_NOT_LOADED_TEXT
+      : buildTimerSummaryText(settings);
+  const autoRunSummaryText =
+    settings === null
+      ? SETTINGS_NOT_LOADED_TEXT
+      : buildAutoRunSummaryText(
+          settings.autoRunFeatureEnabled,
+          settings.weeklyAutoRunConfig,
+        );
+  const postBreakPolicySummaryText =
+    settings === null
+      ? SETTINGS_NOT_LOADED_TEXT
+      : buildPostBreakPolicySummaryText(settings.postBreakTransitionPolicy);
+  const notificationSummaryText =
+    settings === null
+      ? SETTINGS_NOT_LOADED_TEXT
+      : buildNotificationSummaryText(
+          settings.notificationSoundMuted,
+          settings.notificationSoundVolumePercent,
+        );
   const switchPostBreakPolicyOnTopScreen = (): void => {
-    const switchedPolicy = getSwitchedPostBreakTransitionPolicy(
-      postBreakTransitionPolicy,
+    if (settings === null) {
+      return;
+    }
+    void savePostBreakTransitionPolicy(
+      getSwitchedPostBreakTransitionPolicy(settings.postBreakTransitionPolicy),
     );
-    setPostBreakTransitionPolicy(switchedPolicy);
   };
-  const notificationSummaryText = buildNotificationSummaryText(
-    notificationSoundMuted,
-    notificationSoundVolumePercent,
-  );
 
   return (
     <section
@@ -249,16 +233,20 @@ export function SettingsTopPage({
           summaryText={timerSummaryText}
           testId="settings-top-row-timer"
           openCategoryPage={openTimerSettings}
+          disabled={settings === null}
         />
         <SettingsTopRowButton
           label="曜日別自動実行"
           summaryText={autoRunSummaryText}
           testId="settings-top-row-auto-run"
           openCategoryPage={openAutoRunSettings}
+          disabled={settings === null}
         />
         <SettingsTopPostBreakPolicyRow
           postBreakPolicySummaryText={postBreakPolicySummaryText}
-          postBreakTransitionPolicy={postBreakTransitionPolicy}
+          postBreakTransitionPolicy={
+            settings?.postBreakTransitionPolicy ?? null
+          }
           switchPostBreakPolicyOnTopScreen={switchPostBreakPolicyOnTopScreen}
         />
         <SettingsTopRowButton
@@ -266,6 +254,7 @@ export function SettingsTopPage({
           summaryText={notificationSummaryText}
           testId="settings-top-row-notification"
           openCategoryPage={openNotificationSettings}
+          disabled={settings === null}
         />
       </div>
     </section>

@@ -14,13 +14,8 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import { useErrorStore, type AppError } from "./errorStore";
-import { resetSettingsStoreForTest } from "@/test/resetSettingsStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { TimerStatus, useTimerStore } from "./timerStore";
-import {
-  useSettingsStore,
-  type SettingsApplicationStatus,
-} from "./settingsStore";
 
 interface TimerControlAvailabilityCase {
   label: string;
@@ -28,20 +23,6 @@ interface TimerControlAvailabilityCase {
   expectedCommand: string;
   expectedArguments?: Record<string, unknown>;
 }
-
-const SETTINGS_APPLICATION_STATUSES: SettingsApplicationStatus[] = [
-  "confirmed",
-  "pending",
-  "unconfirmed",
-];
-
-const settingsStatusCases = SETTINGS_APPLICATION_STATUSES.flatMap(
-  (durationStatus) =>
-    SETTINGS_APPLICATION_STATUSES.map((automationStatus) => ({
-      durationStatus,
-      automationStatus,
-    })),
-);
 
 const timerControlAvailabilityCases: TimerControlAvailabilityCase[] = [
   {
@@ -119,40 +100,28 @@ describe("timerStore backend command errors", () => {
     mockInvoke.mockResolvedValue(undefined);
     useErrorStore.getState().clearAllErrors();
     resetTimerStoreForTest();
-    resetSettingsStoreForTest();
   });
 
-  describe.each(settingsStatusCases)(
-    "with $durationStatus duration and $automationStatus automation",
-    ({ durationStatus, automationStatus }) => {
-      it.each(timerControlAvailabilityCases)(
-        "keeps $label available",
-        async ({ request, expectedCommand, expectedArguments }) => {
-          useSettingsStore.setState({
-            durationSettingsApplicationStatus: durationStatus,
-            automationSettingsApplicationStatus: automationStatus,
-          });
-          useTimerStore.setState({
-            isConnected: true,
-            status: TimerStatus.IDLE,
-            requiresManualContinueDecision: true,
-            bootAutoStartPromptWindow: {
-              weekday_key: "mon",
-              start_time: "09:00",
-              end_time: "18:00",
-              crosses_midnight: false,
-            },
-          });
-
-          await request();
-
-          expect(mockInvoke).toHaveBeenCalledTimes(1);
-          expect(mockInvoke.mock.calls[0]?.[0]).toBe(expectedCommand);
-          if (expectedArguments !== undefined) {
-            expect(mockInvoke.mock.calls[0]?.[1]).toEqual(expectedArguments);
-          }
+  it.each(timerControlAvailabilityCases)(
+    "sends $label to the backend",
+    async ({ request, expectedCommand, expectedArguments }) => {
+      useTimerStore.setState({
+        isConnected: true,
+        status: TimerStatus.IDLE,
+        requiresManualContinueDecision: true,
+        bootAutoStartPromptWindow: {
+          weekday_key: "mon",
+          start_time: "09:00",
+          end_time: "18:00",
+          crosses_midnight: false,
         },
-      );
+      });
+
+      await request();
+
+      expect(mockInvoke).toHaveBeenCalledTimes(1);
+      expect(mockInvoke.mock.calls[0]?.[0]).toBe(expectedCommand);
+      expect(mockInvoke.mock.calls[0]?.[1]).toEqual(expectedArguments);
     },
   );
 
@@ -161,10 +130,6 @@ describe("timerStore backend command errors", () => {
       code: "window_control_error",
       message: "failed to enter fullscreen at C:\\Users\\nak\\secret",
     };
-    useSettingsStore.setState({
-      durationSettingsApplicationStatus: "pending",
-      automationSettingsApplicationStatus: "unconfirmed",
-    });
     mockInvoke.mockRejectedValueOnce(backendError);
 
     await expectCommandRejection(
@@ -186,12 +151,6 @@ describe("timerStore backend command errors", () => {
     expect(useErrorStore.getState().errors.start_work?.retryFn).toEqual(
       expect.any(Function),
     );
-    expect(useSettingsStore.getState().durationSettingsApplicationStatus).toBe(
-      "pending",
-    );
-    expect(
-      useSettingsStore.getState().automationSettingsApplicationStatus,
-    ).toBe("unconfirmed");
   });
 
   it("stores safe structured details for resolve_post_break_decision rejections", async () => {

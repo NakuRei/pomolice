@@ -2,17 +2,9 @@ import { useId, type ChangeEvent } from "react";
 import { parseDurationInputText } from "./durationInputValue";
 /**
  * DurationInput Component
- * Reusable input component for duration settings with validation
+ * Numeric input for a timer setting. It checks only that a number was typed;
+ * range errors come from the backend through `errorMessage`.
  */
-
-function isInputValid(
-  inputValue: string,
-  min: number,
-  max: number,
-  allowDecimal: boolean,
-): boolean {
-  return parseDurationInputText(inputValue, min, max, allowDecimal) !== null;
-}
 
 function createElementTestId(
   testId: string | undefined,
@@ -31,28 +23,37 @@ function getInputStateClassName(isValid: boolean): string {
     : "border-danger-500 focus:ring-danger-500";
 }
 
+function getFormErrorMessage(
+  value: string,
+  allowDecimal: boolean,
+): string | undefined {
+  if (parseDurationInputText(value, allowDecimal) !== null) {
+    return undefined;
+  }
+  return allowDecimal ? "数値を入力してください。" : "整数を入力してください。";
+}
+
 interface DurationInputProps {
   label: string;
   value: string;
   onChange: (value: string) => void;
-  min: number;
-  max: number;
   unit?: string;
   testId?: string;
   disabled?: boolean;
   allowDecimal?: boolean;
+  /** Why the backend rejected the last saved value, if it did. */
+  errorMessage?: string;
 }
 
 export function DurationInput({
   label,
   value,
   onChange,
-  min,
-  max,
   unit = "分",
   testId,
   disabled = false,
   allowDecimal = true,
+  errorMessage,
 }: DurationInputProps): React.ReactElement {
   const generatedElementId = useId();
 
@@ -60,14 +61,14 @@ export function DurationInput({
     onChange(e.target.value);
   };
 
-  const isValid = isInputValid(value, min, max, allowDecimal);
+  const shownErrorMessage =
+    getFormErrorMessage(value, allowDecimal) ?? errorMessage;
+  const isValid = shownErrorMessage === undefined;
   const inputStateClassName = getInputStateClassName(isValid);
   const inputTestId = createElementTestId(testId, "input");
   const errorTestId = createElementTestId(testId, "error");
   const inputId = `${generatedElementId}-input`;
-  const rangeHintId = `${generatedElementId}-hint`;
   const errorId = `${generatedElementId}-error`;
-  const describedBy = isValid ? rangeHintId : `${rangeHintId} ${errorId}`;
 
   return (
     <div className="flex flex-col gap-2" data-testid={testId}>
@@ -80,12 +81,10 @@ export function DurationInput({
           type="number"
           value={value}
           onChange={handleChange}
-          min={min}
-          max={max}
           step={getStepValue(allowDecimal)}
           disabled={disabled}
           aria-invalid={isValid ? undefined : true}
-          aria-describedby={describedBy}
+          aria-describedby={isValid ? undefined : errorId}
           className={`flex-1 rounded-lg border bg-surface-raised px-3 py-2 text-on-surface focus:ring-2 focus:outline-none disabled:cursor-not-allowed disabled:border-disabled-border disabled:bg-disabled-bg disabled:text-disabled-text ${inputStateClassName}`}
           data-testid={inputTestId}
         />
@@ -97,14 +96,9 @@ export function DurationInput({
           className="text-xs text-danger-300"
           data-testid={errorTestId}
         >
-          {min}〜{max}
-          {unit}の範囲で入力してください
+          {shownErrorMessage}
         </p>
       )}
-      <p id={rangeHintId} className="text-xs text-text-muted">
-        範囲: {min}〜{max}
-        {unit}
-      </p>
     </div>
   );
 }

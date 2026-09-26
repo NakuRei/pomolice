@@ -10,10 +10,13 @@ use tokio::sync::Semaphore;
 
 use crate::error::{PersistenceFailure, PomoliceError, Result};
 use crate::external_adapters::clock::Clock;
-use crate::external_adapters::persistence::{PersistenceManager, SaveError};
-use crate::logging_event::{log_error_event, BackendLogEvent};
+use crate::external_adapters::persistence::{PersistedDocument, PersistenceManager, SaveError};
+use crate::logging_event::{log_error_event, log_warn_event, BackendLogEvent};
+use crate::settings::{
+    PersistedSettings, SettingsChanges, SettingsInput, UserSettings, SETTINGS_SCHEMA_VERSION,
+};
 use crate::timer_core::{Effect, Event, TimerCore};
-use crate::types::TimerTickPayload;
+use crate::types::{PersistedState, TimerTickPayload};
 
 /// Where effects go. The application handle is the only production sink.
 pub(crate) trait EffectSink {
@@ -23,7 +26,7 @@ pub(crate) trait EffectSink {
     async fn release_break_lock(&self) -> Event;
 }
 
-/// Owns the core, the clock it is driven by, the store it persists to, and
+/// Owns the core, the clock it is driven by, the files it persists to, and
 /// the permit that serializes every change. The fields are private so a
 /// transition can only be applied here, under the permit, with its effects
 /// run before the next one starts.
@@ -33,20 +36,23 @@ pub(crate) struct TimerRuntime {
     /// Serializes every dispatch (apply plus effect execution). Held across awaits.
     dispatch_permit: Semaphore,
     clock: Arc<dyn Clock + Send + Sync>,
-    persistence: PersistenceManager,
+    timer_state_persistence: PersistenceManager<PersistedState>,
+    settings_persistence: PersistenceManager<PersistedSettings>,
 }
 
 impl TimerRuntime {
     pub(crate) fn new(
         core: TimerCore,
         clock: Arc<dyn Clock + Send + Sync>,
-        persistence: PersistenceManager,
+        timer_state_persistence: PersistenceManager<PersistedState>,
+        settings_persistence: PersistenceManager<PersistedSettings>,
     ) -> Self {
         Self {
             core: StdMutex::new(core),
             dispatch_permit: Semaphore::new(1),
             clock,
-            persistence,
+            timer_state_persistence,
+            settings_persistence,
         }
     }
 
@@ -63,6 +69,53 @@ impl TimerRuntime {
         read: impl FnOnce(&TimerCore, DateTime<Local>) -> T,
     ) -> Result<T> {
         let _permit = self.acquire_dispatch_permit().await;
+        self.apply_then_read(sink, event, read).await
+    }
+
+    /// Writes `settings.json` first and changes the core only once that
+    /// succeeded, so the file and the running timer never disagree. The new
+    /// settings reach the frontend as an event, in order with every other
+    /// state event, so the caller learns only whether the save happened.
+    ///
+    /// The changes are laid over the settings in effect while the permit is
+    /// held, so saves that overlap never undo each other.
+    pub(crate) async fn update_settings(
+        &self,
+        sink: &impl EffectSink,
+        changes: SettingsChanges,
+    ) -> Result<()> {
+        let _permit = self.acquire_dispatch_permit().await;
+        if changes.is_empty() {
+            return Ok(());
+        }
+
+        let current = self.read(|core| SettingsInput::from(core.settings().clone()));
+        let settings = UserSettings::try_from(changes.applied_to(current)).map_err(|errors| {
+            log_warn_event(
+                BackendLogEvent::SettingsUpdateRejected,
+                &[("issue_count", errors.issues().len().to_string())],
+            );
+            PomoliceError::InvalidSettings(errors)
+        })?;
+        save_in_background(
+            &self.settings_persistence,
+            PersistedSettings {
+                schema_version: SETTINGS_SCHEMA_VERSION,
+                settings: settings.clone(),
+            },
+        )
+        .await?;
+        self.apply_then_read(sink, Event::SettingsChanged { settings }, |_, _| ())
+            .await
+    }
+
+    /// Must be called while holding the dispatch permit.
+    async fn apply_then_read<T>(
+        &self,
+        sink: &impl EffectSink,
+        event: Event,
+        read: impl FnOnce(&TimerCore, DateTime<Local>) -> T,
+    ) -> Result<T> {
         let now = self.clock.now_local();
         let effects = self.apply(event, now)?;
         let effect_result = self.run_effects(sink, effects, now).await;
@@ -82,7 +135,13 @@ impl TimerRuntime {
         let saved_at = self.clock.now_utc();
         let now = self.clock.now_local();
         let persisted_state = self.read(|core| core.persisted_state(now, saved_at));
-        self.persistence.save_state_sync(&persisted_state)
+        self.timer_state_persistence.save_sync(&persisted_state)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn read_full_state_for_tests(&self) -> crate::types::FullStatePayload {
+        let now = self.clock.now_local();
+        self.read(|core| core.full_state_payload(now))
     }
 
     fn apply(&self, event: Event, now: DateTime<Local>) -> Result<Vec<Effect>> {
@@ -138,6 +197,10 @@ impl TimerRuntime {
                     sink.emit("active_window_changed", &payload);
                     None
                 }
+                Effect::EmitSettingsChanged(payload) => {
+                    sink.emit("settings_changed", &payload);
+                    None
+                }
                 Effect::Persist => {
                     if let Err(error) = self.persist(now).await {
                         first_error.get_or_insert(error);
@@ -164,24 +227,28 @@ impl TimerRuntime {
     async fn persist(&self, now: DateTime<Local>) -> Result<()> {
         let saved_at = self.clock.now_utc();
         let persisted_state = self.read(|core| core.persisted_state(now, saved_at));
-        let persistence = self.persistence.clone();
+        save_in_background(&self.timer_state_persistence, persisted_state).await
+    }
+}
 
-        let save_result =
-            tokio::task::spawn_blocking(move || persistence.save_state_sync(&persisted_state))
-                .await;
-        match save_result {
-            Ok(Ok(())) => Ok(()),
-            Ok(Err(error)) => Err(PomoliceError::PersistenceSave(
-                PersistenceFailure::from_error(error),
-            )),
-            Err(source) => {
-                log_error_event(
-                    BackendLogEvent::StoragePersistenceWriteFailed,
-                    &[],
-                    Some(&source),
-                );
-                Err(PomoliceError::PersistenceTaskJoin { source })
-            }
+async fn save_in_background<T: PersistedDocument + Send + 'static>(
+    persistence: &PersistenceManager<T>,
+    document: T,
+) -> Result<()> {
+    let persistence = persistence.clone();
+    let save_result = tokio::task::spawn_blocking(move || persistence.save_sync(&document)).await;
+    match save_result {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(error)) => Err(PomoliceError::PersistenceSave(
+            PersistenceFailure::from_error(error),
+        )),
+        Err(source) => {
+            log_error_event(
+                BackendLogEvent::StoragePersistenceWriteFailed,
+                &[],
+                Some(&source),
+            );
+            Err(PomoliceError::PersistenceTaskJoin { source })
         }
     }
 }
@@ -191,10 +258,8 @@ mod tests {
     use super::*;
     use crate::external_adapters::clock::testing::FixedClock;
     use crate::external_adapters::persistence::{PersistenceLoadOutcome, SaveError};
-    use crate::types::{
-        PersistedState, PostBreakDecisionAction, PostBreakTransitionPolicy, TimerSettings,
-        TimerStatus, WeeklyAutoRunConfig,
-    };
+    use crate::settings::SettingsFileStatus;
+    use crate::types::{PostBreakDecisionAction, PostBreakTransitionPolicy, TimerStatus};
     use chrono::{Local, TimeZone, Utc};
     use std::path::PathBuf;
     use std::sync::Mutex;
@@ -240,6 +305,16 @@ mod tests {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .iter()
                 .map(|(name, _)| name.clone())
+                .collect()
+        }
+
+        fn emitted_payloads(&self, event_name: &str) -> Vec<serde_json::Value> {
+            self.emitted
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .iter()
+                .filter(|(name, _)| name == event_name)
+                .map(|(_, payload)| payload.clone())
                 .collect()
         }
 
@@ -300,45 +375,76 @@ mod tests {
         Arc::new(FixedClock::new(now_utc.with_timezone(&Local)))
     }
 
-    fn idle_runtime(persistence: PersistenceManager, clock: &Arc<FixedClock>) -> TimerRuntime {
+    fn runtime_with(
+        timer_state_persistence: PersistenceManager<PersistedState>,
+        settings_persistence: PersistenceManager<PersistedSettings>,
+        clock: &Arc<FixedClock>,
+    ) -> TimerRuntime {
         let clock_trait: Arc<dyn Clock + Send + Sync> = Arc::<FixedClock>::clone(clock);
         TimerRuntime::new(
-            TimerCore::restore(None, clock.now_local()),
+            TimerCore::restore(
+                None,
+                UserSettings::default(),
+                SettingsFileStatus::Ok,
+                clock.now_local(),
+            ),
             clock_trait,
-            persistence,
+            timer_state_persistence,
+            settings_persistence,
         )
     }
 
-    fn one_second_work_settings() -> TimerSettings {
-        TimerSettings::try_from_raw(
-            1,
-            60,
-            120,
-            4,
-            PostBreakTransitionPolicy::RequireManualContinue,
+    /// An idle runtime whose files live in `data_dir`.
+    fn idle_runtime(data_dir: &std::path::Path, clock: &Arc<FixedClock>) -> TimerRuntime {
+        runtime_with(
+            PersistenceManager::new(Some(data_dir.to_path_buf())),
+            PersistenceManager::new(Some(data_dir.to_path_buf())),
+            clock,
         )
-        .expect("valid settings")
+    }
+
+    fn one_second_work() -> SettingsChanges {
+        SettingsChanges {
+            work_duration_secs: Some(1),
+            ..SettingsChanges::default()
+        }
+    }
+
+    fn daytime_slot(enabled: bool) -> crate::settings::DaySlotInput {
+        crate::settings::DaySlotInput {
+            enabled,
+            start_time: "09:00".to_string(),
+            end_time: "18:00".to_string(),
+        }
     }
 
     fn saved_state(runtime: &TimerRuntime) -> Option<PersistedState> {
-        match runtime.persistence.load_state_sync() {
+        match runtime.timer_state_persistence.load_sync() {
             PersistenceLoadOutcome::Restored(persisted) => Some(persisted),
-            PersistenceLoadOutcome::NoState | PersistenceLoadOutcome::UnsupportedSchemaFallback => {
-                None
-            }
+            PersistenceLoadOutcome::NoState | PersistenceLoadOutcome::Discarded => None,
+        }
+    }
+
+    fn saved_settings(runtime: &TimerRuntime) -> Option<UserSettings> {
+        match runtime.settings_persistence.load_sync() {
+            PersistenceLoadOutcome::Restored(persisted) => Some(persisted.settings),
+            PersistenceLoadOutcome::NoState | PersistenceLoadOutcome::Discarded => None,
         }
     }
 
     async fn start_default_work(runtime: &TimerRuntime, sink: &RecordingSink) {
         runtime
-            .dispatch(
-                sink,
-                Event::StartWorkRequested {
-                    settings: TimerSettings::default(),
-                },
-            )
+            .dispatch(sink, Event::StartWorkRequested)
             .await
             .expect("start should succeed");
+    }
+
+    async fn start_one_second_work(runtime: &TimerRuntime, sink: &RecordingSink) {
+        runtime
+            .update_settings(sink, one_second_work())
+            .await
+            .expect("settings save should succeed");
+        start_default_work(runtime, sink).await;
     }
 
     #[tokio::test]
@@ -351,17 +457,10 @@ mod tests {
                     source: std::io::Error::other("injected"),
                 })
             }));
-        let runtime = idle_runtime(persistence, &clock);
+        let runtime = runtime_with(persistence, PersistenceManager::new(None), &clock);
         let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
 
-        let result = runtime
-            .dispatch(
-                &sink,
-                Event::StartWorkRequested {
-                    settings: TimerSettings::default(),
-                },
-            )
-            .await;
+        let result = runtime.dispatch(&sink, Event::StartWorkRequested).await;
 
         assert!(matches!(result, Err(PomoliceError::PersistenceSave(_))));
         let last_tick = sink.last_timer_tick().expect("a tick should be emitted");
@@ -372,7 +471,7 @@ mod tests {
     async fn a_rejected_event_runs_no_effects() {
         let clock = fixed_clock();
         let temp_dir = create_temp_dir("rejected-event");
-        let runtime = idle_runtime(PersistenceManager::new(Some(temp_dir.clone())), &clock);
+        let runtime = idle_runtime(&temp_dir, &clock);
         let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
 
         let result = runtime
@@ -396,17 +495,9 @@ mod tests {
     async fn the_frontend_receives_the_break_with_its_lock_outcome_and_it_is_persisted() {
         let clock = fixed_clock();
         let temp_dir = create_temp_dir("break-saved");
-        let runtime = idle_runtime(PersistenceManager::new(Some(temp_dir.clone())), &clock);
+        let runtime = idle_runtime(&temp_dir, &clock);
         let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
-        runtime
-            .dispatch(
-                &sink,
-                Event::StartWorkRequested {
-                    settings: one_second_work_settings(),
-                },
-            )
-            .await
-            .expect("start should succeed");
+        start_one_second_work(&runtime, &sink).await;
         clock.set_now_local(clock.now_local() + chrono::Duration::seconds(1));
 
         runtime
@@ -428,10 +519,7 @@ mod tests {
     #[tokio::test]
     async fn starting_work_is_saved_before_the_command_returns() {
         let clock = fixed_clock();
-        let runtime = idle_runtime(
-            PersistenceManager::new(Some(create_temp_dir("start-saved"))),
-            &clock,
-        );
+        let runtime = idle_runtime(&create_temp_dir("start-saved"), &clock);
         let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
 
         start_default_work(&runtime, &sink).await;
@@ -443,10 +531,7 @@ mod tests {
     #[tokio::test]
     async fn an_emergency_stop_is_saved_before_the_command_returns() {
         let clock = fixed_clock();
-        let runtime = idle_runtime(
-            PersistenceManager::new(Some(create_temp_dir("stop-saved"))),
-            &clock,
-        );
+        let runtime = idle_runtime(&create_temp_dir("stop-saved"), &clock);
         let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
         start_default_work(&runtime, &sink).await;
 
@@ -460,42 +545,237 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_schedule_change_is_saved_before_the_command_returns() {
+    async fn saved_settings_are_written_to_their_file_and_announced_as_an_event() {
         let clock = fixed_clock();
-        let runtime = idle_runtime(
-            PersistenceManager::new(Some(create_temp_dir("schedule-saved"))),
-            &clock,
-        );
+        let runtime = idle_runtime(&create_temp_dir("settings-saved"), &clock);
         let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
+        let settings = UserSettings {
+            post_break_transition_policy: PostBreakTransitionPolicy::StartNextWorkAutomatically,
+            ..UserSettings::default()
+        };
 
         runtime
-            .dispatch(
+            .update_settings(
                 &sink,
-                Event::AutomationPoliciesChanged {
-                    auto_run_feature_enabled: true,
-                    weekly_auto_run_config: WeeklyAutoRunConfig::default(),
-                    post_break_transition_policy:
+                SettingsChanges {
+                    post_break_transition_policy: Some(
                         PostBreakTransitionPolicy::StartNextWorkAutomatically,
+                    ),
+                    ..SettingsChanges::default()
                 },
             )
             .await
-            .expect("schedule change should succeed");
+            .expect("settings save should succeed");
 
-        let saved = saved_state(&runtime).expect("the schedule change should be saved");
-        assert!(saved.auto_run_feature_enabled);
         assert_eq!(
-            saved.settings.post_break_transition_policy,
-            PostBreakTransitionPolicy::StartNextWorkAutomatically
+            sink.emitted_payloads("settings_changed"),
+            vec![serde_json::json!({
+                "settings": serde_json::to_value(&settings).expect("settings should serialize"),
+                "settings_file_status": "ok",
+            })]
         );
+        assert_eq!(saved_settings(&runtime), Some(settings));
+    }
+
+    #[tokio::test]
+    async fn saving_settings_does_not_depend_on_the_timer_state_file() {
+        let clock = fixed_clock();
+        let failing_timer_state =
+            PersistenceManager::new(Some(create_temp_dir("settings-without-timer-state")))
+                .with_injected_save_error_hook(Arc::new(|| {
+                    Some(SaveError::Write {
+                        path: PathBuf::from("timer_state.json"),
+                        source: std::io::Error::other("injected"),
+                    })
+                }));
+        let runtime = runtime_with(
+            failing_timer_state,
+            PersistenceManager::new(Some(create_temp_dir("settings-with-own-file"))),
+            &clock,
+        );
+        let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
+        let settings = UserSettings {
+            auto_run_feature_enabled: true,
+            ..UserSettings::default()
+        };
+
+        runtime
+            .update_settings(
+                &sink,
+                SettingsChanges {
+                    auto_run_feature_enabled: Some(true),
+                    ..SettingsChanges::default()
+                },
+            )
+            .await
+            .expect("settings save should not touch the timer state file");
+
+        assert_eq!(runtime.read_full_state_for_tests().settings, settings);
+        assert_eq!(saved_settings(&runtime), Some(settings));
+    }
+
+    #[tokio::test]
+    async fn a_settings_save_that_cannot_be_written_changes_nothing() {
+        let clock = fixed_clock();
+        let settings_persistence =
+            PersistenceManager::new(Some(create_temp_dir("settings-save-failure")))
+                .with_injected_save_error_hook(Arc::new(|| {
+                    Some(SaveError::Write {
+                        path: PathBuf::from("settings.json"),
+                        source: std::io::Error::other("injected"),
+                    })
+                }));
+        let runtime = runtime_with(PersistenceManager::new(None), settings_persistence, &clock);
+        let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
+
+        let result = runtime.update_settings(&sink, one_second_work()).await;
+
+        assert!(matches!(result, Err(PomoliceError::PersistenceSave(_))));
+        assert!(sink.emitted_names().is_empty());
+        assert_eq!(
+            runtime.read_full_state_for_tests().settings,
+            UserSettings::default()
+        );
+    }
+
+    #[tokio::test]
+    async fn overlapping_saves_of_different_settings_keep_both_changes() {
+        let clock = fixed_clock();
+        let runtime = idle_runtime(&create_temp_dir("overlapping-saves"), &clock);
+        let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
+
+        let (muted, policy_changed) = tokio::join!(
+            runtime.update_settings(
+                &sink,
+                SettingsChanges {
+                    notification_sound_muted: Some(true),
+                    ..SettingsChanges::default()
+                },
+            ),
+            runtime.update_settings(
+                &sink,
+                SettingsChanges {
+                    post_break_transition_policy: Some(
+                        PostBreakTransitionPolicy::StartNextWorkAutomatically,
+                    ),
+                    ..SettingsChanges::default()
+                },
+            ),
+        );
+        muted.expect("mute save should succeed");
+        policy_changed.expect("policy save should succeed");
+
+        let expected = UserSettings {
+            notification_sound_muted: true,
+            post_break_transition_policy: PostBreakTransitionPolicy::StartNextWorkAutomatically,
+            ..UserSettings::default()
+        };
+        assert_eq!(runtime.read_full_state_for_tests().settings, expected);
+        assert_eq!(saved_settings(&runtime), Some(expected));
+    }
+
+    #[tokio::test]
+    async fn the_later_save_of_the_same_setting_wins() {
+        let clock = fixed_clock();
+        let runtime = idle_runtime(&create_temp_dir("same-setting-twice"), &clock);
+        let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
+        let muted = |value: bool| SettingsChanges {
+            notification_sound_muted: Some(value),
+            ..SettingsChanges::default()
+        };
+
+        runtime
+            .update_settings(&sink, muted(true))
+            .await
+            .expect("first save should succeed");
+        runtime
+            .update_settings(&sink, muted(false))
+            .await
+            .expect("second save should succeed");
+
+        assert!(
+            !runtime
+                .read_full_state_for_tests()
+                .settings
+                .notification_sound_muted
+        );
+        assert_eq!(
+            saved_settings(&runtime).map(|settings| settings.notification_sound_muted),
+            Some(false)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_change_is_validated_together_with_the_settings_it_joins() {
+        let clock = fixed_clock();
+        let runtime = idle_runtime(&create_temp_dir("validated-as-a-whole"), &clock);
+        let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
+        let mut tuesday_only = SettingsInput::from(UserSettings::default()).weekly_auto_run_config;
+        tuesday_only.tue = daytime_slot(true);
+        runtime
+            .update_settings(
+                &sink,
+                SettingsChanges {
+                    weekly_auto_run_config: Some(tuesday_only.clone()),
+                    ..SettingsChanges::default()
+                },
+            )
+            .await
+            .expect("tuesday save should succeed");
+        let mut monday_overnight = tuesday_only;
+        monday_overnight.mon = crate::settings::DaySlotInput {
+            enabled: true,
+            start_time: "23:00".to_string(),
+            end_time: "10:00".to_string(),
+        };
+
+        let result = runtime
+            .update_settings(
+                &sink,
+                SettingsChanges {
+                    weekly_auto_run_config: Some(monday_overnight),
+                    ..SettingsChanges::default()
+                },
+            )
+            .await;
+
+        match result {
+            Err(PomoliceError::InvalidSettings(errors)) => assert_eq!(
+                errors.issues(),
+                [
+                    crate::settings::SettingsValidationIssue::OverlappingTimeRanges {
+                        primary_weekday: crate::types::WeekdayKey::Mon,
+                        secondary_weekday: crate::types::WeekdayKey::Tue,
+                    }
+                ]
+            ),
+            other => panic!("expected an overlap rejection, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn saving_no_changes_writes_nothing_and_announces_nothing() {
+        let clock = fixed_clock();
+        let runtime = idle_runtime(&create_temp_dir("no-changes"), &clock);
+        let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
+
+        runtime
+            .update_settings(&sink, SettingsChanges::default())
+            .await
+            .expect("an empty save should succeed");
+
+        assert_eq!(
+            runtime.read_full_state_for_tests().settings,
+            UserSettings::default()
+        );
+        assert_eq!(saved_settings(&runtime), None);
+        assert!(sink.emitted_names().is_empty());
     }
 
     #[tokio::test]
     async fn idle_ticks_do_not_write_to_disk() {
         let clock = fixed_clock();
-        let runtime = idle_runtime(
-            PersistenceManager::new(Some(create_temp_dir("idle-no-write"))),
-            &clock,
-        );
+        let runtime = idle_runtime(&create_temp_dir("idle-no-write"), &clock);
         let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
 
         for _ in 0..3 {
@@ -512,21 +792,10 @@ mod tests {
     #[tokio::test]
     async fn dispatches_do_not_interleave_even_while_an_effect_is_still_running() {
         let clock = fixed_clock();
-        let runtime = idle_runtime(
-            PersistenceManager::new(Some(create_temp_dir("serialized"))),
-            &clock,
-        );
+        let runtime = idle_runtime(&create_temp_dir("serialized"), &clock);
         let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered)
             .with_slow_lock(std::time::Duration::from_millis(50));
-        runtime
-            .dispatch(
-                &sink,
-                Event::StartWorkRequested {
-                    settings: one_second_work_settings(),
-                },
-            )
-            .await
-            .expect("start should succeed");
+        start_one_second_work(&runtime, &sink).await;
         clock.set_now_local(clock.now_local() + chrono::Duration::seconds(1));
 
         // The tick is polled first and parks inside the slow break lock. If
@@ -547,7 +816,7 @@ mod tests {
             .expect("the stop overtook the break: dispatches interleaved");
         let stop_reported = statuses
             .iter()
-            .position(|status| status == "idle")
+            .rposition(|status| status == "idle")
             .expect("the stop should reach the frontend");
         assert!(
             break_reported < stop_reported,
@@ -558,21 +827,10 @@ mod tests {
     #[tokio::test]
     async fn exit_flush_saves_while_a_dispatch_is_still_running_its_effects() {
         let clock = fixed_clock();
-        let runtime = idle_runtime(
-            PersistenceManager::new(Some(create_temp_dir("exit-during-dispatch"))),
-            &clock,
-        );
+        let runtime = idle_runtime(&create_temp_dir("exit-during-dispatch"), &clock);
         let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered)
             .with_slow_lock(std::time::Duration::from_millis(50));
-        runtime
-            .dispatch(
-                &sink,
-                Event::StartWorkRequested {
-                    settings: one_second_work_settings(),
-                },
-            )
-            .await
-            .expect("start should succeed");
+        start_one_second_work(&runtime, &sink).await;
         clock.set_now_local(clock.now_local() + chrono::Duration::seconds(1));
 
         // The tick is polled first and parks inside the slow break lock, so the

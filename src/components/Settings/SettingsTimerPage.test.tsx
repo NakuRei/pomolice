@@ -1,80 +1,117 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useSettingsStore } from "@/store/settingsStore";
-import { SessionType, TimerStatus, useTimerStore } from "@/store/timerStore";
-import { resetSettingsStoreForTest } from "@/test/resetSettingsStore";
+
+type InvokeCommand = (
+  command: string,
+  args?: Record<string, unknown>,
+) => Promise<unknown>;
+
+const mockInvoke = vi.fn<InvokeCommand>();
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (command: string, args?: Record<string, unknown>): Promise<unknown> =>
+    mockInvoke(command, args),
+}));
+
+import { TimerStatus, useTimerStore } from "@/store/timerStore";
+import {
+  createSettingsForTest,
+  answerSettingsSavesForTest,
+} from "@/test/settingsFixture";
+import { resetTimerStoreForTest } from "@/test/resetTimerStore";
+import type { Settings, SettingsPayload } from "@/types/settings";
 import { SettingsTimerPage } from "./SettingsTimerPage";
+
+function acceptSettingsSaves(): void {
+  mockInvoke.mockImplementation(answerSettingsSavesForTest);
+}
+
+function savedSettingsChanges(): Partial<SettingsPayload>[] {
+  return mockInvoke.mock.calls
+    .filter(([command]) => command === "update_settings")
+    .map(([, args]) => args?.changes as Partial<SettingsPayload>);
+}
+
+function renderTimerPage(
+  settings: Settings = createSettingsForTest(),
+  openSettingsTopScreen = vi.fn(),
+): ReturnType<typeof vi.fn> {
+  render(
+    <SettingsTimerPage
+      settings={settings}
+      openSettingsTopScreen={openSettingsTopScreen}
+    />,
+  );
+  return openSettingsTopScreen;
+}
 
 describe("SettingsTimerPage", () => {
   beforeEach(() => {
-    resetSettingsStoreForTest();
-    useTimerStore.setState({
-      status: TimerStatus.IDLE,
-      remainingSeconds: 25 * 60,
-      sessionType: SessionType.WORK,
-      currentCycle: 0,
-      completedPomodoros: 0,
-      breakInteractionCount: 0,
-      isFullscreenBreak: false,
-      requiresManualContinueDecision: false,
-      isConnected: true,
-      bootAutoStartPromptWindow: null,
-      activeWindowSummary: null,
-      infoMessage: null,
-      infoMessageShownAtById: {},
-    });
+    mockInvoke.mockReset();
+    resetTimerStoreForTest();
+    acceptSettingsSaves();
   });
 
-  it("saves timer settings and keeps unrelated settings unchanged", async () => {
+  it("saves only the timer durations, in seconds", async () => {
     const user = userEvent.setup();
-    const openSettingsTopScreen = vi.fn();
-
-    useSettingsStore.setState({
-      workDuration: 25,
-      autoRunFeatureEnabled: true,
-      notificationSoundVolumePercent: 50,
-      postBreakTransitionPolicy: "require_manual_continue",
-    });
-
-    render(<SettingsTimerPage openSettingsTopScreen={openSettingsTopScreen} />);
+    const openSettingsTopScreen = renderTimerPage(
+      createSettingsForTest({
+        autoRunFeatureEnabled: true,
+        notificationSoundVolumePercent: 70,
+      }),
+    );
 
     const workInput = screen.getByRole("spinbutton", { name: "作業時間" });
     await user.clear(workInput);
     await user.type(workInput, "32");
     await user.click(screen.getByRole("button", { name: "保存" }));
 
-    expect(useSettingsStore.getState().workDuration).toBe(32);
-    expect(useSettingsStore.getState().postBreakTransitionPolicy).toBe(
-      "require_manual_continue",
+    await waitFor(() => {
+      expect(openSettingsTopScreen).toHaveBeenCalledTimes(1);
+    });
+    expect(savedSettingsChanges()).toEqual([
+      {
+        work_duration_secs: 32 * 60,
+        short_break_duration_secs: 5 * 60,
+        long_break_duration_secs: 15 * 60,
+        long_break_interval: 4,
+      },
+    ]);
+  });
+
+  it("shows the saved durations in minutes", () => {
+    renderTimerPage(
+      createSettingsForTest({
+        workDurationSecs: 50 * 60,
+        shortBreakDurationSecs: 90,
+      }),
     );
-    expect(useSettingsStore.getState().autoRunFeatureEnabled).toBe(true);
-    expect(useSettingsStore.getState().notificationSoundVolumePercent).toBe(50);
-    expect(openSettingsTopScreen).toHaveBeenCalledTimes(1);
+
+    expect(screen.getByRole("spinbutton", { name: "作業時間" })).toHaveValue(
+      50,
+    );
+    expect(screen.getByRole("spinbutton", { name: "短い休憩" })).toHaveValue(
+      1.5,
+    );
   });
 
   it("discards timer draft on cancel", async () => {
     const user = userEvent.setup();
-    const openSettingsTopScreen = vi.fn();
-
-    useSettingsStore.setState({ workDuration: 25 });
-
-    render(<SettingsTimerPage openSettingsTopScreen={openSettingsTopScreen} />);
+    const openSettingsTopScreen = renderTimerPage();
 
     const workInput = screen.getByRole("spinbutton", { name: "作業時間" });
     await user.clear(workInput);
     await user.type(workInput, "44");
     await user.click(screen.getByRole("button", { name: "キャンセル" }));
 
-    expect(useSettingsStore.getState().workDuration).toBe(25);
+    expect(savedSettingsChanges()).toEqual([]);
     expect(openSettingsTopScreen).toHaveBeenCalledTimes(1);
   });
 
   it("blocks timer save when long break interval draft is not an integer", async () => {
     const user = userEvent.setup();
-    const openSettingsTopScreen = vi.fn();
-
-    render(<SettingsTimerPage openSettingsTopScreen={openSettingsTopScreen} />);
+    const openSettingsTopScreen = renderTimerPage();
 
     const intervalInput = screen.getByRole("spinbutton", {
       name: "長い休憩の間隔",
@@ -86,43 +123,64 @@ describe("SettingsTimerPage", () => {
 
     await user.click(screen.getByRole("button", { name: "保存" }));
 
-    expect(useSettingsStore.getState().longBreakInterval).toBe(4);
+    expect(savedSettingsChanges()).toEqual([]);
     expect(openSettingsTopScreen).not.toHaveBeenCalled();
   });
 
-  it("keeps out-of-range timer draft visible while blocking save", async () => {
+  it("shows the backend's range error next to the rejected field and stays on the page", async () => {
     const user = userEvent.setup();
-
-    render(<SettingsTimerPage openSettingsTopScreen={() => undefined} />);
+    mockInvoke.mockRejectedValue({
+      code: "invalid_settings",
+      message: "Invalid settings",
+      issues: [
+        {
+          code: "out_of_range",
+          field: "work_duration_secs",
+          min: 1,
+          max: 7200,
+        },
+      ],
+    });
+    const openSettingsTopScreen = renderTimerPage();
 
     const workInput = screen.getByRole("spinbutton", { name: "作業時間" });
     await user.clear(workInput);
     await user.type(workInput, "999");
+    await user.click(screen.getByRole("button", { name: "保存" }));
 
+    expect(
+      await screen.findByText("1秒〜120分の範囲で入力してください。"),
+    ).toBeInTheDocument();
+    expect(workInput).toHaveAttribute("aria-invalid", "true");
     expect(workInput).toHaveValue(999);
-    expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
+    expect(openSettingsTopScreen).not.toHaveBeenCalled();
   });
 
-  it("disables timer duration inputs and keeps existing warning when timer is running", () => {
+  it("keeps inputs editable while the timer runs and says the change applies from the next session", () => {
     useTimerStore.setState({ status: TimerStatus.WORKING });
 
-    render(<SettingsTimerPage openSettingsTopScreen={() => undefined} />);
+    renderTimerPage();
 
-    expect(screen.getByRole("spinbutton", { name: "作業時間" })).toBeDisabled();
-    expect(screen.getByRole("spinbutton", { name: "短い休憩" })).toBeDisabled();
-    expect(screen.getByRole("spinbutton", { name: "長い休憩" })).toBeDisabled();
     expect(
-      screen.getByRole("spinbutton", { name: "長い休憩の間隔" }),
-    ).toBeDisabled();
+      screen.getByRole("spinbutton", { name: "作業時間" }),
+    ).not.toBeDisabled();
     expect(
       screen.getByText(
-        "タイマー実行中は時間長設定を変更できません。曜日別スケジュールのみ編集できます。",
+        "実行中のセッションの長さは変わりません。保存した時間は次のセッションから使われます。",
       ),
     ).toBeInTheDocument();
   });
 
+  it("does not show the next-session note while idle", () => {
+    renderTimerPage();
+
+    expect(
+      screen.queryByTestId("settings-duration-applies-next-session"),
+    ).not.toBeInTheDocument();
+  });
+
   it("focuses the timer heading on mount", async () => {
-    render(<SettingsTimerPage openSettingsTopScreen={() => undefined} />);
+    renderTimerPage();
 
     await waitFor(() => {
       expect(

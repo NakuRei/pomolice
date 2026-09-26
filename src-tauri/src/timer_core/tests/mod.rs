@@ -9,6 +9,9 @@
 // - `Durations { .. }` names the timer settings a scenario cares about;
 //   everything not mentioned keeps the application defaults, and
 //   `default_work_secs()` / `default_short_break_secs()` name those defaults.
+// - Settings reach the core only as a whole (`Event::SettingsChanged`), so
+//   helpers such as `enable_schedule` and `start_work` change the settings the
+//   core already holds and keep everything else.
 // - Break-lock outcomes (`BreakLockEntered` etc.) are fed back by hand,
 //   playing the role the shell has in production.
 
@@ -20,12 +23,15 @@ mod emergency_stop_and_escape;
 mod guards;
 mod restore;
 mod schedule;
+mod settings_changes;
 
 use super::*;
 use crate::error::PomoliceError;
+use crate::settings::{SettingsFileStatus, UserSettings};
 use crate::types::{
-    BreakAttendance, DayAutoRunSlot, HhMm, PostBreakDecisionAction, PostBreakTransitionPolicy,
-    ScheduleStopState, SessionTransitionReason, WeeklyAutoRunConfig,
+    BreakAttendance, DayAutoRunSlot, HhMm, LongBreakDurationSecs, LongBreakIntervalCount,
+    PostBreakDecisionAction, PostBreakTransitionPolicy, ScheduleStopState, SessionDurationSecs,
+    SessionTransitionReason, ShortBreakDurationSecs, WeeklyAutoRunConfig, WorkDurationSecs,
     PERSISTED_STATE_SCHEMA_VERSION,
 };
 use chrono::{Duration as ChronoDuration, TimeZone};
@@ -89,24 +95,29 @@ fn workday_end() -> DateTime<Local> {
     monday(18, 0, 0)
 }
 
-/// Enables the schedule with `config`. The post-break policy is sent along
-/// because the event carries all automation policies; it stays at the
-/// default (manual continue). Tests about the policy set it explicitly.
-fn schedule_enabled(config: WeeklyAutoRunConfig) -> Event {
-    Event::AutomationPoliciesChanged {
+/// Saves settings with the schedule enabled on `config`; every other setting
+/// keeps its current value.
+fn enable_schedule(
+    core: &mut TimerCore,
+    config: WeeklyAutoRunConfig,
+    now: DateTime<Local>,
+) -> Vec<Effect> {
+    let settings = UserSettings {
         auto_run_feature_enabled: true,
         weekly_auto_run_config: config,
-        post_break_transition_policy: PostBreakTransitionPolicy::RequireManualContinue,
-    }
+        ..core.settings.clone()
+    };
+    apply(core, Event::SettingsChanged { settings }, now)
 }
 
-/// Disables the schedule; the post-break policy stays at the default.
-fn schedule_disabled() -> Event {
-    Event::AutomationPoliciesChanged {
+/// Saves settings with the schedule disabled; every other setting keeps its
+/// current value.
+fn disable_schedule(core: &mut TimerCore, now: DateTime<Local>) -> Vec<Effect> {
+    let settings = UserSettings {
         auto_run_feature_enabled: false,
-        weekly_auto_run_config: workday(),
-        post_break_transition_policy: PostBreakTransitionPolicy::RequireManualContinue,
-    }
+        ..core.settings.clone()
+    };
+    apply(core, Event::SettingsChanged { settings }, now)
 }
 
 // ---- settings ----
@@ -122,7 +133,7 @@ struct Durations {
 
 impl Default for Durations {
     fn default() -> Self {
-        let defaults = TimerSettings::default();
+        let defaults = UserSettings::default();
         Self {
             work: defaults.work_duration_secs.get(),
             short_break: defaults.short_break_duration_secs.get(),
@@ -145,25 +156,29 @@ fn default_short_break_secs() -> u64 {
 /// specification, not a tunable: the runtime ticks once a second.
 const SECONDS_PER_TICK: u64 = 1;
 
-fn timer_settings(durations: Durations) -> TimerSettings {
-    TimerSettings::try_from_raw(
-        durations.work,
-        durations.short_break,
-        durations.long_break,
-        durations.long_break_interval,
-        durations.policy,
-    )
-    .expect("valid settings")
+/// `settings` with the durations and policy replaced by `durations`.
+fn with_durations(settings: UserSettings, durations: Durations) -> UserSettings {
+    UserSettings {
+        work_duration_secs: WorkDurationSecs::try_new(durations.work).expect("valid work"),
+        short_break_duration_secs: ShortBreakDurationSecs::try_new(durations.short_break)
+            .expect("valid short break"),
+        long_break_duration_secs: LongBreakDurationSecs::try_new(durations.long_break)
+            .expect("valid long break"),
+        long_break_interval: LongBreakIntervalCount::try_new(durations.long_break_interval)
+            .expect("valid interval"),
+        post_break_transition_policy: durations.policy,
+        ..settings
+    }
 }
 
-fn durations_changed(durations: Durations) -> Event {
-    let settings = timer_settings(durations);
-    Event::TimerDurationSettingsChanged {
-        work_duration_secs: settings.work_duration_secs,
-        short_break_duration_secs: settings.short_break_duration_secs,
-        long_break_duration_secs: settings.long_break_duration_secs,
-        long_break_interval: settings.long_break_interval,
-    }
+/// Saves `durations`; every other setting keeps its current value.
+fn change_durations(
+    core: &mut TimerCore,
+    durations: Durations,
+    now: DateTime<Local>,
+) -> Vec<Effect> {
+    let settings = with_durations(core.settings.clone(), durations);
+    apply(core, Event::SettingsChanged { settings }, now)
 }
 
 // ---- driving the core ----
@@ -191,18 +206,32 @@ fn dismiss_boot_prompt(core: &mut TimerCore, now: DateTime<Local>) {
 /// An idle timer whose schedule is enabled and whose boot prompt is out of
 /// the way, so scheduled starts are free to fire.
 fn idle_with_schedule(now: DateTime<Local>, config: WeeklyAutoRunConfig) -> TimerCore {
-    let mut core = TimerCore::restore(None, now);
-    apply(&mut core, schedule_enabled(config), now);
+    let mut core = idle_without_schedule(now);
+    enable_schedule(&mut core, config, now);
     dismiss_boot_prompt(&mut core, now);
     core
 }
 
 fn idle_without_schedule(now: DateTime<Local>) -> TimerCore {
-    TimerCore::restore(None, now)
+    restore_with_default_settings(None, now)
 }
 
-fn start_work(core: &mut TimerCore, now: DateTime<Local>, settings: TimerSettings) {
-    apply(core, Event::StartWorkRequested { settings }, now);
+fn restore_with_default_settings(
+    persisted: Option<PersistedState>,
+    now: DateTime<Local>,
+) -> TimerCore {
+    TimerCore::restore(
+        persisted,
+        UserSettings::default(),
+        SettingsFileStatus::Ok,
+        now,
+    )
+}
+
+/// Saves `durations` and starts a work session with them.
+fn start_work(core: &mut TimerCore, now: DateTime<Local>, durations: Durations) {
+    change_durations(core, durations, now);
+    apply(core, Event::StartWorkRequested, now);
     assert_eq!(core.status(), TimerStatus::Working);
 }
 
@@ -217,10 +246,10 @@ fn reach_break_after_one_second_of_work(
     start_work(
         core,
         now,
-        timer_settings(Durations {
+        Durations {
             work: 1,
             ..break_durations
-        }),
+        },
     );
     apply(core, Event::Tick, seconds_after(now, 1));
     assert_eq!(core.status(), TimerStatus::OnBreak);
@@ -235,14 +264,13 @@ fn saved_state(
         schema_version: PERSISTED_STATE_SCHEMA_VERSION,
         status,
         remaining_seconds,
+        session_duration_secs: SessionDurationSecs::try_new(default_work_secs())
+            .expect("valid session duration"),
         session_type: SessionType::Work,
         current_cycle: 1,
         completed_pomodoros: 0,
         post_break_decision_pending: false,
-        settings: TimerSettings::default(),
         saved_at: saved_at.with_timezone(&Utc),
-        auto_run_feature_enabled: false,
-        weekly_auto_run_config: WeeklyAutoRunConfig::default(),
         schedule_stop_state: ScheduleStopState::NotControlledBySchedule,
     }
 }

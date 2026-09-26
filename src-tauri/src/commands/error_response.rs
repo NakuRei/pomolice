@@ -2,6 +2,7 @@ use serde::Serialize;
 use tauri::ipc::InvokeError;
 
 use crate::error::PomoliceError;
+use crate::settings::SettingsValidationIssue;
 
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, strum::EnumCount, strum::EnumIter,
@@ -11,6 +12,7 @@ pub(crate) enum BackendErrorCode {
     UnauthorizedWindow,
     InvalidStateTransition,
     RateLimited,
+    InvalidSettings,
     WindowControlError,
     PersistenceError,
     InvalidCommandInput,
@@ -20,6 +22,9 @@ pub(crate) enum BackendErrorCode {
 pub(crate) struct BackendErrorResponse {
     code: BackendErrorCode,
     message: &'static str,
+    /// Present only for rejected settings, naming every input to fix.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    issues: Option<Vec<SettingsValidationIssue>>,
 }
 
 impl BackendErrorCode {
@@ -28,6 +33,7 @@ impl BackendErrorCode {
             Self::UnauthorizedWindow => "Unauthorized window",
             Self::InvalidStateTransition => "Invalid state transition",
             Self::RateLimited => "Rate limited",
+            Self::InvalidSettings => "Invalid settings",
             Self::WindowControlError => "Window control error",
             Self::PersistenceError => "Persistence error",
             Self::InvalidCommandInput => "Invalid command input",
@@ -40,18 +46,27 @@ impl BackendErrorResponse {
         Self {
             code,
             message: code.public_message(),
+            issues: None,
         }
     }
 }
 
 impl From<&PomoliceError> for BackendErrorResponse {
     fn from(error: &PomoliceError) -> Self {
+        if let PomoliceError::InvalidSettings(errors) = error {
+            return Self {
+                issues: Some(errors.issues().to_vec()),
+                ..Self::from_code(BackendErrorCode::InvalidSettings)
+            };
+        }
+
         let code = match error {
             PomoliceError::Unauthorized(_) => BackendErrorCode::UnauthorizedWindow,
             PomoliceError::InvalidStateTransition { .. } => {
                 BackendErrorCode::InvalidStateTransition
             }
             PomoliceError::RateLimited { .. } => BackendErrorCode::RateLimited,
+            PomoliceError::InvalidSettings(_) => BackendErrorCode::InvalidSettings,
             PomoliceError::WindowControl(_) => BackendErrorCode::WindowControlError,
             PomoliceError::PersistenceSave(_) | PomoliceError::PersistenceTaskJoin { .. } => {
                 BackendErrorCode::PersistenceError
@@ -83,8 +98,9 @@ mod tests {
     use serde_json::json;
 
     use crate::error::PersistenceFailure;
+    use crate::settings::{RangedSettingField, SettingsValidationErrors};
     use crate::shared_tests::join_error::join_error_from_panic;
-    use crate::types::TimerStatus;
+    use crate::types::{TimerStatus, WeekdayKey};
 
     fn persistence_failure(detail: &'static str) -> PersistenceFailure {
         PersistenceFailure::from_error(std::io::Error::other(detail))
@@ -180,6 +196,37 @@ mod tests {
                 "unexpected public response for {error:?}"
             );
         }
+    }
+
+    #[test]
+    fn rejected_settings_expose_every_issue_alongside_the_public_envelope() {
+        let error = PomoliceError::InvalidSettings(SettingsValidationErrors::from_issues(vec![
+            SettingsValidationIssue::OutOfRange {
+                field: RangedSettingField::WorkDurationSecs,
+                min: 1,
+                max: 7_200,
+            },
+            SettingsValidationIssue::OverlappingTimeRanges {
+                primary_weekday: WeekdayKey::Mon,
+                secondary_weekday: WeekdayKey::Tue,
+            },
+        ]));
+
+        assert_eq!(
+            serde_json::to_value(&error).expect("command error should serialize"),
+            json!({
+                "code": "invalid_settings",
+                "message": "Invalid settings",
+                "issues": [
+                    { "code": "out_of_range", "field": "work_duration_secs", "min": 1, "max": 7200 },
+                    {
+                        "code": "overlapping_time_ranges",
+                        "primary_weekday": "mon",
+                        "secondary_weekday": "tue"
+                    },
+                ],
+            })
+        );
     }
 
     #[test]

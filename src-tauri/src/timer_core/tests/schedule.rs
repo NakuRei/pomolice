@@ -6,11 +6,7 @@ use super::*;
 fn disabling_the_schedule_right_before_the_start_boundary_prevents_the_auto_start() {
     let mut core = idle_with_schedule(seconds_before(workday_start(), 2), workday());
 
-    apply(
-        &mut core,
-        schedule_disabled(),
-        seconds_before(workday_start(), 1),
-    );
+    disable_schedule(&mut core, seconds_before(workday_start(), 1));
     let at_boundary = apply(&mut core, Event::Tick, workday_start());
 
     assert_eq!(core.status(), TimerStatus::Idle);
@@ -23,7 +19,7 @@ fn a_manual_start_inside_the_window_is_scheduled_to_stop_at_the_schedule_end() {
     start_work(
         &mut core,
         seconds_before(workday_end(), 60),
-        TimerSettings::default(),
+        Durations::default(),
     );
 
     let at_end = apply(&mut core, Event::Tick, workday_end());
@@ -33,19 +29,20 @@ fn a_manual_start_inside_the_window_is_scheduled_to_stop_at_the_schedule_end() {
 
 #[test]
 fn a_manual_start_outside_the_window_is_not_scheduled_to_stop_at_the_schedule_end() {
-    let before_the_window = seconds_before(workday_start(), 60 * 60);
-    let mut core = idle_with_schedule(before_the_window, workday());
-    let long_enough_to_outlast_the_window = timer_settings(Durations {
-        work: 11 * 60 * 60,
+    let one_hour_window = monday_slot((9, 0), (10, 0));
+    let before_the_window = monday(8, 30, 0);
+    let mut core = idle_with_schedule(before_the_window, one_hour_window);
+    let long_enough_to_outlast_the_window = Durations {
+        work: 2 * 60 * 60,
         ..Durations::default()
-    });
+    };
     start_work(
         &mut core,
         before_the_window,
         long_enough_to_outlast_the_window,
     );
 
-    let at_end = apply(&mut core, Event::Tick, workday_end());
+    let at_end = apply(&mut core, Event::Tick, monday(10, 0, 0));
 
     assert!(!at_end.contains(&Effect::EmitAutoRunStopPending));
 }
@@ -56,14 +53,10 @@ fn a_manual_start_while_the_schedule_is_disabled_stays_manual_after_enabling_it(
     start_work(
         &mut core,
         seconds_before(workday_end(), 60),
-        TimerSettings::default(),
+        Durations::default(),
     );
 
-    apply(
-        &mut core,
-        schedule_enabled(workday()),
-        seconds_before(workday_end(), 30),
-    );
+    enable_schedule(&mut core, workday(), seconds_before(workday_end(), 30));
     let at_end = apply(&mut core, Event::Tick, workday_end());
 
     assert!(!at_end.contains(&Effect::EmitAutoRunStopPending));
@@ -72,13 +65,9 @@ fn a_manual_start_while_the_schedule_is_disabled_stays_manual_after_enabling_it(
 #[test]
 fn moving_the_end_time_later_moves_the_scheduled_stop_with_it() {
     let mut core = idle_with_schedule(monday(11, 59, 0), monday_slot((9, 0), (12, 0)));
-    start_work(&mut core, monday(11, 59, 0), TimerSettings::default());
+    start_work(&mut core, monday(11, 59, 0), Durations::default());
 
-    apply(
-        &mut core,
-        schedule_enabled(monday_slot((9, 0), (13, 0))),
-        monday(11, 59, 30),
-    );
+    enable_schedule(&mut core, monday_slot((9, 0), (13, 0)), monday(11, 59, 30));
     let at_old_end = apply(&mut core, Event::Tick, monday(12, 0, 0));
     let at_new_end = apply(&mut core, Event::Tick, monday(13, 0, 0));
 
@@ -92,11 +81,11 @@ fn the_end_boundary_lets_the_running_session_finish_and_then_stops() {
     start_work(
         &mut core,
         seconds_before(workday_end(), 1),
-        timer_settings(Durations {
+        Durations {
             work: 5,
             policy: PostBreakTransitionPolicy::StartNextWorkAutomatically,
             ..Durations::default()
-        }),
+        },
     );
 
     let at_end = apply(&mut core, Event::Tick, workday_end());
@@ -119,7 +108,7 @@ fn enabling_the_schedule_after_the_start_boundary_does_not_replay_it() {
     let mut core = idle_without_schedule(monday(9, 30, 0));
     dismiss_boot_prompt(&mut core, monday(9, 30, 0));
 
-    apply(&mut core, schedule_enabled(workday()), monday(9, 30, 0));
+    enable_schedule(&mut core, workday(), monday(9, 30, 0));
     let next_tick = apply(&mut core, Event::Tick, monday(9, 30, 1));
 
     assert_eq!(core.status(), TimerStatus::Idle);
@@ -159,12 +148,12 @@ fn work_end_and_schedule_end_on_the_same_second_take_the_break_before_stopping()
     start_work(
         &mut core,
         seconds_before(workday_end(), 3),
-        timer_settings(Durations {
+        Durations {
             work: 3,
             short_break: 2,
             policy: PostBreakTransitionPolicy::StartNextWorkAutomatically,
             ..Durations::default()
-        }),
+        },
     );
 
     let at_end = apply(&mut core, Event::Tick, workday_end());
@@ -192,11 +181,14 @@ fn an_end_boundary_crossed_while_the_app_was_closed_fires_on_the_first_tick() {
         default_work_secs(),
         seconds_before(workday_end(), 30 * 60),
     );
-    saved.auto_run_feature_enabled = true;
-    saved.weekly_auto_run_config = workday();
     saved.schedule_stop_state = ScheduleStopState::WaitingForScheduleEnd;
+    let settings = UserSettings {
+        auto_run_feature_enabled: true,
+        weekly_auto_run_config: workday(),
+        ..UserSettings::default()
+    };
     let restarted_at = seconds_after(workday_end(), 5 * 60);
-    let mut core = TimerCore::restore(Some(saved), restarted_at);
+    let mut core = TimerCore::restore(Some(saved), settings, SettingsFileStatus::Ok, restarted_at);
     apply(&mut core, Event::Started, restarted_at);
 
     let first_tick = apply(&mut core, Event::Tick, seconds_after(restarted_at, 1));
@@ -210,20 +202,20 @@ fn a_policy_change_keeps_a_pending_scheduled_stop() {
     start_work(
         &mut core,
         seconds_before(workday_end(), 1),
-        timer_settings(Durations {
+        Durations {
             work: 30,
             ..Durations::default()
-        }),
+        },
     );
     apply(&mut core, Event::Tick, workday_end());
 
+    let settings = UserSettings {
+        post_break_transition_policy: PostBreakTransitionPolicy::StartNextWorkAutomatically,
+        ..core.settings.clone()
+    };
     apply(
         &mut core,
-        Event::AutomationPoliciesChanged {
-            auto_run_feature_enabled: true,
-            weekly_auto_run_config: workday(),
-            post_break_transition_policy: PostBreakTransitionPolicy::StartNextWorkAutomatically,
-        },
+        Event::SettingsChanged { settings },
         seconds_after(workday_end(), 1),
     );
     let at_work_end = apply(&mut core, Event::Tick, seconds_after(workday_end(), 29));
@@ -240,22 +232,75 @@ fn disabling_the_schedule_cancels_a_pending_scheduled_stop() {
     start_work(
         &mut core,
         seconds_before(workday_end(), 1),
-        timer_settings(Durations {
+        Durations {
             work: 30,
             ..Durations::default()
-        }),
+        },
     );
     apply(&mut core, Event::Tick, workday_end());
 
-    apply(
-        &mut core,
-        schedule_disabled(),
-        seconds_after(workday_end(), 1),
-    );
+    disable_schedule(&mut core, seconds_after(workday_end(), 1));
     let at_work_end = apply(&mut core, Event::Tick, seconds_after(workday_end(), 29));
 
     assert_eq!(
         completion_reason(&at_work_end),
         Some(SessionTransitionReason::WorkToBreak)
     );
+}
+
+#[test]
+fn a_restored_scheduled_stop_does_not_end_a_session_while_the_schedule_is_disabled() {
+    let saved_at = monday(10, 0, 0);
+    let mut saved = saved_state(TimerStatus::Working, 5, saved_at);
+    saved.schedule_stop_state = ScheduleStopState::StopAtNextSessionBoundary;
+    let mut core = restore_with_default_settings(Some(saved), saved_at);
+
+    let at_work_end = apply(&mut core, Event::Tick, seconds_after(saved_at, 5));
+
+    assert_eq!(
+        completion_reason(&at_work_end),
+        Some(SessionTransitionReason::WorkToBreak)
+    );
+}
+
+#[test]
+fn re_enabling_the_schedule_puts_the_session_back_under_its_control() {
+    let mut core = idle_with_schedule(seconds_before(workday_end(), 1), workday());
+    start_work(
+        &mut core,
+        seconds_before(workday_end(), 1),
+        Durations {
+            work: 30,
+            ..Durations::default()
+        },
+    );
+    apply(&mut core, Event::Tick, workday_end());
+    disable_schedule(&mut core, seconds_after(workday_end(), 1));
+
+    enable_schedule(&mut core, workday(), seconds_after(workday_end(), 2));
+    let at_work_end = apply(&mut core, Event::Tick, seconds_after(workday_end(), 29));
+
+    assert_eq!(
+        completion_reason(&at_work_end),
+        Some(SessionTransitionReason::ScheduledStopExecuted)
+    );
+}
+
+#[test]
+fn saving_settings_between_ticks_does_not_skip_a_boundary_crossed_in_that_gap() {
+    let last_tick = millis_before(workday_start(), 500);
+    let mut core = idle_with_schedule(last_tick, workday());
+    apply(&mut core, Event::Tick, last_tick);
+
+    change_durations(
+        &mut core,
+        Durations {
+            work: 600,
+            ..Durations::default()
+        },
+        millis_after(workday_start(), 200),
+    );
+    let next_tick = apply(&mut core, Event::Tick, millis_after(workday_start(), 500));
+
+    assert!(starts_work(&next_tick));
 }

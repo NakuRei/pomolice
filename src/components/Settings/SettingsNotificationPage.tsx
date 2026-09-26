@@ -4,38 +4,34 @@ import {
   playNotificationSoundPreview,
   type NotificationSoundType,
 } from "@/services/notifications";
-import { useSettingsStore, VALIDATION_RULES } from "@/store/settingsStore";
+import { useSettingsSave } from "@/hooks/useSettingsSave";
+import type { Settings } from "@/types/settings";
 import { Button } from "../shared/Button";
 import { NotificationMuteToggleButton } from "../shared/NotificationMuteToggleButton";
 import { SettingsPageHeader } from "./SettingsPageHeader";
 import { SettingsSaveCancelFooter } from "./SettingsSaveCancelFooter";
+import { rangedFieldIssueMessage } from "./settingsIssueMessages";
 
 interface SettingsNotificationPageProps {
+  settings: Settings;
   openSettingsTopScreen: () => void;
 }
 
-const isFiniteNumberValue = (value: number | null): value is number =>
-  typeof value === "number" && Number.isFinite(value);
-
 export function SettingsNotificationPage({
+  settings,
   openSettingsTopScreen,
 }: SettingsNotificationPageProps): React.ReactElement {
   const headingReference = useFocusHeadingOnMount();
-
-  const notificationSoundMutedFromStore = useSettingsStore(
-    (state) => state.notificationSoundMuted,
+  const { issues, isSaving, save, settleIssues } = useSettingsSave(
+    openSettingsTopScreen,
   );
-  const notificationSoundVolumePercentFromStore = useSettingsStore(
-    (state) => state.notificationSoundVolumePercent,
-  );
-  const updateSettings = useSettingsStore((state) => state.updateSettings);
 
   const [notificationSoundMutedDraft, setNotificationSoundMutedDraft] =
-    useState<boolean>(notificationSoundMutedFromStore);
+    useState<boolean>(settings.notificationSoundMuted);
   const [
     notificationSoundVolumePercentDraft,
     setNotificationSoundVolumePercentDraft,
-  ] = useState<number | null>(notificationSoundVolumePercentFromStore);
+  ] = useState<number>(settings.notificationSoundVolumePercent);
   const [notificationSoundPreviewType, setNotificationSoundPreviewType] =
     useState<NotificationSoundType>("work");
   const [
@@ -43,28 +39,10 @@ export function SettingsNotificationPage({
     setNotificationSoundPreviewStatusText,
   ] = useState<string>("");
 
-  const notificationSoundVolumeDraftIsValid =
-    isFiniteNumberValue(notificationSoundVolumePercentDraft) &&
-    notificationSoundVolumePercentDraft >=
-      VALIDATION_RULES.notificationSoundVolumePercent.min &&
-    notificationSoundVolumePercentDraft <=
-      VALIDATION_RULES.notificationSoundVolumePercent.max;
-
-  const saveNotificationSettingsPage = (): void => {
-    if (!notificationSoundVolumeDraftIsValid) {
-      return;
-    }
-
-    updateSettings({
-      notificationSoundMuted: notificationSoundMutedDraft,
-      notificationSoundVolumePercent: notificationSoundVolumePercentDraft,
-    });
-    openSettingsTopScreen();
-  };
-
-  const cancelNotificationSettingsPage = (): void => {
-    openSettingsTopScreen();
-  };
+  const volumeIssueMessage = rangedFieldIssueMessage(
+    issues,
+    "notification_sound_volume_percent",
+  );
 
   const toggleNotificationMuteDraft = (): void => {
     setNotificationSoundMutedDraft((previousMutedState) => {
@@ -87,7 +65,7 @@ export function SettingsNotificationPage({
 
     const previewResult = await playNotificationSoundPreview({
       soundType: notificationSoundPreviewType,
-      volumePercent: notificationSoundVolumePercentDraft ?? 0,
+      volumePercent: notificationSoundVolumePercentDraft,
       muted: notificationSoundMutedDraft,
     });
 
@@ -138,7 +116,7 @@ export function SettingsNotificationPage({
               className="text-sm text-text-muted tabular-nums"
               data-testid="settings-notification-sound-volume-value"
             >
-              {notificationSoundVolumePercentDraft ?? 0}%
+              {notificationSoundVolumePercentDraft}%
             </span>
           </div>
 
@@ -151,13 +129,18 @@ export function SettingsNotificationPage({
             <input
               id="settings-notification-sound-volume"
               type="range"
-              min={VALIDATION_RULES.notificationSoundVolumePercent.min}
-              max={VALIDATION_RULES.notificationSoundVolumePercent.max}
+              min={0}
+              max={100}
               step={1}
-              value={notificationSoundVolumePercentDraft ?? 0}
+              value={notificationSoundVolumePercentDraft}
               onChange={(event) => {
                 setNotificationSoundVolumePercentDraft(
                   Number(event.target.value),
+                );
+                settleIssues(
+                  (issue) =>
+                    issue.code === "out_of_range" &&
+                    issue.field === "notification_sound_volume_percent",
                 );
               }}
               className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-surface-raised accent-primary-700"
@@ -166,6 +149,15 @@ export function SettingsNotificationPage({
               disabled={notificationSoundMutedDraft}
             />
           </div>
+          {volumeIssueMessage !== undefined && (
+            <p
+              className="mt-1 text-xs text-danger-300"
+              data-testid="settings-notification-sound-volume-error"
+              role="alert"
+            >
+              {volumeIssueMessage}
+            </p>
+          )}
         </div>
 
         <div className="space-y-2">
@@ -215,9 +207,15 @@ export function SettingsNotificationPage({
         </div>
 
         <SettingsSaveCancelFooter
-          onCancelButtonClick={cancelNotificationSettingsPage}
-          onSaveButtonClick={saveNotificationSettingsPage}
-          saveButtonDisabled={!notificationSoundVolumeDraftIsValid}
+          onCancelButtonClick={openSettingsTopScreen}
+          onSaveButtonClick={() => {
+            void save({
+              notificationSoundMuted: notificationSoundMutedDraft,
+              notificationSoundVolumePercent:
+                notificationSoundVolumePercentDraft,
+            });
+          }}
+          saveButtonDisabled={isSaving}
           footerTestId="settings-notification-footer"
           footerClassName="pt-2"
         />

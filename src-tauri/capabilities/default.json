@@ -15,8 +15,7 @@
     "allow-resolve-post-break-decision",
     "allow-set-away-during-break",
     "allow-emergency-stop",
-    "allow-sync-timer-duration-settings",
-    "allow-sync-automation-policies",
+    "allow-update-settings",
     "allow-get-full-state",
     "allow-resolve-boot-auto-start-prompt"
   ]

@@ -21,7 +21,7 @@
     "prepare": "husky",
     "test": "vitest --no-watch",
     "test:logging": "npm run test:logging:frontend && npm run test:logging:rust",
-    "test:logging:frontend": "vitest --no-watch src/logging/logger.test.ts src/logging/redaction.test.ts src/logging/devtools.test.ts src/hooks/useTimerSync.test.ts src/services/notifications.preview.test.ts src/services/notifications.session-complete.test.ts src/store/timerStore.syncSettings.test.ts",
+    "test:logging:frontend": "vitest --no-watch src/logging/logger.test.ts src/logging/redaction.test.ts src/logging/devtools.test.ts src/hooks/useTimerSync.test.ts src/services/notifications.preview.test.ts src/services/notifications.session-complete.test.ts",
     "test:logging:rust": "cargo test --manifest-path src-tauri/Cargo.toml tests::log",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "test:watch": "vitest",

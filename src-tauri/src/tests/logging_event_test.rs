@@ -13,6 +13,7 @@ macro_rules! with_backend_log_event_variants {
             AppStateCreated,
             AppStateRestoredFromPersistence,
             AppStateUsingDefaults,
+            AppStateDiscardedUnusableFile,
             AppStateInitializationStarted,
             AppStateInitializationCompleted,
             AppWindowHiddenToTray,
@@ -32,8 +33,8 @@ macro_rules! with_backend_log_event_variants {
             TimerTransitionRejected,
             TimerWorkSessionStarted,
             TimerTransitionCompleted,
-            SettingsSyncApplied,
-            SettingsSyncFailed,
+            SettingsUpdateApplied,
+            SettingsUpdateRejected,
             StoragePersistenceWriteStarted,
             StoragePersistenceWriteFailed,
             StoragePersistenceWriteCompleted,
@@ -174,9 +175,9 @@ fn test_render_event_message_redacts_timer_command_input_rejected_error() {
         BackendLogEvent::TimerCommandInputRejected,
         &[
             ("error_message", "invalid args token=abc".to_string()),
-            ("argument_name", "workDurationSecs".to_string()),
+            ("argument_name", "changes".to_string()),
             ("window_label", "main".to_string()),
-            ("command_name", "sync_timer_duration_settings".to_string()),
+            ("command_name", "update_settings".to_string()),
         ],
         None,
     );
@@ -191,9 +192,9 @@ fn test_render_event_message_redacts_timer_command_input_rejected_error() {
             "error_message",
         ],
     );
-    assert!(rendered.contains("sync_timer_duration_settings"));
+    assert!(rendered.contains("update_settings"));
     assert!(rendered.contains("main"));
-    assert!(rendered.contains("workDurationSecs"));
+    assert!(rendered.contains("changes"));
     assert!(rendered.contains("invalid"));
     assert!(rendered.contains("args"));
     assert!(!rendered.contains("token=abc"));
@@ -208,9 +209,9 @@ fn test_render_event_message_prevents_sensitive_field_structure_injection() {
                 "error_message",
                 "invalid args \"quoted\" fake=value \\\r\n\tpassword=secret".to_string(),
             ),
-            ("argument_name", "workDurationSecs".to_string()),
+            ("argument_name", "changes".to_string()),
             ("window_label", "main".to_string()),
-            ("command_name", "sync_timer_duration_settings".to_string()),
+            ("command_name", "update_settings".to_string()),
         ],
         None,
     );
@@ -280,7 +281,7 @@ fn test_render_event_message_redacts_authorization_bearer_tokens_from_error_fiel
             ),
             ("argument_name", "authorizationHeader".to_string()),
             ("window_label", "main".to_string()),
-            ("command_name", "sync_timer_duration_settings".to_string()),
+            ("command_name", "update_settings".to_string()),
         ],
         None,
     );
@@ -312,7 +313,7 @@ fn test_render_event_message_redacts_case_insensitive_tokens_with_trailing_punct
             ),
             ("argument_name", "authorizationHeader".to_string()),
             ("window_label", "main".to_string()),
-            ("command_name", "sync_timer_duration_settings".to_string()),
+            ("command_name", "update_settings".to_string()),
         ],
         None,
     );

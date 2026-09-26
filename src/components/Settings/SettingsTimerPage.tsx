@@ -1,7 +1,12 @@
 import { useState } from "react";
 import { useFocusHeadingOnMount } from "@/hooks/useFocusHeadingOnMount";
-import { useSettingsStore, VALIDATION_RULES } from "@/store/settingsStore";
+import { useSettingsSave } from "@/hooks/useSettingsSave";
 import { TimerStatus, useTimerStore } from "@/store/timerStore";
+import type {
+  RangedSettingField,
+  Settings,
+  SettingsChanges,
+} from "@/types/settings";
 import { DurationInput } from "./DurationInput";
 import {
   formatDurationInputText,
@@ -9,123 +14,123 @@ import {
 } from "./durationInputValue";
 import { SettingsPageHeader } from "./SettingsPageHeader";
 import { SettingsSaveCancelFooter } from "./SettingsSaveCancelFooter";
+import { rangedFieldIssueMessage } from "./settingsIssueMessages";
 
 interface SettingsTimerPageProps {
+  settings: Settings;
   openSettingsTopScreen: () => void;
 }
 
-interface TimerSettingDraftValues {
-  workDuration: string;
-  shortBreakDuration: string;
-  longBreakDuration: string;
-  longBreakInterval: string;
+type TimerSettingField = Extract<
+  RangedSettingField,
+  | "work_duration_secs"
+  | "short_break_duration_secs"
+  | "long_break_duration_secs"
+  | "long_break_interval"
+>;
+
+type TimerSettingDraftValues = Record<TimerSettingField, string>;
+
+const SECONDS_PER_MINUTE = 60;
+
+function formatMinutesInputText(seconds: number): string {
+  return formatDurationInputText(
+    Math.round((seconds / SECONDS_PER_MINUTE) * 100) / 100,
+  );
 }
 
-interface ValidTimerSettingValues {
-  workDuration: number;
-  shortBreakDuration: number;
-  longBreakDuration: number;
-  longBreakInterval: number;
+function parseMinutesToSeconds(raw: string): number | null {
+  const minutes = parseDurationInputText(raw, true);
+  return minutes === null ? null : Math.round(minutes * SECONDS_PER_MINUTE);
 }
 
-function getValidTimerSettingValues(
+function createDraftValues(settings: Settings): TimerSettingDraftValues {
+  return {
+    work_duration_secs: formatMinutesInputText(settings.workDurationSecs),
+    short_break_duration_secs: formatMinutesInputText(
+      settings.shortBreakDurationSecs,
+    ),
+    long_break_duration_secs: formatMinutesInputText(
+      settings.longBreakDurationSecs,
+    ),
+    long_break_interval: formatDurationInputText(settings.longBreakInterval),
+  };
+}
+
+function changesFromDraftValues(
   draftValues: TimerSettingDraftValues,
-): ValidTimerSettingValues | null {
-  const workDuration = parseDurationInputText(
-    draftValues.workDuration,
-    VALIDATION_RULES.workDuration.min,
-    VALIDATION_RULES.workDuration.max,
-    true,
+): SettingsChanges | null {
+  const workDurationSecs = parseMinutesToSeconds(
+    draftValues.work_duration_secs,
   );
-  const shortBreakDuration = parseDurationInputText(
-    draftValues.shortBreakDuration,
-    VALIDATION_RULES.shortBreakDuration.min,
-    VALIDATION_RULES.shortBreakDuration.max,
-    true,
+  const shortBreakDurationSecs = parseMinutesToSeconds(
+    draftValues.short_break_duration_secs,
   );
-  const longBreakDuration = parseDurationInputText(
-    draftValues.longBreakDuration,
-    VALIDATION_RULES.longBreakDuration.min,
-    VALIDATION_RULES.longBreakDuration.max,
-    true,
+  const longBreakDurationSecs = parseMinutesToSeconds(
+    draftValues.long_break_duration_secs,
   );
   const longBreakInterval = parseDurationInputText(
-    draftValues.longBreakInterval,
-    VALIDATION_RULES.longBreakInterval.min,
-    VALIDATION_RULES.longBreakInterval.max,
+    draftValues.long_break_interval,
     false,
   );
 
   if (
-    workDuration === null ||
-    shortBreakDuration === null ||
-    longBreakDuration === null ||
+    workDurationSecs === null ||
+    shortBreakDurationSecs === null ||
+    longBreakDurationSecs === null ||
     longBreakInterval === null
   ) {
     return null;
   }
 
   return {
-    workDuration,
-    shortBreakDuration,
-    longBreakDuration,
+    workDurationSecs,
+    shortBreakDurationSecs,
+    longBreakDurationSecs,
     longBreakInterval,
   };
 }
 
 export function SettingsTimerPage({
+  settings,
   openSettingsTopScreen,
 }: SettingsTimerPageProps): React.ReactElement {
   const headingReference = useFocusHeadingOnMount();
-
-  const workDurationFromStore = useSettingsStore((state) => state.workDuration);
-  const shortBreakDurationFromStore = useSettingsStore(
-    (state) => state.shortBreakDuration,
-  );
-  const longBreakDurationFromStore = useSettingsStore(
-    (state) => state.longBreakDuration,
-  );
-  const longBreakIntervalFromStore = useSettingsStore(
-    (state) => state.longBreakInterval,
-  );
-  const updateSettings = useSettingsStore((state) => state.updateSettings);
   const timerStatus = useTimerStore((state) => state.status);
-
-  const [workDurationDraft, setWorkDurationDraft] = useState<string>(
-    formatDurationInputText(workDurationFromStore),
-  );
-  const [shortBreakDurationDraft, setShortBreakDurationDraft] =
-    useState<string>(formatDurationInputText(shortBreakDurationFromStore));
-  const [longBreakDurationDraft, setLongBreakDurationDraft] = useState<string>(
-    formatDurationInputText(longBreakDurationFromStore),
-  );
-  const [longBreakIntervalDraft, setLongBreakIntervalDraft] = useState<string>(
-    formatDurationInputText(longBreakIntervalFromStore),
+  const { issues, isSaving, save, settleIssues } = useSettingsSave(
+    openSettingsTopScreen,
   );
 
-  const validTimerSettingValues = getValidTimerSettingValues({
-    workDuration: workDurationDraft,
-    shortBreakDuration: shortBreakDurationDraft,
-    longBreakDuration: longBreakDurationDraft,
-    longBreakInterval: longBreakIntervalDraft,
-  });
-  const timerDurationDraftValuesAreValid = validTimerSettingValues !== null;
+  const [draftValues, setDraftValues] = useState<TimerSettingDraftValues>(() =>
+    createDraftValues(settings),
+  );
 
-  const isTimerIdle = timerStatus === TimerStatus.IDLE;
+  const changes = changesFromDraftValues(draftValues);
 
-  const saveTimerSettingsPage = (): void => {
-    if (validTimerSettingValues === null) {
-      return;
-    }
-
-    updateSettings(validTimerSettingValues);
-
-    openSettingsTopScreen();
+  const updateDraftValue = (field: TimerSettingField, value: string): void => {
+    setDraftValues((previous) => ({ ...previous, [field]: value }));
+    settleIssues(
+      (issue) => issue.code === "out_of_range" && issue.field === field,
+    );
   };
 
-  const cancelTimerSettingsPage = (): void => {
-    openSettingsTopScreen();
-  };
+  const renderDurationInput = (
+    field: TimerSettingField,
+    label: string,
+    options: { unit?: string; allowDecimal?: boolean; testId: string },
+  ): React.ReactElement => (
+    <DurationInput
+      label={label}
+      value={draftValues[field]}
+      onChange={(value) => {
+        updateDraftValue(field, value);
+      }}
+      unit={options.unit}
+      allowDecimal={options.allowDecimal}
+      testId={options.testId}
+      errorMessage={rangedFieldIssueMessage(issues, field)}
+    />
+  );
 
   return (
     <section
@@ -142,61 +147,38 @@ export function SettingsTimerPage({
       />
 
       <div className="space-y-6 rounded-lg border border-border bg-surface p-4">
-        <DurationInput
-          label="作業時間"
-          value={workDurationDraft}
-          onChange={setWorkDurationDraft}
-          min={VALIDATION_RULES.workDuration.min}
-          max={VALIDATION_RULES.workDuration.max}
-          testId="settings-work-duration"
-          disabled={!isTimerIdle}
-        />
+        {renderDurationInput("work_duration_secs", "作業時間", {
+          testId: "settings-work-duration",
+        })}
+        {renderDurationInput("short_break_duration_secs", "短い休憩", {
+          testId: "settings-short-break",
+        })}
+        {renderDurationInput("long_break_duration_secs", "長い休憩", {
+          testId: "settings-long-break",
+        })}
+        {renderDurationInput("long_break_interval", "長い休憩の間隔", {
+          unit: "回",
+          allowDecimal: false,
+          testId: "settings-interval",
+        })}
 
-        <DurationInput
-          label="短い休憩"
-          value={shortBreakDurationDraft}
-          onChange={setShortBreakDurationDraft}
-          min={VALIDATION_RULES.shortBreakDuration.min}
-          max={VALIDATION_RULES.shortBreakDuration.max}
-          testId="settings-short-break"
-          disabled={!isTimerIdle}
-        />
-
-        <DurationInput
-          label="長い休憩"
-          value={longBreakDurationDraft}
-          onChange={setLongBreakDurationDraft}
-          min={VALIDATION_RULES.longBreakDuration.min}
-          max={VALIDATION_RULES.longBreakDuration.max}
-          testId="settings-long-break"
-          disabled={!isTimerIdle}
-        />
-
-        <DurationInput
-          label="長い休憩の間隔"
-          value={longBreakIntervalDraft}
-          onChange={setLongBreakIntervalDraft}
-          min={VALIDATION_RULES.longBreakInterval.min}
-          max={VALIDATION_RULES.longBreakInterval.max}
-          unit="回"
-          allowDecimal={false}
-          testId="settings-interval"
-          disabled={!isTimerIdle}
-        />
-
-        {!isTimerIdle && (
+        {timerStatus !== TimerStatus.IDLE && (
           <p
-            className="text-xs text-warning-300"
-            data-testid="settings-duration-edit-disabled-message"
+            className="text-xs text-text-muted"
+            data-testid="settings-duration-applies-next-session"
           >
-            タイマー実行中は時間長設定を変更できません。曜日別スケジュールのみ編集できます。
+            実行中のセッションの長さは変わりません。保存した時間は次のセッションから使われます。
           </p>
         )}
 
         <SettingsSaveCancelFooter
-          onCancelButtonClick={cancelTimerSettingsPage}
-          onSaveButtonClick={saveTimerSettingsPage}
-          saveButtonDisabled={!timerDurationDraftValuesAreValid}
+          onCancelButtonClick={openSettingsTopScreen}
+          onSaveButtonClick={() => {
+            if (changes !== null) {
+              void save(changes);
+            }
+          }}
+          saveButtonDisabled={changes === null || isSaving}
           footerTestId="settings-timer-footer"
           footerClassName="pt-2"
         />

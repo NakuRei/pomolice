@@ -1,3 +1,4 @@
+import { useTimerStore } from "@/store/timerStore";
 import type { AppScreen, SettingsScreen } from "../../types/appScreen";
 import { SettingsAutoRunPage } from "./SettingsAutoRunPage";
 import { SettingsNotificationPage } from "./SettingsNotificationPage";
@@ -18,33 +19,42 @@ export function SettingsScreenContent({
   currentScreen,
   moveToScreen,
 }: SettingsScreenContentProps): React.ReactElement {
+  const settings = useTimerStore((state) => state.settings);
+  const openSettingsTopScreen = (): void => {
+    moveToScreen("settingsTop");
+  };
+
+  // Settings come from the backend; until it has answered there is nothing
+  // to edit, so only the overview is shown.
+  if (settings === null || currentScreen === "settingsTop") {
+    return (
+      <SettingsScreenLayout mainTestId="settings-top-main">
+        <SettingsTopPage
+          settings={settings}
+          openHomeScreen={() => {
+            moveToScreen("home");
+          }}
+          openTimerSettings={() => {
+            moveToScreen("settingsTimer");
+          }}
+          openAutoRunSettings={() => {
+            moveToScreen("settingsAutoRun");
+          }}
+          openNotificationSettings={() => {
+            moveToScreen("settingsNotification");
+          }}
+        />
+      </SettingsScreenLayout>
+    );
+  }
+
   switch (currentScreen) {
-    case "settingsTop":
-      return (
-        <SettingsScreenLayout mainTestId="settings-top-main">
-          <SettingsTopPage
-            openHomeScreen={() => {
-              moveToScreen("home");
-            }}
-            openTimerSettings={() => {
-              moveToScreen("settingsTimer");
-            }}
-            openAutoRunSettings={() => {
-              moveToScreen("settingsAutoRun");
-            }}
-            openNotificationSettings={() => {
-              moveToScreen("settingsNotification");
-            }}
-          />
-        </SettingsScreenLayout>
-      );
     case "settingsTimer":
       return (
         <SettingsScreenLayout mainTestId="settings-timer-main">
           <SettingsTimerPage
-            openSettingsTopScreen={() => {
-              moveToScreen("settingsTop");
-            }}
+            settings={settings}
+            openSettingsTopScreen={openSettingsTopScreen}
           />
         </SettingsScreenLayout>
       );
@@ -52,9 +62,8 @@ export function SettingsScreenContent({
       return (
         <SettingsScreenLayout mainTestId="settings-auto-run-main">
           <SettingsAutoRunPage
-            openSettingsTopScreen={() => {
-              moveToScreen("settingsTop");
-            }}
+            settings={settings}
+            openSettingsTopScreen={openSettingsTopScreen}
           />
         </SettingsScreenLayout>
       );
@@ -62,9 +71,8 @@ export function SettingsScreenContent({
       return (
         <SettingsScreenLayout mainTestId="settings-notification-main">
           <SettingsNotificationPage
-            openSettingsTopScreen={() => {
-              moveToScreen("settingsTop");
-            }}
+            settings={settings}
+            openSettingsTopScreen={openSettingsTopScreen}
           />
         </SettingsScreenLayout>
       );
