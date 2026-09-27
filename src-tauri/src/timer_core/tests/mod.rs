@@ -188,27 +188,12 @@ fn apply(core: &mut TimerCore, event: Event, now: DateTime<Local>) -> Vec<Effect
 }
 
 fn boot_prompt_is_offered(core: &TimerCore, now: DateTime<Local>) -> bool {
-    core.full_state_payload(now)
-        .boot_auto_start_prompt_window
-        .is_some()
+    core.full_state_payload(now).boot_auto_start_offer.is_some()
 }
 
-/// Plays the frontend's first fetch of the state and, if the boot prompt is
-/// offered, answers it with "later".
-fn dismiss_boot_prompt(core: &mut TimerCore, now: DateTime<Local>) {
-    apply(core, Event::FirstFullStateObserved, now);
-    if boot_prompt_is_offered(core, now) {
-        apply(core, Event::BootPromptResolved { start_now: false }, now);
-    }
-    assert!(!boot_prompt_is_offered(core, now));
-}
-
-/// An idle timer whose schedule is enabled and whose boot prompt is out of
-/// the way, so scheduled starts are free to fire.
 fn idle_with_schedule(now: DateTime<Local>, config: WeeklyAutoRunConfig) -> TimerCore {
     let mut core = idle_without_schedule(now);
     enable_schedule(&mut core, config, now);
-    dismiss_boot_prompt(&mut core, now);
     core
 }
 

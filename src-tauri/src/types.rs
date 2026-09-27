@@ -777,8 +777,14 @@ pub(crate) struct FullStatePayload {
     pub settings: UserSettings,
     pub settings_file_status: SettingsFileStatus,
     /// Present while the boot auto-start prompt is still waiting for a decision.
-    pub boot_auto_start_prompt_window: Option<ActiveWindowSummaryPayload>,
+    pub boot_auto_start_offer: Option<BootAutoStartOfferPayload>,
     pub active_window_summary: Option<ActiveWindowSummaryPayload>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct BootAutoStartOfferPayload {
+    pub anchor_local_date: chrono::NaiveDate,
+    pub window: ActiveWindowSummaryPayload,
 }
 
 /// Summary of the currently active schedule window.

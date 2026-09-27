@@ -51,6 +51,9 @@ export function useTimerSync(): void {
   const handleTimerTick = useTimerStore((s) => s.handleTimerTick);
   const handleSessionCompleted = useTimerStore((s) => s.handleSessionCompleted);
   const handleFullState = useTimerStore((s) => s.handleFullState);
+  const clearBootAutoStartOffer = useTimerStore(
+    (s) => s.clearBootAutoStartOffer,
+  );
   const handleActiveWindowChanged = useTimerStore(
     (s) => s.handleActiveWindowChanged,
   );
@@ -169,12 +172,24 @@ export function useTimerSync(): void {
           }
         },
       );
-      return registerActiveListener(unlistenSettingsChanged);
+      if (!registerActiveListener(unlistenSettingsChanged)) {
+        return false;
+      }
+
+      const unlistenBootOfferClosed = await listen(
+        "boot_auto_start_offer_closed",
+        () => {
+          if (mounted) {
+            clearBootAutoStartOffer();
+          }
+        },
+      );
+      return registerActiveListener(unlistenBootOfferClosed);
     }
 
     function shouldRetryTimerSyncSetupFailure(
       error: unknown,
-      failureSource: "setup" | "command" | "initial_state_transport",
+      failureSource: "setup" | "command" | "command_transport",
       retryAttempt: number,
     ): boolean {
       if (!shouldRetryTimerSyncConnection(retryAttempt)) {
@@ -188,8 +203,7 @@ export function useTimerSync(): void {
 
     async function setup(retryAttempt = 0): Promise<void> {
       const listenerStartIndex = listeners.length;
-      let failureSource: "setup" | "command" | "initial_state_transport" =
-        "setup";
+      let failureSource: "setup" | "command" | "command_transport" = "setup";
 
       try {
         const listenersRegistered = await registerBackendListeners();
@@ -197,19 +211,17 @@ export function useTimerSync(): void {
           return;
         }
 
-        failureSource = "initial_state_transport";
+        failureSource = "command_transport";
         const fullState = await invoke<FullStatePayload>("get_full_state");
         failureSource = "setup";
-
         if (!mounted) {
           return;
         }
-
         handleFullState(fullState);
         clearTimerSyncConnectionError();
       } catch (error) {
         if (
-          failureSource === "initial_state_transport" &&
+          failureSource === "command_transport" &&
           isBackendErrorResponse(error)
         ) {
           failureSource = "command";
@@ -264,6 +276,7 @@ export function useTimerSync(): void {
     handleTimerTick,
     handleSessionCompleted,
     handleFullState,
+    clearBootAutoStartOffer,
     handleActiveWindowChanged,
     handleSettingsChanged,
     setConnected,

@@ -248,7 +248,8 @@ mod run_event_tests {
     }
 
     fn full_state_at_startup(dir: &Path) -> crate::types::FullStatePayload {
-        start_app_state(dir).timer.read_full_state_for_tests()
+        let app_state = start_app_state(dir);
+        tauri::async_runtime::block_on(app_state.timer.read_full_state())
     }
 
     #[test]

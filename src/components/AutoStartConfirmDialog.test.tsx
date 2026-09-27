@@ -10,6 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { AutoStartConfirmDialog } from "./AutoStartConfirmDialog";
 import { SessionType, TimerStatus, useTimerStore } from "@/store/timerStore";
+import { createBootAutoStartOfferForTest } from "@/test/bootAutoStartOfferFixture";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockResolvedValue("resolved_later"),
@@ -24,7 +25,7 @@ const MONDAY_DAYTIME_WINDOW = {
 
 function setDialogVisible(): void {
   useTimerStore.setState({
-    bootAutoStartPromptWindow: MONDAY_DAYTIME_WINDOW,
+    bootAutoStartOffer: createBootAutoStartOfferForTest(),
     activeWindowSummary: MONDAY_DAYTIME_WINDOW,
   });
 }
@@ -46,7 +47,7 @@ describe("AutoStartConfirmDialog", () => {
       isFullscreenBreak: false,
       requiresManualContinueDecision: false,
       isConnected: true,
-      bootAutoStartPromptWindow: null,
+      bootAutoStartOffer: null,
       activeWindowSummary: null,
     });
   });
@@ -56,6 +57,24 @@ describe("AutoStartConfirmDialog", () => {
     expect(
       screen.queryByRole("dialog", { name: "作業を開始しますか？" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("does not render before the startup offer is known", () => {
+    useTimerStore.setState({ bootAutoStartOffer: undefined });
+    render(<AutoStartConfirmDialog />);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("closes when the backend closes the startup offer", () => {
+    setDialogVisible();
+    render(<AutoStartConfirmDialog />);
+
+    act(() => {
+      useTimerStore.getState().clearBootAutoStartOffer();
+    });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(invoke).not.toHaveBeenCalled();
   });
 
   it("stays open with the boot-time window after the live window ends", () => {
@@ -76,7 +95,7 @@ describe("AutoStartConfirmDialog", () => {
 
   it("does not render when only the live active window exists without a boot prompt", () => {
     useTimerStore.setState({
-      bootAutoStartPromptWindow: null,
+      bootAutoStartOffer: null,
       activeWindowSummary: MONDAY_DAYTIME_WINDOW,
     });
 
@@ -168,7 +187,7 @@ describe("AutoStartConfirmDialog", () => {
 
     act(() => {
       useTimerStore.setState({
-        bootAutoStartPromptWindow: null,
+        bootAutoStartOffer: null,
         activeWindowSummary: null,
       });
       setDialogVisible();

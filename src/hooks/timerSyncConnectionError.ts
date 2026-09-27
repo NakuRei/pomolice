@@ -8,7 +8,7 @@ import {
 type TimerSyncConnectionFailureSource =
   | "setup"
   | "command"
-  | "initial_state_transport";
+  | "command_transport";
 
 const SETUP_CONNECTION_ERROR_MESSAGE =
   "バックエンドに接続できません。アプリが正常に動作しない可能性があります。";
@@ -17,7 +17,7 @@ export function formatTimerSyncConnectionErrorDetail(
   error: unknown,
   source: TimerSyncConnectionFailureSource = "setup",
 ): string {
-  if (source === "command" || source === "initial_state_transport") {
+  if (source === "command" || source === "command_transport") {
     return formatPublicCommandErrorDetail(error);
   }
 

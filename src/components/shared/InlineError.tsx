@@ -12,9 +12,10 @@ interface InlineErrorProps {
   /**
    * Optional override for the retry button action.
    * If omitted, the retryFn stored in the error entry is used.
+   * Null disables retry when the action is no longer available.
    * If neither is available, no retry button is shown.
    */
-  onRetry?: () => void | Promise<void>;
+  onRetry?: (() => void | Promise<void>) | null;
 }
 
 /**
@@ -59,9 +60,9 @@ export function InlineError({
     return null;
   }
 
+  const retryAction = onRetry === undefined ? error.retryFn : onRetry;
   const handleRetry = (): void => {
     incrementRetryCount(errorId);
-    const retryAction = onRetry ?? error.retryFn;
     if (retryAction !== null) {
       void (async (): Promise<void> => {
         await retryAction();
@@ -69,8 +70,7 @@ export function InlineError({
     }
   };
 
-  const showRetryButton =
-    error.canRetry && (onRetry !== undefined || error.retryFn !== null);
+  const showRetryButton = error.canRetry && retryAction !== null;
 
   return (
     <StatusNotice

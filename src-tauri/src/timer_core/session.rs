@@ -176,6 +176,7 @@ impl TimerCore {
     }
 
     pub(super) fn emergency_stop(&mut self, now: DateTime<Local>) -> Vec<Effect> {
+        self.boot_auto_start_offer = None;
         let was_fullscreen_break = self
             .current_break()
             .is_some_and(|current_break| current_break.is_fullscreen);

@@ -29,7 +29,7 @@ const IDLE_FULL_STATE = vi.hoisted(() => ({
   is_fullscreen_break: false,
   away_during_break: false,
   post_break_decision_pending: false,
-  boot_auto_start_prompt_window: null,
+  boot_auto_start_offer: null,
   active_window_summary: null,
   settings: {
     work_duration_secs: 1500,
@@ -117,10 +117,16 @@ describe("App", () => {
   });
 
   it("shows SCHEDULED when the backend reports an active auto-run window at connection", async () => {
-    vi.mocked(invoke).mockResolvedValueOnce({
-      ...IDLE_FULL_STATE,
-      active_window_summary: MONDAY_DAYTIME_WINDOW,
-    });
+    vi.mocked(invoke).mockImplementation((command) =>
+      Promise.resolve(
+        command === "get_full_state"
+          ? {
+              ...IDLE_FULL_STATE,
+              active_window_summary: MONDAY_DAYTIME_WINDOW,
+            }
+          : undefined,
+      ),
+    );
 
     render(<App />);
 

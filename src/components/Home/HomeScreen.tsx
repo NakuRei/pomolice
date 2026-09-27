@@ -59,6 +59,9 @@ export function HomeScreen({
   onOpenSettingsTopScreen,
 }: HomeScreenProps): React.ReactElement {
   const sessionType = useTimerStore((state) => state.sessionType);
+  const hasBootAutoStartOffer = useTimerStore((state) =>
+    Boolean(state.bootAutoStartOffer),
+  );
 
   return (
     // Fills the space AppRoot leaves below its notices, rather than claiming
@@ -147,6 +150,12 @@ export function HomeScreen({
         {/* Shown when start_work fails; auto-clears after 5 seconds */}
         <InlineError errorId="start_work" />
         <InlineError errorId="update_settings" />
+        {!hasBootAutoStartOffer && (
+          <InlineError
+            errorId="resolve_boot_auto_start_prompt"
+            onRetry={null}
+          />
+        )}
       </ToastStack>
 
       <ContinueDialog />

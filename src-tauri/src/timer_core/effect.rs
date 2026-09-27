@@ -12,6 +12,7 @@ pub(crate) enum Effect {
     EmitAutoRunStopped,
     EmitActiveWindowChanged(ActiveWindowChangedPayload),
     EmitSettingsChanged(SettingsChangedPayload),
+    EmitBootAutoStartOfferClosed,
     Persist,
     /// Start input monitoring and lock every monitor. Reports back as
     /// `Event::BreakLockEntered` or `Event::BreakLockEnterFailed`.

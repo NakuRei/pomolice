@@ -5,7 +5,7 @@ use crate::error::{PomoliceError, Result};
 use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
 use crate::settings::SettingsChanges;
 use crate::state::AppState;
-use crate::timer_core::{Event, TimerCore};
+use crate::timer_core::Event;
 use crate::types::{BreakAttendance, FullStatePayload, PostBreakDecisionAction};
 
 /// Start a work session with the saved settings.
@@ -90,21 +90,14 @@ pub(crate) async fn update_settings(
         .await
 }
 
-/// Get full timer state for initial sync
+/// Read the current state without advancing the timer.
 #[tauri::command]
 pub(crate) async fn get_full_state(
     window: WebviewWindow,
     state: State<'_, AppState>,
 ) -> Result<FullStatePayload> {
     authorize_main_window(&window, "get_full_state")?;
-    state
-        .timer
-        .dispatch_then_read(
-            window.app_handle(),
-            Event::FirstFullStateObserved,
-            TimerCore::full_state_payload,
-        )
-        .await
+    Ok(state.timer.read_full_state().await)
 }
 
 /// Resolve startup auto-start confirmation prompt.

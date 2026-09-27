@@ -8,8 +8,8 @@ import { DialogPanel } from "./shared/DialogPanel";
 import { InlineError } from "./shared/InlineError";
 
 export function AutoStartConfirmDialog(): React.ReactElement | null {
-  const bootAutoStartPromptWindow = useTimerStore(
-    (state) => state.bootAutoStartPromptWindow,
+  const promptWindow = useTimerStore(
+    (state) => state.bootAutoStartOffer?.window,
   );
   const resolveBootAutoStartPrompt = useTimerStore(
     (state) => state.resolveBootAutoStartPrompt,
@@ -17,7 +17,7 @@ export function AutoStartConfirmDialog(): React.ReactElement | null {
   const titleId = useId();
   const startButtonRef = useRef<HTMLButtonElement>(null);
 
-  const isVisible = bootAutoStartPromptWindow !== null;
+  const isVisible = Boolean(promptWindow);
   useEffect(() => {
     if (!isVisible) {
       return;
@@ -44,13 +44,12 @@ export function AutoStartConfirmDialog(): React.ReactElement | null {
     };
   }, [isVisible, resolveBootAutoStartPrompt]);
 
-  if (!isVisible) {
+  if (!promptWindow) {
     return null;
   }
 
-  const weekdayLabel =
-    WEEKDAY_LABELS_BY_KEY[bootAutoStartPromptWindow.weekday_key].full;
-  const crossesMidnightSuffix = bootAutoStartPromptWindow.crosses_midnight
+  const weekdayLabel = WEEKDAY_LABELS_BY_KEY[promptWindow.weekday_key].full;
+  const crossesMidnightSuffix = promptWindow.crosses_midnight
     ? "（日跨ぎ）"
     : "";
 
@@ -61,20 +60,15 @@ export function AutoStartConfirmDialog(): React.ReactElement | null {
           作業を開始しますか？
         </h2>
         <p className="mb-2 text-text-muted">
-          現在は {weekdayLabel} {bootAutoStartPromptWindow.start_time} -{" "}
-          {bootAutoStartPromptWindow.end_time}
+          現在は {weekdayLabel} {promptWindow.start_time} -{" "}
+          {promptWindow.end_time}
           {crossesMidnightSuffix} の自動実行枠です。
         </p>
         <p className="mb-4 text-text-muted">
           開始すると終了時刻連動でセッション区切り停止されます。
         </p>
         <div className="mb-4">
-          <InlineError
-            errorId="resolve_boot_auto_start_prompt"
-            onRetry={() => {
-              void resolveBootAutoStartPrompt(true).catch(() => undefined);
-            }}
-          />
+          <InlineError errorId="resolve_boot_auto_start_prompt" />
         </div>
         <DialogActionRow>
           <Button

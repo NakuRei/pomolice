@@ -16,7 +16,7 @@ use crate::settings::{
     PersistedSettings, SettingsChanges, SettingsInput, UserSettings, SETTINGS_SCHEMA_VERSION,
 };
 use crate::timer_core::{Effect, Event, TimerCore};
-use crate::types::{PersistedState, TimerTickPayload};
+use crate::types::{FullStatePayload, PersistedState, TimerTickPayload};
 
 /// Where effects go. The application handle is the only production sink.
 pub(crate) trait EffectSink {
@@ -57,19 +57,15 @@ impl TimerRuntime {
     }
 
     pub(crate) async fn dispatch(&self, sink: &impl EffectSink, event: Event) -> Result<()> {
-        self.dispatch_then_read(sink, event, |_, _| ()).await
+        let _permit = self.acquire_dispatch_permit().await;
+        self.apply_and_run_effects(sink, event).await
     }
 
-    /// Applies `event`, runs its effects, then reads from the core before the
-    /// permit is released, so the read sees exactly the dispatched state.
-    pub(crate) async fn dispatch_then_read<T>(
-        &self,
-        sink: &impl EffectSink,
-        event: Event,
-        read: impl FnOnce(&TimerCore, DateTime<Local>) -> T,
-    ) -> Result<T> {
+    /// Waits for in-flight effects so the snapshot includes their outcomes.
+    pub(crate) async fn read_full_state(&self) -> FullStatePayload {
         let _permit = self.acquire_dispatch_permit().await;
-        self.apply_then_read(sink, event, read).await
+        let now = self.clock.now_local();
+        self.read(|core| core.full_state_payload(now))
     }
 
     /// Writes `settings.json` first and changes the core only once that
@@ -105,22 +101,15 @@ impl TimerRuntime {
             },
         )
         .await?;
-        self.apply_then_read(sink, Event::SettingsChanged { settings }, |_, _| ())
+        self.apply_and_run_effects(sink, Event::SettingsChanged { settings })
             .await
     }
 
     /// Must be called while holding the dispatch permit.
-    async fn apply_then_read<T>(
-        &self,
-        sink: &impl EffectSink,
-        event: Event,
-        read: impl FnOnce(&TimerCore, DateTime<Local>) -> T,
-    ) -> Result<T> {
+    async fn apply_and_run_effects(&self, sink: &impl EffectSink, event: Event) -> Result<()> {
         let now = self.clock.now_local();
         let effects = self.apply(event, now)?;
-        let effect_result = self.run_effects(sink, effects, now).await;
-        let value = self.read(|core| read(core, now));
-        effect_result.map(|()| value)
+        self.run_effects(sink, effects, now).await
     }
 
     /// Synchronous save for `RunEvent::Exit`, called on the main thread.
@@ -136,12 +125,6 @@ impl TimerRuntime {
         let now = self.clock.now_local();
         let persisted_state = self.read(|core| core.persisted_state(now, saved_at));
         self.timer_state_persistence.save_sync(&persisted_state)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn read_full_state_for_tests(&self) -> crate::types::FullStatePayload {
-        let now = self.clock.now_local();
-        self.read(|core| core.full_state_payload(now))
     }
 
     fn apply(&self, event: Event, now: DateTime<Local>) -> Result<Vec<Effect>> {
@@ -201,6 +184,10 @@ impl TimerRuntime {
                     sink.emit("settings_changed", &payload);
                     None
                 }
+                Effect::EmitBootAutoStartOfferClosed => {
+                    sink.emit("boot_auto_start_offer_closed", &serde_json::json!({}));
+                    None
+                }
                 Effect::Persist => {
                     if let Err(error) = self.persist(now).await {
                         first_error.get_or_insert(error);
@@ -255,6 +242,8 @@ async fn save_in_background<T: PersistedDocument + Send + 'static>(
 
 #[cfg(test)]
 mod tests {
+    mod full_state;
+
     use super::*;
     use crate::external_adapters::clock::testing::FixedClock;
     use crate::external_adapters::persistence::{PersistenceLoadOutcome, SaveError};
@@ -610,7 +599,7 @@ mod tests {
             .await
             .expect("settings save should not touch the timer state file");
 
-        assert_eq!(runtime.read_full_state_for_tests().settings, settings);
+        assert_eq!(runtime.read_full_state().await.settings, settings);
         assert_eq!(saved_settings(&runtime), Some(settings));
     }
 
@@ -633,7 +622,7 @@ mod tests {
         assert!(matches!(result, Err(PomoliceError::PersistenceSave(_))));
         assert!(sink.emitted_names().is_empty());
         assert_eq!(
-            runtime.read_full_state_for_tests().settings,
+            runtime.read_full_state().await.settings,
             UserSettings::default()
         );
     }
@@ -670,7 +659,7 @@ mod tests {
             post_break_transition_policy: PostBreakTransitionPolicy::StartNextWorkAutomatically,
             ..UserSettings::default()
         };
-        assert_eq!(runtime.read_full_state_for_tests().settings, expected);
+        assert_eq!(runtime.read_full_state().await.settings, expected);
         assert_eq!(saved_settings(&runtime), Some(expected));
     }
 
@@ -695,7 +684,8 @@ mod tests {
 
         assert!(
             !runtime
-                .read_full_state_for_tests()
+                .read_full_state()
+                .await
                 .settings
                 .notification_sound_muted
         );
@@ -765,7 +755,7 @@ mod tests {
             .expect("an empty save should succeed");
 
         assert_eq!(
-            runtime.read_full_state_for_tests().settings,
+            runtime.read_full_state().await.settings,
             UserSettings::default()
         );
         assert_eq!(saved_settings(&runtime), None);

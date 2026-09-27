@@ -9,9 +9,6 @@ pub(crate) enum Event {
     Started,
     Tick,
     StartWorkRequested,
-    /// The frontend fetched the full state. Only the first observation decides
-    /// whether the boot auto-start prompt is offered.
-    FirstFullStateObserved,
     BootPromptResolved {
         start_now: bool,
     },

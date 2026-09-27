@@ -18,6 +18,7 @@ import {
   type FullStatePayload,
 } from "./timerStore";
 import { resetTimerStoreForTest } from "../test/resetTimerStore";
+import { createBootAutoStartOfferForTest } from "@/test/bootAutoStartOfferFixture";
 import { useErrorStore } from "./errorStore";
 import {
   createSettingsForTest,
@@ -38,7 +39,7 @@ function createFullStatePayload(
     is_fullscreen_break: false,
     away_during_break: false,
     post_break_decision_pending: false,
-    boot_auto_start_prompt_window: null,
+    boot_auto_start_offer: null,
     active_window_summary: null,
     settings: settingsPayloadForTest(createSettingsForTest()),
     settings_file_status: "ok",
@@ -304,12 +305,7 @@ describe("timerStore", () => {
 
         handleFullState({
           ...createFullStatePayload({ current_cycle: 1 }),
-          boot_auto_start_prompt_window: {
-            weekday_key: "mon",
-            start_time: "09:00",
-            end_time: "18:00",
-            crosses_midnight: false,
-          },
+          boot_auto_start_offer: createBootAutoStartOfferForTest(),
           active_window_summary: {
             weekday_key: "mon",
             start_time: "09:00",
@@ -319,12 +315,9 @@ describe("timerStore", () => {
         });
 
         const state = useTimerStore.getState();
-        expect(state.bootAutoStartPromptWindow).toEqual({
-          weekday_key: "mon",
-          start_time: "09:00",
-          end_time: "18:00",
-          crosses_midnight: false,
-        });
+        expect(state.bootAutoStartOffer).toEqual(
+          createBootAutoStartOfferForTest(),
+        );
         expect(state.activeWindowSummary).toEqual({
           weekday_key: "mon",
           start_time: "09:00",

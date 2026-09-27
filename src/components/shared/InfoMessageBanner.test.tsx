@@ -15,7 +15,7 @@ describe("InfoMessageBanner", () => {
       isFullscreenBreak: false,
       requiresManualContinueDecision: false,
       isConnected: false,
-      bootAutoStartPromptWindow: null,
+      bootAutoStartOffer: null,
       activeWindowSummary: null,
       infoMessage: null,
       infoMessageShownAtById: {},

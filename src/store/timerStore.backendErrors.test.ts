@@ -15,6 +15,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 import { useErrorStore, type AppError } from "./errorStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
+import { createBootAutoStartOfferForTest } from "@/test/bootAutoStartOfferFixture";
 import { TimerStatus, useTimerStore } from "./timerStore";
 
 interface TimerControlAvailabilityCase {
@@ -109,12 +110,7 @@ describe("timerStore backend command errors", () => {
         isConnected: true,
         status: TimerStatus.IDLE,
         requiresManualContinueDecision: true,
-        bootAutoStartPromptWindow: {
-          weekday_key: "mon",
-          start_time: "09:00",
-          end_time: "18:00",
-          crosses_midnight: false,
-        },
+        bootAutoStartOffer: createBootAutoStartOfferForTest(),
       });
 
       await request();
@@ -268,6 +264,9 @@ describe("timerStore backend command errors", () => {
   });
 
   it("stores retry actions for retryable boot prompt rejections", async () => {
+    useTimerStore.setState({
+      bootAutoStartOffer: createBootAutoStartOfferForTest(),
+    });
     const backendError: BackendErrorResponse = {
       code: "rate_limited",
       message: "please wait 300ms before resolving boot prompt",
@@ -297,7 +296,10 @@ describe("timerStore backend command errors", () => {
     ).toEqual(expect.any(Function));
   });
 
-  it("stores retry actions for boot prompt persistence rejections", async () => {
+  it("reports that work started without offering to repeat a failed save as a start", async () => {
+    useTimerStore.setState({
+      bootAutoStartOffer: createBootAutoStartOfferForTest(),
+    });
     const backendError: BackendErrorResponse = {
       code: "persistence_error",
       message: "failed to store boot prompt decision at C:\\secret",
@@ -314,9 +316,10 @@ describe("timerStore backend command errors", () => {
     ).toMatchObject({
       id: "resolve_boot_auto_start_prompt",
       technicalDetail: "persistence_error",
+      message: "作業を開始しましたが、状態の保存に失敗しました",
       severity: "recoverable",
       origin: "backend_command",
-      canRetry: true,
+      canRetry: false,
     });
     expectUserMessageExcludesDiagnostics(
       useErrorStore.getState().errors.resolve_boot_auto_start_prompt,
@@ -324,8 +327,76 @@ describe("timerStore backend command errors", () => {
     );
     expect(
       useErrorStore.getState().errors.resolve_boot_auto_start_prompt?.retryFn,
-    ).toEqual(expect.any(Function));
+    ).toBeNull();
   });
+
+  it("does not offer a retry when a retryable failure arrives after the offer closed", async () => {
+    const backendError: BackendErrorResponse = {
+      code: "rate_limited",
+      message: "delayed rejection",
+    };
+    useTimerStore.setState({
+      bootAutoStartOffer: createBootAutoStartOfferForTest(),
+    });
+    mockInvoke.mockRejectedValueOnce(backendError);
+
+    const request = useTimerStore.getState().resolveBootAutoStartPrompt(true);
+    useTimerStore.getState().clearBootAutoStartOffer();
+    await expect(request).rejects.toBe(backendError);
+
+    expect(
+      useErrorStore.getState().errors.resolve_boot_auto_start_prompt,
+    ).toMatchObject({
+      canRetry: false,
+      retryFn: null,
+    });
+  });
+
+  it.each(["before failure", "after failure"])(
+    "keeps a save failure when a duplicate answer sent %s completes successfully",
+    async (order) => {
+      let completeDuplicate: () => void = () => {
+        throw new Error("Expected a pending command");
+      };
+      const duplicateResponse = new Promise<void>((resolve) => {
+        completeDuplicate = resolve;
+      });
+      const backendError: BackendErrorResponse = {
+        code: "persistence_error",
+        message: "failed to save the started session",
+      };
+      useTimerStore.setState({
+        bootAutoStartOffer: createBootAutoStartOfferForTest(),
+      });
+      mockInvoke
+        .mockRejectedValueOnce(backendError)
+        .mockReturnValueOnce(duplicateResponse);
+
+      const firstAnswer = useTimerStore
+        .getState()
+        .resolveBootAutoStartPrompt(true);
+      const overlappingAnswer =
+        order === "before failure"
+          ? useTimerStore.getState().resolveBootAutoStartPrompt(true)
+          : undefined;
+      await expect(firstAnswer).rejects.toBe(backendError);
+
+      const duplicateAnswer =
+        overlappingAnswer ??
+        useTimerStore.getState().resolveBootAutoStartPrompt(true);
+      useTimerStore.getState().clearBootAutoStartOffer();
+
+      completeDuplicate();
+      await duplicateAnswer;
+
+      expect(
+        useErrorStore.getState().errors.resolve_boot_auto_start_prompt,
+      ).toMatchObject({
+        message: "作業を開始しましたが、状態の保存に失敗しました",
+        canRetry: false,
+      });
+    },
+  );
 
   it("uses generic details for unknown object rejections", async () => {
     const backendError = {

@@ -1,7 +1,6 @@
 use chrono::{DateTime, Local};
 
 use super::{Effect, TimerCore};
-use crate::error::Result;
 use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
 use crate::schedule_boundary::{
     collect_crossed_end_boundaries, collect_crossed_start_boundaries, ActiveWindow,
@@ -11,15 +10,6 @@ use crate::types::{
     ActiveWindowChangedPayload, BoundaryOccurrenceId, ScheduleStopState, SettingsChangedPayload,
     TimerStatus, WorkStartOrigin,
 };
-
-/// Gate that keeps schedule starts closed until the frontend has had the
-/// chance to show the boot auto-start prompt.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum BootPromptGate {
-    WaitingForFirstFullState,
-    WaitingForDecision,
-    Open,
-}
 
 /// What the weekly schedule tracks between ticks. Whether it is enabled
 /// and its slots are part of the user settings.
@@ -31,40 +21,9 @@ pub(super) struct ScheduleState {
     /// while the app was closed do not fire once that session ends.
     pub(super) starts_blocked_until_idle: bool,
     pub(super) last_published_active_window: Option<ActiveWindow>,
-    pub(super) boot_prompt_gate: BootPromptGate,
 }
 
 impl TimerCore {
-    pub(super) fn observe_first_full_state(&mut self, now: DateTime<Local>) {
-        if self.schedule.boot_prompt_gate != BootPromptGate::WaitingForFirstFullState {
-            return;
-        }
-        let should_prompt =
-            self.status() == TimerStatus::Idle && self.active_window_at(now).is_some();
-        self.schedule.boot_prompt_gate = if should_prompt {
-            BootPromptGate::WaitingForDecision
-        } else {
-            BootPromptGate::Open
-        };
-    }
-
-    pub(super) fn resolve_boot_prompt(
-        &mut self,
-        start_now: bool,
-        now: DateTime<Local>,
-    ) -> Result<Vec<Effect>> {
-        if self.schedule.boot_prompt_gate != BootPromptGate::WaitingForDecision {
-            return Ok(Vec::new());
-        }
-        self.schedule.boot_prompt_gate = BootPromptGate::Open;
-        if !start_now {
-            return Ok(Vec::new());
-        }
-
-        self.start_work(self.manual_start_origin(now), now)?;
-        Ok(vec![self.publish(now), Effect::Persist])
-    }
-
     pub(super) fn manual_start_origin(&self, now: DateTime<Local>) -> WorkStartOrigin {
         if self.active_window_at(now).is_some() {
             WorkStartOrigin::ManualInsideScheduleWindow
@@ -160,9 +119,7 @@ impl TimerCore {
             self.schedule.starts_blocked_until_idle = false;
             return Vec::new();
         }
-        if !self.settings.auto_run_feature_enabled
-            || self.schedule.boot_prompt_gate != BootPromptGate::Open
-        {
+        if !self.settings.auto_run_feature_enabled {
             return Vec::new();
         }
 

@@ -6,6 +6,7 @@
 // The submodules are topical views over this one state, not components:
 // each `impl TimerCore` block may read and write any field.
 
+mod boot_auto_start;
 mod break_session;
 mod effect;
 mod event;
@@ -22,14 +23,14 @@ pub(crate) use effect::Effect;
 pub(crate) use event::Event;
 
 use phase::{BreakSessionState, TimerPhase};
-use schedule::{BootPromptGate, ScheduleState};
+use schedule::ScheduleState;
 
 use crate::error::Result;
 use crate::schedule_boundary::{is_now_inside_schedule_window, ActiveWindow};
 use crate::settings::{SettingsFileStatus, UserSettings};
 use crate::types::{
-    FullStatePayload, PersistedState, SessionDurationSecs, SessionType, TimerStatus,
-    TimerTickPayload, PERSISTED_STATE_SCHEMA_VERSION,
+    BootAutoStartOfferPayload, FullStatePayload, PersistedState, SessionDurationSecs, SessionType,
+    TimerStatus, TimerTickPayload, PERSISTED_STATE_SCHEMA_VERSION,
 };
 
 pub(crate) struct TimerCore {
@@ -39,20 +40,18 @@ pub(crate) struct TimerCore {
     settings: UserSettings,
     settings_file_status: SettingsFileStatus,
     last_transition_at: Option<DateTime<Local>>,
+    boot_auto_start_offer: Option<ActiveWindow>,
     schedule: ScheduleState,
 }
 
 impl TimerCore {
     /// `Err` means the event was rejected and the state is unchanged.
     pub(crate) fn apply(&mut self, event: Event, now: DateTime<Local>) -> Result<Vec<Effect>> {
-        match event {
+        let had_boot_offer = self.boot_auto_start_offer.is_some();
+        let mut effects = match event {
             Event::Started => Ok(self.apply_started(now)),
             Event::Tick => Ok(self.apply_tick(now)),
             Event::StartWorkRequested => self.start_work_requested(now),
-            Event::FirstFullStateObserved => {
-                self.observe_first_full_state(now);
-                Ok(Vec::new())
-            }
             Event::BootPromptResolved { start_now } => self.resolve_boot_prompt(start_now, now),
             Event::PostBreakDecisionResolved { action } => {
                 self.resolve_post_break_decision(action, now)
@@ -66,7 +65,12 @@ impl TimerCore {
             Event::BreakLockEnterFailed => Ok(self.break_lock_enter_failed(now)),
             Event::BreakLockReleased => Ok(self.break_lock_released(now)),
             Event::BreakLockReleaseFailed => Ok(self.break_lock_release_failed(now)),
+        }?;
+        self.clear_invalid_boot_auto_start_offer(now);
+        if had_boot_offer && self.boot_auto_start_offer.is_none() {
+            effects.push(Effect::EmitBootAutoStartOfferClosed);
         }
+        Ok(effects)
     }
 
     /// One second of the application clock. The countdown runs before the
@@ -133,12 +137,13 @@ impl TimerCore {
             .active_window_at(now)
             .as_ref()
             .map(ActiveWindow::to_summary_payload);
-        let boot_auto_start_prompt_window =
-            if self.schedule.boot_prompt_gate == BootPromptGate::WaitingForDecision {
-                active_window_summary.clone()
-            } else {
-                None
-            };
+        let boot_auto_start_offer =
+            self.boot_auto_start_offer
+                .as_ref()
+                .map(|window| BootAutoStartOfferPayload {
+                    anchor_local_date: window.anchor_local_date,
+                    window: window.to_summary_payload(),
+                });
         let tick = self.tick_payload(now);
 
         FullStatePayload {
@@ -154,7 +159,7 @@ impl TimerCore {
             post_break_decision_pending: self.post_break_decision_pending(),
             settings: self.settings.clone(),
             settings_file_status: self.settings_file_status,
-            boot_auto_start_prompt_window,
+            boot_auto_start_offer,
             active_window_summary,
         }
     }

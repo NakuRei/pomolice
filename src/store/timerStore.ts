@@ -6,6 +6,7 @@ import { useErrorStore } from "./errorStore";
 import {
   classifyBackendError,
   formatPublicCommandErrorDetail,
+  isBackendErrorResponse,
   settingsValidationIssuesOf,
 } from "../errors/classifyBackendError";
 import {
@@ -81,7 +82,7 @@ export interface FullStatePayload extends TimerTickPayload {
   post_break_decision_pending: boolean;
   settings: SettingsPayload;
   settings_file_status: SettingsFileStatus;
-  boot_auto_start_prompt_window: ActiveWindowSummaryPayload | null;
+  boot_auto_start_offer: BootAutoStartOfferPayload | null;
   active_window_summary: ActiveWindowSummaryPayload | null;
 }
 
@@ -90,6 +91,11 @@ export interface ActiveWindowSummaryPayload {
   start_time: string;
   end_time: string;
   crosses_midnight: boolean;
+}
+
+export interface BootAutoStartOfferPayload {
+  anchor_local_date: string;
+  window: ActiveWindowSummaryPayload;
 }
 
 /**
@@ -138,9 +144,8 @@ interface TimerState {
   // UI-only state
   requiresManualContinueDecision: boolean;
   isConnected: boolean;
-  // Snapshot from the boot-time prompt, kept apart from the live
-  // activeWindowSummary so the dialog survives until the user answers.
-  bootAutoStartPromptWindow: ActiveWindowSummaryPayload | null;
+  // Undefined until observed; null is final for this backend run.
+  bootAutoStartOffer: BootAutoStartOfferPayload | null | undefined;
   activeWindowSummary: ActiveWindowSummaryPayload | null;
   infoMessage: InfoMessage | null;
   infoMessageShownAtById: Partial<Record<InfoMessageId, number>>;
@@ -188,6 +193,7 @@ interface TimerActions {
   handleFullState: (payload: FullStatePayload) => void;
   handleActiveWindowChanged: (payload: ActiveWindowChangedPayload) => void;
   handleSettingsChanged: (payload: SettingsChangedPayload) => void;
+  clearBootAutoStartOffer: () => void;
   setConnected: (connected: boolean) => void;
 }
 
@@ -232,7 +238,7 @@ const initialState: TimerState = {
   isAwayDuringBreak: false,
   requiresManualContinueDecision: false,
   isConnected: false,
-  bootAutoStartPromptWindow: null,
+  bootAutoStartOffer: undefined,
   activeWindowSummary: null,
   infoMessage: null,
   infoMessageShownAtById: {},
@@ -416,25 +422,49 @@ export const useTimerStore = create<TimerStore>()(
       },
 
       resolveBootAutoStartPrompt: async (startNow: boolean): Promise<void> => {
+        const previousError =
+          useErrorStore.getState().errors.resolve_boot_auto_start_prompt;
         try {
           await invoke("resolve_boot_auto_start_prompt", { startNow });
           set((state) => {
-            state.bootAutoStartPromptWindow = null;
+            state.bootAutoStartOffer = null;
           });
+          if (
+            previousError?.canRetry === true &&
+            useErrorStore.getState().errors.resolve_boot_auto_start_prompt ===
+              previousError
+          ) {
+            useErrorStore
+              .getState()
+              .clearError("resolve_boot_auto_start_prompt");
+          }
         } catch (error) {
           const detail = formatPublicCommandErrorDetail(error);
-          const { userMessage, severity, canRetry } =
-            classifyBackendError(error);
+          const {
+            userMessage,
+            severity,
+            canRetry: retryableError,
+          } = classifyBackendError(error);
+          const persistenceFailed =
+            isBackendErrorResponse(error) && error.code === "persistence_error";
+          const canRetry =
+            retryableError &&
+            !persistenceFailed &&
+            Boolean(get().bootAutoStartOffer);
           useErrorStore.getState().reportError({
             id: "resolve_boot_auto_start_prompt",
-            message: userMessage,
+            message: persistenceFailed
+              ? "作業を開始しましたが、状態の保存に失敗しました"
+              : userMessage,
             technicalDetail: detail,
             severity,
             origin: "backend_command",
             canRetry,
             retryFn: canRetry
               ? async (): Promise<void> => {
-                  await get().resolveBootAutoStartPrompt(startNow);
+                  if (get().bootAutoStartOffer) {
+                    await get().resolveBootAutoStartPrompt(startNow);
+                  }
                 }
               : null,
           });
@@ -537,10 +567,18 @@ export const useTimerStore = create<TimerStore>()(
           state.settingsFileStatus = payload.settings_file_status;
           state.requiresManualContinueDecision =
             payload.post_break_decision_pending;
-          state.bootAutoStartPromptWindow =
-            payload.boot_auto_start_prompt_window;
+          // A late snapshot cannot reopen an offer closed during this backend run.
+          if (state.bootAutoStartOffer !== null) {
+            state.bootAutoStartOffer = payload.boot_auto_start_offer;
+          }
           state.activeWindowSummary = payload.active_window_summary;
           state.isConnected = true;
+        });
+      },
+
+      clearBootAutoStartOffer: (): void => {
+        set((state) => {
+          state.bootAutoStartOffer = null;
         });
       },
 

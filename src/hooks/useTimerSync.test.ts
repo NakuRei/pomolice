@@ -12,6 +12,7 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
+import { createBootAutoStartOfferForTest } from "@/test/bootAutoStartOfferFixture";
 import {
   useTimerStore,
   TimerStatus,
@@ -88,7 +89,7 @@ function createFullStatePayload(
     is_fullscreen_break: false,
     away_during_break: false,
     post_break_decision_pending: false,
-    boot_auto_start_prompt_window: null,
+    boot_auto_start_offer: null,
     active_window_summary: null,
     settings: settingsPayloadForTest(createSettingsForTest()),
     settings_file_status: "ok",
@@ -175,10 +176,9 @@ async function advanceThroughTimerSyncConnectionRetries(): Promise<void> {
   await vi.advanceTimersByTimeAsync(7000);
 }
 
-function getFullStateInvokeCount(): number {
-  return mockInvoke.mock.calls.filter(
-    ([command]) => command === "get_full_state",
-  ).length;
+function getCommandInvokeCount(commandName: string): number {
+  return mockInvoke.mock.calls.filter(([command]) => command === commandName)
+    .length;
 }
 
 function getTimerTickListenCount(): number {
@@ -188,6 +188,15 @@ function getTimerTickListenCount(): number {
 
 function invokedCommandNames(): string[] {
   return mockInvoke.mock.calls.map(([command]) => command);
+}
+
+function mockCommandFailure(commandName: string, error: unknown): void {
+  const rejectCommand = vi.fn<() => Promise<never>>().mockRejectedValue(error);
+  mockInvoke.mockImplementation((command) =>
+    command === commandName
+      ? rejectCommand()
+      : Promise.resolve(createFullStatePayload()),
+  );
 }
 
 describe("useTimerSync", () => {
@@ -228,7 +237,50 @@ describe("useTimerSync", () => {
     expect(invokedCommandNames()).toEqual(["get_full_state"]);
   });
 
-  it("receives session completion events while the initial full state is pending", async () => {
+  it("subscribes before reading the startup offer from the backend", async () => {
+    const offer = createBootAutoStartOfferForTest();
+    mockInvoke.mockImplementation(() => {
+      expect(mockListen.mock.calls.map(([event]) => event)).toEqual(
+        expect.arrayContaining([
+          "timer_tick",
+          "session_completed",
+          "boot_auto_start_offer_closed",
+        ]),
+      );
+      return Promise.resolve(
+        createFullStatePayload({ boot_auto_start_offer: offer }),
+      );
+    });
+
+    renderTimerSync();
+    await waitFor(() => {
+      expect(useTimerStore.getState().isConnected).toBe(true);
+    });
+    expect(useTimerStore.getState().bootAutoStartOffer).toEqual(offer);
+    expect(invokedCommandNames()).toEqual(["get_full_state"]);
+  });
+
+  it("closes the startup offer when the backend expires it", async () => {
+    const offer = createBootAutoStartOfferForTest();
+    mockInvoke.mockResolvedValue(
+      createFullStatePayload({ boot_auto_start_offer: offer }),
+    );
+    const closeOffer = await renderAndGetTimerEventHandler(
+      "boot_auto_start_offer_closed",
+    );
+    await waitFor(() => {
+      expect(useTimerStore.getState().bootAutoStartOffer).toEqual(offer);
+    });
+
+    act(() => {
+      closeOffer({ payload: {} });
+    });
+
+    expect(useTimerStore.getState().bootAutoStartOffer).toBeNull();
+    expect(useTimerStore.getState().isConnected).toBe(true);
+  });
+
+  it("does not reopen an expired offer when an earlier full state arrives late", async () => {
     let resolveFullState: (payload: FullStatePayload) => void = () => {
       throw new Error("Expected the full-state request to be pending");
     };
@@ -236,6 +288,41 @@ describe("useTimerSync", () => {
       resolveFullState = resolve;
     });
     mockInvoke.mockReturnValue(pendingFullState);
+    const closeOffer = await renderAndGetTimerEventHandler(
+      "boot_auto_start_offer_closed",
+    );
+    await waitFor(() => {
+      expect(getCommandInvokeCount("get_full_state")).toBe(1);
+    });
+    act(() => {
+      closeOffer({ payload: {} });
+    });
+
+    await act(async () => {
+      resolveFullState(
+        createFullStatePayload({
+          boot_auto_start_offer: createBootAutoStartOfferForTest(),
+        }),
+      );
+      await pendingFullState;
+    });
+
+    expect(useTimerStore.getState().bootAutoStartOffer).toBeNull();
+    expect(useTimerStore.getState().isConnected).toBe(true);
+  });
+
+  it("receives session completion events while the initial full state is pending", async () => {
+    let resolveFullState: (payload: FullStatePayload) => void = () => {
+      throw new Error("Expected the full-state request to be pending");
+    };
+    const pendingFullState = new Promise<FullStatePayload>((resolve) => {
+      resolveFullState = resolve;
+    });
+    mockInvoke.mockImplementation((command) =>
+      command === "get_full_state"
+        ? pendingFullState
+        : Promise.resolve(undefined),
+    );
 
     const sessionHandler =
       await renderAndGetTimerEventHandler("session_completed");
@@ -252,13 +339,13 @@ describe("useTimerSync", () => {
     });
   });
 
-  it("should report get_full_state command failures through code-derived connection presentation", async () => {
+  it("reports get_full_state command failures through code-derived connection presentation", async () => {
     vi.useFakeTimers();
     const backendError = {
       code: "window_control_error",
       message: "failed to read full state from C:\\Users\\nak\\secret",
     };
-    mockInvoke.mockRejectedValue(backendError);
+    mockCommandFailure("get_full_state", backendError);
 
     renderTimerSync();
 
@@ -281,21 +368,22 @@ describe("useTimerSync", () => {
     expect(connectionError?.message).not.toContain("secret");
   });
 
-  it("should retry raw get_full_state invoke failures as connection failures", async () => {
+  it("retries raw get_full_state invoke failures as connection failures", async () => {
     vi.useFakeTimers();
-    mockInvoke.mockRejectedValue(
+    mockCommandFailure(
+      "get_full_state",
       new Error("transport failed from C:\\Users\\nak\\secret"),
     );
 
     renderTimerSync();
 
     await flushTimerSyncSetup();
-    expect(getFullStateInvokeCount()).toBe(1);
+    expect(getCommandInvokeCount("get_full_state")).toBe(1);
     expect(useErrorStore.getState().errors.connection).toBeUndefined();
 
     await advanceThroughTimerSyncConnectionRetries();
 
-    expect(getFullStateInvokeCount()).toBe(4);
+    expect(getCommandInvokeCount("get_full_state")).toBe(4);
     const connectionError = useErrorStore.getState().errors.connection;
     expect(connectionError).toMatchObject({
       id: "connection",
@@ -309,13 +397,13 @@ describe("useTimerSync", () => {
     expect(connectionError?.retryFn).toEqual(expect.any(Function));
   });
 
-  it("should report non-retryable get_full_state command failures without automatic retries", async () => {
+  it("reports non-retryable get_full_state command failures without automatic retries", async () => {
     vi.useFakeTimers();
     const backendError = {
       code: "invalid_command_input",
       message: "invalid type near C:\\Users\\nak\\secret",
     };
-    mockInvoke.mockRejectedValue(backendError);
+    mockCommandFailure("get_full_state", backendError);
 
     renderTimerSync();
 
@@ -336,11 +424,11 @@ describe("useTimerSync", () => {
     expect(connectionError?.message).not.toContain("C:\\Users\\nak");
     expect(connectionError?.message).not.toContain("secret");
 
-    expect(getFullStateInvokeCount()).toBe(1);
+    expect(getCommandInvokeCount("get_full_state")).toBe(1);
 
     await advanceThroughTimerSyncConnectionRetries();
 
-    expect(getFullStateInvokeCount()).toBe(1);
+    expect(getCommandInvokeCount("get_full_state")).toBe(1);
   });
 
   it("should clean up listeners from a failed setup attempt before retrying", async () => {
@@ -602,11 +690,11 @@ describe("useTimerSync", () => {
 
   it("cancels a pending connection retry on unmount", async () => {
     vi.useFakeTimers();
-    mockInvoke.mockRejectedValue(new Error("connection unavailable"));
+    mockCommandFailure("get_full_state", new Error("connection unavailable"));
 
     const { unmount } = renderTimerSync();
     await flushTimerSyncSetup();
-    expect(getFullStateInvokeCount()).toBe(1);
+    expect(getCommandInvokeCount("get_full_state")).toBe(1);
 
     unmount();
     mockListen.mockClear();
@@ -647,7 +735,7 @@ describe("useTimerSync", () => {
     const { unmount } = renderTimerSync();
 
     await waitFor(() => {
-      expect(getFullStateInvokeCount()).toBe(1);
+      expect(getCommandInvokeCount("get_full_state")).toBe(1);
     });
 
     unmount();

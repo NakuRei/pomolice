@@ -106,7 +106,6 @@ fn the_end_boundary_lets_the_running_session_finish_and_then_stops() {
 #[test]
 fn enabling_the_schedule_after_the_start_boundary_does_not_replay_it() {
     let mut core = idle_without_schedule(monday(9, 30, 0));
-    dismiss_boot_prompt(&mut core, monday(9, 30, 0));
 
     enable_schedule(&mut core, workday(), monday(9, 30, 0));
     let next_tick = apply(&mut core, Event::Tick, monday(9, 30, 1));

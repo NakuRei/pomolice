@@ -69,7 +69,7 @@ describe("backend penalty state", () => {
       completed_pomodoros: 4,
       break_interaction_count: 7,
       post_break_decision_pending: false,
-      boot_auto_start_prompt_window: null,
+      boot_auto_start_offer: null,
       active_window_summary: null,
       session_duration_secs: 900,
       settings: settingsPayloadForTest(createSettingsForTest()),

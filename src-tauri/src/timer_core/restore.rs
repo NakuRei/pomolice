@@ -1,7 +1,8 @@
 use chrono::{DateTime, Duration as ChronoDuration, Local};
 
+use super::boot_auto_start::initial_boot_auto_start_offer;
 use super::phase::{BreakKind, BreakSessionState, TimerPhase};
-use super::schedule::{BootPromptGate, ScheduleState};
+use super::schedule::ScheduleState;
 use super::TimerCore;
 use crate::logging_event::{log_warn_event, BackendLogEvent};
 use crate::settings::{SettingsFileStatus, UserSettings};
@@ -60,6 +61,7 @@ impl TimerCore {
         };
 
         Self {
+            boot_auto_start_offer: initial_boot_auto_start_offer(phase.status(), &settings, now),
             phase,
             current_cycle: normalized.current_cycle,
             completed_pomodoros: normalized.completed_pomodoros,
@@ -71,7 +73,6 @@ impl TimerCore {
                 last_boundary_check_local,
                 starts_blocked_until_idle: is_running,
                 last_published_active_window: None,
-                boot_prompt_gate: BootPromptGate::WaitingForFirstFullState,
             },
         }
     }
@@ -82,6 +83,7 @@ impl TimerCore {
         now: DateTime<Local>,
     ) -> Self {
         Self {
+            boot_auto_start_offer: initial_boot_auto_start_offer(TimerStatus::Idle, &settings, now),
             phase: TimerPhase::Idle {
                 post_break_decision_pending: false,
             },
@@ -95,7 +97,6 @@ impl TimerCore {
                 last_boundary_check_local: now,
                 starts_blocked_until_idle: false,
                 last_published_active_window: None,
-                boot_prompt_gate: BootPromptGate::WaitingForFirstFullState,
             },
         }
     }
