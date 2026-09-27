@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 type InvokeCommand = (
   command: string,
   args?: Record<string, unknown>,
@@ -349,6 +349,10 @@ describe("timerStore", () => {
     });
 
     describe("Info Message", () => {
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
       it("should show stop-pending info message", () => {
         const { showAutoRunStopPendingInfo } = useTimerStore.getState();
 
@@ -364,28 +368,25 @@ describe("timerStore", () => {
       });
 
       it("should suppress duplicate stop-pending info within ttl", () => {
-        const { showAutoRunStopPendingInfo } = useTimerStore.getState();
-        const dateNowSpy = vi.spyOn(Date, "now");
+        vi.useFakeTimers({ now: 1000 });
+        const { showAutoRunStopPendingInfo, clearInfoMessage } =
+          useTimerStore.getState();
 
-        dateNowSpy.mockReturnValue(1000);
         showAutoRunStopPendingInfo();
-        expect(
-          useTimerStore.getState().infoMessageShownAtById.auto_run_stop_pending,
-        ).toBe(1000);
+        expect(useTimerStore.getState().infoMessage?.id).toBe(
+          "auto_run_stop_pending",
+        );
+        clearInfoMessage();
 
-        dateNowSpy.mockReturnValue(2000);
+        vi.setSystemTime(5999);
         showAutoRunStopPendingInfo();
-        expect(
-          useTimerStore.getState().infoMessageShownAtById.auto_run_stop_pending,
-        ).toBe(1000);
+        expect(useTimerStore.getState().infoMessage).toBeNull();
 
-        dateNowSpy.mockReturnValue(7001);
+        vi.setSystemTime(6000);
         showAutoRunStopPendingInfo();
-        expect(
-          useTimerStore.getState().infoMessageShownAtById.auto_run_stop_pending,
-        ).toBe(7001);
-
-        dateNowSpy.mockRestore();
+        expect(useTimerStore.getState().infoMessage?.id).toBe(
+          "auto_run_stop_pending",
+        );
       });
 
       it("should show auto-run stopped info message", () => {

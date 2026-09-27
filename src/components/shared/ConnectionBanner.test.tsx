@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useErrorStore } from "@/store/errorStore";
@@ -46,23 +46,23 @@ describe("ConnectionBanner", () => {
       retryFn: null,
     });
 
-    const { rerender } = render(<ConnectionBanner />);
+    render(<ConnectionBanner />);
 
     expect(
       screen.queryByRole("button", { name: "再試行" }),
     ).not.toBeInTheDocument();
 
-    useErrorStore.getState().reportError({
-      id: "connection",
-      message: "バックエンドに接続できません",
-      technicalDetail: "setup failed",
-      severity: "critical",
-      origin: "backend_connection",
-      canRetry: true,
-      retryFn,
+    act(() => {
+      useErrorStore.getState().reportError({
+        id: "connection",
+        message: "バックエンドに接続できません",
+        technicalDetail: "setup failed",
+        severity: "critical",
+        origin: "backend_connection",
+        canRetry: true,
+        retryFn,
+      });
     });
-
-    rerender(<ConnectionBanner />);
 
     expect(screen.getByRole("button", { name: "再試行" })).toBeInTheDocument();
   });

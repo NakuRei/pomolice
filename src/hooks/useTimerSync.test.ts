@@ -25,10 +25,6 @@ import {
   createSettingsForTest,
   settingsPayloadForTest,
 } from "@/test/settingsFixture";
-import {
-  TIMER_SYNC_MAX_CONNECTION_RETRIES,
-  timerSyncRetryDelayMs,
-} from "./timerSyncConnectionRetryPolicy";
 
 // Mock Tauri APIs
 type TimerEventHandler = (event: { payload: unknown }) => void;
@@ -175,27 +171,19 @@ async function flushTimerSyncSetup(): Promise<void> {
   await vi.advanceTimersByTimeAsync(0);
 }
 
-function timerSyncConnectionRetryAttempts(): number[] {
-  return Array.from(
-    { length: TIMER_SYNC_MAX_CONNECTION_RETRIES },
-    (_unused, retryAttempt) => retryAttempt,
-  );
-}
-
 async function advanceThroughTimerSyncConnectionRetries(): Promise<void> {
-  await timerSyncConnectionRetryAttempts().reduce<Promise<void>>(
-    async (previousRetry, retryAttempt) => {
-      await previousRetry;
-      await vi.advanceTimersByTimeAsync(timerSyncRetryDelayMs(retryAttempt));
-    },
-    Promise.resolve(),
-  );
+  await vi.advanceTimersByTimeAsync(7000);
 }
 
 function getFullStateInvokeCount(): number {
   return mockInvoke.mock.calls.filter(
     ([command]) => command === "get_full_state",
   ).length;
+}
+
+function getTimerTickListenCount(): number {
+  return mockListen.mock.calls.filter(([event]) => event === "timer_tick")
+    .length;
 }
 
 function invokedCommandNames(): string[] {
@@ -307,9 +295,7 @@ describe("useTimerSync", () => {
 
     await advanceThroughTimerSyncConnectionRetries();
 
-    expect(getFullStateInvokeCount()).toBe(
-      TIMER_SYNC_MAX_CONNECTION_RETRIES + 1,
-    );
+    expect(getFullStateInvokeCount()).toBe(4);
     const connectionError = useErrorStore.getState().errors.connection;
     expect(connectionError).toMatchObject({
       id: "connection",
@@ -352,7 +338,7 @@ describe("useTimerSync", () => {
 
     expect(getFullStateInvokeCount()).toBe(1);
 
-    await vi.advanceTimersByTimeAsync(timerSyncRetryDelayMs(0));
+    await advanceThroughTimerSyncConnectionRetries();
 
     expect(getFullStateInvokeCount()).toBe(1);
   });
@@ -379,48 +365,30 @@ describe("useTimerSync", () => {
     });
   });
 
-  it("should retry setup failures according to the connection retry policy", async () => {
+  it("retries connection setup after 1, 2, and 4 seconds, then reports the failure", async () => {
     vi.useFakeTimers();
     mockListen.mockRejectedValue(new Error("listen failed"));
 
     renderTimerSync();
 
     await flushTimerSyncSetup();
-    expect(mockListen).toHaveBeenCalledTimes(1);
+    expect(getTimerTickListenCount()).toBe(1);
 
-    await timerSyncConnectionRetryAttempts().reduce<Promise<void>>(
-      async (previousRetry, retryAttempt) => {
-        await previousRetry;
-        const retryDelayMs = timerSyncRetryDelayMs(retryAttempt);
-        const setupAttemptCountBeforeRetry = retryAttempt + 1;
+    await vi.advanceTimersByTimeAsync(999);
+    expect(getTimerTickListenCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(getTimerTickListenCount()).toBe(2);
 
-        await vi.advanceTimersByTimeAsync(retryDelayMs - 1);
-        expect(mockListen).toHaveBeenCalledTimes(setupAttemptCountBeforeRetry);
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(getTimerTickListenCount()).toBe(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(getTimerTickListenCount()).toBe(3);
 
-        await vi.advanceTimersByTimeAsync(1);
-
-        expect(mockListen).toHaveBeenCalledTimes(
-          setupAttemptCountBeforeRetry + 1,
-        );
-      },
-      Promise.resolve(),
-    );
-
-    expect(mockListen).toHaveBeenCalledTimes(
-      TIMER_SYNC_MAX_CONNECTION_RETRIES + 1,
-    );
-  });
-
-  it("should report a retryable connection error after retry exhaustion", async () => {
-    vi.useFakeTimers();
-    mockListen.mockRejectedValue(new Error("listen failed"));
-
-    renderTimerSync();
-
-    await flushTimerSyncSetup();
-    expect(mockListen).toHaveBeenCalledTimes(1);
-
-    await advanceThroughTimerSyncConnectionRetries();
+    await vi.advanceTimersByTimeAsync(3999);
+    expect(getTimerTickListenCount()).toBe(3);
+    expect(useErrorStore.getState().errors.connection).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(getTimerTickListenCount()).toBe(4);
 
     const connectionError = useErrorStore.getState().errors.connection;
     expect(connectionError).toMatchObject({
@@ -434,16 +402,19 @@ describe("useTimerSync", () => {
     });
     expect(connectionError?.retryFn).toEqual(expect.any(Function));
     expect(useTimerStore.getState().isConnected).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(getTimerTickListenCount()).toBe(4);
   });
 
-  it("should clear the connection error and restart setup from attempt 0 on manual retry", async () => {
+  it("manual retry clears the error and grants three new retries", async () => {
     vi.useFakeTimers();
     mockListen.mockRejectedValue(new Error("listen failed"));
 
     renderTimerSync();
 
     await flushTimerSyncSetup();
-    expect(mockListen).toHaveBeenCalledTimes(1);
+    expect(getTimerTickListenCount()).toBe(1);
 
     await advanceThroughTimerSyncConnectionRetries();
 
@@ -460,7 +431,11 @@ describe("useTimerSync", () => {
     await retryFn();
 
     expect(useErrorStore.getState().errors.connection).toBeUndefined();
-    expect(mockListen).toHaveBeenCalledTimes(1);
+    expect(getTimerTickListenCount()).toBe(1);
+
+    await advanceThroughTimerSyncConnectionRetries();
+    expect(getTimerTickListenCount()).toBe(4);
+    expect(useErrorStore.getState().errors.connection?.canRetry).toBe(true);
   });
 
   it("should reconnect successfully when manual retry setup succeeds", async () => {

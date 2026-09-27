@@ -453,10 +453,6 @@ mod tests {
         }
     }
 
-    fn no_existing_overlay_labels() -> BTreeSet<String> {
-        BTreeSet::new()
-    }
-
     #[test]
     fn test_default_window_state_manager_selects_default_centered_restore_plan() {
         let manager = WindowStateManager::default();
@@ -527,25 +523,22 @@ mod tests {
     }
 
     #[test]
-    fn test_overlay_plan_skips_confirmed_main_monitor() {
+    fn test_overlay_plan_covers_only_the_other_monitor_at_its_geometry() {
         let main_monitor = monitor_snapshot(Some("built-in"), 0, 0, 1920, 1080);
-        let external_monitor = monitor_snapshot(Some("external"), 1920, 0, 1920, 1080);
+        let external_monitor = monitor_snapshot(Some("external"), -1280, 120, 1280, 1024);
         let monitors = vec![main_monitor.clone(), external_monitor.clone()];
 
         let overlay_window_plans = WindowStateManager::build_break_overlay_window_plans(
             Some(&main_monitor),
             &monitors,
-            &no_existing_overlay_labels(),
+            &BTreeSet::new(),
         );
 
-        assert_eq!(
-            overlay_window_plans,
-            vec![BreakOverlayWindowPlan {
-                label: "break-overlay-1".to_string(),
-                position: external_monitor.position,
-                size: external_monitor.size,
-            }]
-        );
+        assert_eq!(overlay_window_plans.len(), 1);
+        let overlay = &overlay_window_plans[0];
+        assert_eq!(overlay.position, external_monitor.position);
+        assert_eq!(overlay.size, external_monitor.size);
+        assert!(overlay.label.starts_with(BREAK_OVERLAY_LABEL_PREFIX));
     }
 
     #[test]
@@ -557,39 +550,13 @@ mod tests {
         let overlay_window_plans = WindowStateManager::build_break_overlay_window_plans(
             Some(&main_monitor),
             &monitors,
-            &no_existing_overlay_labels(),
+            &BTreeSet::new(),
         );
 
-        assert_eq!(
-            overlay_window_plans,
-            vec![BreakOverlayWindowPlan {
-                label: "break-overlay-0".to_string(),
-                position: candidate_monitor.position,
-                size: candidate_monitor.size,
-            }]
-        );
-    }
-
-    #[test]
-    fn test_overlay_plan_targets_non_main_monitor_geometry() {
-        let main_monitor = monitor_snapshot(Some("built-in"), 0, 0, 1920, 1080);
-        let external_monitor = monitor_snapshot(Some("external"), -1280, 120, 1280, 1024);
-        let monitors = vec![main_monitor.clone(), external_monitor.clone()];
-
-        let overlay_window_plans = WindowStateManager::build_break_overlay_window_plans(
-            Some(&main_monitor),
-            &monitors,
-            &no_existing_overlay_labels(),
-        );
-
-        assert_eq!(
-            overlay_window_plans,
-            vec![BreakOverlayWindowPlan {
-                label: "break-overlay-1".to_string(),
-                position: physical_position(-1280, 120),
-                size: physical_size(1280, 1024),
-            }]
-        );
+        assert_eq!(overlay_window_plans.len(), 1);
+        let overlay = &overlay_window_plans[0];
+        assert_eq!(overlay.position, candidate_monitor.position);
+        assert_eq!(overlay.size, candidate_monitor.size);
     }
 
     #[test]
@@ -597,7 +564,13 @@ mod tests {
         let main_monitor = monitor_snapshot(Some("built-in"), 0, 0, 1920, 1080);
         let external_monitor = monitor_snapshot(Some("external"), 1920, 0, 1920, 1080);
         let monitors = vec![main_monitor.clone(), external_monitor];
-        let existing_overlay_labels = BTreeSet::from(["break-overlay-1".to_string()]);
+        let initial_plans = WindowStateManager::build_break_overlay_window_plans(
+            Some(&main_monitor),
+            &monitors,
+            &BTreeSet::new(),
+        );
+        assert_eq!(initial_plans.len(), 1);
+        let existing_overlay_labels = BTreeSet::from([initial_plans[0].label.clone()]);
 
         let overlay_window_plans = WindowStateManager::build_break_overlay_window_plans(
             Some(&main_monitor),

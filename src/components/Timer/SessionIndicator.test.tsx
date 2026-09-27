@@ -61,14 +61,12 @@ describe("SessionIndicator", () => {
 
     it("should update when cycle changes", () => {
       useTimerStore.setState({ currentCycle: 1 });
-      const { rerender } = render(<SessionIndicator />);
+      render(<SessionIndicator />);
       expect(getSessionIndicator()).toHaveTextContent("ポモドーロ 1/4");
 
-      // Update cycle
       act(() => {
         useTimerStore.setState({ currentCycle: 3 });
       });
-      rerender(<SessionIndicator />);
       expect(getSessionIndicator()).toHaveTextContent("ポモドーロ 3/4");
     });
   });
@@ -83,14 +81,12 @@ describe("SessionIndicator", () => {
 
     it("should update when settings change", () => {
       useTimerStore.setState({ currentCycle: 1 });
-      const { rerender } = render(<SessionIndicator />);
+      render(<SessionIndicator />);
       expect(getSessionIndicator()).toHaveTextContent("ポモドーロ 1/4");
 
-      // Change interval setting
       act(() => {
         setLongBreakInterval(3);
       });
-      rerender(<SessionIndicator />);
       expect(getSessionIndicator()).toHaveTextContent("ポモドーロ 1/3");
     });
   });

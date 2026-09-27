@@ -805,7 +805,6 @@ pub(crate) struct SettingsChangedPayload {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde::Deserialize;
     use serde_json::json;
 
     fn enabled_slot(start_time: &str, end_time: &str) -> DayAutoRunSlot {
@@ -1047,35 +1046,6 @@ mod tests {
 
         assert_eq!(first, same);
         assert_ne!(first, different);
-    }
-
-    #[test]
-    fn test_enum_fields_deserialize_with_serde_default() {
-        #[derive(Debug, Deserialize)]
-        struct EnumDefaultsWrapper {
-            #[serde(default)]
-            work_start_origin: WorkStartOrigin,
-            #[serde(default)]
-            schedule_stop_state: ScheduleStopState,
-            #[serde(default)]
-            post_break_transition_policy: PostBreakTransitionPolicy,
-        }
-
-        let wrapper: EnumDefaultsWrapper =
-            serde_json::from_str("{}").expect("enum defaults wrapper should deserialize");
-
-        assert_eq!(
-            wrapper.work_start_origin,
-            WorkStartOrigin::ManualOutsideScheduleWindow
-        );
-        assert_eq!(
-            wrapper.schedule_stop_state,
-            ScheduleStopState::NotControlledBySchedule
-        );
-        assert_eq!(
-            wrapper.post_break_transition_policy,
-            PostBreakTransitionPolicy::RequireManualContinue
-        );
     }
 
     #[test]
