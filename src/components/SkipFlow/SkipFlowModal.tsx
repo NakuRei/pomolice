@@ -14,8 +14,7 @@ import TypingChallenge from "./steps/TypingChallenge";
 import MathChallenge from "./steps/MathChallenge";
 import LongPressButton from "./steps/LongPressButton";
 import FinalWarning from "./steps/FinalWarning";
-import { DialogOverlay } from "../shared/DialogOverlay";
-import { DialogPanel } from "../shared/DialogPanel";
+import { AppDialog } from "../shared/AppDialog";
 
 const CONFIRMATION_STEPS = new Set<number>([
   SKIP_FLOW_STEPS.CONFIRMATION_1,
@@ -138,24 +137,23 @@ export default function SkipFlowModal({
   };
 
   return (
-    <DialogOverlay className="bg-backdrop/90">
-      <DialogPanel
-        labelledBy={titleId}
-        describedBy={descriptionId}
-        className="max-w-2xl shadow-2xl shadow-shadow/40"
-      >
-        <h2 id={titleId} className="sr-only">
-          休憩スキップ確認
-        </h2>
-        <p id={descriptionId} className="sr-only">
-          休憩をスキップするには、この確認フローを順番に完了してください。各ステップの指示に従って進めてください。
-        </p>
-        {/* Progress Indicator */}
-        <ProgressIndicator currentStep={currentStep} totalSteps={10} />
+    <AppDialog
+      overlayClassName="bg-backdrop/90"
+      labelledBy={titleId}
+      describedBy={descriptionId}
+      className="max-w-2xl shadow-2xl shadow-shadow/40"
+    >
+      <h2 id={titleId} className="sr-only">
+        休憩スキップ確認
+      </h2>
+      <p id={descriptionId} className="sr-only">
+        休憩をスキップするには、この確認フローを順番に完了してください。各ステップの指示に従って進めてください。
+      </p>
+      {/* Progress Indicator */}
+      <ProgressIndicator currentStep={currentStep} totalSteps={10} />
 
-        {/* Step Content */}
-        <div className="mt-8">{renderStep()}</div>
-      </DialogPanel>
-    </DialogOverlay>
+      {/* Step Content */}
+      <div className="mt-8">{renderStep()}</div>
+    </AppDialog>
   );
 }

@@ -27,7 +27,6 @@ pub(super) struct BreakSessionState {
     pub(super) duration_secs: SessionDurationSecs,
     /// Counts down one per observed tick.
     pub(super) remaining_seconds: u64,
-    pub(super) is_fullscreen: bool,
     pub(super) interaction_count: u32,
     pub(super) last_penalty_at: Option<DateTime<Local>>,
     pub(super) attendance: BreakAttendance,
@@ -43,7 +42,6 @@ impl BreakSessionState {
             kind,
             duration_secs,
             remaining_seconds,
-            is_fullscreen: false,
             interaction_count: 0,
             last_penalty_at: None,
             attendance: BreakAttendance::AtDesk,

@@ -1,8 +1,10 @@
+import { createTimerSnapshotForTest } from "@/test/timerEffectsFixture";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TimerControls } from "./TimerControls";
-import { useTimerStore, TimerStatus, SessionType } from "@/store/timerStore";
+import { useTimerStore } from "@/store/timerStore";
+import { TimerStatus, SessionType } from "@/types/timer";
 
 type InvokeCommand = (
   command: string,
@@ -35,7 +37,7 @@ function getInvokeCall(callIndex: number): {
 describe("TimerControls", () => {
   beforeEach(() => {
     mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
+    mockInvoke.mockResolvedValue(createTimerSnapshotForTest());
     // Reset store to initial state before each test
     useTimerStore.setState({
       status: TimerStatus.IDLE,
@@ -44,7 +46,6 @@ describe("TimerControls", () => {
       currentCycle: 0,
       completedPomodoros: 0,
       breakInteractionCount: 0,
-      isFullscreenBreak: false,
       requiresManualContinueDecision: false,
       isConnected: false,
     });

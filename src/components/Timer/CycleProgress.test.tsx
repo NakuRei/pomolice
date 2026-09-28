@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { CycleProgress } from "./CycleProgress";
-import { SessionType, useTimerStore } from "@/store/timerStore";
+import { useTimerStore } from "@/store/timerStore";
+import { SessionType } from "@/types/timer";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { createSettingsForTest } from "@/test/settingsFixture";
 

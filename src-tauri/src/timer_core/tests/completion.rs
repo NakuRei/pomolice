@@ -22,42 +22,11 @@ fn work_completion_announces_the_break_and_asks_for_the_lock() {
         completion_reason(&at_work_end),
         Some(SessionTransitionReason::WorkToBreak)
     );
-    assert!(at_work_end.contains(&Effect::EnterBreakLock));
+    assert!(at_work_end.contains(&Effect::SetBreakLockTarget(BreakLockTarget::Locked)));
     let break_state = core.tick_payload(seconds_after(started_at, 2));
     assert_eq!(break_state.completed_pomodoros, 1);
     assert_eq!(break_state.session_type, SessionType::ShortBreak);
     assert_eq!(break_state.remaining_seconds, default_short_break_secs());
-}
-
-#[test]
-fn a_successful_break_lock_is_reported_to_the_frontend() {
-    let started_at = monday(10, 0, 0);
-    let mut core = idle_without_schedule(started_at);
-    reach_break_after_one_second_of_work(&mut core, started_at, Durations::default());
-
-    let after_lock = apply(
-        &mut core,
-        Event::BreakLockEntered,
-        seconds_after(started_at, 1),
-    );
-
-    assert!(last_published(&after_lock).is_fullscreen_break);
-}
-
-#[test]
-fn a_failed_break_lock_continues_the_break_without_fullscreen() {
-    let started_at = monday(10, 0, 0);
-    let mut core = idle_without_schedule(started_at);
-    reach_break_after_one_second_of_work(&mut core, started_at, Durations::default());
-
-    let after_failure = apply(
-        &mut core,
-        Event::BreakLockEnterFailed,
-        seconds_after(started_at, 1),
-    );
-
-    assert_eq!(core.status(), TimerStatus::OnBreak);
-    assert!(!last_published(&after_failure).is_fullscreen_break);
 }
 
 #[test]
@@ -72,11 +41,6 @@ fn break_completion_announces_the_decision_and_releases_the_lock() {
             ..Durations::default()
         },
     );
-    apply(
-        &mut core,
-        Event::BreakLockEntered,
-        seconds_after(started_at, 1),
-    );
     apply(&mut core, Event::Tick, seconds_after(started_at, 2));
 
     let at_break_end = apply(&mut core, Event::Tick, seconds_after(started_at, 3));
@@ -87,16 +51,10 @@ fn break_completion_announces_the_decision_and_releases_the_lock() {
         completion_reason(&at_break_end),
         Some(SessionTransitionReason::BreakWaitingDecision)
     );
-    assert!(at_break_end.contains(&Effect::ReleaseBreakLock));
+    assert!(at_break_end.contains(&Effect::SetBreakLockTarget(BreakLockTarget::Unlocked)));
 
-    let after_release = apply(
-        &mut core,
-        Event::BreakLockReleased,
-        seconds_after(started_at, 3),
-    );
-    let final_state = last_published(&after_release);
+    let final_state = last_published(&at_break_end);
     assert_eq!(final_state.status, TimerStatus::Idle);
-    assert!(!final_state.is_fullscreen_break);
 }
 
 /// A one-second work session followed by a one-second break, with the given

@@ -53,6 +53,9 @@ pub(crate) enum PersistenceLoadOutcome<T> {
 
 #[derive(Debug, Error)]
 pub(crate) enum SaveError {
+    #[error("persistence directory is unavailable")]
+    PathUnavailable,
+
     #[error("failed to create persistence directory for {path}: {source}")]
     CreateDir {
         path: PathBuf,
@@ -130,7 +133,7 @@ impl<T: PersistedDocument> PersistenceManager<T> {
     pub(crate) fn save_sync(&self, document: &T) -> Result<(), SaveError> {
         let Some(path) = self.file_path.as_deref() else {
             log_warn_event(BackendLogEvent::StoragePersistencePathUnavailable, &[]);
-            return Ok(());
+            return Err(SaveError::PathUnavailable);
         };
 
         log_info_event(
@@ -815,13 +818,14 @@ mod tests {
     }
 
     #[test]
-    fn test_new_with_none_disables_persistence_deterministically() {
+    fn saving_without_a_directory_reports_unavailable() {
         let persistence: PersistenceManager<PersistedState> = PersistenceManager::new(None);
         let saved_at_utc = create_utc_datetime(2025, 2, 1, 9, 0, 0);
 
-        persistence
-            .save_sync(&contract_persisted_state(saved_at_utc))
-            .expect("sync save without a path should be a no-op success");
+        assert!(matches!(
+            persistence.save_sync(&contract_persisted_state(saved_at_utc)),
+            Err(SaveError::PathUnavailable)
+        ));
         assert!(matches!(
             persistence.load_sync(),
             PersistenceLoadOutcome::NoState

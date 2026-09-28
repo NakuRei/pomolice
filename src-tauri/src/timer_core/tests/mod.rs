@@ -12,7 +12,7 @@
 // - Settings reach the core only as a whole (`Event::SettingsChanged`), so
 //   helpers such as `enable_schedule` and `start_work` change the settings the
 //   core already holds and keep everything else.
-// - Break-lock outcomes (`BreakLockEntered` etc.) are fed back by hand,
+// - Break-lock outcomes are fed back by hand,
 //   playing the role the shell has in production.
 
 mod active_window;

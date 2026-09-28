@@ -44,6 +44,7 @@ futures-util = "0.3"
 zbus = { version = "5.15", default-features = false, features = ["tokio"] }
 
 [dev-dependencies]
+tauri = { version = "2", features = ["test"] }
 chrono-tz = "0.10"
 tokio = { version = "1", features = ["test-util"] }
 

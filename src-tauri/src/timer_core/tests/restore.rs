@@ -26,7 +26,7 @@ fn work_that_expired_while_the_app_was_closed_enters_its_break_on_start() {
         completion_reason(&on_start),
         Some(SessionTransitionReason::WorkToBreak)
     );
-    assert!(on_start.contains(&Effect::EnterBreakLock));
+    assert!(on_start.contains(&Effect::SetBreakLockTarget(BreakLockTarget::Locked)));
 }
 
 #[test]
@@ -41,7 +41,7 @@ fn a_restored_break_keeps_its_remaining_time_and_re_enters_enforcement() {
 
     assert_eq!(core.status(), TimerStatus::OnBreak);
     assert_eq!(remaining(&core, restarted_at), 180);
-    assert!(on_start.contains(&Effect::EnterBreakLock));
+    assert!(on_start.contains(&Effect::SetBreakLockTarget(BreakLockTarget::Locked)));
     assert!(completion_reason(&on_start).is_none());
 }
 

@@ -15,6 +15,7 @@ mod schedule_boundary;
 mod settings;
 mod state;
 mod timer_core;
+mod timer_effects;
 mod timer_runtime;
 mod tray_icon_renderer;
 mod types;
@@ -110,17 +111,22 @@ fn setup_app(app: &tauri::App) {
     );
 }
 
+fn app_context<R: tauri::Runtime>() -> tauri::Context<R> {
+    #[expect(
+        clippy::exit,
+        reason = "Tauri's generate_context!() codegen calls process::exit() if generated context creation panics"
+    )]
+    let context = tauri::generate_context!();
+    context
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Start the Tauri application and register all runtime state, handlers, and background tasks.
 ///
 /// # Errors
 /// Returns an error if Tauri application setup or runtime startup fails.
 pub fn run() -> RunResult {
-    #[expect(
-        clippy::exit,
-        reason = "Tauri's generate_context!() codegen calls process::exit() if generated context creation panics"
-    )]
-    let tauri_context = tauri::generate_context!();
+    let tauri_context = app_context();
 
     let app = tauri::Builder::default()
         // Raw Input registration interferes with rdev keyboard hooks on Windows while focused.
@@ -132,19 +138,7 @@ pub fn run() -> RunResult {
             Ok(())
         })
         .on_window_event(handle_window_event)
-        .invoke_handler(tauri::generate_handler![
-            commands::application::is_tray_available,
-            commands::application::has_input_monitor_failed,
-            commands::application::get_emergency_shortcut_status,
-            commands::application::exit_without_tray,
-            commands::timer::start_work,
-            commands::timer::resolve_post_break_decision,
-            commands::timer::set_away_during_break,
-            commands::timer::emergency_stop,
-            commands::timer::update_settings,
-            commands::timer::get_full_state,
-            commands::timer::resolve_boot_auto_start_prompt,
-        ])
+        .invoke_handler(commands::invoke_handler())
         .build(tauri_context)?;
 
     app.run(|app_handle, event| {
@@ -249,7 +243,7 @@ mod run_event_tests {
 
     fn full_state_at_startup(dir: &Path) -> crate::types::FullStatePayload {
         let app_state = start_app_state(dir);
-        tauri::async_runtime::block_on(app_state.timer.read_full_state())
+        tauri::async_runtime::block_on(app_state.timer.read_full_state()).timer
     }
 
     #[test]

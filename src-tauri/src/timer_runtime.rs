@@ -2,7 +2,6 @@
 // their effects. One permit serializes apply and effects together, so the
 // order the core returns is the order the outside world observes.
 
-use std::collections::VecDeque;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use chrono::{DateTime, Local};
@@ -15,15 +14,19 @@ use crate::logging_event::{log_error_event, log_warn_event, BackendLogEvent};
 use crate::settings::{
     PersistedSettings, SettingsChanges, SettingsInput, UserSettings, SETTINGS_SCHEMA_VERSION,
 };
-use crate::timer_core::{Effect, Event, TimerCore};
-use crate::types::{FullStatePayload, PersistedState, TimerTickPayload};
+use crate::timer_core::{BreakLockTarget, Effect, Event, TimerCore};
+use crate::timer_effects::{
+    BreakLockAction, BreakLockOutcome, BreakLockState, EffectStatus, TimerEffectsState,
+    TimerSnapshot,
+};
+use crate::types::{PersistedState, TimerTickPayload};
 
 /// Where effects go. The application handle is the only production sink.
 pub(crate) trait EffectSink {
     fn emit(&self, event_name: &str, payload: &(impl serde::Serialize + Clone));
     fn update_tray(&self, payload: &TimerTickPayload);
-    async fn enter_break_lock(&self) -> Event;
-    async fn release_break_lock(&self) -> Event;
+    async fn enter_break_lock(&self) -> Result<()>;
+    async fn release_break_lock(&self) -> Result<()>;
 }
 
 /// Owns the core, the clock it is driven by, the files it persists to, and
@@ -33,6 +36,7 @@ pub(crate) trait EffectSink {
 pub(crate) struct TimerRuntime {
     /// Locked only inside synchronous critical sections; never held across an await.
     core: StdMutex<TimerCore>,
+    effects: StdMutex<TimerEffectsState>,
     /// Serializes every dispatch (apply plus effect execution). Held across awaits.
     dispatch_permit: Semaphore,
     clock: Arc<dyn Clock + Send + Sync>,
@@ -49,6 +53,7 @@ impl TimerRuntime {
     ) -> Self {
         Self {
             core: StdMutex::new(core),
+            effects: StdMutex::new(TimerEffectsState::default()),
             dispatch_permit: Semaphore::new(1),
             clock,
             timer_state_persistence,
@@ -56,22 +61,25 @@ impl TimerRuntime {
         }
     }
 
-    pub(crate) async fn dispatch(&self, sink: &impl EffectSink, event: Event) -> Result<()> {
+    pub(crate) async fn dispatch(
+        &self,
+        sink: &impl EffectSink,
+        event: Event,
+    ) -> Result<TimerSnapshot> {
         let _permit = self.acquire_dispatch_permit().await;
         self.apply_and_run_effects(sink, event).await
     }
 
     /// Waits for in-flight effects so the snapshot includes their outcomes.
-    pub(crate) async fn read_full_state(&self) -> FullStatePayload {
+    pub(crate) async fn read_full_state(&self) -> TimerSnapshot {
         let _permit = self.acquire_dispatch_permit().await;
-        let now = self.clock.now_local();
-        self.read(|core| core.full_state_payload(now))
+        self.snapshot()
     }
 
     /// Writes `settings.json` first and changes the core only once that
     /// succeeded, so the file and the running timer never disagree. The new
     /// settings reach the frontend as an event, in order with every other
-    /// state event, so the caller learns only whether the save happened.
+    /// state event. A save failure rejects the update before changing the core.
     ///
     /// The changes are laid over the settings in effect while the permit is
     /// held, so saves that overlap never undo each other.
@@ -79,10 +87,10 @@ impl TimerRuntime {
         &self,
         sink: &impl EffectSink,
         changes: SettingsChanges,
-    ) -> Result<()> {
+    ) -> Result<TimerSnapshot> {
         let _permit = self.acquire_dispatch_permit().await;
         if changes.is_empty() {
-            return Ok(());
+            return Ok(self.snapshot());
         }
 
         let current = self.read(|core| SettingsInput::from(core.settings().clone()));
@@ -106,10 +114,48 @@ impl TimerRuntime {
     }
 
     /// Must be called while holding the dispatch permit.
-    async fn apply_and_run_effects(&self, sink: &impl EffectSink, event: Event) -> Result<()> {
+    async fn apply_and_run_effects(
+        &self,
+        sink: &impl EffectSink,
+        event: Event,
+    ) -> Result<TimerSnapshot> {
         let now = self.clock.now_local();
         let effects = self.apply(event, now)?;
-        self.run_effects(sink, effects, now).await
+        self.run_effects(sink, effects, now).await;
+        Ok(self.snapshot())
+    }
+
+    pub(crate) async fn retry_failed_effects(&self, sink: &impl EffectSink) -> TimerSnapshot {
+        let _permit = self.acquire_dispatch_permit().await;
+        let failed = self.effect_state();
+        let mut effects = Vec::new();
+        if failed
+            .break_lock
+            .last_attempt
+            .is_some_and(|attempt| attempt.status == EffectStatus::Failed)
+        {
+            effects.push(Effect::SetBreakLockTarget(failed.break_lock.target));
+        }
+        if failed.last_timer_save == Some(EffectStatus::Failed) {
+            effects.push(Effect::Persist);
+        }
+        self.run_effects(sink, effects, self.clock.now_local())
+            .await;
+        self.snapshot()
+    }
+
+    fn effect_state(&self) -> TimerEffectsState {
+        *self
+            .effects
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn snapshot(&self) -> TimerSnapshot {
+        TimerSnapshot {
+            timer: self.read(|core| core.full_state_payload(self.clock.now_local())),
+            effects: self.effect_state(),
+        }
     }
 
     /// Synchronous save for `RunEvent::Exit`, called on the main thread.
@@ -153,62 +199,56 @@ impl TimerRuntime {
         sink: &impl EffectSink,
         effects: Vec<Effect>,
         now: DateTime<Local>,
-    ) -> Result<()> {
-        let mut queue: VecDeque<Effect> = effects.into();
-        let mut first_error = None;
+    ) {
+        let previous = self.effect_state();
+        let mut outcomes = previous;
 
-        while let Some(effect) = queue.pop_front() {
-            let follow_up = match effect {
+        for effect in effects {
+            match effect {
                 Effect::PublishTimerState(payload) => {
                     sink.emit("timer_tick", &payload);
                     sink.update_tray(&payload);
-                    None
                 }
                 Effect::EmitSessionCompleted(payload) => {
                     sink.emit("session_completed", &payload);
-                    None
                 }
                 Effect::EmitAutoRunStopPending => {
                     sink.emit("auto_run_stop_pending", &serde_json::json!({}));
-                    None
                 }
                 Effect::EmitAutoRunStopped => {
                     sink.emit("auto_run_stopped", &serde_json::json!({}));
-                    None
                 }
                 Effect::EmitActiveWindowChanged(payload) => {
                     sink.emit("active_window_changed", &payload);
-                    None
                 }
                 Effect::EmitSettingsChanged(payload) => {
                     sink.emit("settings_changed", &payload);
-                    None
                 }
                 Effect::EmitBootAutoStartOfferClosed => {
                     sink.emit("boot_auto_start_offer_closed", &serde_json::json!({}));
-                    None
                 }
                 Effect::Persist => {
-                    if let Err(error) = self.persist(now).await {
-                        first_error.get_or_insert(error);
-                    }
-                    None
+                    outcomes.last_timer_save = Some(if self.persist(now).await.is_ok() {
+                        EffectStatus::Succeeded
+                    } else {
+                        EffectStatus::Failed
+                    });
                 }
-                Effect::EnterBreakLock => Some(sink.enter_break_lock().await),
-                Effect::ReleaseBreakLock => Some(sink.release_break_lock().await),
-            };
-
-            if let Some(follow_up) = follow_up {
-                match self.apply(follow_up, now) {
-                    Ok(more) => queue.extend(more),
-                    Err(error) => {
-                        first_error.get_or_insert(error);
-                    }
+                Effect::SetBreakLockTarget(target) => {
+                    outcomes.break_lock.target = target;
+                    reconcile_break_lock(sink, &mut outcomes.break_lock).await;
                 }
             }
         }
 
-        first_error.map_or(Ok(()), Err)
+        if outcomes != previous {
+            outcomes.revision += 1;
+            *self
+                .effects
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = outcomes;
+            sink.emit("timer_effects_changed", &outcomes);
+        }
     }
 
     async fn persist(&self, now: DateTime<Local>) -> Result<()> {
@@ -240,9 +280,55 @@ async fn save_in_background<T: PersistedDocument + Send + 'static>(
     }
 }
 
+async fn reconcile_break_lock(sink: &impl EffectSink, state: &mut BreakLockState) {
+    match state.target {
+        BreakLockTarget::Unlocked => {
+            if state.last_attempt.is_some_and(|attempt| {
+                attempt.action != BreakLockAction::Release || attempt.status == EffectStatus::Failed
+            }) {
+                state.last_attempt = Some(attempt_break_lock(sink, BreakLockAction::Release).await);
+            }
+        }
+        BreakLockTarget::Locked => {
+            if state
+                .last_attempt
+                .is_some_and(|attempt| attempt.status == EffectStatus::Failed)
+            {
+                let cleanup = attempt_break_lock(sink, BreakLockAction::Release).await;
+                state.last_attempt = Some(cleanup);
+                if cleanup.status == EffectStatus::Failed {
+                    return;
+                }
+            }
+            if !state.last_attempt.is_some_and(|attempt| {
+                attempt.action == BreakLockAction::Enter
+                    && attempt.status == EffectStatus::Succeeded
+            }) {
+                state.last_attempt = Some(attempt_break_lock(sink, BreakLockAction::Enter).await);
+            }
+        }
+    }
+}
+
+async fn attempt_break_lock(sink: &impl EffectSink, action: BreakLockAction) -> BreakLockOutcome {
+    let result = match action {
+        BreakLockAction::Enter => sink.enter_break_lock().await,
+        BreakLockAction::Release => sink.release_break_lock().await,
+    };
+    BreakLockOutcome {
+        action,
+        status: if result.is_ok() {
+            EffectStatus::Succeeded
+        } else {
+            EffectStatus::Failed
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     mod full_state;
+    mod outcomes;
 
     use super::*;
     use crate::external_adapters::clock::testing::FixedClock;
@@ -258,16 +344,20 @@ mod tests {
     /// request with a configured outcome.
     struct RecordingSink {
         emitted: Mutex<Vec<(String, serde_json::Value)>>,
-        lock_outcome: Event,
+        lock_outcome: EffectStatus,
         lock_takes: Option<std::time::Duration>,
+        release_fails: bool,
+        lock_actions: Mutex<Vec<BreakLockAction>>,
     }
 
     impl RecordingSink {
-        fn with_lock_outcome(lock_outcome: Event) -> Self {
+        fn with_lock_outcome(lock_outcome: EffectStatus) -> Self {
             Self {
                 emitted: Mutex::new(Vec::new()),
                 lock_outcome,
                 lock_takes: None,
+                release_fails: false,
+                lock_actions: Mutex::new(Vec::new()),
             }
         }
 
@@ -331,15 +421,35 @@ mod tests {
 
         fn update_tray(&self, _payload: &TimerTickPayload) {}
 
-        async fn enter_break_lock(&self) -> Event {
+        async fn enter_break_lock(&self) -> Result<()> {
+            self.lock_actions
+                .lock()
+                .expect("lock actions")
+                .push(BreakLockAction::Enter);
             if let Some(lock_takes) = self.lock_takes {
                 tokio::time::sleep(lock_takes).await;
             }
-            self.lock_outcome.clone()
+            if self.lock_outcome == EffectStatus::Succeeded {
+                Ok(())
+            } else {
+                Err(PomoliceError::WindowControl(
+                    "injected entry failure".into(),
+                ))
+            }
         }
 
-        async fn release_break_lock(&self) -> Event {
-            Event::BreakLockReleased
+        async fn release_break_lock(&self) -> Result<()> {
+            self.lock_actions
+                .lock()
+                .expect("lock actions")
+                .push(BreakLockAction::Release);
+            if self.release_fails {
+                Err(PomoliceError::WindowControl(
+                    "injected release failure".into(),
+                ))
+            } else {
+                Ok(())
+            }
         }
     }
 
@@ -447,11 +557,12 @@ mod tests {
                 })
             }));
         let runtime = runtime_with(persistence, PersistenceManager::new(None), &clock);
-        let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
+        let sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded);
 
         let result = runtime.dispatch(&sink, Event::StartWorkRequested).await;
 
-        assert!(matches!(result, Err(PomoliceError::PersistenceSave(_))));
+        let outcome = result.expect("the input was accepted");
+        assert_eq!(outcome.effects.last_timer_save, Some(EffectStatus::Failed));
         let last_tick = sink.last_timer_tick().expect("a tick should be emitted");
         assert_eq!(last_tick["status"], "working");
     }
@@ -461,7 +572,7 @@ mod tests {
         let clock = fixed_clock();
         let temp_dir = create_temp_dir("rejected-event");
         let runtime = idle_runtime(&temp_dir, &clock);
-        let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
+        let sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded);
 
         let result = runtime
             .dispatch(
@@ -485,7 +596,7 @@ mod tests {
         let clock = fixed_clock();
         let temp_dir = create_temp_dir("break-saved");
         let runtime = idle_runtime(&temp_dir, &clock);
-        let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
+        let sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded);
         start_one_second_work(&runtime, &sink).await;
         clock.set_now_local(clock.now_local() + chrono::Duration::seconds(1));
 
@@ -499,7 +610,18 @@ mod tests {
             .contains(&"session_completed".to_string()));
         let last_tick = sink.last_timer_tick().expect("a tick should be emitted");
         assert_eq!(last_tick["status"], "on_break");
-        assert_eq!(last_tick["is_fullscreen_break"], true);
+        assert_eq!(
+            runtime
+                .read_full_state()
+                .await
+                .effects
+                .break_lock
+                .last_attempt,
+            Some(BreakLockOutcome {
+                action: BreakLockAction::Enter,
+                status: EffectStatus::Succeeded
+            })
+        );
         let saved = saved_state(&runtime)
             .expect("the break should have been saved by the time the tick returned");
         assert_eq!(saved.status, TimerStatus::OnBreak);
@@ -509,7 +631,7 @@ mod tests {
     async fn starting_work_is_saved_before_the_command_returns() {
         let clock = fixed_clock();
         let runtime = idle_runtime(&create_temp_dir("start-saved"), &clock);
-        let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
+        let sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded);
 
         start_default_work(&runtime, &sink).await;
 
@@ -521,7 +643,7 @@ mod tests {
     async fn an_emergency_stop_is_saved_before_the_command_returns() {
         let clock = fixed_clock();
         let runtime = idle_runtime(&create_temp_dir("stop-saved"), &clock);
-        let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
+        let sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded);
         start_default_work(&runtime, &sink).await;
 
         runtime
@@ -537,7 +659,7 @@ mod tests {
     async fn saved_settings_are_written_to_their_file_and_announced_as_an_event() {
         let clock = fixed_clock();
         let runtime = idle_runtime(&create_temp_dir("settings-saved"), &clock);
-        let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
+        let sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded);
         let settings = UserSettings {
             post_break_transition_policy: PostBreakTransitionPolicy::StartNextWorkAutomatically,
             ..UserSettings::default()
@@ -582,7 +704,7 @@ mod tests {
             PersistenceManager::new(Some(create_temp_dir("settings-with-own-file"))),
             &clock,
         );
-        let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
+        let sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded);
         let settings = UserSettings {
             auto_run_feature_enabled: true,
             ..UserSettings::default()
@@ -599,7 +721,7 @@ mod tests {
             .await
             .expect("settings save should not touch the timer state file");
 
-        assert_eq!(runtime.read_full_state().await.settings, settings);
+        assert_eq!(runtime.read_full_state().await.timer.settings, settings);
         assert_eq!(saved_settings(&runtime), Some(settings));
     }
 
@@ -615,14 +737,14 @@ mod tests {
                     })
                 }));
         let runtime = runtime_with(PersistenceManager::new(None), settings_persistence, &clock);
-        let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
+        let sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded);
 
         let result = runtime.update_settings(&sink, one_second_work()).await;
 
         assert!(matches!(result, Err(PomoliceError::PersistenceSave(_))));
         assert!(sink.emitted_names().is_empty());
         assert_eq!(
-            runtime.read_full_state().await.settings,
+            runtime.read_full_state().await.timer.settings,
             UserSettings::default()
         );
     }
@@ -631,7 +753,7 @@ mod tests {
     async fn overlapping_saves_of_different_settings_keep_both_changes() {
         let clock = fixed_clock();
         let runtime = idle_runtime(&create_temp_dir("overlapping-saves"), &clock);
-        let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
+        let sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded);
 
         let (muted, policy_changed) = tokio::join!(
             runtime.update_settings(
@@ -659,7 +781,7 @@ mod tests {
             post_break_transition_policy: PostBreakTransitionPolicy::StartNextWorkAutomatically,
             ..UserSettings::default()
         };
-        assert_eq!(runtime.read_full_state().await.settings, expected);
+        assert_eq!(runtime.read_full_state().await.timer.settings, expected);
         assert_eq!(saved_settings(&runtime), Some(expected));
     }
 
@@ -667,7 +789,7 @@ mod tests {
     async fn the_later_save_of_the_same_setting_wins() {
         let clock = fixed_clock();
         let runtime = idle_runtime(&create_temp_dir("same-setting-twice"), &clock);
-        let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
+        let sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded);
         let muted = |value: bool| SettingsChanges {
             notification_sound_muted: Some(value),
             ..SettingsChanges::default()
@@ -686,6 +808,7 @@ mod tests {
             !runtime
                 .read_full_state()
                 .await
+                .timer
                 .settings
                 .notification_sound_muted
         );
@@ -699,7 +822,7 @@ mod tests {
     async fn a_change_is_validated_together_with_the_settings_it_joins() {
         let clock = fixed_clock();
         let runtime = idle_runtime(&create_temp_dir("validated-as-a-whole"), &clock);
-        let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
+        let sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded);
         let mut tuesday_only = SettingsInput::from(UserSettings::default()).weekly_auto_run_config;
         tuesday_only.tue = daytime_slot(true);
         runtime
@@ -747,7 +870,7 @@ mod tests {
     async fn saving_no_changes_writes_nothing_and_announces_nothing() {
         let clock = fixed_clock();
         let runtime = idle_runtime(&create_temp_dir("no-changes"), &clock);
-        let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
+        let sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded);
 
         runtime
             .update_settings(&sink, SettingsChanges::default())
@@ -755,7 +878,7 @@ mod tests {
             .expect("an empty save should succeed");
 
         assert_eq!(
-            runtime.read_full_state().await.settings,
+            runtime.read_full_state().await.timer.settings,
             UserSettings::default()
         );
         assert_eq!(saved_settings(&runtime), None);
@@ -766,7 +889,7 @@ mod tests {
     async fn idle_ticks_do_not_write_to_disk() {
         let clock = fixed_clock();
         let runtime = idle_runtime(&create_temp_dir("idle-no-write"), &clock);
-        let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
+        let sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded);
 
         for _ in 0..3 {
             clock.set_now_local(clock.now_local() + chrono::Duration::seconds(1));
@@ -783,7 +906,7 @@ mod tests {
     async fn dispatches_do_not_interleave_even_while_an_effect_is_still_running() {
         let clock = fixed_clock();
         let runtime = idle_runtime(&create_temp_dir("serialized"), &clock);
-        let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered)
+        let sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded)
             .with_slow_lock(std::time::Duration::from_millis(50));
         start_one_second_work(&runtime, &sink).await;
         clock.set_now_local(clock.now_local() + chrono::Duration::seconds(1));
@@ -818,7 +941,7 @@ mod tests {
     async fn exit_flush_saves_while_a_dispatch_is_still_running_its_effects() {
         let clock = fixed_clock();
         let runtime = idle_runtime(&create_temp_dir("exit-during-dispatch"), &clock);
-        let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered)
+        let sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded)
             .with_slow_lock(std::time::Duration::from_millis(50));
         start_one_second_work(&runtime, &sink).await;
         clock.set_now_local(clock.now_local() + chrono::Duration::seconds(1));

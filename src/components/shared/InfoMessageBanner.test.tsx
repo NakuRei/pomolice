@@ -1,7 +1,8 @@
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InfoMessageBanner } from "./InfoMessageBanner";
-import { SessionType, TimerStatus, useTimerStore } from "@/store/timerStore";
+import { useTimerStore } from "@/store/timerStore";
+import { SessionType, TimerStatus } from "@/types/timer";
 
 describe("InfoMessageBanner", () => {
   beforeEach(() => {
@@ -12,7 +13,6 @@ describe("InfoMessageBanner", () => {
       currentCycle: 0,
       completedPomodoros: 0,
       breakInteractionCount: 0,
-      isFullscreenBreak: false,
       requiresManualContinueDecision: false,
       isConnected: false,
       bootAutoStartOffer: null,

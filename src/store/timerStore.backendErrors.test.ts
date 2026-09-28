@@ -1,3 +1,9 @@
+import { useTimerEffectsStore } from "./timerEffectsStore";
+import {
+  createTimerEffectsForTest,
+  createTimerSnapshotForTest,
+} from "@/test/timerEffectsFixture";
+import type { TimerSnapshot } from "@/types/timerEffects";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BackendErrorResponse } from "@/errors/classifyBackendError";
 
@@ -16,7 +22,8 @@ vi.mock("@tauri-apps/api/core", () => ({
 import { useErrorStore, type AppError } from "./errorStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { createBootAutoStartOfferForTest } from "@/test/bootAutoStartOfferFixture";
-import { TimerStatus, useTimerStore } from "./timerStore";
+import { useTimerStore } from "./timerStore";
+import { TimerStatus } from "@/types/timer";
 
 interface TimerControlAvailabilityCase {
   label: string;
@@ -98,7 +105,7 @@ function expectTechnicalDetailExcludesDiagnostics(
 describe("timerStore backend command errors", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockInvoke.mockResolvedValue(undefined);
+    mockInvoke.mockResolvedValue(createTimerSnapshotForTest());
     useErrorStore.getState().clearAllErrors();
     resetTimerStoreForTest();
   });
@@ -296,38 +303,22 @@ describe("timerStore backend command errors", () => {
     ).toEqual(expect.any(Function));
   });
 
-  it("reports that work started without offering to repeat a failed save as a start", async () => {
+  it("keeps a failed save separate from an accepted startup answer", async () => {
     useTimerStore.setState({
       bootAutoStartOffer: createBootAutoStartOfferForTest(),
     });
-    const backendError: BackendErrorResponse = {
-      code: "persistence_error",
-      message: "failed to store boot prompt decision at C:\\secret",
-    };
-    mockInvoke.mockRejectedValueOnce(backendError);
-
-    await expectCommandRejection(
-      () => useTimerStore.getState().resolveBootAutoStartPrompt(true),
-      backendError,
-    );
-
-    expect(
-      useErrorStore.getState().errors.resolve_boot_auto_start_prompt,
-    ).toMatchObject({
-      id: "resolve_boot_auto_start_prompt",
-      technicalDetail: "persistence_error",
-      message: "作業を開始しましたが、状態の保存に失敗しました",
-      severity: "recoverable",
-      origin: "backend_command",
-      canRetry: false,
+    const effects = createTimerEffectsForTest({
+      revision: 1,
+      last_timer_save: "failed",
     });
-    expectUserMessageExcludesDiagnostics(
-      useErrorStore.getState().errors.resolve_boot_auto_start_prompt,
-      ["failed to store boot prompt decision", "C:\\secret"],
-    );
+    mockInvoke.mockResolvedValueOnce(createTimerSnapshotForTest({ effects }));
+    await useTimerStore.getState().resolveBootAutoStartPrompt(true);
+    expect(useTimerStore.getState().bootAutoStartOffer).toBeNull();
     expect(
-      useErrorStore.getState().errors.resolve_boot_auto_start_prompt?.retryFn,
-    ).toBeNull();
+      useErrorStore.getState().errors.resolve_boot_auto_start_prompt,
+    ).toBeUndefined();
+    expect(useTimerEffectsStore.getState().effects).toEqual(effects);
+    expect(mockInvoke).toHaveBeenCalledTimes(1);
   });
 
   it("does not offer a retry when a retryable failure arrives after the offer closed", async () => {
@@ -355,23 +346,23 @@ describe("timerStore backend command errors", () => {
   it.each(["before failure", "after failure"])(
     "keeps a save failure when a duplicate answer sent %s completes successfully",
     async (order) => {
-      let completeDuplicate: () => void = () => {
+      let completeDuplicate: (result: TimerSnapshot) => void = () => {
         throw new Error("Expected a pending command");
       };
-      const duplicateResponse = new Promise<void>((resolve) => {
+      const duplicateResponse = new Promise<TimerSnapshot>((resolve) => {
         completeDuplicate = resolve;
       });
-      const backendError: BackendErrorResponse = {
-        code: "persistence_error",
-        message: "failed to save the started session",
-      };
+      const effects = createTimerEffectsForTest({
+        revision: 1,
+        last_timer_save: "failed",
+      });
+      const outcome = createTimerSnapshotForTest({ effects });
       useTimerStore.setState({
         bootAutoStartOffer: createBootAutoStartOfferForTest(),
       });
       mockInvoke
-        .mockRejectedValueOnce(backendError)
+        .mockResolvedValueOnce(outcome)
         .mockReturnValueOnce(duplicateResponse);
-
       const firstAnswer = useTimerStore
         .getState()
         .resolveBootAutoStartPrompt(true);
@@ -379,22 +370,18 @@ describe("timerStore backend command errors", () => {
         order === "before failure"
           ? useTimerStore.getState().resolveBootAutoStartPrompt(true)
           : undefined;
-      await expect(firstAnswer).rejects.toBe(backendError);
-
+      await firstAnswer;
       const duplicateAnswer =
         overlappingAnswer ??
         useTimerStore.getState().resolveBootAutoStartPrompt(true);
-      useTimerStore.getState().clearBootAutoStartOffer();
-
-      completeDuplicate();
+      completeDuplicate(outcome);
       await duplicateAnswer;
-
+      expect(useTimerEffectsStore.getState().effects?.last_timer_save).toBe(
+        "failed",
+      );
       expect(
         useErrorStore.getState().errors.resolve_boot_auto_start_prompt,
-      ).toMatchObject({
-        message: "作業を開始しましたが、状態の保存に失敗しました",
-        canRetry: false,
-      });
+      ).toBeUndefined();
     },
   );
 

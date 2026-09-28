@@ -1,3 +1,4 @@
+import { answerSettingsSavesForTest } from "@/test/settingsSaveFixture";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -20,10 +21,7 @@ vi.mock("@/services/notifications", () => ({
   ),
 }));
 
-import {
-  createSettingsForTest,
-  answerSettingsSavesForTest,
-} from "@/test/settingsFixture";
+import { createSettingsForTest } from "@/test/settingsFixture";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import type { Settings, SettingsPayload } from "@/types/settings";
 import { playNotificationSoundPreview } from "@/services/notifications";

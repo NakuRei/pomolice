@@ -1,3 +1,5 @@
+import { answerSettingsSavesForTest } from "@/test/settingsSaveFixture";
+import { createTimerSnapshotForTest } from "@/test/timerEffectsFixture";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -17,13 +19,11 @@ vi.mock("@tauri-apps/api/core", () => ({
 import { FullscreenBreak } from "./FullscreenBreak";
 import { useEmergencyShortcutStore } from "@/store/emergencyShortcutStore";
 import { useErrorStore } from "@/store/errorStore";
-import { useTimerStore, SessionType, TimerStatus } from "@/store/timerStore";
+import { useTimerStore } from "@/store/timerStore";
+import { SessionType, TimerStatus } from "@/types/timer";
 import { useSkipFlowStore } from "@/store/skipFlowStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
-import {
-  createSettingsForTest,
-  answerSettingsSavesForTest,
-} from "@/test/settingsFixture";
+import { createSettingsForTest } from "@/test/settingsFixture";
 import type { Settings } from "@/types/settings";
 import {
   LONG_TYPING_PHRASES,
@@ -107,7 +107,7 @@ describe("FullscreenBreak", () => {
       connectionFailed: false,
     });
     mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
+    mockInvoke.mockResolvedValue(createTimerSnapshotForTest());
     resetTimerStoreForTest();
     useSkipFlowStore.getState().resetSkipFlow();
     useErrorStore.getState().clearAllErrors();
@@ -116,7 +116,6 @@ describe("FullscreenBreak", () => {
       sessionType: SessionType.SHORT_BREAK,
       remainingSeconds: 300,
       status: TimerStatus.ON_BREAK,
-      isFullscreenBreak: true,
       isConnected: true,
     });
   });
@@ -203,7 +202,7 @@ describe("FullscreenBreak", () => {
       ).toBeInTheDocument();
     });
 
-    it("keeps the break screen while fullscreen remains enforced", () => {
+    it("does not rewrite the reported timer phase when displaying break controls", () => {
       useTimerStore.getState().handleTimerTick({
         status: TimerStatus.IDLE,
         remaining_seconds: 300,
@@ -212,13 +211,12 @@ describe("FullscreenBreak", () => {
         current_cycle: 1,
         completed_pomodoros: 0,
         break_interaction_count: 0,
-        is_fullscreen_break: true,
         away_during_break: false,
       });
 
       render(<FullscreenBreak />);
 
-      expect(useTimerStore.getState().status).toBe(TimerStatus.ON_BREAK);
+      expect(useTimerStore.getState().status).toBe(TimerStatus.IDLE);
       expect(
         screen.getByRole("button", { name: "休憩をスキップ" }),
       ).toBeInTheDocument();
@@ -324,7 +322,6 @@ describe("FullscreenBreak", () => {
         current_cycle: 1,
         completed_pomodoros: 1,
         break_interaction_count: 0,
-        is_fullscreen_break: true,
         away_during_break: awayDuringBreak,
       });
     }

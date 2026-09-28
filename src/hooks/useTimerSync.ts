@@ -5,18 +5,19 @@
  */
 
 import { useEffect } from "react";
+import { useTimerEffectsStore } from "@/store/timerEffectsStore";
+import type { TimerSnapshot, TimerEffectsState } from "@/types/timerEffects";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { createLogger } from "../logging/logger";
 import { FRONTEND_LOG_EVENT_IDS } from "../logging/logEvents";
+import { useTimerStore } from "../store/timerStore";
 import {
   type ActiveWindowChangedPayload,
   type SettingsChangedPayload,
   type TimerTickPayload,
   type SessionCompletedPayload,
-  type FullStatePayload,
-  useTimerStore,
-} from "../store/timerStore";
+} from "@/types/timer";
 import {
   notifyWorkComplete,
   notifyBreakAutoStarted,
@@ -48,6 +49,7 @@ const logger = createLogger("timer_sync");
  * store so the UI can surface a ConnectionBanner.
  */
 export function useTimerSync(): void {
+  const observeEffects = useTimerEffectsStore((state) => state.observe);
   const handleTimerTick = useTimerStore((s) => s.handleTimerTick);
   const handleSessionCompleted = useTimerStore((s) => s.handleSessionCompleted);
   const handleFullState = useTimerStore((s) => s.handleFullState);
@@ -184,7 +186,14 @@ export function useTimerSync(): void {
           }
         },
       );
-      return registerActiveListener(unlistenBootOfferClosed);
+      if (!registerActiveListener(unlistenBootOfferClosed)) return false;
+      const unlistenEffects = await listen<TimerEffectsState>(
+        "timer_effects_changed",
+        (event) => {
+          if (mounted) observeEffects(event.payload);
+        },
+      );
+      return registerActiveListener(unlistenEffects);
     }
 
     function shouldRetryTimerSyncSetupFailure(
@@ -212,7 +221,7 @@ export function useTimerSync(): void {
         }
 
         failureSource = "command_transport";
-        const fullState = await invoke<FullStatePayload>("get_full_state");
+        const fullState = await invoke<TimerSnapshot>("get_full_state");
         failureSource = "setup";
         if (!mounted) {
           return;
@@ -277,6 +286,7 @@ export function useTimerSync(): void {
     handleSessionCompleted,
     handleFullState,
     clearBootAutoStartOffer,
+    observeEffects,
     handleActiveWindowChanged,
     handleSettingsChanged,
     setConnected,

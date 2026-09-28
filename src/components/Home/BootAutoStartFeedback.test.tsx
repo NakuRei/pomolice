@@ -1,3 +1,10 @@
+import { TimerEffectsNotice } from "@/components/shared/TimerEffectsNotice";
+import { useTimerEffectsStore } from "@/store/timerEffectsStore";
+import {
+  createTimerEffectsForTest,
+  createTimerSnapshotForTest,
+} from "@/test/timerEffectsFixture";
+import type { TimerSnapshot } from "@/types/timerEffects";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -5,25 +12,29 @@ import { invoke } from "@tauri-apps/api/core";
 import { HomeScreen } from "./HomeScreen";
 import type { BackendErrorResponse } from "@/errors/classifyBackendError";
 import { useErrorStore } from "@/store/errorStore";
-import { TimerStatus, useTimerStore } from "@/store/timerStore";
+import { useTimerStore } from "@/store/timerStore";
+import { TimerStatus } from "@/types/timer";
 import { createBootAutoStartOfferForTest } from "@/test/bootAutoStartOfferFixture";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { createSettingsForTest } from "@/test/settingsFixture";
 
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn().mockResolvedValue(undefined),
+  invoke: vi.fn(),
 }));
 
 function renderHome(): void {
   render(
-    <HomeScreen
-      notificationSoundMuted={false}
-      isAutoRunWindowActive={true}
-      isAutoContinueEnabled={false}
-      requiresManualContinue={false}
-      onToggleNotificationSoundMuted={() => undefined}
-      onOpenSettingsTopScreen={() => undefined}
-    />,
+    <>
+      <TimerEffectsNotice />
+      <HomeScreen
+        notificationSoundMuted={false}
+        isAutoRunWindowActive={true}
+        isAutoContinueEnabled={false}
+        requiresManualContinue={false}
+        onToggleNotificationSoundMuted={() => undefined}
+        onOpenSettingsTopScreen={() => undefined}
+      />
+    </>,
   );
 }
 
@@ -34,7 +45,9 @@ const rateLimited: BackendErrorResponse = {
 
 describe("startup confirmation feedback", () => {
   beforeEach(() => {
-    vi.mocked(invoke).mockReset().mockResolvedValue(undefined);
+    vi.mocked(invoke)
+      .mockReset()
+      .mockResolvedValue(createTimerSnapshotForTest());
     resetTimerStoreForTest();
     useErrorStore.getState().clearAllErrors();
     useTimerStore.setState({
@@ -47,56 +60,56 @@ describe("startup confirmation feedback", () => {
   it.each(["close first", "failure first"])(
     "keeps a save failure visible when the backend sends %s",
     async (order) => {
-      let rejectCommand: (error: BackendErrorResponse) => void = () => {
+      let resolveCommand: (result: TimerSnapshot) => void = () => {
         throw new Error("Expected a pending command");
       };
-      const pendingCommand = new Promise<void>((_resolve, reject) => {
-        rejectCommand = reject;
+      const pendingCommand = new Promise<TimerSnapshot>((resolve) => {
+        resolveCommand = resolve;
       });
       vi.mocked(invoke).mockReturnValueOnce(pendingCommand);
       renderHome();
-      await userEvent
-        .setup()
-        .click(screen.getByRole("button", { name: "開始する" }));
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: "開始する" }));
+      const effects = createTimerEffectsForTest({
+        revision: 1,
+        last_timer_save: "failed",
+      });
       act(() => {
         useTimerStore.setState({ status: TimerStatus.WORKING });
-        if (order === "close first") {
+        if (order === "close first")
           useTimerStore.getState().clearBootAutoStartOffer();
-        }
+        useTimerEffectsStore.getState().observe(effects);
       });
-
-      await act(async () => {
-        rejectCommand({
-          code: "persistence_error",
-          message: "injected save failure",
-        });
-        await pendingCommand.catch(() => undefined);
-      });
-
       if (order === "failure first") {
         const dialog = screen.getByRole("dialog", {
           name: "作業を開始しますか？",
         });
         expect(within(dialog).getByRole("alert")).toHaveTextContent(
-          "作業を開始しましたが、状態の保存に失敗しました",
+          "タイマーの状態の保存に失敗しました",
         );
-        expect(
-          within(dialog).queryByRole("button", { name: "再試行" }),
-        ).not.toBeInTheDocument();
-        act(() => {
-          useTimerStore.getState().clearBootAutoStartOffer();
-        });
       }
-
+      await act(async () => {
+        resolveCommand(createTimerSnapshotForTest({ effects }));
+        await pendingCommand;
+      });
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
       expect(screen.getByRole("alert")).toHaveTextContent(
-        "作業を開始しましたが、状態の保存に失敗しました",
+        "タイマーの状態の保存に失敗しました",
       );
-      expect(
-        screen.queryByRole("button", { name: "再試行" }),
-      ).not.toBeInTheDocument();
       expect(useTimerStore.getState().status).toBe(TimerStatus.WORKING);
       expect(invoke).toHaveBeenCalledTimes(1);
+      vi.mocked(invoke).mockResolvedValueOnce(
+        createTimerSnapshotForTest({
+          effects: createTimerEffectsForTest({
+            revision: 2,
+            last_timer_save: "succeeded",
+          }),
+        }),
+      );
+      await user.click(screen.getByRole("button", { name: "再試行" }));
+      expect(invoke).toHaveBeenLastCalledWith("retry_failed_timer_effects");
+      expect(invoke).toHaveBeenCalledTimes(2);
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     },
   );
 

@@ -23,16 +23,17 @@ async fn reading_full_state_does_not_create_a_boot_offer_or_write_files() {
         PersistenceManager::new(Some(data_dir.clone())),
         PersistenceManager::new(Some(data_dir)),
     );
-    let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
+    let sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded);
 
     assert!(runtime
         .read_full_state()
         .await
+        .timer
         .boot_auto_start_offer
         .is_none());
     clock.set_now_local(now + chrono::Duration::hours(1));
     for _ in 0..2 {
-        let state = runtime.read_full_state().await;
+        let state = runtime.read_full_state().await.timer;
         assert_eq!(state.status, TimerStatus::Idle);
         assert!(state.active_window_summary.is_some());
         assert!(state.boot_auto_start_offer.is_none());
@@ -44,7 +45,10 @@ async fn reading_full_state_does_not_create_a_boot_offer_or_write_files() {
         .dispatch(&sink, Event::Tick)
         .await
         .expect("tick should start the scheduled work");
-    assert_eq!(runtime.read_full_state().await.status, TimerStatus::Working);
+    assert_eq!(
+        runtime.read_full_state().await.timer.status,
+        TimerStatus::Working
+    );
     assert!(saved_state(&runtime).is_some());
 }
 
@@ -71,11 +75,14 @@ async fn a_tick_closes_the_startup_offer_and_announces_it_once() {
         PersistenceManager::new(Some(data_dir.clone())),
         PersistenceManager::new(Some(data_dir)),
     );
-    let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
-    let offer = runtime.read_full_state().await.boot_auto_start_offer;
+    let sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded);
+    let offer = runtime.read_full_state().await.timer.boot_auto_start_offer;
     assert!(offer.is_some());
     clock.set_now_local(now + chrono::Duration::seconds(1));
-    assert_eq!(runtime.read_full_state().await.boot_auto_start_offer, offer);
+    assert_eq!(
+        runtime.read_full_state().await.timer.boot_auto_start_offer,
+        offer
+    );
     assert!(sink.emitted_names().is_empty());
     assert!(saved_state(&runtime).is_none());
     assert!(saved_settings(&runtime).is_none());
@@ -90,6 +97,7 @@ async fn a_tick_closes_the_startup_offer_and_announces_it_once() {
     assert!(runtime
         .read_full_state()
         .await
+        .timer
         .boot_auto_start_offer
         .is_none());
     assert_eq!(
@@ -102,14 +110,14 @@ async fn a_tick_closes_the_startup_offer_and_announces_it_once() {
 async fn reading_full_state_does_not_complete_an_expired_work_session() {
     let clock = fixed_clock();
     let runtime = idle_runtime(&create_temp_dir("read-expired-work"), &clock);
-    let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered);
+    let sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded);
     start_one_second_work(&runtime, &sink).await;
     let saved_before_reads = saved_state(&runtime).expect("work should be saved");
     let emitted_before_reads = sink.emitted_names();
     clock.set_now_local(clock.now_local() + chrono::Duration::seconds(1));
 
     for _ in 0..2 {
-        let state = runtime.read_full_state().await;
+        let state = runtime.read_full_state().await.timer;
         assert_eq!(state.status, TimerStatus::Working);
         assert_eq!(state.remaining_seconds, 0);
         assert_eq!(state.completed_pomodoros, 0);
@@ -127,14 +135,17 @@ async fn reading_full_state_does_not_complete_an_expired_work_session() {
         .dispatch(&sink, Event::Tick)
         .await
         .expect("tick should complete the work");
-    assert_eq!(runtime.read_full_state().await.status, TimerStatus::OnBreak);
+    assert_eq!(
+        runtime.read_full_state().await.timer.status,
+        TimerStatus::OnBreak
+    );
 }
 
 #[tokio::test(start_paused = true)]
 async fn reading_full_state_waits_for_the_break_lock_outcome() {
     let clock = fixed_clock();
     let runtime = idle_runtime(&create_temp_dir("read-during-break-entry"), &clock);
-    let sink = RecordingSink::with_lock_outcome(Event::BreakLockEntered)
+    let sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded)
         .with_slow_lock(std::time::Duration::from_millis(50));
     start_one_second_work(&runtime, &sink).await;
     clock.set_now_local(clock.now_local() + chrono::Duration::seconds(1));
@@ -146,6 +157,14 @@ async fn reading_full_state_waits_for_the_break_lock_outcome() {
     );
 
     tick.expect("tick should succeed");
-    assert_eq!(state.status, TimerStatus::OnBreak);
-    assert!(state.is_fullscreen_break);
+    assert_eq!(state.timer.status, TimerStatus::OnBreak);
+    assert_eq!(
+        state
+            .effects
+            .break_lock
+            .last_attempt
+            .expect("lock outcome")
+            .status,
+        EffectStatus::Succeeded
+    );
 }

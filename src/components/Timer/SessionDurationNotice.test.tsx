@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { SessionType, TimerStatus, useTimerStore } from "@/store/timerStore";
+import { useTimerStore } from "@/store/timerStore";
+import { SessionType, TimerStatus } from "@/types/timer";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { createSettingsForTest } from "@/test/settingsFixture";
 import { SessionDurationNotice } from "./SessionDurationNotice";

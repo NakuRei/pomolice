@@ -19,7 +19,7 @@ mod tests;
 
 use chrono::{DateTime, Local, Utc};
 
-pub(crate) use effect::Effect;
+pub(crate) use effect::{BreakLockTarget, Effect};
 pub(crate) use event::Event;
 
 use phase::{BreakSessionState, TimerPhase};
@@ -61,10 +61,6 @@ impl TimerCore {
             Event::SettingsChanged { settings } => Ok(self.change_settings(settings, now)),
             Event::InputDetected => Ok(self.apply_input_penalty(now)),
             Event::EscapeComboPressed => Ok(self.escape_combo_pressed()),
-            Event::BreakLockEntered => Ok(self.break_lock_entered(now)),
-            Event::BreakLockEnterFailed => Ok(self.break_lock_enter_failed(now)),
-            Event::BreakLockReleased => Ok(self.break_lock_released(now)),
-            Event::BreakLockReleaseFailed => Ok(self.break_lock_release_failed(now)),
         }?;
         self.clear_invalid_boot_auto_start_offer(now);
         if had_boot_offer && self.boot_auto_start_offer.is_none() {
@@ -123,7 +119,6 @@ impl TimerCore {
             current_cycle: self.current_cycle,
             completed_pomodoros: self.completed_pomodoros,
             break_interaction_count: current_break.map_or(0, |b| b.interaction_count),
-            is_fullscreen_break: current_break.is_some_and(|b| b.is_fullscreen),
             away_during_break: current_break.is_some_and(|b| b.attendance.is_away()),
         }
     }
@@ -154,7 +149,6 @@ impl TimerCore {
             current_cycle: tick.current_cycle,
             completed_pomodoros: tick.completed_pomodoros,
             break_interaction_count: tick.break_interaction_count,
-            is_fullscreen_break: tick.is_fullscreen_break,
             away_during_break: tick.away_during_break,
             post_break_decision_pending: self.post_break_decision_pending(),
             settings: self.settings.clone(),

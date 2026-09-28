@@ -1,4 +1,4 @@
-use tauri::{Manager, WebviewWindow};
+use tauri::{Manager, Runtime, WebviewWindow};
 
 use crate::commands::error_response::{BackendErrorCode, BackendErrorResponse};
 use crate::external_adapters::emergency_shortcut::{
@@ -7,8 +7,8 @@ use crate::external_adapters::emergency_shortcut::{
 use crate::external_adapters::tray_icon;
 
 #[tauri::command]
-pub(crate) async fn get_emergency_shortcut_status(
-    window: WebviewWindow,
+pub(crate) async fn get_emergency_shortcut_status<R: Runtime>(
+    window: WebviewWindow<R>,
 ) -> Result<EmergencyShortcutStatus, BackendErrorResponse> {
     if window.label() != "main" {
         return Err(BackendErrorResponse::from_code(
@@ -19,8 +19,8 @@ pub(crate) async fn get_emergency_shortcut_status(
 }
 
 #[tauri::command]
-pub(crate) async fn has_input_monitor_failed(
-    window: WebviewWindow,
+pub(crate) async fn has_input_monitor_failed<R: Runtime>(
+    window: WebviewWindow<R>,
 ) -> Result<bool, BackendErrorResponse> {
     if window.label() != "main" {
         return Err(BackendErrorResponse::from_code(
@@ -33,7 +33,9 @@ pub(crate) async fn has_input_monitor_failed(
 }
 
 #[tauri::command]
-pub(crate) async fn is_tray_available(window: WebviewWindow) -> Result<bool, BackendErrorResponse> {
+pub(crate) async fn is_tray_available<R: Runtime>(
+    window: WebviewWindow<R>,
+) -> Result<bool, BackendErrorResponse> {
     if window.label() != "main" {
         return Err(BackendErrorResponse::from_code(
             BackendErrorCode::UnauthorizedWindow,
@@ -43,7 +45,9 @@ pub(crate) async fn is_tray_available(window: WebviewWindow) -> Result<bool, Bac
 }
 
 #[tauri::command]
-pub(crate) async fn exit_without_tray(window: WebviewWindow) -> Result<(), BackendErrorResponse> {
+pub(crate) async fn exit_without_tray<R: Runtime>(
+    window: WebviewWindow<R>,
+) -> Result<(), BackendErrorResponse> {
     if window.label() != "main" {
         return Err(BackendErrorResponse::from_code(
             BackendErrorCode::UnauthorizedWindow,

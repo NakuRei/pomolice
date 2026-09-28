@@ -3,10 +3,11 @@ import { devtools } from "zustand/middleware";
 import { immer } from "zustand/middleware/immer";
 import { invoke } from "@tauri-apps/api/core";
 import { useErrorStore } from "./errorStore";
+import { useTimerEffectsStore } from "./timerEffectsStore";
+import type { TimerSnapshot } from "@/types/timerEffects";
 import {
   classifyBackendError,
   formatPublicCommandErrorDetail,
-  isBackendErrorResponse,
   settingsValidationIssuesOf,
 } from "../errors/classifyBackendError";
 import {
@@ -15,105 +16,24 @@ import {
   type Settings,
   type SettingsChanges,
   type SettingsFileStatus,
-  type SettingsPayload,
   type SettingsValidationIssue,
 } from "../types/settings";
-import type { WeekdayKey } from "../types/weeklyAutoRun";
 import type {
   PostBreakDecisionAction,
   PostBreakTransitionPolicy,
-  SessionTransitionOutcome,
 } from "../types/sessionTransitionPolicy";
 
-/**
- * Timer status constants matching backend TimerStatus enum
- */
-export const TimerStatus = {
-  IDLE: "idle",
-  WORKING: "working",
-  ON_BREAK: "on_break",
-} as const;
-
-export type TimerStatus = (typeof TimerStatus)[keyof typeof TimerStatus];
-
-function timerStatusWithFullscreenEnforcement(
-  reportedStatus: TimerStatus,
-  isFullscreenBreak: boolean,
-): TimerStatus {
-  return isFullscreenBreak ? TimerStatus.ON_BREAK : reportedStatus;
-}
-
-/**
- * Session type constants matching backend SessionType enum
- */
-export const SessionType = {
-  WORK: "work",
-  SHORT_BREAK: "short_break",
-  LONG_BREAK: "long_break",
-} as const;
-
-export type SessionTypeValue = (typeof SessionType)[keyof typeof SessionType];
-
-/**
- * Payload received from backend timer_tick events
- */
-export interface TimerTickPayload {
-  status: TimerStatus;
-  remaining_seconds: number;
-  /** Total length of the current session; while idle, of the next work session. */
-  session_duration_secs: number;
-  session_type: SessionTypeValue;
-  current_cycle: number;
-  completed_pomodoros: number;
-  break_interaction_count: number;
-  is_fullscreen_break: boolean;
-  away_during_break: boolean;
-}
-
-/**
- * Payload received from backend session_completed events
- */
-export type SessionCompletedPayload = SessionTransitionOutcome;
-
-/**
- * Full state payload from backend get_full_state command
- */
-export interface FullStatePayload extends TimerTickPayload {
-  post_break_decision_pending: boolean;
-  settings: SettingsPayload;
-  settings_file_status: SettingsFileStatus;
-  boot_auto_start_offer: BootAutoStartOfferPayload | null;
-  active_window_summary: ActiveWindowSummaryPayload | null;
-}
-
-export interface ActiveWindowSummaryPayload {
-  weekday_key: WeekdayKey;
-  start_time: string;
-  end_time: string;
-  crosses_midnight: boolean;
-}
-
-export interface BootAutoStartOfferPayload {
-  anchor_local_date: string;
-  window: ActiveWindowSummaryPayload;
-}
-
-/**
- * Payload received from backend active_window_changed events.
- * Null while auto-run is disabled or the time is outside every enabled slot.
- */
-export interface ActiveWindowChangedPayload {
-  active_window_summary: ActiveWindowSummaryPayload | null;
-}
-
-/**
- * Payload received from backend settings_changed events, sent whenever the
- * settings in effect change.
- */
-export interface SettingsChangedPayload {
-  settings: SettingsPayload;
-  settings_file_status: SettingsFileStatus;
-}
+import {
+  TimerStatus,
+  SessionType,
+  type SessionTypeValue,
+  type TimerTickPayload,
+  type SessionCompletedPayload,
+  type BootAutoStartOfferPayload,
+  type ActiveWindowSummaryPayload,
+  type ActiveWindowChangedPayload,
+  type SettingsChangedPayload,
+} from "@/types/timer";
 
 export type InfoMessageId = "auto_run_stop_pending" | "auto_run_stopped";
 
@@ -138,7 +58,6 @@ interface TimerState {
   currentCycle: number;
   completedPomodoros: number;
   breakInteractionCount: number;
-  isFullscreenBreak: boolean;
   isAwayDuringBreak: boolean;
 
   // UI-only state
@@ -190,7 +109,7 @@ interface TimerActions {
   // Event handlers (called by event listeners from useTimerSync)
   handleTimerTick: (payload: TimerTickPayload) => void;
   handleSessionCompleted: (payload: SessionCompletedPayload) => void;
-  handleFullState: (payload: FullStatePayload) => void;
+  handleFullState: (snapshot: TimerSnapshot) => void;
   handleActiveWindowChanged: (payload: ActiveWindowChangedPayload) => void;
   handleSettingsChanged: (payload: SettingsChangedPayload) => void;
   clearBootAutoStartOffer: () => void;
@@ -234,7 +153,6 @@ const initialState: TimerState = {
   currentCycle: 0,
   completedPomodoros: 0,
   breakInteractionCount: 0,
-  isFullscreenBreak: false,
   isAwayDuringBreak: false,
   requiresManualContinueDecision: false,
   isConnected: false,
@@ -265,7 +183,8 @@ export const useTimerStore = create<TimerStore>()(
       // Backend decides manual_inside_window/manual_outside_window from server-side clock and schedule.
       start: async (): Promise<void> => {
         try {
-          await invoke("start_work");
+          const outcome = await invoke<TimerSnapshot>("start_work");
+          useTimerEffectsStore.getState().observe(outcome.effects);
           useErrorStore.getState().clearError("start_work");
         } catch (error) {
           const detail = formatPublicCommandErrorDetail(error);
@@ -293,7 +212,11 @@ export const useTimerStore = create<TimerStore>()(
         action: PostBreakDecisionAction,
       ): Promise<void> => {
         try {
-          await invoke("resolve_post_break_decision", { action });
+          const outcome = await invoke<TimerSnapshot>(
+            "resolve_post_break_decision",
+            { action },
+          );
+          useTimerEffectsStore.getState().observe(outcome.effects);
           set((state) => {
             state.requiresManualContinueDecision = false;
           });
@@ -322,7 +245,8 @@ export const useTimerStore = create<TimerStore>()(
       // Emergency stop
       emergencyStop: async (): Promise<void> => {
         try {
-          await invoke("emergency_stop");
+          const outcome = await invoke<TimerSnapshot>("emergency_stop");
+          useTimerEffectsStore.getState().observe(outcome.effects);
           useErrorStore.getState().clearError("emergency_stop");
         } catch (error) {
           const detail = formatPublicCommandErrorDetail(error);
@@ -348,11 +272,12 @@ export const useTimerStore = create<TimerStore>()(
         changes: SettingsChanges,
       ): Promise<SettingsSaveResult> => {
         try {
-          // The saved settings arrive as a settings_changed event, in order
-          // with the timer events, so nothing is taken from the reply.
-          await invoke("update_settings", {
+          // Read settings from ordered events so a delayed reply cannot
+          // overwrite a newer settings change.
+          const outcome = await invoke<TimerSnapshot>("update_settings", {
             changes: settingsChangesToPayload(changes),
           });
+          useTimerEffectsStore.getState().observe(outcome.effects);
           useErrorStore.getState().clearError("update_settings");
           return { status: "saved" };
         } catch (error) {
@@ -398,7 +323,10 @@ export const useTimerStore = create<TimerStore>()(
 
       setAwayDuringBreak: async (away: boolean): Promise<void> => {
         try {
-          await invoke("set_away_during_break", { away });
+          const outcome = await invoke<TimerSnapshot>("set_away_during_break", {
+            away,
+          });
+          useTimerEffectsStore.getState().observe(outcome.effects);
           useErrorStore.getState().clearError("set_away_during_break");
         } catch (error) {
           const detail = formatPublicCommandErrorDetail(error);
@@ -425,7 +353,11 @@ export const useTimerStore = create<TimerStore>()(
         const previousError =
           useErrorStore.getState().errors.resolve_boot_auto_start_prompt;
         try {
-          await invoke("resolve_boot_auto_start_prompt", { startNow });
+          const outcome = await invoke<TimerSnapshot>(
+            "resolve_boot_auto_start_prompt",
+            { startNow },
+          );
+          useTimerEffectsStore.getState().observe(outcome.effects);
           set((state) => {
             state.bootAutoStartOffer = null;
           });
@@ -445,17 +377,10 @@ export const useTimerStore = create<TimerStore>()(
             severity,
             canRetry: retryableError,
           } = classifyBackendError(error);
-          const persistenceFailed =
-            isBackendErrorResponse(error) && error.code === "persistence_error";
-          const canRetry =
-            retryableError &&
-            !persistenceFailed &&
-            Boolean(get().bootAutoStartOffer);
+          const canRetry = retryableError && Boolean(get().bootAutoStartOffer);
           useErrorStore.getState().reportError({
             id: "resolve_boot_auto_start_prompt",
-            message: persistenceFailed
-              ? "作業を開始しましたが、状態の保存に失敗しました"
-              : userMessage,
+            message: userMessage,
             technicalDetail: detail,
             severity,
             origin: "backend_command",
@@ -524,17 +449,13 @@ export const useTimerStore = create<TimerStore>()(
       // Handle timer tick event from backend
       handleTimerTick: (payload: TimerTickPayload): void => {
         set((state) => {
-          state.status = timerStatusWithFullscreenEnforcement(
-            payload.status,
-            payload.is_fullscreen_break,
-          );
+          state.status = payload.status;
           state.remainingSeconds = payload.remaining_seconds;
           state.sessionDurationSeconds = payload.session_duration_secs;
           state.sessionType = payload.session_type;
           state.currentCycle = payload.current_cycle;
           state.completedPomodoros = payload.completed_pomodoros;
           state.breakInteractionCount = payload.break_interaction_count;
-          state.isFullscreenBreak = payload.is_fullscreen_break;
           state.isAwayDuringBreak = payload.away_during_break;
         });
       },
@@ -549,19 +470,17 @@ export const useTimerStore = create<TimerStore>()(
       },
 
       // Handle full state from backend (initial sync)
-      handleFullState: (payload: FullStatePayload): void => {
+      handleFullState: (snapshot: TimerSnapshot): void => {
+        useTimerEffectsStore.getState().observe(snapshot.effects);
+        const payload = snapshot.timer;
         set((state) => {
-          state.status = timerStatusWithFullscreenEnforcement(
-            payload.status,
-            payload.is_fullscreen_break,
-          );
+          state.status = payload.status;
           state.remainingSeconds = payload.remaining_seconds;
           state.sessionDurationSeconds = payload.session_duration_secs;
           state.sessionType = payload.session_type;
           state.currentCycle = payload.current_cycle;
           state.completedPomodoros = payload.completed_pomodoros;
           state.breakInteractionCount = payload.break_interaction_count;
-          state.isFullscreenBreak = payload.is_fullscreen_break;
           state.isAwayDuringBreak = payload.away_during_break;
           state.settings = settingsFromPayload(payload.settings);
           state.settingsFileStatus = payload.settings_file_status;

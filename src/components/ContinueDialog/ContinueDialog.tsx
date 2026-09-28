@@ -2,8 +2,7 @@ import { useEffect, useId, useRef } from "react";
 import { useTimerStore } from "@/store/timerStore";
 import { DialogActionRow } from "../shared/DialogActionRow";
 import { Button } from "../shared/Button";
-import { DialogOverlay } from "../shared/DialogOverlay";
-import { DialogPanel } from "../shared/DialogPanel";
+import { AppDialog } from "../shared/AppDialog";
 import { InlineError } from "../shared/InlineError";
 import { StatusNotice } from "../shared/StatusNotice";
 
@@ -70,52 +69,48 @@ export function ContinueDialog(): React.ReactElement | null {
   }
 
   return (
-    <DialogOverlay testId="continue-dialog">
-      <DialogPanel labelledBy={titleId}>
-        <h2 id={titleId} className="mb-4 text-2xl font-bold text-text">
-          1サイクル完了しました！
-        </h2>
-        <p className="mb-2 text-text-muted">
-          お疲れ様でした。休憩が完了しました。
-        </p>
-        <p className="mb-6 text-text-muted">
-          完了したポモドーロ:{" "}
-          <span className="font-semibold">{completedPomodoros}</span>
-        </p>
-        <p className="mb-4 font-medium text-text">
-          次のポモドーロを続けますか？
-        </p>
-        <StatusNotice
-          tone="warning"
-          className="mb-4"
-          testId="continue-dialog-manual-decision-message"
+    <AppDialog overlayTestId="continue-dialog" labelledBy={titleId}>
+      <h2 id={titleId} className="mb-4 text-2xl font-bold text-text">
+        1サイクル完了しました！
+      </h2>
+      <p className="mb-2 text-text-muted">
+        お疲れ様でした。休憩が完了しました。
+      </p>
+      <p className="mb-6 text-text-muted">
+        完了したポモドーロ:{" "}
+        <span className="font-semibold">{completedPomodoros}</span>
+      </p>
+      <p className="mb-4 font-medium text-text">次のポモドーロを続けますか？</p>
+      <StatusNotice
+        tone="warning"
+        className="mb-4"
+        testId="continue-dialog-manual-decision-message"
+      >
+        現在、手動判断待ちです。続けるか終了を選んでください。
+      </StatusNotice>
+      {/* Error area: shown when manual decision command fails */}
+      <div className="mb-4">
+        <InlineError errorId="resolve_post_break_decision" />
+      </div>
+      <DialogActionRow>
+        <Button
+          appearance="secondary"
+          onClick={handleEnd}
+          className="flex-1"
+          testId="continue-dialog-end"
         >
-          現在、手動判断待ちです。続けるか終了を選んでください。
-        </StatusNotice>
-        {/* Error area: shown when manual decision command fails */}
-        <div className="mb-4">
-          <InlineError errorId="resolve_post_break_decision" />
-        </div>
-        <DialogActionRow>
-          <Button
-            appearance="secondary"
-            onClick={handleEnd}
-            className="flex-1"
-            testId="continue-dialog-end"
-          >
-            終了
-          </Button>
-          <Button
-            ref={continueButtonReference}
-            appearance="primary"
-            onClick={handleContinue}
-            className="flex-1"
-            testId="continue-dialog-continue"
-          >
-            続ける
-          </Button>
-        </DialogActionRow>
-      </DialogPanel>
-    </DialogOverlay>
+          終了
+        </Button>
+        <Button
+          ref={continueButtonReference}
+          appearance="primary"
+          onClick={handleContinue}
+          className="flex-1"
+          testId="continue-dialog-continue"
+        >
+          続ける
+        </Button>
+      </DialogActionRow>
+    </AppDialog>
   );
 }

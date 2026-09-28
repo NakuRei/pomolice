@@ -230,11 +230,6 @@ fn restored_session_that_ends_after_the_start_boundary() -> (TimerCore, Vec<Effe
     apply(&mut core, Event::Started, restarted_after_the_boundary);
     assert_eq!(core.status(), TimerStatus::OnBreak);
     assert!(!boot_prompt_is_offered(&core, restarted_after_the_boundary));
-    apply(
-        &mut core,
-        Event::BreakLockEntered,
-        restarted_after_the_boundary,
-    );
 
     let at_break_end = apply(
         &mut core,

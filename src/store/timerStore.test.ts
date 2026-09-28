@@ -1,3 +1,9 @@
+import {
+  useTimerEffectsStore,
+  selectBreakLockObservation,
+} from "./timerEffectsStore";
+import type { TimerSnapshot, TimerEffectsState } from "@/types/timerEffects";
+import { createTimerSnapshotForTest } from "@/test/timerEffectsFixture";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 type InvokeCommand = (
   command: string,
@@ -11,12 +17,8 @@ vi.mock("@tauri-apps/api/core", () => ({
     mockInvoke(command, args),
 }));
 
-import {
-  useTimerStore,
-  TimerStatus,
-  SessionType,
-  type FullStatePayload,
-} from "./timerStore";
+import { useTimerStore } from "./timerStore";
+import { TimerStatus, SessionType, type FullStatePayload } from "@/types/timer";
 import { resetTimerStoreForTest } from "../test/resetTimerStore";
 import { createBootAutoStartOfferForTest } from "@/test/bootAutoStartOfferFixture";
 import { useErrorStore } from "./errorStore";
@@ -27,30 +29,19 @@ import {
 
 function createFullStatePayload(
   overrides: Partial<FullStatePayload> = {},
-): FullStatePayload {
+  effects?: TimerEffectsState,
+): TimerSnapshot {
+  const snapshot = createTimerSnapshotForTest();
   return {
-    status: TimerStatus.IDLE,
-    remaining_seconds: 1500,
-    session_duration_secs: 1500,
-    session_type: SessionType.WORK,
-    current_cycle: 0,
-    completed_pomodoros: 0,
-    break_interaction_count: 0,
-    is_fullscreen_break: false,
-    away_during_break: false,
-    post_break_decision_pending: false,
-    boot_auto_start_offer: null,
-    active_window_summary: null,
-    settings: settingsPayloadForTest(createSettingsForTest()),
-    settings_file_status: "ok",
-    ...overrides,
+    timer: { ...snapshot.timer, ...overrides },
+    effects: effects ?? snapshot.effects,
   };
 }
 
 describe("timerStore", () => {
   beforeEach(() => {
     mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
+    mockInvoke.mockResolvedValue(createTimerSnapshotForTest());
     resetTimerStoreForTest();
   });
 
@@ -113,7 +104,6 @@ describe("timerStore", () => {
           current_cycle: 2,
           completed_pomodoros: 1,
           break_interaction_count: 0,
-          is_fullscreen_break: false,
           away_during_break: false,
         });
 
@@ -137,7 +127,6 @@ describe("timerStore", () => {
           current_cycle: 1,
           completed_pomodoros: 1,
           break_interaction_count: 3,
-          is_fullscreen_break: true,
           away_during_break: false,
         });
 
@@ -145,10 +134,17 @@ describe("timerStore", () => {
         expect(state.status).toBe(TimerStatus.ON_BREAK);
         expect(state.sessionType).toBe(SessionType.SHORT_BREAK);
         expect(state.breakInteractionCount).toBe(3);
-        expect(state.isFullscreenBreak).toBe(true);
       });
 
-      it("keeps the effective status on break while fullscreen remains active", () => {
+      it("preserves the reported timer phase independently of a confirmed lock", () => {
+        useTimerEffectsStore.getState().observe({
+          revision: 1,
+          last_timer_save: null,
+          break_lock: {
+            target: "locked",
+            last_attempt: { action: "enter", status: "succeeded" },
+          },
+        });
         useTimerStore.setState({
           status: TimerStatus.WORKING,
           isConnected: true,
@@ -162,13 +158,14 @@ describe("timerStore", () => {
           current_cycle: 1,
           completed_pomodoros: 1,
           break_interaction_count: 0,
-          is_fullscreen_break: true,
           away_during_break: false,
         });
 
         const state = useTimerStore.getState();
-        expect(state.status).toBe(TimerStatus.ON_BREAK);
-        expect(state.isFullscreenBreak).toBe(true);
+        expect(state.status).toBe(TimerStatus.IDLE);
+        expect(
+          selectBreakLockObservation(useTimerEffectsStore.getState()),
+        ).toBe("locked");
       });
     });
 
@@ -288,31 +285,41 @@ describe("timerStore", () => {
         expect(useTimerStore.getState().settingsFileStatus).toBe("unusable");
       });
 
-      it("keeps the full-state status on break while fullscreen enforcement remains active", () => {
-        useTimerStore.getState().handleFullState({
-          ...createFullStatePayload(),
-          is_fullscreen_break: true,
-          away_during_break: false,
-        });
-
-        const state = useTimerStore.getState();
-        expect(state.status).toBe(TimerStatus.ON_BREAK);
-        expect(state.isFullscreenBreak).toBe(true);
+      it("keeps timer phase separate from the lock in a full snapshot", () => {
+        useTimerStore.getState().handleFullState(
+          createFullStatePayload(
+            {},
+            {
+              revision: 1,
+              last_timer_save: null,
+              break_lock: {
+                target: "locked",
+                last_attempt: { action: "enter", status: "succeeded" },
+              },
+            },
+          ),
+        );
+        expect(useTimerStore.getState().status).toBe(TimerStatus.IDLE);
+        expect(
+          selectBreakLockObservation(useTimerEffectsStore.getState()),
+        ).toBe("locked");
       });
 
       it("should keep startup prompt state from backend full payload", () => {
         const { handleFullState } = useTimerStore.getState();
 
-        handleFullState({
-          ...createFullStatePayload({ current_cycle: 1 }),
-          boot_auto_start_offer: createBootAutoStartOfferForTest(),
-          active_window_summary: {
-            weekday_key: "mon",
-            start_time: "09:00",
-            end_time: "18:00",
-            crosses_midnight: false,
-          },
-        });
+        handleFullState(
+          createFullStatePayload({
+            current_cycle: 1,
+            boot_auto_start_offer: createBootAutoStartOfferForTest(),
+            active_window_summary: {
+              weekday_key: "mon",
+              start_time: "09:00",
+              end_time: "18:00",
+              crosses_midnight: false,
+            },
+          }),
+        );
 
         const state = useTimerStore.getState();
         expect(state.bootAutoStartOffer).toEqual(

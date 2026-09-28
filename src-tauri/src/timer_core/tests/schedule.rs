@@ -163,7 +163,6 @@ fn work_end_and_schedule_end_on_the_same_second_take_the_break_before_stopping()
     );
     assert!(at_end.contains(&Effect::EmitAutoRunStopPending));
 
-    apply(&mut core, Event::BreakLockEntered, workday_end());
     apply(&mut core, Event::Tick, seconds_after(workday_end(), 1));
     let at_break_end = apply(&mut core, Event::Tick, seconds_after(workday_end(), 2));
     assert_eq!(core.status(), TimerStatus::Idle);

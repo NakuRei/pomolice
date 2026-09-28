@@ -3,7 +3,8 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HomeScreen, type HomeScreenProps } from "./HomeScreen";
 import { useErrorStore } from "@/store/errorStore";
-import { SessionType, TimerStatus, useTimerStore } from "@/store/timerStore";
+import { useTimerStore } from "@/store/timerStore";
+import { SessionType, TimerStatus } from "@/types/timer";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { createSettingsForTest } from "@/test/settingsFixture";
 
@@ -34,7 +35,6 @@ describe("HomeScreen", () => {
       currentCycle: 0,
       completedPomodoros: 0,
       breakInteractionCount: 0,
-      isFullscreenBreak: false,
       requiresManualContinueDecision: false,
       isConnected: false,
       bootAutoStartOffer: null,

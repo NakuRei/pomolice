@@ -1,7 +1,7 @@
 use chrono::{DateTime, Duration as ChronoDuration, Local};
 
 use super::phase::{BreakKind, BreakSessionState, TimerPhase};
-use super::{Effect, TimerCore};
+use super::{BreakLockTarget, Effect, TimerCore};
 use crate::error::{PomoliceError, Result};
 use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
 use crate::settings::UserSettings;
@@ -24,7 +24,7 @@ impl TimerCore {
                 self.complete_work_session(now)
             }
             TimerPhase::Working { .. } => vec![self.publish(now)],
-            TimerPhase::OnBreak(_) => vec![Effect::EnterBreakLock],
+            TimerPhase::OnBreak(_) => vec![Effect::SetBreakLockTarget(BreakLockTarget::Locked)],
             TimerPhase::Idle { .. } => Vec::new(),
         }
     }
@@ -177,18 +177,14 @@ impl TimerCore {
 
     pub(super) fn emergency_stop(&mut self, now: DateTime<Local>) -> Vec<Effect> {
         self.boot_auto_start_offer = None;
-        let was_fullscreen_break = self
-            .current_break()
-            .is_some_and(|current_break| current_break.is_fullscreen);
-
         self.schedule.stop_state = ScheduleStopState::NotControlledBySchedule;
         self.enter_idle(false, now);
 
-        if was_fullscreen_break {
-            vec![Effect::ReleaseBreakLock]
-        } else {
-            vec![self.publish(now), Effect::Persist]
-        }
+        vec![
+            Effect::SetBreakLockTarget(BreakLockTarget::Unlocked),
+            self.publish(now),
+            Effect::Persist,
+        ]
     }
 
     /// Countdown step for the current session. Work derives from the wall
@@ -241,7 +237,9 @@ impl TimerCore {
         self.log_transition("transition_to_break", payload.transition_reason);
         vec![
             Effect::EmitSessionCompleted(payload),
-            Effect::EnterBreakLock,
+            Effect::SetBreakLockTarget(BreakLockTarget::Locked),
+            self.publish(now),
+            Effect::Persist,
         ]
     }
 
@@ -256,7 +254,9 @@ impl TimerCore {
             return vec![
                 Effect::EmitSessionCompleted(payload),
                 Effect::EmitAutoRunStopped,
-                Effect::ReleaseBreakLock,
+                Effect::SetBreakLockTarget(BreakLockTarget::Unlocked),
+                self.publish(now),
+                Effect::Persist,
             ];
         }
 
@@ -270,7 +270,9 @@ impl TimerCore {
         };
         vec![
             Effect::EmitSessionCompleted(payload),
-            Effect::ReleaseBreakLock,
+            Effect::SetBreakLockTarget(BreakLockTarget::Unlocked),
+            self.publish(now),
+            Effect::Persist,
         ]
     }
 

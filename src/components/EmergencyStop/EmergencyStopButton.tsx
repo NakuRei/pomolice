@@ -1,9 +1,9 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { useTimerStore, TimerStatus } from "@/store/timerStore";
+import { useTimerStore } from "@/store/timerStore";
+import { TimerStatus } from "@/types/timer";
 import { Button } from "../shared/Button";
 import { DialogActionRow } from "../shared/DialogActionRow";
-import { DialogOverlay } from "../shared/DialogOverlay";
-import { DialogPanel } from "../shared/DialogPanel";
+import { AppDialog } from "../shared/AppDialog";
 import { InlineError } from "../shared/InlineError";
 
 /**
@@ -87,39 +87,41 @@ export function EmergencyStopButton(): React.ReactElement | null {
       </Button>
 
       {showConfirmDialog && (
-        <DialogOverlay testId="emergency-stop-dialog">
-          <DialogPanel labelledBy={titleId} className="p-6">
-            <h2 id={titleId} className="mb-4 text-xl font-bold text-text">
-              緊急停止しますか？
-            </h2>
-            <p className="mb-4 text-text-muted">
-              現在のポモドーロセッションは記録されません。
-              <br />
-              緊急時以外は、セッション完了までお待ちください。
-            </p>
-            {/* Dialog stays open on failure; error shown here with retry button */}
-            <div className="mb-4">
-              <InlineError errorId="emergency_stop" onRetry={handleConfirm} />
-            </div>
-            <DialogActionRow className="justify-end gap-3">
-              <Button
-                ref={cancelButtonReference}
-                appearance="secondary"
-                onClick={handleCancel}
-                testId="emergency-stop-cancel"
-              >
-                キャンセル
-              </Button>
-              <Button
-                appearance="danger"
-                onClick={handleConfirm}
-                testId="emergency-stop-confirm"
-              >
-                停止する
-              </Button>
-            </DialogActionRow>
-          </DialogPanel>
-        </DialogOverlay>
+        <AppDialog
+          overlayTestId="emergency-stop-dialog"
+          labelledBy={titleId}
+          className="p-6"
+        >
+          <h2 id={titleId} className="mb-4 text-xl font-bold text-text">
+            緊急停止しますか？
+          </h2>
+          <p className="mb-4 text-text-muted">
+            現在のポモドーロセッションは記録されません。
+            <br />
+            緊急時以外は、セッション完了までお待ちください。
+          </p>
+          {/* Dialog stays open on failure; error shown here with retry button */}
+          <div className="mb-4">
+            <InlineError errorId="emergency_stop" onRetry={handleConfirm} />
+          </div>
+          <DialogActionRow className="justify-end gap-3">
+            <Button
+              ref={cancelButtonReference}
+              appearance="secondary"
+              onClick={handleCancel}
+              testId="emergency-stop-cancel"
+            >
+              キャンセル
+            </Button>
+            <Button
+              appearance="danger"
+              onClick={handleConfirm}
+              testId="emergency-stop-confirm"
+            >
+              停止する
+            </Button>
+          </DialogActionRow>
+        </AppDialog>
       )}
     </>
   );

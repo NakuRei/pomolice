@@ -1,4 +1,4 @@
-import { SessionType, type SessionTypeValue } from "@/store/timerStore";
+import { SessionType, type SessionTypeValue } from "@/types/timer";
 
 /**
  * Visual state of one segment in the cycle bar.

@@ -13,7 +13,8 @@ import { InlineError } from "../shared/InlineError";
 import { NotificationMuteToggleButton } from "../shared/NotificationMuteToggleButton";
 import { SettingsFileNotice } from "../shared/SettingsFileNotice";
 import { ToastStack } from "../shared/ToastStack";
-import { useTimerStore, SessionType } from "@/store/timerStore";
+import { useTimerStore } from "@/store/timerStore";
+import { SessionType } from "@/types/timer";
 
 const HEADER_LINE_CLASS_NAME = "text-sm tracking-widest md:text-lg";
 const SIDE_PADDING_CLASS_NAME = "px-8 md:px-20";

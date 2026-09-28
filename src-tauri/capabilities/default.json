@@ -17,6 +17,7 @@
     "allow-emergency-stop",
     "allow-update-settings",
     "allow-get-full-state",
-    "allow-resolve-boot-auto-start-prompt"
+    "allow-resolve-boot-auto-start-prompt",
+    "allow-retry-failed-timer-effects"
   ]
 }

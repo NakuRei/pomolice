@@ -1,3 +1,8 @@
+import {
+  useTimerEffectsStore,
+  selectBreakLockObservation,
+} from "./timerEffectsStore";
+import { createTimerSnapshotForTest } from "@/test/timerEffectsFixture";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type InvokeCommand = (
@@ -13,7 +18,8 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import { useErrorStore } from "./errorStore";
-import { SessionType, TimerStatus, useTimerStore } from "./timerStore";
+import { useTimerStore } from "./timerStore";
+import { SessionType, TimerStatus } from "@/types/timer";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import {
   createSettingsForTest,
@@ -29,7 +35,7 @@ describe("timerStore settings saving", () => {
 
   describe("saveSettings()", () => {
     it("sends only the changed settings", async () => {
-      mockInvoke.mockResolvedValueOnce(undefined);
+      mockInvoke.mockResolvedValueOnce(createTimerSnapshotForTest());
 
       const result = await useTimerStore
         .getState()
@@ -48,10 +54,17 @@ describe("timerStore settings saving", () => {
         status: TimerStatus.ON_BREAK,
         sessionType: SessionType.SHORT_BREAK,
         remainingSeconds: 299,
-        isFullscreenBreak: true,
+      });
+      useTimerEffectsStore.getState().observe({
+        revision: 2,
+        last_timer_save: null,
+        break_lock: {
+          target: "locked",
+          last_attempt: { action: "enter", status: "succeeded" },
+        },
       });
       const stateBeforeTheReply = useTimerStore.getState();
-      mockInvoke.mockResolvedValueOnce(undefined);
+      mockInvoke.mockResolvedValueOnce(createTimerSnapshotForTest());
 
       await useTimerStore.getState().saveSettings({ workDurationSecs: 60 });
 
@@ -59,7 +72,9 @@ describe("timerStore settings saving", () => {
       expect(state.settings).toBe(stateBeforeTheReply.settings);
       expect(state.status).toBe(TimerStatus.ON_BREAK);
       expect(state.remainingSeconds).toBe(299);
-      expect(state.isFullscreenBreak).toBe(true);
+      expect(selectBreakLockObservation(useTimerEffectsStore.getState())).toBe(
+        "locked",
+      );
     });
 
     it("returns every rejected input without reporting a global error", async () => {
@@ -119,7 +134,7 @@ describe("timerStore settings saving", () => {
         message: "Persistence error",
       });
       await useTimerStore.getState().saveSettings(settings);
-      mockInvoke.mockResolvedValueOnce(undefined);
+      mockInvoke.mockResolvedValueOnce(createTimerSnapshotForTest());
 
       await useTimerStore.getState().saveSettings(settings);
 
@@ -132,7 +147,7 @@ describe("timerStore settings saving", () => {
       useTimerStore.setState({
         settings: createSettingsForTest({ notificationSoundMuted: false }),
       });
-      mockInvoke.mockResolvedValueOnce(undefined);
+      mockInvoke.mockResolvedValueOnce(createTimerSnapshotForTest());
 
       await useTimerStore.getState().toggleNotificationSoundMuted();
 
@@ -155,7 +170,7 @@ describe("timerStore settings saving", () => {
           postBreakTransitionPolicy: "require_manual_continue",
         }),
       });
-      mockInvoke.mockResolvedValueOnce(undefined);
+      mockInvoke.mockResolvedValueOnce(createTimerSnapshotForTest());
 
       await useTimerStore
         .getState()

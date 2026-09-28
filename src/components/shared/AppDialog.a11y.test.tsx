@@ -2,8 +2,7 @@ import { StrictMode, useEffect, useRef, useState } from "react";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DialogOverlay } from "./DialogOverlay";
-import { DialogPanel } from "./DialogPanel";
+import { AppDialog } from "./AppDialog";
 
 function createRootFixture(): HTMLDivElement {
   document.body.innerHTML = "";
@@ -97,7 +96,7 @@ beforeEach(() => {
   document.body.innerHTML = "";
 });
 
-describe("DialogOverlay accessibility", () => {
+describe("AppDialog accessibility", () => {
   it("marks #root inert and aria-hidden while a dialog overlay is mounted", async () => {
     const user = userEvent.setup();
 
@@ -114,18 +113,16 @@ describe("DialogOverlay accessibility", () => {
             Open dialog
           </button>
           {isOpen ? (
-            <DialogOverlay testId="test-dialog-overlay">
-              <DialogPanel labelledBy="test-dialog-title">
-                <h2 id="test-dialog-title">Test dialog</h2>
-                <button
-                  onClick={() => {
-                    setIsOpen(false);
-                  }}
-                >
-                  Close dialog
-                </button>
-              </DialogPanel>
-            </DialogOverlay>
+            <AppDialog labelledBy="test-dialog-title">
+              <h2 id="test-dialog-title">Test dialog</h2>
+              <button
+                onClick={() => {
+                  setIsOpen(false);
+                }}
+              >
+                Close dialog
+              </button>
+            </AppDialog>
           ) : null}
         </>
       );
@@ -161,18 +158,16 @@ describe("DialogOverlay accessibility", () => {
             Open dialog
           </button>
           {isOpen ? (
-            <DialogOverlay>
-              <DialogPanel labelledBy="focus-order-dialog-title">
-                <h2 id="focus-order-dialog-title">Focus order dialog</h2>
-                <button
-                  onClick={() => {
-                    setIsOpen(false);
-                  }}
-                >
-                  Close dialog
-                </button>
-              </DialogPanel>
-            </DialogOverlay>
+            <AppDialog labelledBy="focus-order-dialog-title">
+              <h2 id="focus-order-dialog-title">Focus order dialog</h2>
+              <button
+                onClick={() => {
+                  setIsOpen(false);
+                }}
+              >
+                Close dialog
+              </button>
+            </AppDialog>
           ) : null}
         </>
       );
@@ -211,12 +206,10 @@ describe("DialogOverlay accessibility", () => {
 
   it("moves focus to the dialog fallback when opened without tabbable descendants", async () => {
     renderIntoRoot(
-      <DialogOverlay>
-        <DialogPanel labelledBy="fallback-dialog-title">
-          <h2 id="fallback-dialog-title">Fallback dialog</h2>
-          <p>No interactive elements here.</p>
-        </DialogPanel>
-      </DialogOverlay>,
+      <AppDialog labelledBy="fallback-dialog-title">
+        <h2 id="fallback-dialog-title">Fallback dialog</h2>
+        <p>No interactive elements here.</p>
+      </AppDialog>,
     );
 
     const dialog = screen.getByRole("dialog", { name: "Fallback dialog" });
@@ -228,12 +221,10 @@ describe("DialogOverlay accessibility", () => {
 
   it("does not override focus when a descendant has already taken focus on mount", async () => {
     renderIntoRoot(
-      <DialogOverlay>
-        <DialogPanel labelledBy="autofocus-dialog-title">
-          <h2 id="autofocus-dialog-title">Autofocus dialog</h2>
-          <AutoFocusField />
-        </DialogPanel>
-      </DialogOverlay>,
+      <AppDialog labelledBy="autofocus-dialog-title">
+        <h2 id="autofocus-dialog-title">Autofocus dialog</h2>
+        <AutoFocusField />
+      </AppDialog>,
     );
 
     await waitFor(() => {
@@ -249,15 +240,13 @@ describe("DialogOverlay accessibility", () => {
     renderIntoRoot(
       <>
         <button>Outside before</button>
-        <DialogOverlay>
-          <DialogPanel labelledBy="trap-dialog-title">
-            <h2 id="trap-dialog-title">Trap dialog</h2>
-            <AutoFocusFirstButton
-              firstLabel="First action"
-              secondLabel="Second action"
-            />
-          </DialogPanel>
-        </DialogOverlay>
+        <AppDialog labelledBy="trap-dialog-title">
+          <h2 id="trap-dialog-title">Trap dialog</h2>
+          <AutoFocusFirstButton
+            firstLabel="First action"
+            secondLabel="Second action"
+          />
+        </AppDialog>
         <button>Outside after</button>
       </>,
     );
@@ -299,18 +288,16 @@ describe("DialogOverlay accessibility", () => {
             Open dialog
           </button>
           {isOpen ? (
-            <DialogOverlay>
-              <DialogPanel labelledBy="restore-focus-dialog-title">
-                <h2 id="restore-focus-dialog-title">Restore focus dialog</h2>
-                <button
-                  onClick={() => {
-                    setIsOpen(false);
-                  }}
-                >
-                  Close dialog
-                </button>
-              </DialogPanel>
-            </DialogOverlay>
+            <AppDialog labelledBy="restore-focus-dialog-title">
+              <h2 id="restore-focus-dialog-title">Restore focus dialog</h2>
+              <button
+                onClick={() => {
+                  setIsOpen(false);
+                }}
+              >
+                Close dialog
+              </button>
+            </AppDialog>
           ) : null}
         </>
       );
@@ -347,20 +334,16 @@ describe("DialogOverlay accessibility", () => {
       }, [updateNestedOpen]);
 
       return (
-        <DialogOverlay>
-          <DialogPanel labelledBy="primary-dialog-title">
-            <h2 id="primary-dialog-title">Primary dialog</h2>
-            <button>Open nested dialog</button>
-            {isNestedOpen ? (
-              <DialogOverlay>
-                <DialogPanel labelledBy="nested-dialog-title">
-                  <h2 id="nested-dialog-title">Nested dialog</h2>
-                  <AutoFocusCloseButton onClose={doNothing} />
-                </DialogPanel>
-              </DialogOverlay>
-            ) : null}
-          </DialogPanel>
-        </DialogOverlay>
+        <AppDialog labelledBy="primary-dialog-title">
+          <h2 id="primary-dialog-title">Primary dialog</h2>
+          <button>Open nested dialog</button>
+          {isNestedOpen ? (
+            <AppDialog labelledBy="nested-dialog-title">
+              <h2 id="nested-dialog-title">Nested dialog</h2>
+              <AutoFocusCloseButton onClose={doNothing} />
+            </AppDialog>
+          ) : null}
+        </AppDialog>
       );
     }
 
@@ -407,18 +390,16 @@ describe("DialogOverlay accessibility", () => {
         <>
           <button>Outside trigger</button>
           {isOpen ? (
-            <DialogOverlay>
-              <DialogPanel labelledBy="strict-dialog-title">
-                <h2 id="strict-dialog-title">Strict dialog</h2>
-                <button
-                  onClick={() => {
-                    setIsOpen(false);
-                  }}
-                >
-                  Close dialog
-                </button>
-              </DialogPanel>
-            </DialogOverlay>
+            <AppDialog labelledBy="strict-dialog-title">
+              <h2 id="strict-dialog-title">Strict dialog</h2>
+              <button
+                onClick={() => {
+                  setIsOpen(false);
+                }}
+              >
+                Close dialog
+              </button>
+            </AppDialog>
           ) : null}
         </>
       );
@@ -446,25 +427,25 @@ describe("DialogOverlay accessibility", () => {
     expectRootHidden(root, false);
   });
 
-  it("does not throw when the overlay has no descendant role=dialog element", () => {
+  it("provides the dialog region around its content", () => {
     renderIntoRoot(
-      <DialogOverlay>
-        <div>No dialog root</div>
-      </DialogOverlay>,
+      <AppDialog labelledBy="content-title">
+        <h2 id="content-title">Dialog content</h2>
+      </AppDialog>,
     );
 
-    expect(screen.getByText("No dialog root")).toBeInTheDocument();
+    expect(
+      screen.getByRole("dialog", { name: "Dialog content" }),
+    ).toBeInTheDocument();
   });
 
   it("skips inert management without throwing when #root is absent", () => {
     document.body.innerHTML = "";
 
     render(
-      <DialogOverlay>
-        <DialogPanel labelledBy="no-root-dialog-title">
-          <h2 id="no-root-dialog-title">No root dialog</h2>
-        </DialogPanel>
-      </DialogOverlay>,
+      <AppDialog labelledBy="no-root-dialog-title">
+        <h2 id="no-root-dialog-title">No root dialog</h2>
+      </AppDialog>,
     );
 
     expect(document.getElementById("root")).toBeNull();

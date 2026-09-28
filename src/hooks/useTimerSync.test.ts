@@ -1,3 +1,4 @@
+import type { TimerSnapshot, TimerEffectsState } from "@/types/timerEffects";
 /**
  * useTimerSync Hook Tests
  *
@@ -14,13 +15,18 @@ import {
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { createBootAutoStartOfferForTest } from "@/test/bootAutoStartOfferFixture";
 import {
-  useTimerStore,
+  createTimerEffectsForTest,
+  createTimerSnapshotForTest,
+} from "@/test/timerEffectsFixture";
+import { useTimerEffectsStore } from "@/store/timerEffectsStore";
+import { useTimerStore } from "@/store/timerStore";
+import {
   TimerStatus,
   SessionType,
   type FullStatePayload,
   type SessionCompletedPayload,
   type TimerTickPayload,
-} from "@/store/timerStore";
+} from "@/types/timer";
 import { useErrorStore } from "@/store/errorStore";
 import {
   createSettingsForTest,
@@ -77,23 +83,12 @@ import { useTimerSync } from "./useTimerSync";
 
 function createFullStatePayload(
   overrides: Partial<FullStatePayload> = {},
-): FullStatePayload {
+  effects?: TimerEffectsState,
+): TimerSnapshot {
+  const snapshot = createTimerSnapshotForTest();
   return {
-    status: TimerStatus.IDLE,
-    remaining_seconds: 1500,
-    session_duration_secs: 1500,
-    session_type: SessionType.WORK,
-    current_cycle: 0,
-    completed_pomodoros: 0,
-    break_interaction_count: 0,
-    is_fullscreen_break: false,
-    away_during_break: false,
-    post_break_decision_pending: false,
-    boot_auto_start_offer: null,
-    active_window_summary: null,
-    settings: settingsPayloadForTest(createSettingsForTest()),
-    settings_file_status: "ok",
-    ...overrides,
+    timer: { ...snapshot.timer, ...overrides },
+    effects: effects ?? snapshot.effects,
   };
 }
 
@@ -145,7 +140,6 @@ function emitTimerTick(
       current_cycle: 1,
       completed_pomodoros: 0,
       break_interaction_count: 0,
-      is_fullscreen_break: false,
       away_during_break: false,
       ...overrides,
     },
@@ -260,6 +254,45 @@ describe("useTimerSync", () => {
     expect(invokedCommandNames()).toEqual(["get_full_state"]);
   });
 
+  it("keeps effect recovery newer than an earlier initial snapshot", async () => {
+    let resolveState: (payload: TimerSnapshot) => void = () => {
+      throw new Error("Expected a pending snapshot");
+    };
+    const pending = new Promise<TimerSnapshot>((resolve) => {
+      resolveState = resolve;
+    });
+    mockInvoke.mockReturnValue(pending);
+    const effectsChanged = await renderAndGetTimerEventHandler(
+      "timer_effects_changed",
+    );
+    await waitFor(() => {
+      expect(getCommandInvokeCount("get_full_state")).toBe(1);
+    });
+    act(() => {
+      effectsChanged({
+        payload: createTimerEffectsForTest({
+          revision: 2,
+          last_timer_save: "succeeded",
+        }),
+      });
+    });
+    await act(async () => {
+      resolveState(
+        createFullStatePayload(
+          {},
+          createTimerEffectsForTest({
+            revision: 1,
+            last_timer_save: "failed",
+          }),
+        ),
+      );
+      await pending;
+    });
+    expect(useTimerEffectsStore.getState().effects?.last_timer_save).toBe(
+      "succeeded",
+    );
+  });
+
   it("closes the startup offer when the backend expires it", async () => {
     const offer = createBootAutoStartOfferForTest();
     mockInvoke.mockResolvedValue(
@@ -281,10 +314,10 @@ describe("useTimerSync", () => {
   });
 
   it("does not reopen an expired offer when an earlier full state arrives late", async () => {
-    let resolveFullState: (payload: FullStatePayload) => void = () => {
+    let resolveFullState: (payload: TimerSnapshot) => void = () => {
       throw new Error("Expected the full-state request to be pending");
     };
-    const pendingFullState = new Promise<FullStatePayload>((resolve) => {
+    const pendingFullState = new Promise<TimerSnapshot>((resolve) => {
       resolveFullState = resolve;
     });
     mockInvoke.mockReturnValue(pendingFullState);
@@ -312,10 +345,10 @@ describe("useTimerSync", () => {
   });
 
   it("receives session completion events while the initial full state is pending", async () => {
-    let resolveFullState: (payload: FullStatePayload) => void = () => {
+    let resolveFullState: (payload: TimerSnapshot) => void = () => {
       throw new Error("Expected the full-state request to be pending");
     };
-    const pendingFullState = new Promise<FullStatePayload>((resolve) => {
+    const pendingFullState = new Promise<TimerSnapshot>((resolve) => {
       resolveFullState = resolve;
     });
     mockInvoke.mockImplementation((command) =>
@@ -714,10 +747,10 @@ describe("useTimerSync", () => {
       return Promise.resolve(unlisten);
     });
 
-    let resolvePendingFullState: (payload: FullStatePayload) => void = () => {
+    let resolvePendingFullState: (payload: TimerSnapshot) => void = () => {
       throw new Error("Expected pending full-state resolver");
     };
-    const pendingFullState = new Promise<FullStatePayload>((resolve) => {
+    const pendingFullState = new Promise<TimerSnapshot>((resolve) => {
       resolvePendingFullState = resolve;
     });
     mockInvoke.mockImplementation((command) => {

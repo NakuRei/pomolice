@@ -1,3 +1,4 @@
+import { useTimerEffectsStore } from "./store/timerEffectsStore";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   act,
@@ -19,38 +20,44 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 const IDLE_FULL_STATE = vi.hoisted(() => ({
-  status: "idle",
-  remaining_seconds: 1500,
-  session_duration_secs: 1500,
-  session_type: "work",
-  current_cycle: 0,
-  completed_pomodoros: 0,
-  break_interaction_count: 0,
-  is_fullscreen_break: false,
-  away_during_break: false,
-  post_break_decision_pending: false,
-  boot_auto_start_offer: null,
-  active_window_summary: null,
-  settings: {
-    work_duration_secs: 1500,
-    short_break_duration_secs: 300,
-    long_break_duration_secs: 900,
-    long_break_interval: 4,
-    post_break_transition_policy: "require_manual_continue",
-    auto_run_feature_enabled: false,
-    weekly_auto_run_config: {
-      mon: { enabled: false, start_time: "09:00", end_time: "18:00" },
-      tue: { enabled: false, start_time: "09:00", end_time: "18:00" },
-      wed: { enabled: false, start_time: "09:00", end_time: "18:00" },
-      thu: { enabled: false, start_time: "09:00", end_time: "18:00" },
-      fri: { enabled: false, start_time: "09:00", end_time: "18:00" },
-      sat: { enabled: false, start_time: "09:00", end_time: "18:00" },
-      sun: { enabled: false, start_time: "09:00", end_time: "18:00" },
+  timer: {
+    status: "idle",
+    remaining_seconds: 1500,
+    session_duration_secs: 1500,
+    session_type: "work",
+    current_cycle: 0,
+    completed_pomodoros: 0,
+    break_interaction_count: 0,
+    away_during_break: false,
+    post_break_decision_pending: false,
+    boot_auto_start_offer: null,
+    active_window_summary: null,
+    settings: {
+      work_duration_secs: 1500,
+      short_break_duration_secs: 300,
+      long_break_duration_secs: 900,
+      long_break_interval: 4,
+      post_break_transition_policy: "require_manual_continue",
+      auto_run_feature_enabled: false,
+      weekly_auto_run_config: {
+        mon: { enabled: false, start_time: "09:00", end_time: "18:00" },
+        tue: { enabled: false, start_time: "09:00", end_time: "18:00" },
+        wed: { enabled: false, start_time: "09:00", end_time: "18:00" },
+        thu: { enabled: false, start_time: "09:00", end_time: "18:00" },
+        fri: { enabled: false, start_time: "09:00", end_time: "18:00" },
+        sat: { enabled: false, start_time: "09:00", end_time: "18:00" },
+        sun: { enabled: false, start_time: "09:00", end_time: "18:00" },
+      },
+      notification_sound_volume_percent: 50,
+      notification_sound_muted: false,
     },
-    notification_sound_volume_percent: 50,
-    notification_sound_muted: false,
+    settings_file_status: "ok",
   },
-  settings_file_status: "ok",
+  effects: {
+    revision: 0,
+    break_lock: { target: "unlocked", last_attempt: null },
+    last_timer_save: null,
+  },
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -122,7 +129,10 @@ describe("App", () => {
         command === "get_full_state"
           ? {
               ...IDLE_FULL_STATE,
-              active_window_summary: MONDAY_DAYTIME_WINDOW,
+              timer: {
+                ...IDLE_FULL_STATE.timer,
+                active_window_summary: MONDAY_DAYTIME_WINDOW,
+              },
             }
           : undefined,
       ),
@@ -239,7 +249,7 @@ describe("App", () => {
     const user = userEvent.setup();
     vi.mocked(invoke).mockResolvedValue({
       ...IDLE_FULL_STATE,
-      settings_file_status: "unusable",
+      timer: { ...IDLE_FULL_STATE.timer, settings_file_status: "unusable" },
     });
 
     render(<App />);
@@ -296,14 +306,28 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "設定" })).toBeInTheDocument();
 
     act(() => {
-      useTimerStore.setState({ isFullscreenBreak: true });
+      useTimerEffectsStore.getState().observe({
+        revision: 1,
+        last_timer_save: null,
+        break_lock: {
+          target: "locked",
+          last_attempt: { action: "enter", status: "succeeded" },
+        },
+      });
     });
     await waitFor(() => {
       expect(screen.getByText("BREAK")).toBeInTheDocument();
     });
 
     act(() => {
-      useTimerStore.setState({ isFullscreenBreak: false });
+      useTimerEffectsStore.getState().observe({
+        revision: 2,
+        last_timer_save: null,
+        break_lock: {
+          target: "unlocked",
+          last_attempt: { action: "release", status: "succeeded" },
+        },
+      });
     });
     await waitFor(() => {
       expect(screen.getByTestId("timer-display")).toBeInTheDocument();

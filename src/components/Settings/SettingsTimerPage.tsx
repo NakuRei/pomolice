@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useFocusHeadingOnMount } from "@/hooks/useFocusHeadingOnMount";
 import { useSettingsSave } from "@/hooks/useSettingsSave";
-import { TimerStatus, useTimerStore } from "@/store/timerStore";
+import { useTimerStore } from "@/store/timerStore";
+import { TimerStatus } from "@/types/timer";
 import type {
   RangedSettingField,
   Settings,

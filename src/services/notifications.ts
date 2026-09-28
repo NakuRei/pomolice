@@ -12,7 +12,8 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { resolveResource } from "@tauri-apps/api/path";
 import { createLogger } from "../logging/logger";
 import { FRONTEND_LOG_EVENT_IDS } from "../logging/logEvents";
-import { useTimerStore, type SessionTypeValue } from "../store/timerStore";
+import { useTimerStore } from "../store/timerStore";
+import { type SessionTypeValue } from "@/types/timer";
 
 const notificationSoundResourcePathByType = {
   work: "resources/sounds/work.wav",

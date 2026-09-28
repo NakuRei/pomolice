@@ -1,3 +1,4 @@
+import { answerSettingsSavesForTest } from "@/test/settingsSaveFixture";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -14,11 +15,9 @@ vi.mock("@tauri-apps/api/core", () => ({
     mockInvoke(command, args),
 }));
 
-import { TimerStatus, useTimerStore } from "@/store/timerStore";
-import {
-  createSettingsForTest,
-  answerSettingsSavesForTest,
-} from "@/test/settingsFixture";
+import { useTimerStore } from "@/store/timerStore";
+import { TimerStatus } from "@/types/timer";
+import { createSettingsForTest } from "@/test/settingsFixture";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import type { Settings, SettingsPayload } from "@/types/settings";
 import { SettingsTimerPage } from "./SettingsTimerPage";

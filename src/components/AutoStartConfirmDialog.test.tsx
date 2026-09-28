@@ -9,11 +9,15 @@ import {
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { AutoStartConfirmDialog } from "./AutoStartConfirmDialog";
-import { SessionType, TimerStatus, useTimerStore } from "@/store/timerStore";
+import { useTimerStore } from "@/store/timerStore";
+import { SessionType, TimerStatus } from "@/types/timer";
 import { createBootAutoStartOfferForTest } from "@/test/bootAutoStartOfferFixture";
+import { createTimerSnapshotForTest } from "@/test/timerEffectsFixture";
 
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn().mockResolvedValue("resolved_later"),
+  invoke: vi
+    .fn()
+    .mockImplementation(() => Promise.resolve(createTimerSnapshotForTest())),
 }));
 
 const MONDAY_DAYTIME_WINDOW = {
@@ -44,7 +48,6 @@ describe("AutoStartConfirmDialog", () => {
       currentCycle: 0,
       completedPomodoros: 0,
       breakInteractionCount: 0,
-      isFullscreenBreak: false,
       requiresManualContinueDecision: false,
       isConnected: true,
       bootAutoStartOffer: null,

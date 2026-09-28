@@ -2,7 +2,7 @@ use crate::settings::UserSettings;
 use crate::types::{BreakAttendance, PostBreakDecisionAction};
 
 /// Every input that can change timer state. The shell turns commands, the
-/// ticker, input-monitor callbacks and break-lock outcomes into one of these.
+/// ticker and input-monitor callbacks into one of these.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Event {
     /// Applied once after restore, before the ticker starts.
@@ -26,10 +26,4 @@ pub(crate) enum Event {
     },
     InputDetected,
     EscapeComboPressed,
-    /// Outcome of `Effect::EnterBreakLock`, fed back inside the same dispatch.
-    BreakLockEntered,
-    BreakLockEnterFailed,
-    /// Outcome of `Effect::ReleaseBreakLock`, fed back inside the same dispatch.
-    BreakLockReleased,
-    BreakLockReleaseFailed,
 }

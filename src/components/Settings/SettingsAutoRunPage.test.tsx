@@ -1,3 +1,4 @@
+import { answerSettingsSavesForTest } from "@/test/settingsSaveFixture";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -17,7 +18,6 @@ vi.mock("@tauri-apps/api/core", () => ({
 import {
   createSettingsForTest,
   createWeeklyAutoRunConfigForTest,
-  answerSettingsSavesForTest,
 } from "@/test/settingsFixture";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import type {

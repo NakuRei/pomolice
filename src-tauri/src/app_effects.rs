@@ -25,11 +25,11 @@ impl<R: Runtime> EffectSink for AppHandle<R> {
         tray_icon::update_tray_icon(self, payload);
     }
 
-    async fn enter_break_lock(&self) -> Event {
+    async fn enter_break_lock(&self) -> crate::error::Result<()> {
         break_lock::enter(&self.state::<AppState>(), self).await
     }
 
-    async fn release_break_lock(&self) -> Event {
+    async fn release_break_lock(&self) -> crate::error::Result<()> {
         break_lock::release(&self.state::<AppState>(), self).await
     }
 }
@@ -41,7 +41,6 @@ pub(crate) fn spawn_ticker(app: AppHandle) {
         loop {
             interval.tick().await;
             let app_state = app.state::<AppState>();
-            // A tick can only fail on persistence, which is logged where it fails.
             let _ = app_state.timer.dispatch(&app, Event::Tick).await;
         }
     });
@@ -50,7 +49,6 @@ pub(crate) fn spawn_ticker(app: AppHandle) {
 pub(crate) fn dispatch_from_callback(app: AppHandle, event: Event) {
     tauri::async_runtime::spawn(async move {
         let app_state = app.state::<AppState>();
-        // Callback events can only fail on persistence, which is logged where it fails.
         let _ = app_state.timer.dispatch(&app, event).await;
     });
 }

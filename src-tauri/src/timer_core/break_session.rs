@@ -1,9 +1,6 @@
-// What happens inside a break: attendance, input penalties, the escape
-// combo, and the outcomes of the break lock.
-
 use chrono::{DateTime, Duration as ChronoDuration, Local};
 
-use super::{Effect, TimerCore};
+use super::{BreakLockTarget, Effect, TimerCore};
 use crate::error::{PomoliceError, Result};
 use crate::logging_event::{log_warn_event, BackendLogEvent};
 use crate::types::{BreakAttendance, TimerStatus};
@@ -53,34 +50,9 @@ impl TimerCore {
 
     pub(super) fn escape_combo_pressed(&self) -> Vec<Effect> {
         if self.status() == TimerStatus::OnBreak {
-            vec![Effect::ReleaseBreakLock]
+            vec![Effect::SetBreakLockTarget(BreakLockTarget::Unlocked)]
         } else {
             Vec::new()
         }
-    }
-
-    pub(super) fn break_lock_entered(&mut self, now: DateTime<Local>) -> Vec<Effect> {
-        if let Some(current_break) = self.phase.current_break_mut() {
-            current_break.is_fullscreen = true;
-        }
-        vec![self.publish(now), Effect::Persist]
-    }
-
-    pub(super) fn break_lock_enter_failed(&mut self, now: DateTime<Local>) -> Vec<Effect> {
-        if let Some(current_break) = self.phase.current_break_mut() {
-            current_break.is_fullscreen = false;
-        }
-        vec![self.publish(now), Effect::Persist]
-    }
-
-    pub(super) fn break_lock_released(&mut self, now: DateTime<Local>) -> Vec<Effect> {
-        if let Some(current_break) = self.phase.current_break_mut() {
-            current_break.is_fullscreen = false;
-        }
-        vec![self.publish(now), Effect::Persist]
-    }
-
-    pub(super) fn break_lock_release_failed(&self, now: DateTime<Local>) -> Vec<Effect> {
-        vec![self.publish(now), Effect::Persist]
     }
 }

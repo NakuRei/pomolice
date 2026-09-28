@@ -1,14 +1,22 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { TimerEffectsNotice } from "./TimerEffectsNotice";
 
-interface DialogOverlayProps {
+interface AppDialogProps {
   children: ReactNode;
+  labelledBy: string;
+  describedBy?: string;
   className?: string;
+  overlayClassName?: string;
   testId?: string;
+  overlayTestId?: string;
 }
 
 const DIALOG_OVERLAY_BASE_CLASS_NAME =
   "fixed inset-0 z-50 flex items-center justify-center bg-backdrop/50";
+
+const DIALOG_PANEL_BASE_CLASS_NAME =
+  "mx-4 max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-lg border border-border bg-surface p-8 text-on-surface shadow-xl shadow-shadow/30";
 
 const FOCUSABLE_SELECTOR = [
   "a[href]",
@@ -46,6 +54,42 @@ function buildOverlayClassName(className: string): string {
   return [...baseTokens, ...overrideTokens].join(" ");
 }
 
+function isShadowSizeClassName(token: string): boolean {
+  return /^(?:shadow|shadow-(?:none|xs|sm|md|lg|xl|2xl))$/u.test(token);
+}
+
+function isShadowColorClassName(token: string): boolean {
+  return token.startsWith("shadow-shadow/");
+}
+
+function buildPanelClassName(className: string): string {
+  const overrideTokens = getClassTokens(className);
+  const hasWidthOverride = overrideTokens.some((token) =>
+    token.startsWith("max-w-"),
+  );
+  const hasShadowSizeOverride = overrideTokens.some(isShadowSizeClassName);
+  const hasShadowColorOverride = overrideTokens.some(isShadowColorClassName);
+  const baseTokens = getClassTokens(DIALOG_PANEL_BASE_CLASS_NAME).filter(
+    (token) => {
+      if (hasWidthOverride && token.startsWith("max-w-")) {
+        return false;
+      }
+
+      if (hasShadowSizeOverride && isShadowSizeClassName(token)) {
+        return false;
+      }
+
+      if (hasShadowColorOverride && isShadowColorClassName(token)) {
+        return false;
+      }
+
+      return true;
+    },
+  );
+
+  return [...baseTokens, ...overrideTokens].join(" ");
+}
+
 function getActiveElement(): HTMLElement | null {
   return document.activeElement instanceof HTMLElement
     ? document.activeElement
@@ -71,16 +115,6 @@ function setRootVisibilityState(
 
   rootElement.removeAttribute("aria-hidden");
   rootElement.removeAttribute("inert");
-}
-
-function getDialogRoot(overlayElement: HTMLElement | null): HTMLElement | null {
-  if (overlayElement === null) {
-    return null;
-  }
-
-  const dialogElement =
-    overlayElement.querySelector<HTMLElement>("[role='dialog']");
-  return dialogElement instanceof HTMLElement ? dialogElement : null;
 }
 
 function getFocusableElements(dialogElement: HTMLElement): HTMLElement[] {
@@ -178,26 +212,28 @@ function trapFocusWithinDialog(
   targetElement.focus();
 }
 
-/**
- * Shared overlay shell for confirmation dialogs.
- */
-export function DialogOverlay({
+export function AppDialog({
   children,
+  labelledBy,
+  describedBy,
   className = "",
+  overlayClassName = "",
   testId,
-}: DialogOverlayProps): React.ReactElement {
-  const overlayReference = useRef<HTMLDivElement>(null);
-  const modalIdReference = useRef(Symbol("dialog-overlay"));
+  overlayTestId,
+}: AppDialogProps): React.ReactElement {
+  const dialogReference = useRef<HTMLDivElement>(null);
+  const modalIdReference = useRef(Symbol("app-dialog"));
   const previousFocusTargetReference = useRef<HTMLElement | null>(
     typeof document === "undefined" ? null : getActiveElement(),
   );
-  const overlayClassName = buildOverlayClassName(className);
+  const overlayClasses = buildOverlayClassName(overlayClassName);
+  const panelClassName = buildPanelClassName(className);
 
   useEffect(() => {
     const modalId = modalIdReference.current;
-    const overlayElement = overlayReference.current;
+    const dialogElement = dialogReference.current;
 
-    if (overlayElement === null) {
+    if (dialogElement === null) {
       return;
     }
 
@@ -223,22 +259,14 @@ export function DialogOverlay({
         return;
       }
 
-      const dialogElement = getDialogRoot(overlayElement);
-      if (dialogElement === null) {
-        return;
-      }
-
       trapFocusWithinDialog(event, dialogElement);
     };
 
     document.addEventListener("keydown", handleKeyDown);
 
-    const dialogElement = getDialogRoot(overlayElement);
-    if (dialogElement !== null) {
-      const activeElement = getActiveElement();
-      if (activeElement === null || !dialogElement.contains(activeElement)) {
-        dialogElement.focus();
-      }
+    const activeElement = getActiveElement();
+    if (activeElement === null || !dialogElement.contains(activeElement)) {
+      dialogElement.focus();
     }
 
     return (): void => {
@@ -269,12 +297,22 @@ export function DialogOverlay({
   }, []);
 
   return createPortal(
-    <div
-      ref={overlayReference}
-      className={overlayClassName}
-      data-testid={testId}
-    >
-      {children}
+    <div className={overlayClasses} data-testid={overlayTestId}>
+      <div
+        ref={dialogReference}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={labelledBy}
+        aria-describedby={describedBy}
+        tabIndex={-1}
+        className={panelClassName}
+        data-testid={testId}
+      >
+        <div className="mb-4 empty:hidden">
+          <TimerEffectsNotice />
+        </div>
+        {children}
+      </div>
     </div>,
     document.body,
   );

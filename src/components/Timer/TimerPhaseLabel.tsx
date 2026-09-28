@@ -1,4 +1,4 @@
-import { SessionType, type SessionTypeValue } from "@/store/timerStore";
+import { SessionType, type SessionTypeValue } from "@/types/timer";
 import { TIMER_NUMBER_FONT_SIZE } from "./TimerNumber";
 
 const SESSION_PHASE_ACCESSIBLE_NAME = {

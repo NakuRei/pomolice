@@ -1,3 +1,4 @@
+import { createTimerSnapshotForTest } from "@/test/timerEffectsFixture";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fireEvent,
@@ -9,11 +10,14 @@ import {
 import userEvent from "@testing-library/user-event";
 import { EmergencyStopButton } from "./EmergencyStopButton";
 import { useErrorStore } from "@/store/errorStore";
-import { useTimerStore, TimerStatus, SessionType } from "@/store/timerStore";
+import { useTimerStore } from "@/store/timerStore";
+import { TimerStatus, SessionType } from "@/types/timer";
 
 // Mock Tauri invoke
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn().mockResolvedValue(undefined),
+  invoke: vi
+    .fn()
+    .mockImplementation(() => Promise.resolve(createTimerSnapshotForTest())),
 }));
 
 function createRootFixture(): HTMLDivElement {
@@ -72,7 +76,6 @@ describe("EmergencyStopButton", () => {
       currentCycle: 0,
       completedPomodoros: 0,
       breakInteractionCount: 0,
-      isFullscreenBreak: false,
       requiresManualContinueDecision: false,
       isConnected: false,
     });

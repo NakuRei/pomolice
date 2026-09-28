@@ -1,3 +1,4 @@
+import { answerSettingsSavesForTest } from "@/test/settingsSaveFixture";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -18,7 +19,6 @@ import { useTimerStore } from "@/store/timerStore";
 import {
   createSettingsForTest,
   createWeeklyAutoRunConfigForTest,
-  answerSettingsSavesForTest,
 } from "@/test/settingsFixture";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import type { Settings, SettingsPayload } from "@/types/settings";

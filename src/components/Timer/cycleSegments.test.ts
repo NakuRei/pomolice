@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { deriveCycleSegments, type CycleSegmentsInput } from "./cycleSegments";
-import { SessionType } from "@/store/timerStore";
+import { SessionType } from "@/types/timer";
 
 const BASE_INPUT: CycleSegmentsInput = {
   currentCycle: 0,

@@ -1,9 +1,5 @@
-import {
-  SessionType,
-  TimerStatus,
-  useTimerStore,
-  type SessionTypeValue,
-} from "@/store/timerStore";
+import { useTimerStore } from "@/store/timerStore";
+import { SessionType, TimerStatus, type SessionTypeValue } from "@/types/timer";
 import type { Settings } from "@/types/settings";
 import { formatDurationText } from "../shared/durationText";
 

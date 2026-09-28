@@ -693,7 +693,6 @@ pub(crate) struct TimerTickPayload {
     pub current_cycle: u32,
     pub completed_pomodoros: u32,
     pub break_interaction_count: u32,
-    pub is_fullscreen_break: bool,
     pub away_during_break: bool,
 }
 
@@ -771,7 +770,6 @@ pub(crate) struct FullStatePayload {
     pub current_cycle: u32,
     pub completed_pomodoros: u32,
     pub break_interaction_count: u32,
-    pub is_fullscreen_break: bool,
     pub away_during_break: bool,
     pub post_break_decision_pending: bool,
     pub settings: UserSettings,

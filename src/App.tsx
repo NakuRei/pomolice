@@ -4,6 +4,10 @@ import { FullscreenBreak } from "./components/BreakScreen/FullscreenBreak";
 import { HomeScreen } from "./components/Home/HomeScreen";
 import { SettingsScreenContent } from "./components/Settings/SettingsScreenContent";
 import { useTimerSync } from "./hooks/useTimerSync";
+import {
+  useTimerEffectsStore,
+  selectBreakLockObservation,
+} from "./store/timerEffectsStore";
 import { useTimerStore } from "./store/timerStore";
 import type { AppScreen, SettingsScreen } from "./types/appScreen";
 
@@ -20,7 +24,8 @@ function App(): React.ReactElement {
 
   const [currentScreen, setCurrentScreen] = useState<AppScreen>("home");
   // Get fullscreen break state from store (updated by backend events)
-  const isFullscreenBreak = useTimerStore((state) => state.isFullscreenBreak);
+  const isFullscreenBreak =
+    useTimerEffectsStore(selectBreakLockObservation) === "locked";
   const [previousFullscreenBreakState, setPreviousFullscreenBreakState] =
     useState(isFullscreenBreak);
   const settings = useTimerStore((state) => state.settings);

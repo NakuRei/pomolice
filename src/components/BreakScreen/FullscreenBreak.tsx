@@ -1,4 +1,5 @@
-import { useTimerStore, SessionType } from "@/store/timerStore";
+import { useTimerStore } from "@/store/timerStore";
+import { SessionType } from "@/types/timer";
 import { useSkipFlowStore } from "@/store/skipFlowStore";
 import { FootprintsIcon, SkipForwardIcon } from "@/components/icons/AppIcons";
 import { CycleProgress } from "@/components/Timer/CycleProgress";

@@ -1,4 +1,5 @@
-import { useTimerStore, TimerStatus } from "@/store/timerStore";
+import { useTimerStore } from "@/store/timerStore";
+import { TimerStatus } from "@/types/timer";
 import { PlayIcon } from "@/components/icons/AppIcons";
 import { EmergencyStopButton } from "../EmergencyStop/EmergencyStopButton";
 import { Button } from "../shared/Button";

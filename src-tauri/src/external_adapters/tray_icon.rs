@@ -60,7 +60,7 @@ static TRAY_NOTIFICATION_SHOWN: AtomicBool = AtomicBool::new(false);
 
 static IDLE_APP_ICON: OnceLock<TrayIconPixels> = OnceLock::new();
 
-pub(crate) fn is_tray_available(app: &AppHandle) -> bool {
+pub(crate) fn is_tray_available<R: Runtime>(app: &AppHandle<R>) -> bool {
     app.tray_by_id("pomolice-tray").is_some()
 }
 

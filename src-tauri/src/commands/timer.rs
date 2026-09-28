@@ -1,4 +1,4 @@
-use tauri::{Manager, State, WebviewWindow};
+use tauri::{Manager, Runtime, State, WebviewWindow};
 
 use crate::commands::input_rejection::ObservedCommandArg;
 use crate::error::{PomoliceError, Result};
@@ -6,11 +6,15 @@ use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
 use crate::settings::SettingsChanges;
 use crate::state::AppState;
 use crate::timer_core::Event;
-use crate::types::{BreakAttendance, FullStatePayload, PostBreakDecisionAction};
+use crate::timer_effects::TimerSnapshot;
+use crate::types::{BreakAttendance, PostBreakDecisionAction};
 
 /// Start a work session with the saved settings.
 #[tauri::command]
-pub(crate) async fn start_work(window: WebviewWindow, state: State<'_, AppState>) -> Result<()> {
+pub(crate) async fn start_work<R: Runtime>(
+    window: WebviewWindow<R>,
+    state: State<'_, AppState>,
+) -> Result<TimerSnapshot> {
     log_command_invoked("start_work", &window);
     authorize_main_window(&window, "start_work")?;
     state
@@ -23,11 +27,11 @@ pub(crate) async fn start_work(window: WebviewWindow, state: State<'_, AppState>
 ///
 /// This command is valid only while `post_break_decision_pending = true`.
 #[tauri::command]
-pub(crate) async fn resolve_post_break_decision(
-    window: WebviewWindow,
+pub(crate) async fn resolve_post_break_decision<R: Runtime>(
+    window: WebviewWindow<R>,
     state: State<'_, AppState>,
     action: ObservedCommandArg<PostBreakDecisionAction>,
-) -> Result<()> {
+) -> Result<TimerSnapshot> {
     authorize_main_window(&window, "resolve_post_break_decision")?;
     let action = action.into_inner();
     state
@@ -41,11 +45,11 @@ pub(crate) async fn resolve_post_break_decision(
 
 /// Valid only while the timer is on break.
 #[tauri::command]
-pub(crate) async fn set_away_during_break(
-    window: WebviewWindow,
+pub(crate) async fn set_away_during_break<R: Runtime>(
+    window: WebviewWindow<R>,
     state: State<'_, AppState>,
     away: ObservedCommandArg<bool>,
-) -> Result<()> {
+) -> Result<TimerSnapshot> {
     log_command_invoked("set_away_during_break", &window);
     authorize_main_window(&window, "set_away_during_break")?;
     let attendance = BreakAttendance::from_away_flag(away.into_inner());
@@ -60,10 +64,10 @@ pub(crate) async fn set_away_during_break(
 
 /// Emergency stop - reset all state
 #[tauri::command]
-pub(crate) async fn emergency_stop(
-    window: WebviewWindow,
+pub(crate) async fn emergency_stop<R: Runtime>(
+    window: WebviewWindow<R>,
     state: State<'_, AppState>,
-) -> Result<()> {
+) -> Result<TimerSnapshot> {
     log_command_invoked("emergency_stop", &window);
     authorize_main_window(&window, "emergency_stop")?;
     state
@@ -77,11 +81,11 @@ pub(crate) async fn emergency_stop(
 /// apply from the next one. A rejected save changes nothing and names every
 /// input to fix.
 #[tauri::command]
-pub(crate) async fn update_settings(
-    window: WebviewWindow,
+pub(crate) async fn update_settings<R: Runtime>(
+    window: WebviewWindow<R>,
     state: State<'_, AppState>,
     changes: ObservedCommandArg<SettingsChanges>,
-) -> Result<()> {
+) -> Result<TimerSnapshot> {
     log_command_invoked("update_settings", &window);
     authorize_main_window(&window, "update_settings")?;
     state
@@ -92,21 +96,30 @@ pub(crate) async fn update_settings(
 
 /// Read the current state without advancing the timer.
 #[tauri::command]
-pub(crate) async fn get_full_state(
-    window: WebviewWindow,
+pub(crate) async fn get_full_state<R: Runtime>(
+    window: WebviewWindow<R>,
     state: State<'_, AppState>,
-) -> Result<FullStatePayload> {
+) -> Result<TimerSnapshot> {
     authorize_main_window(&window, "get_full_state")?;
     Ok(state.timer.read_full_state().await)
 }
 
+#[tauri::command]
+pub(crate) async fn retry_failed_timer_effects<R: Runtime>(
+    window: WebviewWindow<R>,
+    state: State<'_, AppState>,
+) -> Result<TimerSnapshot> {
+    authorize_main_window(&window, "retry_failed_timer_effects")?;
+    Ok(state.timer.retry_failed_effects(window.app_handle()).await)
+}
+
 /// Resolve startup auto-start confirmation prompt.
 #[tauri::command]
-pub(crate) async fn resolve_boot_auto_start_prompt(
-    window: WebviewWindow,
+pub(crate) async fn resolve_boot_auto_start_prompt<R: Runtime>(
+    window: WebviewWindow<R>,
     state: State<'_, AppState>,
     start_now: ObservedCommandArg<bool>,
-) -> Result<()> {
+) -> Result<TimerSnapshot> {
     authorize_main_window(&window, "resolve_boot_auto_start_prompt")?;
     let start_now = start_now.into_inner();
     state
@@ -115,7 +128,7 @@ pub(crate) async fn resolve_boot_auto_start_prompt(
         .await
 }
 
-fn log_command_invoked(command_name: &'static str, window: &WebviewWindow) {
+fn log_command_invoked<R: Runtime>(command_name: &'static str, window: &WebviewWindow<R>) {
     log_info_event(
         BackendLogEvent::TimerCommandInvoked,
         &[
@@ -133,7 +146,10 @@ fn authorize_main_window_label(window_label: &str) -> Result<()> {
     Err(PomoliceError::Unauthorized(window_label.to_string()))
 }
 
-fn authorize_main_window(window: &WebviewWindow, command_name: &'static str) -> Result<()> {
+fn authorize_main_window<R: Runtime>(
+    window: &WebviewWindow<R>,
+    command_name: &'static str,
+) -> Result<()> {
     let window_label = window.label();
     if let Err(error) = authorize_main_window_label(window_label) {
         log_warn_event(

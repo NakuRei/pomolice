@@ -1,13 +1,13 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { DialogPanel } from "./DialogPanel";
+import { AppDialog } from "./AppDialog";
 
-describe("Dialog layout primitives", () => {
+describe("AppDialog accessible labels", () => {
   it("exposes an accessible name when labelledBy is provided", () => {
     render(
-      <DialogPanel labelledBy="dialog-title">
+      <AppDialog labelledBy="dialog-title">
         <h2 id="dialog-title">Dialog title</h2>
-      </DialogPanel>,
+      </AppDialog>,
     );
 
     const panel = screen.getByRole("dialog", { name: "Dialog title" });
@@ -17,10 +17,10 @@ describe("Dialog layout primitives", () => {
 
   it("exposes an accessible description when describedBy is provided", () => {
     render(
-      <DialogPanel labelledBy="dialog-title" describedBy="dialog-description">
+      <AppDialog labelledBy="dialog-title" describedBy="dialog-description">
         <h2 id="dialog-title">Dialog title</h2>
         <p id="dialog-description">Dialog description</p>
-      </DialogPanel>,
+      </AppDialog>,
     );
 
     const panel = screen.getByRole("dialog", {

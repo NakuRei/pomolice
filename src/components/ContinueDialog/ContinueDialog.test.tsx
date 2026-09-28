@@ -9,7 +9,8 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ContinueDialog } from "./ContinueDialog";
-import { useTimerStore, TimerStatus, SessionType } from "@/store/timerStore";
+import { useTimerStore } from "@/store/timerStore";
+import { TimerStatus, SessionType } from "@/types/timer";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 
 type ResolvePostBreakDecision = ReturnType<
@@ -45,7 +46,6 @@ describe("ContinueDialog", () => {
       currentCycle: 0,
       completedPomodoros: 0,
       breakInteractionCount: 0,
-      isFullscreenBreak: false,
       requiresManualContinueDecision: false,
       isConnected: false,
     });
