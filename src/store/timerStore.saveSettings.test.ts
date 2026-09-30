@@ -35,7 +35,10 @@ describe("timerStore settings saving", () => {
 
   describe("saveSettings()", () => {
     it("sends only the changed settings", async () => {
-      mockInvoke.mockResolvedValueOnce(createTimerSnapshotForTest());
+      mockInvoke.mockResolvedValueOnce({
+        status: "accepted",
+        value: createTimerSnapshotForTest(),
+      });
 
       const result = await useTimerStore
         .getState()
@@ -64,7 +67,10 @@ describe("timerStore settings saving", () => {
         },
       });
       const stateBeforeTheReply = useTimerStore.getState();
-      mockInvoke.mockResolvedValueOnce(createTimerSnapshotForTest());
+      mockInvoke.mockResolvedValueOnce({
+        status: "accepted",
+        value: createTimerSnapshotForTest(),
+      });
 
       await useTimerStore.getState().saveSettings({ workDurationSecs: 60 });
 
@@ -91,10 +97,13 @@ describe("timerStore settings saving", () => {
           secondary_weekday: "tue",
         },
       ];
-      mockInvoke.mockRejectedValueOnce({
-        code: "invalid_settings",
-        message: "Invalid settings",
-        issues,
+      mockInvoke.mockResolvedValueOnce({
+        status: "rejected",
+        error: {
+          code: "invalid_settings",
+          message: "Invalid settings",
+          issues,
+        },
       });
 
       const result = await useTimerStore
@@ -109,9 +118,12 @@ describe("timerStore settings saving", () => {
     it("reports any other failure and keeps the previous settings", async () => {
       const previousSettings = createSettingsForTest();
       useTimerStore.setState({ settings: previousSettings });
-      mockInvoke.mockRejectedValueOnce({
-        code: "persistence_error",
-        message: "Persistence error",
+      mockInvoke.mockResolvedValueOnce({
+        status: "rejected",
+        error: {
+          code: "persistence_error",
+          message: "Persistence error",
+        },
       });
 
       const result = await useTimerStore
@@ -129,12 +141,18 @@ describe("timerStore settings saving", () => {
 
     it("clears a previous save failure once a save succeeds", async () => {
       const settings = createSettingsForTest();
-      mockInvoke.mockRejectedValueOnce({
-        code: "persistence_error",
-        message: "Persistence error",
+      mockInvoke.mockResolvedValueOnce({
+        status: "rejected",
+        error: {
+          code: "persistence_error",
+          message: "Persistence error",
+        },
       });
       await useTimerStore.getState().saveSettings(settings);
-      mockInvoke.mockResolvedValueOnce(createTimerSnapshotForTest());
+      mockInvoke.mockResolvedValueOnce({
+        status: "accepted",
+        value: createTimerSnapshotForTest(),
+      });
 
       await useTimerStore.getState().saveSettings(settings);
 
@@ -147,7 +165,10 @@ describe("timerStore settings saving", () => {
       useTimerStore.setState({
         settings: createSettingsForTest({ notificationSoundMuted: false }),
       });
-      mockInvoke.mockResolvedValueOnce(createTimerSnapshotForTest());
+      mockInvoke.mockResolvedValueOnce({
+        status: "accepted",
+        value: createTimerSnapshotForTest(),
+      });
 
       await useTimerStore.getState().toggleNotificationSoundMuted();
 
@@ -170,7 +191,10 @@ describe("timerStore settings saving", () => {
           postBreakTransitionPolicy: "require_manual_continue",
         }),
       });
-      mockInvoke.mockResolvedValueOnce(createTimerSnapshotForTest());
+      mockInvoke.mockResolvedValueOnce({
+        status: "accepted",
+        value: createTimerSnapshotForTest(),
+      });
 
       await useTimerStore
         .getState()
@@ -199,10 +223,13 @@ describe("timerStore settings saving", () => {
   });
 
   it("treats a rejection that names no input as an ordinary failure", async () => {
-    mockInvoke.mockRejectedValueOnce({
-      code: "invalid_settings",
-      message: "Invalid settings",
-      issues: [],
+    mockInvoke.mockResolvedValueOnce({
+      status: "rejected",
+      error: {
+        code: "invalid_settings",
+        message: "Invalid settings",
+        issues: [],
+      },
     });
 
     const result = await useTimerStore

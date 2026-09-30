@@ -1,3 +1,5 @@
+pub(crate) mod observation;
+
 // The shell around `TimerCore`: the only place that applies events and runs
 // their effects. One permit serializes apply and effects together, so the
 // order the core returns is the order the outside world observes.
@@ -10,21 +12,34 @@ use tokio::sync::Semaphore;
 use crate::error::{PersistenceFailure, PomoliceError, Result};
 use crate::external_adapters::clock::Clock;
 use crate::external_adapters::persistence::{PersistedDocument, PersistenceManager, SaveError};
-use crate::ipc::responses::TimerTickPayload;
-use crate::ipc::responses::{
-    BreakLockAction, BreakLockOutcome, BreakLockState, EffectStatus, TimerEffectsState,
-    TimerSnapshot,
-};
-use crate::ipc::settings::{SettingsChanges, SettingsInput};
 use crate::logging_event::{log_error_event, log_warn_event, BackendLogEvent};
+use crate::settings::input::{SettingsChanges, SettingsInput};
 use crate::settings::{PersistedSettings, UserSettings, SETTINGS_SCHEMA_VERSION};
+use crate::timer_core::observation::TimerTickPayload;
 use crate::timer_core::{BreakLockTarget, Effect, Event, TimerCore};
+use crate::timer_runtime::observation::BreakLockAction;
+use crate::timer_runtime::observation::BreakLockOutcome;
+use crate::timer_runtime::observation::BreakLockState;
+use crate::timer_runtime::observation::EffectStatus;
+use crate::timer_runtime::observation::TimerEffectsState;
+use crate::timer_runtime::observation::TimerSnapshot;
 use crate::types::PersistedState;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TimerNotification {
+    TimerTick(TimerTickPayload),
+    SessionCompleted(crate::timer_core::observation::SessionCompletedPayload),
+    AutoRunStopPending,
+    AutoRunStopped,
+    ActiveWindowChanged(crate::timer_core::observation::ActiveWindowChangedPayload),
+    SettingsChanged(Box<crate::timer_core::observation::SettingsChangedPayload>),
+    BootAutoStartOfferClosed,
+    TimerEffectsChanged(TimerEffectsState),
+}
 
 /// Where effects go. The application handle is the only production sink.
 pub(crate) trait EffectSink {
-    fn emit<E: tauri_specta::Event + serde::Serialize + Clone>(&self, payload: &E);
-    fn update_tray(&self, payload: &TimerTickPayload);
+    fn notify(&self, notification: TimerNotification);
     async fn enter_break_lock(&self) -> Result<()>;
     async fn release_break_lock(&self) -> Result<()>;
 }
@@ -206,27 +221,25 @@ impl TimerRuntime {
         for effect in effects {
             match effect {
                 Effect::PublishTimerState(payload) => {
-                    let event = crate::ipc::events::TimerTick(payload);
-                    sink.emit(&event);
-                    sink.update_tray(&event.0);
+                    sink.notify(TimerNotification::TimerTick(payload));
                 }
                 Effect::EmitSessionCompleted(payload) => {
-                    sink.emit(&crate::ipc::events::SessionCompleted(payload));
+                    sink.notify(TimerNotification::SessionCompleted(payload));
                 }
                 Effect::EmitAutoRunStopPending => {
-                    sink.emit(&crate::ipc::events::AutoRunStopPending);
+                    sink.notify(TimerNotification::AutoRunStopPending);
                 }
                 Effect::EmitAutoRunStopped => {
-                    sink.emit(&crate::ipc::events::AutoRunStopped);
+                    sink.notify(TimerNotification::AutoRunStopped);
                 }
                 Effect::EmitActiveWindowChanged(payload) => {
-                    sink.emit(&crate::ipc::events::ActiveWindowChanged(payload));
+                    sink.notify(TimerNotification::ActiveWindowChanged(payload));
                 }
                 Effect::EmitSettingsChanged(payload) => {
-                    sink.emit(&crate::ipc::events::SettingsChanged(*payload));
+                    sink.notify(TimerNotification::SettingsChanged(payload));
                 }
                 Effect::EmitBootAutoStartOfferClosed => {
-                    sink.emit(&crate::ipc::events::BootAutoStartOfferClosed);
+                    sink.notify(TimerNotification::BootAutoStartOfferClosed);
                 }
                 Effect::Persist => {
                     outcomes.last_timer_save = Some(if self.persist(now).await.is_ok() {
@@ -248,7 +261,7 @@ impl TimerRuntime {
                 .effects
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner) = outcomes;
-            sink.emit(&crate::ipc::events::TimerEffectsChanged(outcomes));
+            sink.notify(TimerNotification::TimerEffectsChanged(outcomes));
         }
     }
 
@@ -328,14 +341,14 @@ async fn attempt_break_lock(sink: &impl EffectSink, action: BreakLockAction) -> 
 
 #[cfg(test)]
 mod tests {
-    use crate::ipc::settings::SettingChange;
+    use crate::settings::input::SettingChange;
     mod full_state;
     mod outcomes;
 
     use super::*;
     use crate::external_adapters::clock::testing::FixedClock;
     use crate::external_adapters::persistence::{PersistenceLoadOutcome, SaveError};
-    use crate::ipc::settings::SettingsFileStatus;
+    use crate::settings::input::SettingsFileStatus;
     use crate::types::{PostBreakDecisionAction, PostBreakTransitionPolicy, TimerStatus};
     use chrono::{Local, TimeZone, Utc};
     use std::path::PathBuf;
@@ -411,17 +424,41 @@ mod tests {
     }
 
     impl EffectSink for RecordingSink {
-        fn emit<E: tauri_specta::Event + serde::Serialize + Clone>(&self, payload: &E) {
+        fn notify(&self, notification: TimerNotification) {
+            let (name, payload) = match notification {
+                TimerNotification::TimerTick(value) => (
+                    "timer_tick",
+                    serde_json::to_value(value).expect("notification should serialize"),
+                ),
+                TimerNotification::SessionCompleted(value) => (
+                    "session_completed",
+                    serde_json::to_value(value).expect("notification should serialize"),
+                ),
+                TimerNotification::AutoRunStopPending => {
+                    ("auto_run_stop_pending", serde_json::Value::Null)
+                }
+                TimerNotification::AutoRunStopped => ("auto_run_stopped", serde_json::Value::Null),
+                TimerNotification::ActiveWindowChanged(value) => (
+                    "active_window_changed",
+                    serde_json::to_value(value).expect("notification should serialize"),
+                ),
+                TimerNotification::SettingsChanged(value) => (
+                    "settings_changed",
+                    serde_json::to_value(value).expect("notification should serialize"),
+                ),
+                TimerNotification::BootAutoStartOfferClosed => {
+                    ("boot_auto_start_offer_closed", serde_json::Value::Null)
+                }
+                TimerNotification::TimerEffectsChanged(value) => (
+                    "timer_effects_changed",
+                    serde_json::to_value(value).expect("notification should serialize"),
+                ),
+            };
             self.emitted
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push((
-                    E::NAME.to_string(),
-                    serde_json::to_value(payload).expect("payload should serialize"),
-                ));
+                .push((name.to_owned(), payload));
         }
-
-        fn update_tray(&self, _payload: &TimerTickPayload) {}
 
         async fn enter_break_lock(&self) -> Result<()> {
             self.lock_actions
@@ -511,8 +548,8 @@ mod tests {
         }
     }
 
-    fn daytime_slot(enabled: bool) -> crate::ipc::settings::DaySlotInput {
-        crate::ipc::settings::DaySlotInput {
+    fn daytime_slot(enabled: bool) -> crate::settings::input::DaySlotInput {
+        crate::settings::input::DaySlotInput {
             enabled,
             start_time: "09:00".to_string(),
             end_time: "18:00".to_string(),
@@ -844,7 +881,7 @@ mod tests {
             .await
             .expect("tuesday save should succeed");
         let mut monday_overnight = tuesday_only;
-        monday_overnight.mon = crate::ipc::settings::DaySlotInput {
+        monday_overnight.mon = crate::settings::input::DaySlotInput {
             enabled: true,
             start_time: "23:00".to_string(),
             end_time: "10:00".to_string(),
@@ -864,7 +901,7 @@ mod tests {
             Err(PomoliceError::InvalidSettings(errors)) => assert_eq!(
                 errors.issues(),
                 [
-                    crate::ipc::settings::SettingsValidationIssue::OverlappingTimeRanges {
+                    crate::settings::input::SettingsValidationIssue::OverlappingTimeRanges {
                         primary_weekday: crate::types::WeekdayKey::Mon,
                         secondary_weekday: crate::types::WeekdayKey::Tue,
                     }

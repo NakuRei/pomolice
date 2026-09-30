@@ -40,12 +40,13 @@ export function EmergencyShortcutNotice(): React.ReactElement | null {
           useEmergencyShortcutStore.setState({ connectionFailed: true });
       }
       try {
-        const snapshot = await commands.getEmergencyShortcutStatus();
+        const response = await commands.getEmergencyShortcutStatus();
         if (active && !receivedNotification) {
-          useEmergencyShortcutStore.setState({
-            status: snapshot,
-            connectionFailed: !subscribed,
-          });
+          useEmergencyShortcutStore.setState(
+            response.status === "accepted"
+              ? { status: response.value, connectionFailed: !subscribed }
+              : { status: null, connectionFailed: true },
+          );
         }
       } catch {
         if (active && !receivedNotification)

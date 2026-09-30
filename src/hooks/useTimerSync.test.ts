@@ -1,3 +1,4 @@
+import { acceptedCommand } from "@/test/commandResponseFixture";
 import type {
   TimerSnapshot,
   TimerEffectsState,
@@ -190,7 +191,7 @@ function mockCommandFailure(commandName: string, error: unknown): void {
   mockInvoke.mockImplementation((command) =>
     command === commandName
       ? rejectCommand()
-      : Promise.resolve(createFullStatePayload()),
+      : Promise.resolve(acceptedCommand(createFullStatePayload())),
   );
 }
 
@@ -205,7 +206,10 @@ describe("useTimerSync", () => {
 
     // Default mock implementations
     mockListen.mockResolvedValue(noopUnlisten);
-    mockInvoke.mockResolvedValue(createFullStatePayload());
+    mockInvoke.mockResolvedValue({
+      status: "accepted",
+      value: createFullStatePayload(),
+    });
   });
 
   afterEach(() => {
@@ -218,11 +222,12 @@ describe("useTimerSync", () => {
     const backendSettings = createSettingsForTest({
       workDurationSecs: 50 * 60,
     });
-    mockInvoke.mockResolvedValue(
-      createFullStatePayload({
+    mockInvoke.mockResolvedValue({
+      status: "accepted",
+      value: createFullStatePayload({
         settings: settingsPayloadForTest(backendSettings),
       }),
-    );
+    });
 
     renderTimerSync();
     await flushTimerSyncSetup();
@@ -243,7 +248,9 @@ describe("useTimerSync", () => {
         ]),
       );
       return Promise.resolve(
-        createFullStatePayload({ boot_auto_start_offer: offer }),
+        acceptedCommand(
+          createFullStatePayload({ boot_auto_start_offer: offer }),
+        ),
       );
     });
 
@@ -262,7 +269,7 @@ describe("useTimerSync", () => {
     const pending = new Promise<TimerSnapshot>((resolve) => {
       resolveState = resolve;
     });
-    mockInvoke.mockReturnValue(pending);
+    mockInvoke.mockReturnValue(pending.then(acceptedCommand));
     const effectsChanged = await renderAndGetTimerEventHandler(
       "timer_effects_changed",
     );
@@ -296,9 +303,10 @@ describe("useTimerSync", () => {
 
   it("closes the startup offer when the backend expires it", async () => {
     const offer = createBootAutoStartOfferForTest();
-    mockInvoke.mockResolvedValue(
-      createFullStatePayload({ boot_auto_start_offer: offer }),
-    );
+    mockInvoke.mockResolvedValue({
+      status: "accepted",
+      value: createFullStatePayload({ boot_auto_start_offer: offer }),
+    });
     const closeOffer = await renderAndGetTimerEventHandler(
       "boot_auto_start_offer_closed",
     );
@@ -321,7 +329,7 @@ describe("useTimerSync", () => {
     const pendingFullState = new Promise<TimerSnapshot>((resolve) => {
       resolveFullState = resolve;
     });
-    mockInvoke.mockReturnValue(pendingFullState);
+    mockInvoke.mockReturnValue(pendingFullState.then(acceptedCommand));
     const closeOffer = await renderAndGetTimerEventHandler(
       "boot_auto_start_offer_closed",
     );
@@ -354,7 +362,7 @@ describe("useTimerSync", () => {
     });
     mockInvoke.mockImplementation((command) =>
       command === "get_full_state"
-        ? pendingFullState
+        ? pendingFullState.then(acceptedCommand)
         : Promise.resolve(undefined),
     );
 
@@ -379,7 +387,7 @@ describe("useTimerSync", () => {
       code: "window_control_error",
       message: "failed to read full state from C:\\Users\\nak\\secret",
     };
-    mockCommandFailure("get_full_state", backendError);
+    mockInvoke.mockResolvedValue({ status: "rejected", error: backendError });
 
     renderTimerSync();
 
@@ -423,7 +431,7 @@ describe("useTimerSync", () => {
       id: "connection",
       message:
         "バックエンドに接続できません。アプリが正常に動作しない可能性があります。",
-      technicalDetail: "Unexpected backend error",
+      technicalDetail: "Command response unavailable",
       severity: "critical",
       origin: "backend_connection",
       canRetry: true,
@@ -434,10 +442,10 @@ describe("useTimerSync", () => {
   it("reports non-retryable get_full_state command failures without automatic retries", async () => {
     vi.useFakeTimers();
     const backendError = {
-      code: "invalid_command_input",
+      code: "invalid_state_transition",
       message: "invalid type near C:\\Users\\nak\\secret",
     };
-    mockCommandFailure("get_full_state", backendError);
+    mockInvoke.mockResolvedValue({ status: "rejected", error: backendError });
 
     renderTimerSync();
 
@@ -446,7 +454,7 @@ describe("useTimerSync", () => {
     const connectionError = useErrorStore.getState().errors.connection;
     expect(connectionError).toMatchObject({
       id: "connection",
-      technicalDetail: "invalid_command_input",
+      technicalDetail: "invalid_state_transition",
       severity: "recoverable",
       origin: "backend_connection",
       canRetry: false,
@@ -588,13 +596,14 @@ describe("useTimerSync", () => {
   });
 
   it("restores the running timer and marks the connection available", async () => {
-    mockInvoke.mockResolvedValue(
-      createFullStatePayload({
+    mockInvoke.mockResolvedValue({
+      status: "accepted",
+      value: createFullStatePayload({
         status: "working",
         remaining_seconds: 777,
         current_cycle: 2,
       }),
-    );
+    });
     renderTimerSync();
 
     await waitFor(() => {
@@ -756,7 +765,7 @@ describe("useTimerSync", () => {
     });
     mockInvoke.mockImplementation((command) => {
       if (command === "get_full_state") {
-        return pendingFullState;
+        return pendingFullState.then(acceptedCommand);
       }
       return Promise.resolve(undefined);
     });

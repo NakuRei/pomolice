@@ -7,8 +7,8 @@ use crate::external_adapters::persistence::{
     PersistedDocument, PersistenceLoadOutcome, PersistenceManager,
 };
 use crate::external_adapters::window_lock::WindowStateManager;
-use crate::ipc::settings::SettingsFileStatus;
 use crate::logging_event::{log_error_event, log_info_event, log_warn_event, BackendLogEvent};
+use crate::settings::input::SettingsFileStatus;
 use crate::settings::{PersistedSettings, UserSettings};
 use crate::timer_core::TimerCore;
 use crate::timer_runtime::TimerRuntime;

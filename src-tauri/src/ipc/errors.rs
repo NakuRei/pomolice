@@ -1,93 +1,43 @@
 use tauri::ipc::InvokeError;
 
 use crate::error::PomoliceError;
-use crate::ipc::settings::SettingsValidationIssue;
+use crate::settings::input::SettingsValidationIssue;
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    PartialEq,
-    serde::Serialize,
-    strum::EnumCount,
-    strum::EnumIter,
-    specta::Type,
-)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum BackendErrorCode {
+#[derive(serde::Serialize, specta::Type)]
+#[serde(tag = "code", rename_all = "snake_case")]
+pub(crate) enum BackendErrorResponse {
     UnauthorizedWindow,
     InvalidStateTransition,
     RateLimited,
-    InvalidSettings,
+    InvalidSettings {
+        issues: Vec<SettingsValidationIssue>,
+    },
     WindowControlError,
     PersistenceError,
-    InvalidCommandInput,
-}
-
-#[derive(serde::Serialize, specta::Type)]
-pub(crate) struct BackendErrorResponse {
-    code: BackendErrorCode,
-    message: &'static str,
-    /// Present only for rejected settings, naming every input to fix.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    issues: Option<Vec<SettingsValidationIssue>>,
-}
-
-impl BackendErrorCode {
-    pub(crate) fn public_message(self) -> &'static str {
-        match self {
-            Self::UnauthorizedWindow => "Unauthorized window",
-            Self::InvalidStateTransition => "Invalid state transition",
-            Self::RateLimited => "Rate limited",
-            Self::InvalidSettings => "Invalid settings",
-            Self::WindowControlError => "Window control error",
-            Self::PersistenceError => "Persistence error",
-            Self::InvalidCommandInput => "Invalid command input",
-        }
-    }
-}
-
-impl BackendErrorResponse {
-    pub(crate) fn from_code(code: BackendErrorCode) -> Self {
-        Self {
-            code,
-            message: code.public_message(),
-            issues: None,
-        }
-    }
 }
 
 impl From<&PomoliceError> for BackendErrorResponse {
     fn from(error: &PomoliceError) -> Self {
-        if let PomoliceError::InvalidSettings(errors) = error {
-            return Self {
-                issues: Some(errors.issues().to_vec()),
-                ..Self::from_code(BackendErrorCode::InvalidSettings)
-            };
-        }
-
-        let code = match error {
-            PomoliceError::Unauthorized(_) => BackendErrorCode::UnauthorizedWindow,
-            PomoliceError::InvalidStateTransition { .. } => {
-                BackendErrorCode::InvalidStateTransition
-            }
-            PomoliceError::RateLimited { .. } => BackendErrorCode::RateLimited,
-            PomoliceError::InvalidSettings(_) => BackendErrorCode::InvalidSettings,
-            PomoliceError::WindowControl(_) => BackendErrorCode::WindowControlError,
+        match error {
+            PomoliceError::Unauthorized(_) => Self::UnauthorizedWindow,
+            PomoliceError::InvalidStateTransition { .. } => Self::InvalidStateTransition,
+            PomoliceError::RateLimited { .. } => Self::RateLimited,
+            PomoliceError::InvalidSettings(errors) => Self::InvalidSettings {
+                issues: errors.issues().to_vec(),
+            },
+            PomoliceError::WindowControl(_) => Self::WindowControlError,
             PomoliceError::PersistenceSave(_) | PomoliceError::PersistenceTaskJoin { .. } => {
-                BackendErrorCode::PersistenceError
+                Self::PersistenceError
             }
-        };
-
-        Self::from_code(code)
+        }
     }
 }
 
 pub(crate) fn public_command_argument_rejection_error() -> InvokeError {
-    InvokeError::from(BackendErrorResponse::from_code(
-        BackendErrorCode::InvalidCommandInput,
-    ))
+    InvokeError::from(serde_json::json!({
+        "code": "invalid_command_input",
+        "message": "Invalid command input"
+    }))
 }
 
 #[cfg(test)]
@@ -96,7 +46,7 @@ mod tests {
     use serde_json::json;
 
     use crate::error::PersistenceFailure;
-    use crate::ipc::settings::RangedSettingField;
+    use crate::settings::input::RangedSettingField;
     use crate::settings::SettingsValidationErrors;
     use crate::shared_tests::join_error::join_error_from_panic;
     use crate::types::{TimerStatus, WeekdayKey};
@@ -106,7 +56,7 @@ mod tests {
     }
 
     #[test]
-    fn command_errors_expose_stable_codes_and_messages_without_diagnostic_details() {
+    fn command_errors_expose_codes_without_diagnostic_details() {
         let cases = [
             (
                 PomoliceError::Unauthorized("settings".to_string()),
@@ -188,11 +138,11 @@ mod tests {
             ),
         ];
 
-        for (error, code, message) in cases {
+        for (error, code, _message) in cases {
             assert_eq!(
                 serde_json::to_value(BackendErrorResponse::from(&error))
                     .expect("command error should serialize"),
-                json!({ "code": code, "message": message }),
+                json!({ "code": code }),
                 "unexpected public response for {error:?}"
             );
         }
@@ -217,7 +167,6 @@ mod tests {
                 .expect("command error should serialize"),
             json!({
                 "code": "invalid_settings",
-                "message": "Invalid settings",
                 "issues": [
                     { "code": "out_of_range", "field": "work_duration_secs", "min": 1, "max": 7200 },
                     {

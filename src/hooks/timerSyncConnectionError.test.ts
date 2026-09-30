@@ -26,7 +26,7 @@ describe("timerSyncConnectionError", () => {
     const retryFn = vi.fn(() => Promise.resolve());
     const error = new Error("setup failed");
 
-    reportTimerSyncConnectionError(error, retryFn);
+    reportTimerSyncConnectionError({ status: "setup", cause: error }, retryFn);
 
     expect(useErrorStore.getState().errors.connection).toMatchObject({
       id: "connection",
@@ -47,7 +47,10 @@ describe("timerSyncConnectionError", () => {
   it("stringifies non-error technical details", () => {
     const retryFn = vi.fn(() => Promise.resolve());
 
-    reportTimerSyncConnectionError("listen failed", retryFn);
+    reportTimerSyncConnectionError(
+      { status: "setup", cause: "listen failed" },
+      retryFn,
+    );
 
     expect(useErrorStore.getState().errors.connection?.technicalDetail).toBe(
       "listen failed",
@@ -59,11 +62,12 @@ describe("timerSyncConnectionError", () => {
 
     reportTimerSyncConnectionError(
       {
-        code: "window_control_error",
-        message: "failed to read state from C:\\Users\\nak\\secret",
+        status: "rejected",
+        error: {
+          code: "window_control_error",
+        },
       },
       retryFn,
-      "command",
     );
 
     const connectionError = useErrorStore.getState().errors.connection;
@@ -87,11 +91,12 @@ describe("timerSyncConnectionError", () => {
 
     reportTimerSyncConnectionError(
       {
-        code: "window_control_error",
-        message: "failed to read state from C:\\secret",
+        status: "rejected",
+        error: {
+          code: "window_control_error",
+        },
       },
       retryFn,
-      "command",
     );
     const retryableMessage =
       useErrorStore.getState().errors.connection?.message;
@@ -104,11 +109,12 @@ describe("timerSyncConnectionError", () => {
 
     reportTimerSyncConnectionError(
       {
-        code: "invalid_command_input",
-        message: "invalid type near C:\\secret",
+        status: "rejected",
+        error: {
+          code: "invalid_state_transition",
+        },
       },
       retryFn,
-      "command",
     );
     const nonRetryableMessage =
       useErrorStore.getState().errors.connection?.message;
@@ -131,8 +137,11 @@ describe("timerSyncConnectionError", () => {
 
     reportTimerSyncConnectionError(
       {
-        code: "unknown_error",
-        message: "internal path C:\\secret",
+        status: "setup",
+        cause: {
+          code: "unknown_error",
+          message: "internal path C:\\secret",
+        },
       },
       retryFn,
     );
@@ -145,15 +154,18 @@ describe("timerSyncConnectionError", () => {
   it("uses safe fallback presentation for malformed command-source failures", () => {
     const retryFn = vi.fn(() => Promise.resolve());
 
-    reportTimerSyncConnectionError("panic at C:\\secret", retryFn, "command");
+    reportTimerSyncConnectionError(
+      { status: "unavailable", cause: "panic at C:\\secret" },
+      retryFn,
+    );
 
     const connectionError = useErrorStore.getState().errors.connection;
     expect(connectionError).toMatchObject({
       id: "connection",
-      severity: "recoverable",
+      severity: "critical",
       origin: "backend_connection",
-      canRetry: false,
-      retryFn: null,
+      canRetry: true,
+      retryFn,
     });
     expectTechnicalDetailExcludesDiagnostics(connectionError?.technicalDetail, [
       "panic",
@@ -167,7 +179,10 @@ describe("timerSyncConnectionError", () => {
 
   it("clears the connection error", () => {
     const retryFn = vi.fn(() => Promise.resolve());
-    reportTimerSyncConnectionError(new Error("setup failed"), retryFn);
+    reportTimerSyncConnectionError(
+      { status: "setup", cause: new Error("setup failed") },
+      retryFn,
+    );
 
     clearTimerSyncConnectionError();
 

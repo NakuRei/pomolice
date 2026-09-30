@@ -1,5 +1,7 @@
 use super::*;
-use crate::ipc::responses::{BreakLockAction, BreakLockOutcome, EffectStatus};
+use crate::timer_runtime::observation::BreakLockAction;
+use crate::timer_runtime::observation::BreakLockOutcome;
+use crate::timer_runtime::observation::EffectStatus;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 fn switchable_persistence(

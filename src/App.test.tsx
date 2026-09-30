@@ -61,7 +61,9 @@ const IDLE_FULL_STATE = vi.hoisted(() => ({
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn().mockResolvedValue(IDLE_FULL_STATE),
+  invoke: vi
+    .fn()
+    .mockResolvedValue({ status: "accepted", value: IDLE_FULL_STATE }),
 }));
 
 vi.mock("@tauri-apps/plugin-notification", () => ({
@@ -119,23 +121,28 @@ describe("App", () => {
       isConnected: true,
       settings: createSettingsForTest(),
     });
-    vi.mocked(invoke).mockResolvedValue(IDLE_FULL_STATE);
+    vi.mocked(invoke).mockResolvedValue({
+      status: "accepted",
+      value: IDLE_FULL_STATE,
+    });
     vi.mocked(listen).mockResolvedValue(vi.fn());
   });
 
   it("shows SCHEDULED when the backend reports an active auto-run window at connection", async () => {
     vi.mocked(invoke).mockImplementation((command) =>
-      Promise.resolve(
-        command === "get_full_state"
-          ? {
-              ...IDLE_FULL_STATE,
-              timer: {
-                ...IDLE_FULL_STATE.timer,
-                active_window_summary: MONDAY_DAYTIME_WINDOW,
-              },
-            }
-          : undefined,
-      ),
+      Promise.resolve({
+        status: "accepted",
+        value:
+          command === "get_full_state"
+            ? {
+                ...IDLE_FULL_STATE,
+                timer: {
+                  ...IDLE_FULL_STATE.timer,
+                  active_window_summary: MONDAY_DAYTIME_WINDOW,
+                },
+              }
+            : undefined,
+      }),
     );
 
     render(<App />);
@@ -248,8 +255,11 @@ describe("App", () => {
   it("keeps the unreadable-settings notice visible across every settings route", async () => {
     const user = userEvent.setup();
     vi.mocked(invoke).mockResolvedValue({
-      ...IDLE_FULL_STATE,
-      timer: { ...IDLE_FULL_STATE.timer, settings_file_status: "unusable" },
+      status: "accepted",
+      value: {
+        ...IDLE_FULL_STATE,
+        timer: { ...IDLE_FULL_STATE.timer, settings_file_status: "unusable" },
+      },
     });
 
     render(<App />);

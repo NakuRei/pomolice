@@ -1,3 +1,4 @@
+import type { commands } from "@/ipc/generated";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
@@ -6,13 +7,17 @@ import { TrayUnavailableNotice } from "./TrayUnavailableNotice";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
-const trayStatusRequest = vi.fn<() => Promise<boolean>>();
-const exitRequest = vi.fn<() => Promise<void>>();
+const trayStatusRequest = vi.fn<typeof commands.isTrayAvailable>();
+const exitRequest = vi.fn<typeof commands.exitWithoutTray>();
 
 describe("tray initialization failure notice", () => {
   beforeEach(() => {
-    trayStatusRequest.mockReset().mockResolvedValue(false);
-    exitRequest.mockReset().mockResolvedValue(undefined);
+    trayStatusRequest
+      .mockReset()
+      .mockResolvedValue({ status: "accepted", value: false });
+    exitRequest
+      .mockReset()
+      .mockResolvedValue({ status: "accepted", value: null });
     vi.mocked(invoke)
       .mockReset()
       .mockImplementation((command) => {
@@ -30,7 +35,10 @@ describe("tray initialization failure notice", () => {
   });
 
   it("does not offer fallback exit when the tray is available", async () => {
-    const statusResponse = Promise.resolve(true);
+    const statusResponse = Promise.resolve({
+      status: "accepted",
+      value: true,
+    } as const);
     trayStatusRequest.mockReturnValue(statusResponse);
     await act(async () => {
       render(<TrayUnavailableNotice />);
@@ -80,7 +88,9 @@ describe("tray initialization failure notice", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "トレイを初期化できませんでした",
     );
-    exitRequest.mockClear().mockResolvedValue(undefined);
+    exitRequest
+      .mockClear()
+      .mockResolvedValue({ status: "accepted", value: null });
     await user.click(screen.getByRole("button", { name: "アプリを終了" }));
     expect(exitRequest).toHaveBeenCalled();
     expect(
@@ -98,7 +108,7 @@ describe("tray initialization failure notice", () => {
     expect(
       screen.queryByRole("button", { name: "アプリを終了" }),
     ).not.toBeInTheDocument();
-    trayStatusRequest.mockResolvedValue(true);
+    trayStatusRequest.mockResolvedValue({ status: "accepted", value: true });
     await user.click(screen.getByRole("button", { name: "再確認" }));
     await waitFor(() => {
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -110,7 +120,7 @@ describe("tray initialization failure notice", () => {
     const user = userEvent.setup();
     render(<TrayUnavailableNotice />);
     const retryButton = await screen.findByRole("button", { name: "再確認" });
-    trayStatusRequest.mockResolvedValue(false);
+    trayStatusRequest.mockResolvedValue({ status: "accepted", value: false });
     await user.click(retryButton);
     expect(
       await screen.findByRole("button", { name: "アプリを終了" }),

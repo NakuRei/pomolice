@@ -3,7 +3,9 @@
 // save from the frontend or the file on disk — goes through `SettingsInput`,
 // so a single set of rules decides what is valid.
 
-use crate::ipc::settings::{
+pub(crate) mod input;
+
+use input::{
     DaySlotInput, RangedSettingField, SettingsInput, SettingsValidationIssue, TimeBoundary,
     WeeklyScheduleInput,
 };

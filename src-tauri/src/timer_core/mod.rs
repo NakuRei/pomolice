@@ -10,6 +10,7 @@ mod boot_auto_start;
 mod break_session;
 mod effect;
 mod event;
+pub(crate) mod observation;
 mod phase;
 mod restore;
 mod schedule;
@@ -26,10 +27,12 @@ use phase::{BreakSessionState, TimerPhase};
 use schedule::ScheduleState;
 
 use crate::error::Result;
-use crate::ipc::responses::{BootAutoStartOfferPayload, FullStatePayload, TimerTickPayload};
-use crate::ipc::settings::SettingsFileStatus;
 use crate::schedule_boundary::{is_now_inside_schedule_window, ActiveWindow};
+use crate::settings::input::SettingsFileStatus;
 use crate::settings::UserSettings;
+use crate::timer_core::observation::BootAutoStartOfferPayload;
+use crate::timer_core::observation::FullStatePayload;
+use crate::timer_core::observation::TimerTickPayload;
 use crate::types::{
     PersistedState, SessionDurationSecs, SessionType, TimerStatus, PERSISTED_STATE_SCHEMA_VERSION,
 };

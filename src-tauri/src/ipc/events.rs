@@ -1,7 +1,9 @@
-use super::responses::{
-    ActiveWindowChangedPayload, EmergencyShortcutStatus, SessionCompletedPayload,
-    SettingsChangedPayload, TimerEffectsState, TimerTickPayload,
-};
+use crate::external_adapters::emergency_shortcut::EmergencyShortcutStatus;
+use crate::timer_core::observation::ActiveWindowChangedPayload;
+use crate::timer_core::observation::SessionCompletedPayload;
+use crate::timer_core::observation::SettingsChangedPayload;
+use crate::timer_core::observation::TimerTickPayload;
+use crate::timer_runtime::observation::TimerEffectsState;
 
 #[derive(Clone, serde::Serialize, specta::Type)]
 #[serde(transparent)]

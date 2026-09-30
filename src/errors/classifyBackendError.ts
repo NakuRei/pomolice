@@ -1,22 +1,15 @@
-import type {
-  SettingsValidationIssue,
-  BackendErrorCode,
-  BackendErrorResponse,
-} from "@/ipc/generated";
+import type { BackendErrorResponse } from "@/ipc/generated";
+import type { CommandFailure } from "@/ipc/receiveCommandResponse";
 import type { ErrorSeverity } from "../store/errorStore";
 
-/** The result of classifying a structured backend error response. */
 export interface BackendErrorClassification {
-  /** User-facing presentation identity shown in the UI. */
   userMessage: string;
-  /** Display importance used to choose the UI treatment. */
   severity: ErrorSeverity;
-  /** Whether the UI should offer a retry action. */
   canRetry: boolean;
 }
 
 const CODE_CLASSIFICATIONS: Readonly<
-  Record<BackendErrorCode, BackendErrorClassification>
+  Record<BackendErrorResponse["code"], BackendErrorClassification>
 > = {
   unauthorized_window: {
     userMessage: "権限エラーが発生しました",
@@ -48,87 +41,28 @@ const CODE_CLASSIFICATIONS: Readonly<
     severity: "recoverable",
     canRetry: true,
   },
-  invalid_command_input: {
-    userMessage: "入力内容を確認してください",
-    severity: "recoverable",
-    canRetry: false,
-  },
 };
 
-const DEFAULT_BACKEND_ERROR_CLASSIFICATION: BackendErrorClassification = {
-  userMessage: "予期しないエラーが発生しました",
-  severity: "recoverable",
-  canRetry: false,
-};
-
-const BACKEND_ERROR_CODES: ReadonlySet<string> = new Set(
-  Object.keys(CODE_CLASSIFICATIONS),
-);
-
-function isBackendErrorCode(code: unknown): code is BackendErrorCode {
-  return typeof code === "string" && BACKEND_ERROR_CODES.has(code);
+export function classifyCommandFailure(
+  failure: CommandFailure,
+): BackendErrorClassification {
+  return failure.status === "rejected"
+    ? CODE_CLASSIFICATIONS[failure.error.code]
+    : {
+        userMessage: "操作の結果を確認できませんでした",
+        severity: "recoverable",
+        canRetry: false,
+      };
 }
 
-export function isBackendErrorResponse(
-  error: unknown,
-): error is BackendErrorResponse {
-  if (typeof error !== "object" || error === null) {
-    return false;
-  }
-
-  const response = error as Record<string, unknown>;
-  return (
-    isBackendErrorCode(response.code) && typeof response.message === "string"
-  );
-}
-
-/**
- * The issues of a rejected settings save, or `null` for any other error.
- * A rejection without issues names nothing to fix, so it is treated as an
- * ordinary failure rather than as a rejection.
- */
-export function settingsValidationIssuesOf(
-  error: unknown,
-): SettingsValidationIssue[] | null {
-  if (!isBackendErrorResponse(error) || error.code !== "invalid_settings") {
-    return null;
-  }
-
-  const { issues } = error as BackendErrorResponse & { issues?: unknown };
-  return Array.isArray(issues) && issues.length > 0 ? issues : null;
+export function formatCommandFailureDetail(failure: CommandFailure): string {
+  return failure.status === "rejected"
+    ? failure.error.code
+    : "Command response unavailable";
 }
 
 export function formatBackendErrorDetail(error: unknown): string {
-  if (isBackendErrorResponse(error)) {
-    return `${error.code}: ${error.message}`;
-  }
-
-  if (error instanceof Error) {
-    return String(error);
-  }
-
-  if (typeof error === "string") {
-    return error;
-  }
-
+  if (error instanceof Error) return String(error);
+  if (typeof error === "string") return error;
   return "Unexpected backend error";
-}
-
-export function formatPublicCommandErrorDetail(error: unknown): string {
-  if (isBackendErrorResponse(error)) {
-    return error.code;
-  }
-
-  return "Unexpected backend error";
-}
-
-/** Map structured backend error responses to user-visible classifications. */
-export function classifyBackendError(
-  error: unknown,
-): BackendErrorClassification {
-  if (isBackendErrorResponse(error)) {
-    return CODE_CLASSIFICATIONS[error.code];
-  }
-
-  return DEFAULT_BACKEND_ERROR_CLASSIFICATION;
 }

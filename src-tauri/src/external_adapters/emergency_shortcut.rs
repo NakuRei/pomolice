@@ -1,4 +1,11 @@
-use crate::ipc::responses::EmergencyShortcutStatus;
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(crate) enum EmergencyShortcutStatus {
+    InputMonitor,
+    Registering,
+    Registered { trigger: String },
+    Unavailable,
+}
 use parking_lot::Mutex;
 use tauri::Manager;
 #[cfg(target_os = "linux")]

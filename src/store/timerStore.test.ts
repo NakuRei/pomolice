@@ -46,7 +46,10 @@ function createFullStatePayload(
 describe("timerStore", () => {
   beforeEach(() => {
     mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(createTimerSnapshotForTest());
+    mockInvoke.mockResolvedValue({
+      status: "accepted",
+      value: createTimerSnapshotForTest(),
+    });
     resetTimerStoreForTest();
   });
 
@@ -176,9 +179,12 @@ describe("timerStore", () => {
 
     describe("setAwayDuringBreak()", () => {
       it("reports a backend rejection instead of swallowing it", async () => {
-        mockInvoke.mockRejectedValueOnce({
-          code: "invalid_state_transition",
-          message: "invalid state",
+        mockInvoke.mockResolvedValueOnce({
+          status: "rejected",
+          error: {
+            code: "invalid_state_transition",
+            message: "invalid state",
+          },
         });
 
         await expect(

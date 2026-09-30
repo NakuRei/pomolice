@@ -1,3 +1,4 @@
+import { receiveCommandResponse } from "@/ipc/receiveCommandResponse";
 /**
  * Timer Sync Hook
  * Sets up event listeners to receive timer state from backend
@@ -24,14 +25,12 @@ import {
   timerSyncRetryDelayMs,
 } from "./timerSyncConnectionRetryPolicy";
 import {
+  type TimerSyncFailure,
   clearTimerSyncConnectionError,
   formatTimerSyncConnectionErrorDetail,
   reportTimerSyncConnectionError,
 } from "./timerSyncConnectionError";
-import {
-  classifyBackendError,
-  isBackendErrorResponse,
-} from "../errors/classifyBackendError";
+import { classifyCommandFailure } from "../errors/classifyBackendError";
 
 const logger = createLogger("timer_sync");
 
@@ -179,81 +178,49 @@ export function useTimerSync(): void {
       return registerActiveListener(unlistenEffects);
     }
 
-    function shouldRetryTimerSyncSetupFailure(
-      error: unknown,
-      failureSource: "setup" | "command" | "command_transport",
-      retryAttempt: number,
-    ): boolean {
-      if (!shouldRetryTimerSyncConnection(retryAttempt)) {
-        return false;
-      }
-
-      return (
-        failureSource !== "command" || classifyBackendError(error).canRetry
-      );
-    }
-
     async function setup(retryAttempt = 0): Promise<void> {
       const listenerStartIndex = listeners.length;
-      let failureSource: "setup" | "command" | "command_transport" = "setup";
-
-      try {
-        const listenersRegistered = await registerBackendListeners();
-        if (!listenersRegistered) {
-          return;
-        }
-
-        failureSource = "command_transport";
-        const fullState = await commands.getFullState();
-        failureSource = "setup";
-        if (!mounted) {
-          return;
-        }
-        handleFullState(fullState);
-        clearTimerSyncConnectionError();
-      } catch (error) {
-        if (
-          failureSource === "command_transport" &&
-          isBackendErrorResponse(error)
-        ) {
-          failureSource = "command";
-        }
-        logger.error(FRONTEND_LOG_EVENT_IDS.timerSyncSetupFailed, error, {
-          retry_attempt: retryAttempt,
-          max_connection_retries: TIMER_SYNC_MAX_CONNECTION_RETRIES,
-          failure_message: formatTimerSyncConnectionErrorDetail(
-            error,
-            failureSource,
-          ),
-        });
-
+      function reportConnectionFailure(failure: TimerSyncFailure): void {
+        logger.error(
+          FRONTEND_LOG_EVENT_IDS.timerSyncSetupFailed,
+          failure.status === "rejected" ? failure.error : failure.cause,
+          {
+            retry_attempt: retryAttempt,
+            max_connection_retries: TIMER_SYNC_MAX_CONNECTION_RETRIES,
+            failure_message: formatTimerSyncConnectionErrorDetail(failure),
+          },
+        );
         clearListenersFrom(listenerStartIndex);
-
-        if (!mounted) {
-          return;
-        }
-
-        if (
-          shouldRetryTimerSyncSetupFailure(error, failureSource, retryAttempt)
-        ) {
+        if (!mounted) return;
+        const canRetry =
+          failure.status !== "rejected" ||
+          classifyCommandFailure(failure).canRetry;
+        if (canRetry && shouldRetryTimerSyncConnection(retryAttempt)) {
           clearRetryTimeout();
           retryTimeoutId = setTimeout(() => {
             retryTimeoutId = null;
-            if (mounted) {
-              void setup(retryAttempt + 1);
-            }
+            if (mounted) void setup(retryAttempt + 1);
           }, timerSyncRetryDelayMs(retryAttempt));
         } else {
           setConnected(false);
-          reportTimerSyncConnectionError(
-            error,
-            async () => {
-              clearTimerSyncConnectionError();
-              await setup(0);
-            },
-            failureSource,
-          );
+          reportTimerSyncConnectionError(failure, async () => {
+            clearTimerSyncConnectionError();
+            await setup(0);
+          });
         }
+      }
+      try {
+        if (!(await registerBackendListeners())) return;
+        const response = await receiveCommandResponse(commands.getFullState());
+        if (!mounted) return;
+        if (response.status !== "accepted") {
+          reportConnectionFailure(response);
+          return;
+        }
+        handleFullState(response.value);
+        clearTimerSyncConnectionError();
+      } catch (cause) {
+        reportConnectionFailure({ status: "setup", cause });
       }
     }
 

@@ -83,7 +83,9 @@ fn main_can_retry_through_ipc_without_changing_a_healthy_timer() {
     let response = invoke(&window, "retry_failed_timer_effects", json!({}))
         .expect("main should be allowed to retry effects");
 
-    assert_eq!(response, before);
+    assert_eq!(response["status"], "accepted");
+    let response = &response["value"];
+    assert_eq!(*response, before);
     assert_eq!(response["timer"]["status"], "idle");
     assert_eq!(response["effects"]["revision"], "0");
     assert!(response["effects"]["last_timer_save"].is_null());
@@ -107,7 +109,7 @@ fn break_overlay_cannot_retry_through_ipc() {
 fn settings_omission_null_and_validation_remain_distinct_over_ipc() {
     let (_app, window, before) = app_with_window("main");
     assert_eq!(
-        invoke(&window, "update_settings", json!({"changes": {}})).unwrap(),
+        invoke(&window, "update_settings", json!({"changes": {}})).unwrap()["value"],
         before
     );
     for changes in [
@@ -126,14 +128,16 @@ fn settings_omission_null_and_validation_remain_distinct_over_ipc() {
         "update_settings",
         json!({"changes": {"work_duration_secs": 0}}),
     )
-    .unwrap_err();
+    .unwrap();
+    assert_eq!(invalid["status"], "rejected");
+    let invalid = &invalid["error"];
     assert_eq!(invalid["code"], "invalid_settings");
     assert_eq!(
         invalid["issues"],
         json!([{"code": "out_of_range", "field": "work_duration_secs", "min": 1, "max": 7200}])
     );
     assert_eq!(
-        invoke(&window, "get_full_state", json!({})).unwrap(),
+        invoke(&window, "get_full_state", json!({})).unwrap()["value"],
         before
     );
 }
@@ -147,7 +151,7 @@ fn command_arguments_use_the_generated_camel_case_keys_and_enum_values() {
             "resolve_boot_auto_start_prompt",
             json!({"startNow": false})
         )
-        .unwrap(),
+        .unwrap()["value"],
         before
     );
     let wrong_key = invoke(
@@ -169,10 +173,11 @@ fn command_arguments_use_the_generated_camel_case_keys_and_enum_values() {
         "resolve_post_break_decision",
         json!({"action": "continue"}),
     )
-    .unwrap_err();
-    assert_eq!(wrong_state["code"], "invalid_state_transition");
-    let wrong_state = invoke(&window, "set_away_during_break", json!({"away": true})).unwrap_err();
-    assert_eq!(wrong_state["code"], "invalid_state_transition");
+    .unwrap();
+    assert_eq!(wrong_state["status"], "rejected");
+    assert_eq!(wrong_state["error"]["code"], "invalid_state_transition");
+    let wrong_state = invoke(&window, "set_away_during_break", json!({"away": true})).unwrap();
+    assert_eq!(wrong_state["error"]["code"], "invalid_state_transition");
 }
 
 #[test]
@@ -200,8 +205,8 @@ fn typed_events_deliver_the_wire_payload_without_a_wrapper_or_precision_loss() {
             .send(event.payload().to_string())
             .expect("receiver should exist");
     });
-    super::events::TimerEffectsChanged(super::responses::TimerEffectsState {
-        revision: super::responses::EffectRevision(u64::MAX),
+    super::events::TimerEffectsChanged(crate::timer_runtime::observation::TimerEffectsState {
+        revision: crate::timer_runtime::observation::EffectRevision(u64::MAX),
         ..Default::default()
     })
     .emit(&app)
@@ -215,4 +220,16 @@ fn typed_events_deliver_the_wire_payload_without_a_wrapper_or_precision_loss() {
     assert_eq!(payload["revision"], "18446744073709551615");
     assert_eq!(payload["break_lock"]["target"], "unlocked");
     assert!(payload["last_timer_save"].is_null());
+}
+
+#[test]
+fn command_rejection_is_a_response_and_keeps_state_unchanged() {
+    let (_app, window, before) = app_with_window("main");
+    let response = invoke(&window, "set_away_during_break", json!({"away": true}))
+        .expect("application rejection must be delivered as a response");
+    assert_eq!(response["status"], "rejected");
+    assert_eq!(response["error"]["code"], "invalid_state_transition");
+    let observed = invoke(&window, "get_full_state", json!({})).unwrap();
+    assert_eq!(observed["status"], "accepted");
+    assert_eq!(observed["value"], before);
 }

@@ -1,6 +1,7 @@
+import { receiveCommandResponse } from "@/ipc/receiveCommandResponse";
 import { type TimerEffectsState, commands } from "@/ipc/generated";
 import { create } from "zustand";
-import { classifyBackendError } from "@/errors/classifyBackendError";
+import { classifyCommandFailure } from "@/errors/classifyBackendError";
 import type { BreakLockObservation } from "@/types/timerEffects";
 
 interface TimerEffectsStore {
@@ -28,10 +29,11 @@ export const useTimerEffectsStore = create<TimerEffectsStore>((set, get) => ({
     if (get().retrying) return;
     set({ retrying: true, retryError: null });
     try {
-      const outcome = await commands.retryFailedTimerEffects();
-      get().observe(outcome.effects);
-    } catch (error) {
-      set({ retryError: classifyBackendError(error).userMessage });
+      const response = await receiveCommandResponse(
+        commands.retryFailedTimerEffects(),
+      );
+      if (response.status === "accepted") get().observe(response.value.effects);
+      else set({ retryError: classifyCommandFailure(response).userMessage });
     } finally {
       set({ retrying: false });
     }

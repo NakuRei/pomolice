@@ -17,7 +17,9 @@ let notification: EventCallback<EmergencyShortcutStatus> | undefined =
 
 beforeEach(() => {
   notification = undefined;
-  vi.mocked(invoke).mockReset().mockResolvedValue({ kind: "registering" });
+  vi.mocked(invoke)
+    .mockReset()
+    .mockResolvedValue({ status: "accepted", value: { kind: "registering" } });
   vi.mocked(listen)
     .mockReset()
     .mockImplementation((event, callback) => {
@@ -53,8 +55,11 @@ it("does not advertise the preferred shortcut while awaiting permission", async 
 
 it("shows the assigned shortcut and follows changes made in desktop settings", async () => {
   vi.mocked(invoke).mockResolvedValue({
-    kind: "registered",
-    trigger: "Super + F12",
+    status: "accepted",
+    value: {
+      kind: "registered",
+      trigger: "Super + F12",
+    },
   });
   await openScreen();
   expect(screen.getByText("Super + F12")).toBeInTheDocument();
@@ -67,8 +72,11 @@ it("shows the assigned shortcut and follows changes made in desktop settings", a
 
 it("removes unusable shortcut guidance and reports loss of availability", async () => {
   vi.mocked(invoke).mockResolvedValue({
-    kind: "registered",
-    trigger: "Super + F12",
+    status: "accepted",
+    value: {
+      kind: "registered",
+      trigger: "Super + F12",
+    },
   });
   await openScreen();
   act(() => {
@@ -81,7 +89,10 @@ it("removes unusable shortcut guidance and reports loss of availability", async 
 });
 
 it("shows the existing shortcut when the input monitor supplies emergency release", async () => {
-  vi.mocked(invoke).mockResolvedValue({ kind: "input_monitor" });
+  vi.mocked(invoke).mockResolvedValue({
+    status: "accepted",
+    value: { kind: "input_monitor" },
+  });
   await openScreen();
   expect(screen.getByText("Ctrl + Alt + Shift + E")).toBeInTheDocument();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();

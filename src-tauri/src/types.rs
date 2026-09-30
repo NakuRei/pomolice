@@ -682,7 +682,7 @@ impl BoundaryOccurrenceId {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ipc::responses::SessionCompletedPayload;
+    use crate::timer_core::observation::SessionCompletedPayload;
     use serde_json::json;
 
     fn enabled_slot(start_time: &str, end_time: &str) -> DayAutoRunSlot {

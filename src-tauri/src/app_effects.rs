@@ -9,20 +9,44 @@ use tokio::time::MissedTickBehavior;
 
 use crate::break_lock;
 use crate::external_adapters::tray_icon;
-use crate::ipc::responses::TimerTickPayload;
+use crate::ipc::events;
 use crate::state::AppState;
 use crate::timer_core::Event;
-use crate::timer_runtime::EffectSink;
+use crate::timer_runtime::{EffectSink, TimerNotification};
+use tauri_specta::Event as _;
 
 const TICK_INTERVAL: Duration = Duration::from_secs(1);
 
 impl<R: Runtime> EffectSink for AppHandle<R> {
-    fn emit<E: tauri_specta::Event + serde::Serialize + Clone>(&self, payload: &E) {
-        let _ = payload.emit(self);
-    }
-
-    fn update_tray(&self, payload: &TimerTickPayload) {
-        tray_icon::update_tray_icon(self, payload);
+    fn notify(&self, notification: TimerNotification) {
+        match notification {
+            TimerNotification::TimerTick(value) => {
+                let event = events::TimerTick(value);
+                let _ = event.emit(self);
+                tray_icon::update_tray_icon(self, &event.0);
+            }
+            TimerNotification::SessionCompleted(value) => {
+                let _ = events::SessionCompleted(value).emit(self);
+            }
+            TimerNotification::AutoRunStopPending => {
+                let _ = events::AutoRunStopPending.emit(self);
+            }
+            TimerNotification::AutoRunStopped => {
+                let _ = events::AutoRunStopped.emit(self);
+            }
+            TimerNotification::ActiveWindowChanged(value) => {
+                let _ = events::ActiveWindowChanged(value).emit(self);
+            }
+            TimerNotification::SettingsChanged(value) => {
+                let _ = events::SettingsChanged(*value).emit(self);
+            }
+            TimerNotification::BootAutoStartOfferClosed => {
+                let _ = events::BootAutoStartOfferClosed.emit(self);
+            }
+            TimerNotification::TimerEffectsChanged(value) => {
+                let _ = events::TimerEffectsChanged(value).emit(self);
+            }
+        }
     }
 
     async fn enter_break_lock(&self) -> crate::error::Result<()> {

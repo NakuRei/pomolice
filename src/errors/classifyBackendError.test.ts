@@ -1,302 +1,88 @@
-import type { BackendErrorCode } from "@/ipc/generated";
+import type { BackendErrorResponse } from "@/ipc/generated";
 import { describe, expect, it } from "vitest";
 import {
-  classifyBackendError,
+  classifyCommandFailure,
+  formatCommandFailureDetail,
   formatBackendErrorDetail,
-  formatPublicCommandErrorDetail,
-  settingsValidationIssuesOf,
-  type BackendErrorClassification,
 } from "./classifyBackendError";
 
-function expectOnlyClassificationResponsibilities(
-  classification: BackendErrorClassification,
-): void {
-  expect(Object.keys(classification).sort()).toEqual([
-    "canRetry",
-    "severity",
-    "userMessage",
-  ]);
-}
-
-describe("classifyBackendError", () => {
-  it("classifies known structured backend error responses by code", () => {
-    const classifications: {
-      code: BackendErrorCode;
-      expected: Omit<BackendErrorClassification, "userMessage">;
-    }[] = [
-      {
-        code: "invalid_state_transition",
-        expected: {
-          severity: "recoverable",
-          canRetry: false,
-        },
-      },
-      {
-        code: "rate_limited",
-        expected: {
-          severity: "recoverable",
-          canRetry: true,
-        },
-      },
-      {
-        code: "window_control_error",
-        expected: {
-          severity: "recoverable",
-          canRetry: true,
-        },
-      },
-      {
-        code: "persistence_error",
-        expected: {
-          severity: "recoverable",
-          canRetry: true,
-        },
-      },
-      {
-        code: "unauthorized_window",
-        expected: {
-          severity: "recoverable",
-          canRetry: false,
-        },
-      },
-      {
-        code: "invalid_command_input",
-        expected: {
-          severity: "recoverable",
-          canRetry: false,
-        },
-      },
-      {
+describe("command failure presentation", () => {
+  const errors: { error: BackendErrorResponse; canRetry: boolean }[] = [
+    { error: { code: "unauthorized_window" }, canRetry: false },
+    { error: { code: "invalid_state_transition" }, canRetry: false },
+    { error: { code: "rate_limited" }, canRetry: true },
+    {
+      error: {
         code: "invalid_settings",
-        expected: {
-          severity: "recoverable",
-          canRetry: false,
-        },
+        issues: [{ code: "empty_time_range", weekday: "wed" }],
       },
-    ];
-    const fallbackClassification = classifyBackendError({
-      code: "unknown_error",
-      message: "fallback diagnostic",
+      canRetry: false,
+    },
+    { error: { code: "window_control_error" }, canRetry: true },
+    { error: { code: "persistence_error" }, canRetry: true },
+  ];
+  it.each(errors)("classifies delivered $error.code", ({ error, canRetry }) => {
+    const failure = { status: "rejected", error } as const;
+    expect(classifyCommandFailure(failure)).toMatchObject({
+      canRetry,
+      severity: "recoverable",
     });
-    const displayIdentities = new Set<string>();
+    expect(classifyCommandFailure(failure).userMessage).not.toBe("");
+    expect(formatCommandFailureDetail(failure)).toBe(error.code);
+  });
 
-    for (const { code, expected } of classifications) {
-      const diagnosticMessage = `diagnostic from C:\\secret for ${code}`;
-      const classification = classifyBackendError({
-        code,
-        message: diagnosticMessage,
+  it.each([
+    { code: "rate_limited", message: "private path" },
+    { code: "invalid_command_input", message: "private path" },
+    { code: "unknown_error", message: "private path" },
+    new Error("private path"),
+    "private path",
+    null,
+    undefined,
+    500,
+  ])(
+    "keeps unavailable responses non-retryable and hides their details",
+    (cause) => {
+      const failure = { status: "unavailable", cause } as const;
+      expect(classifyCommandFailure(failure)).toEqual({
+        userMessage: "操作の結果を確認できませんでした",
+        severity: "recoverable",
+        canRetry: false,
       });
-      const sameCodeWithDifferentMessage = classifyBackendError({
-        code,
-        message: `other diagnostic from C:\\other-secret for ${code}`,
-      });
-
-      expect(classification).toMatchObject(expected);
-      expectOnlyClassificationResponsibilities(classification);
-      expect(sameCodeWithDifferentMessage).toEqual(classification);
-      expect(classification.userMessage).toEqual(expect.any(String));
-      expect(classification.userMessage).not.toBe("");
-      expect(classification.userMessage).not.toBe(
-        fallbackClassification.userMessage,
+      expect(formatCommandFailureDetail(failure)).toBe(
+        "Command response unavailable",
       );
-      expect(classification.userMessage).not.toBe(diagnosticMessage);
-      expect(classification.userMessage).not.toContain("C:\\secret");
-      displayIdentities.add(classification.userMessage);
-    }
+    },
+  );
 
-    expect(displayIdentities.size).toBe(classifications.length);
-  });
-
-  it("does not use public envelope messages for presentation fields", () => {
-    const first = classifyBackendError({
-      code: "window_control_error",
-      message: "failed for C:\\Users\\nak\\secret\\timer_state.json",
-    });
-    const second = classifyBackendError({
-      code: "window_control_error",
-      message: "panic at C:\\Users\\nak\\other-secret",
-    });
-
-    expect(first).toEqual(second);
-    expect(first.userMessage).not.toContain("C:\\Users\\nak");
-    expect(first.userMessage).not.toContain("timer_state.json");
-  });
-
-  it("uses the default classification for malformed values, unknown codes, and legacy strings", () => {
-    const defaultClassification = classifyBackendError({
-      code: "unknown_error",
-      message: "first diagnostic",
-    });
-    const inputs: unknown[] = [
-      {
-        code: "unknown_error",
-        message: "first diagnostic",
-      },
-      {
-        code: "unknown_error",
-        message: "should not be trusted",
-      },
-      { code: "rate_limited", message: 300 },
-      "Rate limited: please wait 300ms",
-      null,
-      undefined,
-      500,
-    ];
-
-    for (const input of inputs) {
-      const classification = classifyBackendError(input);
-
-      expect(classification).toEqual(defaultClassification);
-      expectOnlyClassificationResponsibilities(classification);
-      expect(classification.userMessage).toEqual(expect.any(String));
-      expect(classification.userMessage).not.toBe("");
-      expect(classification.userMessage).not.toContain("first diagnostic");
-      expect(classification.userMessage).not.toContain("should not be trusted");
-      expect(classification.userMessage).not.toContain("please wait 300ms");
-    }
-  });
-});
-
-describe("formatPublicCommandErrorDetail", () => {
-  function expectSafePublicCommandFallbackDetail(error: unknown): void {
-    const detail = formatPublicCommandErrorDetail(error);
-
-    expect(detail).toEqual(expect.any(String));
-    expect(detail).not.toBe("");
-    expect(detail).not.toContain("C:\\secret");
-    expect(detail).not.toContain("panic");
-    expect(detail).not.toContain("internal path");
-  }
-
-  it("stores diagnostics from recognized public codes without raw message text", () => {
-    const cases: {
-      error: Parameters<typeof formatPublicCommandErrorDetail>[0];
-      expectedDetail: string;
-      excludedFragments: string[];
-    }[] = [
-      {
-        error: {
-          code: "window_control_error",
-          message: "failed for C:\\Users\\nak\\secret\\timer_state.json",
-        },
-        expectedDetail: "window_control_error",
-        excludedFragments: ["failed for", "C:\\Users\\nak", "timer_state.json"],
-      },
-      {
-        error: {
-          code: "invalid_command_input",
-          message: "invalid type: string C:\\secret",
-        },
-        expectedDetail: "invalid_command_input",
-        excludedFragments: ["invalid type", "string", "C:\\secret"],
-      },
-    ];
-
-    for (const { error, expectedDetail, excludedFragments } of cases) {
-      const detail = formatPublicCommandErrorDetail(error);
-
-      expect(detail).toBe(expectedDetail);
-      for (const fragment of excludedFragments) {
-        expect(detail).not.toContain(fragment);
-      }
-    }
-  });
-
-  it("uses a safe fallback for malformed command failures", () => {
-    expectSafePublicCommandFallbackDetail(new Error("C:\\secret"));
-    expectSafePublicCommandFallbackDetail("panic at C:\\secret");
-    expectSafePublicCommandFallbackDetail({
-      code: "unknown_error",
-      message: "internal path C:\\secret",
-    });
-  });
-});
-
-describe("formatBackendErrorDetail", () => {
-  it("formats known structured backend responses with code and message", () => {
+  it("gives each rejection a distinct presentation", () => {
     expect(
-      formatBackendErrorDetail({
-        code: "rate_limited",
-        message: "please wait 300ms",
-      }),
-    ).toBe("rate_limited: please wait 300ms");
+      new Set(
+        errors.map(
+          ({ error }) =>
+            classifyCommandFailure({ status: "rejected", error }).userMessage,
+        ),
+      ).size,
+    ).toBe(errors.length);
   });
+});
 
-  it("formats Error objects and string rejections", () => {
+describe("local setup diagnostics", () => {
+  it("formats errors and strings", () => {
     expect(formatBackendErrorDetail(new Error("network unavailable"))).toBe(
       "Error: network unavailable",
     );
-    expect(formatBackendErrorDetail("legacy backend error")).toBe(
-      "legacy backend error",
-    );
+    expect(formatBackendErrorDetail("listen failed")).toBe("listen failed");
   });
-
-  it("uses a generic detail for unknown values and untrusted object messages", () => {
-    expect(
-      formatBackendErrorDetail({
-        code: "unknown_error",
-        message: "should not be trusted",
-      }),
-    ).toBe("Unexpected backend error");
-    expect(formatBackendErrorDetail({ message: "should not be trusted" })).toBe(
-      "Unexpected backend error",
-    );
-    expect(formatBackendErrorDetail(null)).toBe("Unexpected backend error");
-    expect(formatBackendErrorDetail(undefined)).toBe(
-      "Unexpected backend error",
-    );
-    expect(formatBackendErrorDetail(500)).toBe("Unexpected backend error");
-    expect(formatBackendErrorDetail(false)).toBe("Unexpected backend error");
-    expect(formatBackendErrorDetail(Symbol("backend"))).toBe(
-      "Unexpected backend error",
-    );
-  });
-});
-
-describe("settingsValidationIssuesOf", () => {
-  it("returns every issue of a rejected settings save", () => {
-    const issues = [
-      {
-        code: "out_of_range",
-        field: "long_break_interval",
-        min: 2,
-        max: 10,
-      },
-      { code: "empty_time_range", weekday: "wed" },
-    ];
-
-    expect(
-      settingsValidationIssuesOf({
-        code: "invalid_settings",
-        message: "Invalid settings",
-        issues,
-      }),
-    ).toEqual(issues);
-  });
-
-  it("returns null for any other failure", () => {
-    expect(
-      settingsValidationIssuesOf({
-        code: "persistence_error",
-        message: "Persistence error",
-      }),
-    ).toBeNull();
-    expect(settingsValidationIssuesOf(new Error("boom"))).toBeNull();
-  });
-
-  it("returns null for a rejection that names no input", () => {
-    expect(
-      settingsValidationIssuesOf({
-        code: "invalid_settings",
-        message: "Invalid settings",
-      }),
-    ).toBeNull();
-    expect(
-      settingsValidationIssuesOf({
-        code: "invalid_settings",
-        message: "Invalid settings",
-        issues: [],
-      }),
-    ).toBeNull();
+  it.each([
+    { code: "rate_limited", message: "private" },
+    { message: "private" },
+    null,
+    undefined,
+    500,
+    false,
+    Symbol("backend"),
+  ])("does not trust arbitrary object messages", (error) => {
+    expect(formatBackendErrorDetail(error)).toBe("Unexpected backend error");
   });
 });

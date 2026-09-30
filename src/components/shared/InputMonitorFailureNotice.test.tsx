@@ -1,3 +1,4 @@
+import { acceptedCommand } from "@/test/commandResponseFixture";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
@@ -20,7 +21,7 @@ async function renderNotice(): Promise<void> {
 
 function notifyFailure(): void {
   if (!failureNotification) throw new Error("failure subscription missing");
-  vi.mocked(invoke).mockResolvedValue(true);
+  vi.mocked(invoke).mockResolvedValue({ status: "accepted", value: true });
   failureNotification({ event: "input_monitor_failed", id: 1, payload: null });
 }
 
@@ -36,7 +37,7 @@ describe("input monitoring failure notice", () => {
       .mockImplementation((command) => {
         if (command !== "has_input_monitor_failed")
           throw new Error("unexpected command");
-        return Promise.resolve(false);
+        return Promise.resolve(acceptedCommand(false));
       });
     vi.mocked(listen)
       .mockReset()
@@ -54,7 +55,7 @@ describe("input monitoring failure notice", () => {
   });
 
   it("shows a previously detected failure and both affected functions", async () => {
-    vi.mocked(invoke).mockResolvedValue(true);
+    vi.mocked(invoke).mockResolvedValue({ status: "accepted", value: true });
     await renderNotice();
     expect(screen.getByRole("alert")).toHaveTextContent(
       "入力監視でエラーが発生しました",
@@ -78,7 +79,7 @@ describe("input monitoring failure notice", () => {
     useEmergencyShortcutStore.setState({
       status: { kind: "registered", trigger: "Super + F12" },
     });
-    vi.mocked(invoke).mockResolvedValue(true);
+    vi.mocked(invoke).mockResolvedValue({ status: "accepted", value: true });
     await renderNotice();
     expect(screen.getByRole("alert")).toHaveTextContent("ペナルティ");
     expect(screen.getByRole("alert")).not.toHaveTextContent("緊急解除キー");
@@ -91,7 +92,7 @@ describe("input monitoring failure notice", () => {
     vi.mocked(invoke).mockReturnValue(
       new Promise<boolean>((resolve) => {
         resolveSnapshot = resolve;
-      }),
+      }).then(acceptedCommand),
     );
     await renderNotice();
     act(notifyFailure);
@@ -113,7 +114,7 @@ describe("input monitoring failure notice", () => {
     expect(
       screen.queryByText(/private backend detail/u),
     ).not.toBeInTheDocument();
-    vi.mocked(invoke).mockResolvedValue(true);
+    vi.mocked(invoke).mockResolvedValue({ status: "accepted", value: true });
     await userEvent
       .setup()
       .click(screen.getByRole("button", { name: "再確認" }));
@@ -135,7 +136,7 @@ describe("input monitoring failure notice", () => {
 
   it("shows a recorded monitoring failure even when live notifications are unavailable", async () => {
     vi.mocked(listen).mockRejectedValue(new Error("offline"));
-    vi.mocked(invoke).mockResolvedValue(true);
+    vi.mocked(invoke).mockResolvedValue({ status: "accepted", value: true });
     await renderNotice();
     expect(
       await screen.findByText("入力監視でエラーが発生しました。"),

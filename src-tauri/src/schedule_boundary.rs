@@ -5,7 +5,7 @@ use chrono::{
     TimeZone, Weekday,
 };
 
-use crate::ipc::responses::ActiveWindowSummaryPayload;
+use crate::timer_core::observation::ActiveWindowSummaryPayload;
 use crate::types::{BoundaryOccurrenceId, DayAutoRunSlot, WeeklyAutoRunConfig};
 
 const MAX_BOUNDARY_LOOKBACK_DAYS: i64 = 7;

@@ -5,8 +5,7 @@ pub(crate) mod errors;
 pub(crate) mod events;
 pub(crate) mod input;
 mod registration;
-pub(crate) mod responses;
-pub(crate) mod settings;
+pub(crate) mod result;
 
 pub(crate) fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
     use commands::{application, timer};

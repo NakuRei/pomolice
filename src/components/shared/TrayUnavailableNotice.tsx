@@ -15,9 +15,10 @@ export function TrayUnavailableNotice(): React.ReactElement | null {
   useEffect(() => {
     let active = true;
     void commands.isTrayAvailable().then(
-      (available) => {
+      (response) => {
         if (active) {
-          setStatus(available ? "available" : "unavailable");
+          if (response.status === "rejected") setStatus("unknown");
+          else setStatus(response.value ? "available" : "unavailable");
         }
       },
       () => {
@@ -34,7 +35,8 @@ export function TrayUnavailableNotice(): React.ReactElement | null {
   const exitApplication = async (): Promise<void> => {
     setExitStatus("exiting");
     try {
-      await commands.exitWithoutTray();
+      const response = await commands.exitWithoutTray();
+      if (response.status === "rejected") setExitStatus("failed");
     } catch {
       setExitStatus("failed");
     }

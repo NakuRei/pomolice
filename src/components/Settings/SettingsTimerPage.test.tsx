@@ -129,17 +129,20 @@ describe("SettingsTimerPage", () => {
 
   it("shows the backend's range error next to the rejected field and stays on the page", async () => {
     const user = userEvent.setup();
-    mockInvoke.mockRejectedValue({
-      code: "invalid_settings",
-      message: "Invalid settings",
-      issues: [
-        {
-          code: "out_of_range",
-          field: "work_duration_secs",
-          min: 1,
-          max: 7200,
-        },
-      ],
+    mockInvoke.mockResolvedValue({
+      status: "rejected",
+      error: {
+        code: "invalid_settings",
+        message: "Invalid settings",
+        issues: [
+          {
+            code: "out_of_range",
+            field: "work_duration_secs",
+            min: 1,
+            max: 7200,
+          },
+        ],
+      },
     });
     const openSettingsTopScreen = renderTimerPage();
 

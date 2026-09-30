@@ -1,8 +1,9 @@
 use serde::Serialize;
 
-use crate::ipc::responses::{
-    ActiveWindowChangedPayload, SessionCompletedPayload, SettingsChangedPayload, TimerTickPayload,
-};
+use crate::timer_core::observation::ActiveWindowChangedPayload;
+use crate::timer_core::observation::SessionCompletedPayload;
+use crate::timer_core::observation::SettingsChangedPayload;
+use crate::timer_core::observation::TimerTickPayload;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
 #[serde(rename_all = "snake_case")]

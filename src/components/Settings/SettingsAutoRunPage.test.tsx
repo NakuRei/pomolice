@@ -29,10 +29,13 @@ function acceptSettingsSaves(): void {
 }
 
 function rejectSettingsSaves(issues: SettingsValidationIssue[]): void {
-  mockInvoke.mockRejectedValue({
-    code: "invalid_settings",
-    message: "Invalid settings",
-    issues,
+  mockInvoke.mockResolvedValue({
+    status: "rejected",
+    error: {
+      code: "invalid_settings",
+      message: "Invalid settings",
+      issues,
+    },
   });
 }
 

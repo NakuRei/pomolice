@@ -1,3 +1,4 @@
+import { receiveCommandResponse } from "@/ipc/receiveCommandResponse";
 import {
   type TimerSnapshot,
   type SettingsFileStatus,
@@ -21,9 +22,8 @@ import { useErrorStore } from "./errorStore";
 import { useTimerEffectsStore } from "./timerEffectsStore";
 
 import {
-  classifyBackendError,
-  formatPublicCommandErrorDetail,
-  settingsValidationIssuesOf,
+  classifyCommandFailure,
+  formatCommandFailureDetail,
 } from "../errors/classifyBackendError";
 import {
   settingsChangesToPayload,
@@ -73,8 +73,8 @@ interface TimerState {
 
 /**
  * Outcome of saving settings. `rejected` carries every input the backend
- * refused; `failed` means the save did not happen for another reason, which
- * is reported to the error store.
+ * refused; `failed` means the save was rejected for another reason or its
+ * response could not be obtained. The error store records that distinction.
  */
 export type SettingsSaveResult =
   | { status: "saved" }
@@ -179,14 +179,11 @@ export const useTimerStore = create<TimerStore>()(
       // Start work session.
       // Backend decides manual_inside_window/manual_outside_window from server-side clock and schedule.
       start: async (): Promise<void> => {
-        try {
-          const outcome = await commands.startWork();
-          useTimerEffectsStore.getState().observe(outcome.effects);
-          useErrorStore.getState().clearError("start_work");
-        } catch (error) {
-          const detail = formatPublicCommandErrorDetail(error);
+        const response = await receiveCommandResponse(commands.startWork());
+        if (response.status !== "accepted") {
+          const detail = formatCommandFailureDetail(response);
           const { userMessage, severity, canRetry } =
-            classifyBackendError(error);
+            classifyCommandFailure(response);
           useErrorStore.getState().reportError({
             id: "start_work",
             message: userMessage,
@@ -200,25 +197,26 @@ export const useTimerStore = create<TimerStore>()(
                 }
               : null,
           });
-          throw error;
+          throw response.status === "rejected"
+            ? response.error
+            : response.cause;
         }
+        const outcome = response.value;
+        useTimerEffectsStore.getState().observe(outcome.effects);
+        useErrorStore.getState().clearError("start_work");
       },
 
       // Resolve manual decision after break (continue or stop cycle).
       resolvePostBreakDecision: async (
         action: PostBreakDecisionAction,
       ): Promise<void> => {
-        try {
-          const outcome = await commands.resolvePostBreakDecision(action);
-          useTimerEffectsStore.getState().observe(outcome.effects);
-          set((state) => {
-            state.requiresManualContinueDecision = false;
-          });
-          useErrorStore.getState().clearError("resolve_post_break_decision");
-        } catch (error) {
-          const detail = formatPublicCommandErrorDetail(error);
+        const response = await receiveCommandResponse(
+          commands.resolvePostBreakDecision(action),
+        );
+        if (response.status !== "accepted") {
+          const detail = formatCommandFailureDetail(response);
           const { userMessage, severity, canRetry } =
-            classifyBackendError(error);
+            classifyCommandFailure(response);
           useErrorStore.getState().reportError({
             id: "resolve_post_break_decision",
             message: userMessage,
@@ -232,19 +230,24 @@ export const useTimerStore = create<TimerStore>()(
                 }
               : null,
           });
-          throw error;
+          throw response.status === "rejected"
+            ? response.error
+            : response.cause;
         }
+        const outcome = response.value;
+        useTimerEffectsStore.getState().observe(outcome.effects);
+        set((state) => {
+          state.requiresManualContinueDecision = false;
+        });
+        useErrorStore.getState().clearError("resolve_post_break_decision");
       },
 
       // Emergency stop
       emergencyStop: async (): Promise<void> => {
-        try {
-          const outcome = await commands.emergencyStop();
-          useTimerEffectsStore.getState().observe(outcome.effects);
-          useErrorStore.getState().clearError("emergency_stop");
-        } catch (error) {
-          const detail = formatPublicCommandErrorDetail(error);
-          const { userMessage, canRetry } = classifyBackendError(error);
+        const response = await receiveCommandResponse(commands.emergencyStop());
+        if (response.status !== "accepted") {
+          const detail = formatCommandFailureDetail(response);
+          const { userMessage, canRetry } = classifyCommandFailure(response);
           useErrorStore.getState().reportError({
             id: "emergency_stop",
             message: userMessage,
@@ -258,34 +261,38 @@ export const useTimerStore = create<TimerStore>()(
                 }
               : null,
           });
-          throw error;
+          throw response.status === "rejected"
+            ? response.error
+            : response.cause;
         }
+        const outcome = response.value;
+        useTimerEffectsStore.getState().observe(outcome.effects);
+        useErrorStore.getState().clearError("emergency_stop");
       },
 
       saveSettings: async (
         changes: SettingsChanges,
       ): Promise<SettingsSaveResult> => {
-        try {
-          // Read settings from ordered events so a delayed reply cannot
-          // overwrite a newer settings change.
-          const outcome = await commands.updateSettings(
-            settingsChangesToPayload(changes),
-          );
-          useTimerEffectsStore.getState().observe(outcome.effects);
-          useErrorStore.getState().clearError("update_settings");
-          return { status: "saved" };
-        } catch (error) {
-          const issues = settingsValidationIssuesOf(error);
-          if (issues !== null) {
-            return { status: "rejected", issues };
+        // Read settings from ordered events so a delayed reply cannot
+        // overwrite a newer settings change.
+        const response = await receiveCommandResponse(
+          commands.updateSettings(settingsChangesToPayload(changes)),
+        );
+        if (response.status !== "accepted") {
+          if (
+            response.status === "rejected" &&
+            response.error.code === "invalid_settings" &&
+            response.error.issues.length > 0
+          ) {
+            return { status: "rejected", issues: response.error.issues };
           }
 
           const { userMessage, severity, canRetry } =
-            classifyBackendError(error);
+            classifyCommandFailure(response);
           useErrorStore.getState().reportError({
             id: "update_settings",
             message: userMessage,
-            technicalDetail: formatPublicCommandErrorDetail(error),
+            technicalDetail: formatCommandFailureDetail(response),
             severity,
             origin: "backend_command",
             canRetry,
@@ -297,6 +304,10 @@ export const useTimerStore = create<TimerStore>()(
           });
           return { status: "failed" };
         }
+        const outcome = response.value;
+        useTimerEffectsStore.getState().observe(outcome.effects);
+        useErrorStore.getState().clearError("update_settings");
+        return { status: "saved" };
       },
 
       toggleNotificationSoundMuted: async (): Promise<void> => {
@@ -316,14 +327,13 @@ export const useTimerStore = create<TimerStore>()(
       },
 
       setAwayDuringBreak: async (away: boolean): Promise<void> => {
-        try {
-          const outcome = await commands.setAwayDuringBreak(away);
-          useTimerEffectsStore.getState().observe(outcome.effects);
-          useErrorStore.getState().clearError("set_away_during_break");
-        } catch (error) {
-          const detail = formatPublicCommandErrorDetail(error);
+        const response = await receiveCommandResponse(
+          commands.setAwayDuringBreak(away),
+        );
+        if (response.status !== "accepted") {
+          const detail = formatCommandFailureDetail(response);
           const { userMessage, severity, canRetry } =
-            classifyBackendError(error);
+            classifyCommandFailure(response);
           useErrorStore.getState().reportError({
             id: "set_away_during_break",
             message: userMessage,
@@ -337,35 +347,29 @@ export const useTimerStore = create<TimerStore>()(
                 }
               : null,
           });
-          throw error;
+          throw response.status === "rejected"
+            ? response.error
+            : response.cause;
         }
+        const outcome = response.value;
+        useTimerEffectsStore.getState().observe(outcome.effects);
+        useErrorStore.getState().clearError("set_away_during_break");
       },
 
       resolveBootAutoStartPrompt: async (startNow: boolean): Promise<void> => {
         const previousError =
           useErrorStore.getState().errors.resolve_boot_auto_start_prompt;
-        try {
-          const outcome = await commands.resolveBootAutoStartPrompt(startNow);
-          useTimerEffectsStore.getState().observe(outcome.effects);
-          set((state) => {
-            state.bootAutoStartOffer = null;
-          });
-          if (
-            previousError?.canRetry === true &&
-            useErrorStore.getState().errors.resolve_boot_auto_start_prompt ===
-              previousError
-          ) {
-            useErrorStore
-              .getState()
-              .clearError("resolve_boot_auto_start_prompt");
-          }
-        } catch (error) {
-          const detail = formatPublicCommandErrorDetail(error);
+
+        const response = await receiveCommandResponse(
+          commands.resolveBootAutoStartPrompt(startNow),
+        );
+        if (response.status !== "accepted") {
+          const detail = formatCommandFailureDetail(response);
           const {
             userMessage,
             severity,
             canRetry: retryableError,
-          } = classifyBackendError(error);
+          } = classifyCommandFailure(response);
           const canRetry = retryableError && Boolean(get().bootAutoStartOffer);
           useErrorStore.getState().reportError({
             id: "resolve_boot_auto_start_prompt",
@@ -382,7 +386,21 @@ export const useTimerStore = create<TimerStore>()(
                 }
               : null,
           });
-          throw error;
+          throw response.status === "rejected"
+            ? response.error
+            : response.cause;
+        }
+        const outcome = response.value;
+        useTimerEffectsStore.getState().observe(outcome.effects);
+        set((state) => {
+          state.bootAutoStartOffer = null;
+        });
+        if (
+          previousError?.canRetry === true &&
+          useErrorStore.getState().errors.resolve_boot_auto_start_prompt ===
+            previousError
+        ) {
+          useErrorStore.getState().clearError("resolve_boot_auto_start_prompt");
         }
       },
 

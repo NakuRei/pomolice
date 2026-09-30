@@ -33,8 +33,9 @@ describe("timer effect failures", () => {
         last_timer_save: "failed",
       }),
     );
-    vi.mocked(invoke).mockResolvedValue(
-      createTimerSnapshotForTest({
+    vi.mocked(invoke).mockResolvedValue({
+      status: "accepted",
+      value: createTimerSnapshotForTest({
         effects: createTimerEffectsForTest({
           revision: "2",
           break_lock: {
@@ -44,7 +45,7 @@ describe("timer effect failures", () => {
           last_timer_save: "succeeded",
         }),
       }),
-    );
+    });
     render(<TimerEffectsNotice />);
     expect(screen.getByRole("alert")).toHaveTextContent(
       "画面のロック解除に失敗しました",
@@ -86,14 +87,15 @@ describe("timer effect failures", () => {
     useTimerStore.setState({ status: "working" });
     vi.mocked(invoke).mockImplementationOnce(() => {
       useTimerStore.setState({ status: "idle" });
-      return Promise.resolve(
-        createTimerSnapshotForTest({
+      return Promise.resolve({
+        status: "accepted",
+        value: createTimerSnapshotForTest({
           effects: createTimerEffectsForTest({
             revision: "1",
             last_timer_save: "failed",
           }),
         }),
-      );
+      });
     });
     render(
       <>

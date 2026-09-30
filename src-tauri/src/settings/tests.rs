@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use super::*;
-use crate::ipc::settings::{SettingChange, SettingsChanges};
+use crate::settings::input::{SettingChange, SettingsChanges};
 
 fn day_slot(enabled: bool, start_time: &str, end_time: &str) -> DaySlotInput {
     DaySlotInput {

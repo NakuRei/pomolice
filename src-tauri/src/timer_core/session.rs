@@ -3,9 +3,9 @@ use chrono::{DateTime, Duration as ChronoDuration, Local};
 use super::phase::{BreakKind, BreakSessionState, TimerPhase};
 use super::{BreakLockTarget, Effect, TimerCore};
 use crate::error::{PomoliceError, Result};
-use crate::ipc::responses::SessionCompletedPayload;
 use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
 use crate::settings::UserSettings;
+use crate::timer_core::observation::SessionCompletedPayload;
 use crate::types::{
     PostBreakDecisionAction, PostBreakTransitionPolicy, ScheduleStopState, SessionDurationSecs,
     SessionTransitionReason, SessionType, TimerStatus, WorkStartOrigin,

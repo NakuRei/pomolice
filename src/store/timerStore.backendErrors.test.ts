@@ -72,7 +72,7 @@ const timerControlAvailabilityCases: TimerControlAvailabilityCase[] = [
 
 async function expectCommandRejection(
   action: () => Promise<void>,
-  backendError: BackendErrorResponse,
+  backendError: unknown,
 ): Promise<void> {
   await expect(action()).rejects.toBe(backendError);
 }
@@ -104,7 +104,10 @@ function expectTechnicalDetailExcludesDiagnostics(
 describe("timerStore backend command errors", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockInvoke.mockResolvedValue(createTimerSnapshotForTest());
+    mockInvoke.mockResolvedValue({
+      status: "accepted",
+      value: createTimerSnapshotForTest(),
+    });
     useErrorStore.getState().clearAllErrors();
     resetTimerStoreForTest();
   });
@@ -130,9 +133,11 @@ describe("timerStore backend command errors", () => {
   it("stores safe structured details for start_work rejections", async () => {
     const backendError: BackendErrorResponse = {
       code: "window_control_error",
-      message: "failed to enter fullscreen at C:\\Users\\nak\\secret",
     };
-    mockInvoke.mockRejectedValueOnce(backendError);
+    mockInvoke.mockResolvedValueOnce({
+      status: "rejected",
+      error: backendError,
+    });
 
     await expectCommandRejection(
       () => useTimerStore.getState().start(),
@@ -158,9 +163,11 @@ describe("timerStore backend command errors", () => {
   it("stores safe structured details for resolve_post_break_decision rejections", async () => {
     const backendError: BackendErrorResponse = {
       code: "invalid_state_transition",
-      message: "no decision is pending at C:\\Users\\nak\\secret",
     };
-    mockInvoke.mockRejectedValueOnce(backendError);
+    mockInvoke.mockResolvedValueOnce({
+      status: "rejected",
+      error: backendError,
+    });
 
     await expectCommandRejection(
       () => useTimerStore.getState().resolvePostBreakDecision("continue"),
@@ -188,9 +195,11 @@ describe("timerStore backend command errors", () => {
   it("stores safe structured details for emergency_stop rejections", async () => {
     const backendError: BackendErrorResponse = {
       code: "rate_limited",
-      message: "please wait 300ms near C:\\Users\\nak\\secret",
     };
-    mockInvoke.mockRejectedValueOnce(backendError);
+    mockInvoke.mockResolvedValueOnce({
+      status: "rejected",
+      error: backendError,
+    });
 
     await expectCommandRejection(
       () => useTimerStore.getState().emergencyStop(),
@@ -216,9 +225,11 @@ describe("timerStore backend command errors", () => {
   it("keeps emergency_stop non-retryable for non-retryable backend errors", async () => {
     const backendError: BackendErrorResponse = {
       code: "invalid_state_transition",
-      message: "already idle at C:\\Users\\nak\\secret",
     };
-    mockInvoke.mockRejectedValueOnce(backendError);
+    mockInvoke.mockResolvedValueOnce({
+      status: "rejected",
+      error: backendError,
+    });
 
     await expectCommandRejection(
       () => useTimerStore.getState().emergencyStop(),
@@ -240,9 +251,8 @@ describe("timerStore backend command errors", () => {
   });
 
   it("stores safe details for invalid boot prompt command input", async () => {
-    const backendError: BackendErrorResponse = {
+    const backendError = {
       code: "invalid_command_input",
-      message: "invalid type: string C:\\secret",
     };
     mockInvoke.mockRejectedValueOnce(backendError);
 
@@ -255,7 +265,7 @@ describe("timerStore backend command errors", () => {
       useErrorStore.getState().errors.resolve_boot_auto_start_prompt,
     ).toMatchObject({
       id: "resolve_boot_auto_start_prompt",
-      technicalDetail: "invalid_command_input",
+      technicalDetail: "Command response unavailable",
       severity: "recoverable",
       origin: "backend_command",
       canRetry: false,
@@ -275,9 +285,11 @@ describe("timerStore backend command errors", () => {
     });
     const backendError: BackendErrorResponse = {
       code: "rate_limited",
-      message: "please wait 300ms before resolving boot prompt",
     };
-    mockInvoke.mockRejectedValueOnce(backendError);
+    mockInvoke.mockResolvedValueOnce({
+      status: "rejected",
+      error: backendError,
+    });
 
     await expectCommandRejection(
       () => useTimerStore.getState().resolveBootAutoStartPrompt(false),
@@ -310,7 +322,10 @@ describe("timerStore backend command errors", () => {
       revision: "1",
       last_timer_save: "failed",
     });
-    mockInvoke.mockResolvedValueOnce(createTimerSnapshotForTest({ effects }));
+    mockInvoke.mockResolvedValueOnce({
+      status: "accepted",
+      value: createTimerSnapshotForTest({ effects }),
+    });
     await useTimerStore.getState().resolveBootAutoStartPrompt(true);
     expect(useTimerStore.getState().bootAutoStartOffer).toBeNull();
     expect(
@@ -323,12 +338,14 @@ describe("timerStore backend command errors", () => {
   it("does not offer a retry when a retryable failure arrives after the offer closed", async () => {
     const backendError: BackendErrorResponse = {
       code: "rate_limited",
-      message: "delayed rejection",
     };
     useTimerStore.setState({
       bootAutoStartOffer: createBootAutoStartOfferForTest(),
     });
-    mockInvoke.mockRejectedValueOnce(backendError);
+    mockInvoke.mockResolvedValueOnce({
+      status: "rejected",
+      error: backendError,
+    });
 
     const request = useTimerStore.getState().resolveBootAutoStartPrompt(true);
     useTimerStore.getState().clearBootAutoStartOffer();
@@ -360,8 +377,10 @@ describe("timerStore backend command errors", () => {
         bootAutoStartOffer: createBootAutoStartOfferForTest(),
       });
       mockInvoke
-        .mockResolvedValueOnce(outcome)
-        .mockReturnValueOnce(duplicateResponse);
+        .mockResolvedValueOnce({ status: "accepted", value: outcome })
+        .mockReturnValueOnce(
+          duplicateResponse.then((value) => ({ status: "accepted", value })),
+        );
       const firstAnswer = useTimerStore
         .getState()
         .resolveBootAutoStartPrompt(true);

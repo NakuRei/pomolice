@@ -1,13 +1,14 @@
 use chrono::{DateTime, Local};
 
 use super::{Effect, TimerCore};
-use crate::ipc::responses::{ActiveWindowChangedPayload, SettingsChangedPayload};
-use crate::ipc::settings::SettingsFileStatus;
 use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
 use crate::schedule_boundary::{
     collect_crossed_end_boundaries, collect_crossed_start_boundaries, ActiveWindow,
 };
+use crate::settings::input::SettingsFileStatus;
 use crate::settings::UserSettings;
+use crate::timer_core::observation::ActiveWindowChangedPayload;
+use crate::timer_core::observation::SettingsChangedPayload;
 use crate::types::{BoundaryOccurrenceId, ScheduleStopState, TimerStatus, WorkStartOrigin};
 
 /// What the weekly schedule tracks between ticks. Whether it is enabled

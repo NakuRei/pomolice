@@ -107,7 +107,10 @@ describe("FullscreenBreak", () => {
       connectionFailed: false,
     });
     mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(createTimerSnapshotForTest());
+    mockInvoke.mockResolvedValue({
+      status: "accepted",
+      value: createTimerSnapshotForTest(),
+    });
     resetTimerStoreForTest();
     useSkipFlowStore.getState().resetSkipFlow();
     useErrorStore.getState().clearAllErrors();
@@ -189,9 +192,12 @@ describe("FullscreenBreak", () => {
 
     it("shows why a settings save from the break screen failed", async () => {
       const user = userEvent.setup();
-      mockInvoke.mockRejectedValue({
-        code: "persistence_error",
-        message: "Persistence error",
+      mockInvoke.mockResolvedValue({
+        status: "rejected",
+        error: {
+          code: "persistence_error",
+          message: "Persistence error",
+        },
       });
       render(<FullscreenBreak />);
 

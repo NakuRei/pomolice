@@ -44,8 +44,10 @@ export function InputMonitorFailureNotice(): React.ReactElement | null {
       }
 
       try {
-        const observed = await commands.hasInputMonitorFailed();
-        acceptSnapshot(observed, notificationsAvailable);
+        const response = await commands.hasInputMonitorFailed();
+        if (response.status === "accepted")
+          acceptSnapshot(response.value, notificationsAvailable);
+        else if (active) setConnectionFailed(true);
       } catch {
         if (active) setConnectionFailed(true);
       }

@@ -14,18 +14,7 @@ impl LanguageExt for FrontendBindings {
         // Numeric settings are range-validated; durations and counters are bounded.
         // Revision strings retain full u64 precision.
         let ts = Typescript::default().bigint(BigIntExportBehavior::Number);
-        let mut definitions: Vec<_> = contract
-            .type_map
-            .into_iter()
-            .map(|(_, definition)| definition)
-            .collect();
-        definitions.sort_by(|left, right| left.name().cmp(right.name()));
-        let declarations = definitions
-            .into_iter()
-            .map(|definition| {
-                specta_typescript::export_named_datatype(&ts, definition, &contract.type_map)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let declarations = ts.export(&contract.type_map)?;
 
         let commands = contract
             .commands
@@ -76,7 +65,7 @@ impl LanguageExt for FrontendBindings {
 
         Ok(format!(
             "// Generated from the Rust IPC contract.\nimport {{ invoke }} from '@tauri-apps/api/core';\nimport {{ listen, type EventCallback, type UnlistenFn }} from '@tauri-apps/api/event';\n\n{}\n\nexport const commands = {{\n{}\n}};\n\nexport const events = {{\n{}\n}};\n",
-            declarations.join("\n\n"), commands.join(",\n"), events.join(",\n"),
+            declarations, commands.join(",\n"), events.join(",\n"),
         ))
     }
 
@@ -87,6 +76,27 @@ impl LanguageExt for FrontendBindings {
 
 #[cfg(test)]
 mod tests {
+    mod first {
+        #[derive(specta::Type)]
+        pub(super) struct Collision;
+    }
+    mod second {
+        #[derive(specta::Type)]
+        pub(super) struct Collision;
+    }
+
+    #[test]
+    fn conflicting_type_names_fail_generation() {
+        let result = tauri_specta::Builder::<tauri::Wry>::new()
+            .typ::<first::Collision>()
+            .typ::<second::Collision>()
+            .export_str(super::FrontendBindings);
+        assert!(matches!(
+            result,
+            Err(specta_typescript::ExportError::DuplicateTypeName(..))
+        ));
+    }
+
     #[test]
     fn export_contract() {
         let contract = super::super::builder::<tauri::Wry>()

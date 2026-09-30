@@ -1,4 +1,5 @@
-import type { TimerSnapshot } from "@/ipc/generated";
+import { acceptedCommand } from "./commandResponseFixture";
+import type { TimerSnapshot, CommandResponse } from "@/ipc/generated";
 import { useTimerStore } from "@/store/timerStore";
 import { createTimerSnapshotForTest } from "./timerEffectsFixture";
 
@@ -14,7 +15,7 @@ import {
 export function answerSettingsSavesForTest(
   command: string,
   args?: Record<string, unknown>,
-): Promise<TimerSnapshot> {
+): Promise<CommandResponse<TimerSnapshot>> {
   if (command === "update_settings") {
     const { settings, handleSettingsChanged } = useTimerStore.getState();
     handleSettingsChanged({
@@ -25,5 +26,5 @@ export function answerSettingsSavesForTest(
       settings_file_status: "ok",
     });
   }
-  return Promise.resolve(createTimerSnapshotForTest());
+  return Promise.resolve(acceptedCommand(createTimerSnapshotForTest()));
 }

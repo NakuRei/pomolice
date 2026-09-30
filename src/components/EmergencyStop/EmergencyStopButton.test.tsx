@@ -14,9 +14,12 @@ import { useTimerStore } from "@/store/timerStore";
 
 // Mock Tauri invoke
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi
-    .fn()
-    .mockImplementation(() => Promise.resolve(createTimerSnapshotForTest())),
+  invoke: vi.fn().mockImplementation(() =>
+    Promise.resolve({
+      status: "accepted",
+      value: createTimerSnapshotForTest(),
+    }),
+  ),
 }));
 
 function createRootFixture(): HTMLDivElement {
@@ -245,9 +248,12 @@ describe("EmergencyStopButton", () => {
 
     it("should keep the dialog open and show an error when confirm fails", async () => {
       const { invoke } = await import("@tauri-apps/api/core");
-      vi.mocked(invoke).mockRejectedValueOnce({
-        code: "rate_limited",
-        message: "please wait 300ms",
+      vi.mocked(invoke).mockResolvedValueOnce({
+        status: "rejected",
+        error: {
+          code: "rate_limited",
+          message: "please wait 300ms",
+        },
       });
 
       const user = userEvent.setup();

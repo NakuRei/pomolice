@@ -47,14 +47,15 @@ function observeSaveFailure(): void {
 }
 
 function replyWithRecoveredSave(): void {
-  vi.mocked(invoke).mockResolvedValue(
-    createTimerSnapshotForTest({
+  vi.mocked(invoke).mockResolvedValue({
+    status: "accepted",
+    value: createTimerSnapshotForTest({
       effects: createTimerEffectsForTest({
         revision: "2",
         last_timer_save: "succeeded",
       }),
     }),
-  );
+  });
 }
 
 describe("effect recovery during the skip flow", () => {
@@ -120,14 +121,15 @@ describe("effect recovery during the skip flow", () => {
     const user = userEvent.setup();
     const root = renderBreakView();
     observeSaveFailure();
-    vi.mocked(invoke).mockResolvedValue(
-      createTimerSnapshotForTest({
+    vi.mocked(invoke).mockResolvedValue({
+      status: "accepted",
+      value: createTimerSnapshotForTest({
         effects: createTimerEffectsForTest({
           revision: "1",
           last_timer_save: "failed",
         }),
       }),
-    );
+    });
 
     await user.click(screen.getByRole("button", { name: "再試行" }));
     expect(screen.getByRole("alert")).toHaveTextContent("保存に失敗しました");

@@ -1,5 +1,8 @@
 import {
   type commands,
+  type CommandResponse,
+  type BackendErrorResponse,
+  type SettingsValidationIssue,
   type SettingsChanges,
   type TimerSnapshot,
 } from "./generated";
@@ -9,6 +12,9 @@ import { createTimerEffectsForTest } from "@/test/timerEffectsFixture";
 
 describe("IPC contract", () => {
   it("keeps omitted settings distinct from null and infers command responses", () => {
+    expectTypeOf<
+      Extract<BackendErrorResponse, { code: "invalid_settings" }>["issues"]
+    >().toEqualTypeOf<SettingsValidationIssue[]>();
     expectTypeOf<SettingsChanges["notification_sound_muted"]>().toEqualTypeOf<
       boolean | undefined
     >();
@@ -16,7 +22,7 @@ describe("IPC contract", () => {
       Parameters<typeof commands.resolveBootAutoStartPrompt>
     >().toEqualTypeOf<[boolean]>();
     expectTypeOf<ReturnType<typeof commands.getFullState>>().toEqualTypeOf<
-      Promise<TimerSnapshot>
+      Promise<CommandResponse<TimerSnapshot>>
     >();
   });
 

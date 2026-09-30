@@ -36,7 +36,10 @@ function getInvokeCall(callIndex: number): {
 describe("TimerControls", () => {
   beforeEach(() => {
     mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(createTimerSnapshotForTest());
+    mockInvoke.mockResolvedValue({
+      status: "accepted",
+      value: createTimerSnapshotForTest(),
+    });
     // Reset store to initial state before each test
     useTimerStore.setState({
       status: "idle",

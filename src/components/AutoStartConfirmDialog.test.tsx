@@ -15,9 +15,12 @@ import { createBootAutoStartOfferForTest } from "@/test/bootAutoStartOfferFixtur
 import { createTimerSnapshotForTest } from "@/test/timerEffectsFixture";
 
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi
-    .fn()
-    .mockImplementation(() => Promise.resolve(createTimerSnapshotForTest())),
+  invoke: vi.fn().mockImplementation(() =>
+    Promise.resolve({
+      status: "accepted",
+      value: createTimerSnapshotForTest(),
+    }),
+  ),
 }));
 
 const MONDAY_DAYTIME_WINDOW = {

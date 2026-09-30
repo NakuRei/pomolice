@@ -61,14 +61,60 @@ describe("accepted timer operations", () => {
       revision: "1",
       last_timer_save: "failed",
     });
-    vi.mocked(invoke).mockResolvedValue(
-      createTimerSnapshotForTest({ effects }),
-    );
+    vi.mocked(invoke).mockResolvedValue({
+      status: "accepted",
+      value: createTimerSnapshotForTest({ effects }),
+    });
     await run();
     expect(useTimerEffectsStore.getState().effects).toEqual(effects);
     expect(useErrorStore.getState().errors[name]).toBeUndefined();
     expect(invoke).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    ["start_work", (): Promise<unknown> => useTimerStore.getState().start()],
+    [
+      "emergency_stop",
+      (): Promise<unknown> => useTimerStore.getState().emergencyStop(),
+    ],
+    [
+      "resolve_post_break_decision",
+      (): Promise<unknown> =>
+        useTimerStore.getState().resolvePostBreakDecision("continue"),
+    ],
+    [
+      "resolve_boot_auto_start_prompt",
+      (): Promise<unknown> =>
+        useTimerStore.getState().resolveBootAutoStartPrompt(true),
+    ],
+    [
+      "set_away_during_break",
+      (): Promise<unknown> => useTimerStore.getState().setAwayDuringBreak(true),
+    ],
+    [
+      "update_settings",
+      (): Promise<unknown> =>
+        useTimerStore.getState().saveSettings({ notificationSoundMuted: true }),
+    ],
+  ] as const)(
+    "never retries %s when response delivery fails",
+    async (name, run) => {
+      const offer = useTimerStore.getState().bootAutoStartOffer;
+      vi.mocked(invoke).mockRejectedValue({ code: "rate_limited" });
+      await Promise.allSettled([run()]);
+      expect(useErrorStore.getState().errors[name]).toMatchObject({
+        technicalDetail: "Command response unavailable",
+        canRetry: false,
+        retryFn: null,
+      });
+      expect(useTimerStore.getState().bootAutoStartOffer).toEqual(offer);
+      expect(useTimerStore.getState().requiresManualContinueDecision).toBe(
+        true,
+      );
+      expect(useTimerEffectsStore.getState().effects).toBeNull();
+      expect(invoke).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("does not resurrect a failure from an old reply after recovery", () => {
     useTimerEffectsStore.getState().observe(
@@ -93,14 +139,15 @@ describe("accepted timer operations", () => {
       .observe(
         createTimerEffectsForTest({ revision: "1", last_timer_save: "failed" }),
       );
-    vi.mocked(invoke).mockResolvedValue(
-      createTimerSnapshotForTest({
+    vi.mocked(invoke).mockResolvedValue({
+      status: "accepted",
+      value: createTimerSnapshotForTest({
         effects: createTimerEffectsForTest({
           revision: "2",
           last_timer_save: "succeeded",
         }),
       }),
-    );
+    });
     await useTimerEffectsStore.getState().retry();
     expect(invoke).toHaveBeenCalledExactlyOnceWith(
       "retry_failed_timer_effects",

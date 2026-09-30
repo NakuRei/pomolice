@@ -1,3 +1,4 @@
+import { acceptedCommand } from "@/test/commandResponseFixture";
 import type { TimerSnapshot, BackendErrorResponse } from "@/ipc/generated";
 import { TimerEffectsNotice } from "@/components/shared/TimerEffectsNotice";
 import { useTimerEffectsStore } from "@/store/timerEffectsStore";
@@ -41,14 +42,13 @@ function renderHome(): void {
 
 const rateLimited: BackendErrorResponse = {
   code: "rate_limited",
-  message: "please wait",
 };
 
 describe("startup confirmation feedback", () => {
   beforeEach(() => {
     vi.mocked(invoke)
       .mockReset()
-      .mockResolvedValue(createTimerSnapshotForTest());
+      .mockResolvedValue(acceptedCommand(createTimerSnapshotForTest()));
     resetTimerStoreForTest();
     useErrorStore.getState().clearAllErrors();
     useTimerStore.setState({
@@ -67,7 +67,9 @@ describe("startup confirmation feedback", () => {
       const pendingCommand = new Promise<TimerSnapshot>((resolve) => {
         resolveCommand = resolve;
       });
-      vi.mocked(invoke).mockReturnValueOnce(pendingCommand);
+      vi.mocked(invoke).mockReturnValueOnce(
+        pendingCommand.then(acceptedCommand),
+      );
       renderHome();
       const user = userEvent.setup();
       await user.click(screen.getByRole("button", { name: "開始する" }));
@@ -99,14 +101,15 @@ describe("startup confirmation feedback", () => {
       );
       expect(useTimerStore.getState().status).toBe("working");
       expect(invoke).toHaveBeenCalledTimes(1);
-      vi.mocked(invoke).mockResolvedValueOnce(
-        createTimerSnapshotForTest({
+      vi.mocked(invoke).mockResolvedValueOnce({
+        status: "accepted",
+        value: createTimerSnapshotForTest({
           effects: createTimerEffectsForTest({
             revision: "2",
             last_timer_save: "succeeded",
           }),
         }),
-      );
+      });
       await user.click(screen.getByRole("button", { name: "再試行" }));
       expect(invoke).toHaveBeenLastCalledWith("retry_failed_timer_effects");
       expect(invoke).toHaveBeenCalledTimes(2);
@@ -120,7 +123,10 @@ describe("startup confirmation feedback", () => {
   ])(
     "retries the original $label answer while the offer is valid",
     async ({ label, startNow }) => {
-      vi.mocked(invoke).mockRejectedValueOnce(rateLimited);
+      vi.mocked(invoke).mockResolvedValueOnce({
+        status: "rejected",
+        error: rateLimited,
+      });
       renderHome();
       const user = userEvent.setup();
 
@@ -151,7 +157,10 @@ describe("startup confirmation feedback", () => {
   );
 
   it("keeps the error after expiry but removes retry and makes a captured retry harmless", async () => {
-    vi.mocked(invoke).mockRejectedValueOnce(rateLimited);
+    vi.mocked(invoke).mockResolvedValueOnce({
+      status: "rejected",
+      error: rateLimited,
+    });
     renderHome();
     await userEvent
       .setup()

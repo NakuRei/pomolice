@@ -80,17 +80,20 @@ describe("SettingsNotificationPage", () => {
 
   it("shows the backend's volume range error and stays on the page", async () => {
     const user = userEvent.setup();
-    mockInvoke.mockRejectedValue({
-      code: "invalid_settings",
-      message: "Invalid settings",
-      issues: [
-        {
-          code: "out_of_range",
-          field: "notification_sound_volume_percent",
-          min: 0,
-          max: 100,
-        },
-      ],
+    mockInvoke.mockResolvedValue({
+      status: "rejected",
+      error: {
+        code: "invalid_settings",
+        message: "Invalid settings",
+        issues: [
+          {
+            code: "out_of_range",
+            field: "notification_sound_volume_percent",
+            min: 0,
+            max: 100,
+          },
+        ],
+      },
     });
     const openSettingsTopScreen = renderNotificationPage();
 
@@ -104,17 +107,20 @@ describe("SettingsNotificationPage", () => {
 
   it("clears the volume error once the volume is changed", async () => {
     const user = userEvent.setup();
-    mockInvoke.mockRejectedValue({
-      code: "invalid_settings",
-      message: "Invalid settings",
-      issues: [
-        {
-          code: "out_of_range",
-          field: "notification_sound_volume_percent",
-          min: 0,
-          max: 100,
-        },
-      ],
+    mockInvoke.mockResolvedValue({
+      status: "rejected",
+      error: {
+        code: "invalid_settings",
+        message: "Invalid settings",
+        issues: [
+          {
+            code: "out_of_range",
+            field: "notification_sound_volume_percent",
+            min: 0,
+            max: 100,
+          },
+        ],
+      },
     });
     renderNotificationPage();
     await user.click(screen.getByRole("button", { name: "保存" }));

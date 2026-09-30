@@ -164,10 +164,10 @@ mod shared_tests;
 mod run_event_tests {
     use crate::external_adapters::clock::{testing::FixedClock, Clock};
     use crate::external_adapters::persistence::{PersistenceLoadOutcome, PersistenceManager};
-    use crate::ipc::settings::SettingsFileStatus;
     use crate::logging_event::{
         render_persistence_write_failure_message, PERSISTENCE_WRITE_TRIGGER_RUN_EVENT_EXIT,
     };
+    use crate::settings::input::SettingsFileStatus;
     use crate::settings::{PersistedSettings, UserSettings, SETTINGS_SCHEMA_VERSION};
     use crate::state;
     use crate::types::{
@@ -243,7 +243,7 @@ mod run_event_tests {
         app_state
     }
 
-    fn full_state_at_startup(dir: &Path) -> crate::ipc::responses::FullStatePayload {
+    fn full_state_at_startup(dir: &Path) -> crate::timer_core::observation::FullStatePayload {
         let app_state = start_app_state(dir);
         tauri::async_runtime::block_on(app_state.timer.read_full_state()).timer
     }
