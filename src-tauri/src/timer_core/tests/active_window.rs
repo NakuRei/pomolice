@@ -6,7 +6,7 @@ use super::*;
 enum PublishedWindow {
     NotPublished,
     NoneActive,
-    Weekday(String),
+    Weekday(crate::types::WeekdayKey),
 }
 
 fn published_active_window(effects: &[Effect]) -> PublishedWindow {
@@ -18,7 +18,7 @@ fn published_active_window(effects: &[Effect]) -> PublishedWindow {
                     .active_window_summary
                     .as_ref()
                     .map_or(PublishedWindow::NoneActive, |window| {
-                        PublishedWindow::Weekday(window.weekday_key.clone())
+                        PublishedWindow::Weekday(window.weekday_key)
                     }),
             ),
             _ => None,
@@ -40,7 +40,7 @@ fn the_active_window_is_published_when_it_changes_and_only_then() {
     );
     assert_eq!(
         published_active_window(&at_start),
-        PublishedWindow::Weekday("mon".to_string())
+        PublishedWindow::Weekday(crate::types::WeekdayKey::Mon)
     );
     assert_eq!(
         published_active_window(&still_inside),
@@ -69,7 +69,7 @@ fn enabling_a_schedule_whose_window_is_open_tells_the_frontend_at_once() {
 
     assert_eq!(
         published_active_window(&after_enable),
-        PublishedWindow::Weekday("mon".to_string())
+        PublishedWindow::Weekday(crate::types::WeekdayKey::Mon)
     );
 }
 

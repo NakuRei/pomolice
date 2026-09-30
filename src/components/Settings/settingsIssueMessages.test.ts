@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
 import type {
   RangedSettingField,
   SettingsValidationIssue,
-} from "@/types/settings";
+} from "@/ipc/generated";
+import { describe, expect, it } from "vitest";
+
 import {
   overlapIssueMessages,
   rangedFieldIssueMessage,

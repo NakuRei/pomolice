@@ -1,0 +1,385 @@
+// Generated from the Rust IPC contract.
+import { invoke } from "@tauri-apps/api/core";
+import {
+  listen,
+  type EventCallback,
+  type UnlistenFn,
+} from "@tauri-apps/api/event";
+
+export type ActiveWindowChanged = ActiveWindowChangedPayload;
+
+export interface ActiveWindowChangedPayload {
+  active_window_summary: ActiveWindowSummaryPayload | null;
+}
+
+/**
+ * Summary of the currently active schedule window.
+ */
+export interface ActiveWindowSummaryPayload {
+  weekday_key: WeekdayKey;
+  start_time: string;
+  end_time: string;
+  crosses_midnight: boolean;
+}
+
+export type AutoRunStopPending = null;
+
+export type AutoRunStopped = null;
+
+export type BackendErrorCode =
+  | "unauthorized_window"
+  | "invalid_state_transition"
+  | "rate_limited"
+  | "invalid_settings"
+  | "window_control_error"
+  | "persistence_error"
+  | "invalid_command_input";
+
+export interface BackendErrorResponse {
+  code: BackendErrorCode;
+  message: string;
+  /**
+   * Present only for rejected settings, naming every input to fix.
+   */
+  issues?: SettingsValidationIssue[] | null;
+}
+
+export type BootAutoStartOfferClosed = null;
+
+export interface BootAutoStartOfferPayload {
+  anchor_local_date: string;
+  window: ActiveWindowSummaryPayload;
+}
+
+export type BreakLockAction = "enter" | "release";
+
+export interface BreakLockOutcome {
+  action: BreakLockAction;
+  status: EffectStatus;
+}
+
+export interface BreakLockState {
+  target: BreakLockTarget;
+  last_attempt: BreakLockOutcome | null;
+}
+
+export type BreakLockTarget = "locked" | "unlocked";
+
+export interface DaySlotInput {
+  enabled: boolean;
+  start_time: string;
+  end_time: string;
+}
+
+export type EffectRevision = string;
+
+export type EffectStatus = "succeeded" | "failed";
+
+export type EmergencyShortcutChanged = EmergencyShortcutStatus;
+
+export type EmergencyShortcutStatus =
+  | { kind: "input_monitor" }
+  | { kind: "registering" }
+  | { kind: "registered"; trigger: string }
+  | { kind: "unavailable" };
+
+/**
+ * Full timer state sent on initial sync
+ */
+export interface FullStatePayload {
+  status: TimerStatus;
+  remaining_seconds: number;
+  session_duration_secs: number;
+  session_type: SessionType;
+  current_cycle: number;
+  completed_pomodoros: number;
+  break_interaction_count: number;
+  away_during_break: boolean;
+  post_break_decision_pending: boolean;
+  settings: SettingsInput;
+  settings_file_status: SettingsFileStatus;
+  /**
+   * Present while the boot auto-start prompt is still waiting for a decision.
+   */
+  boot_auto_start_offer: BootAutoStartOfferPayload | null;
+  active_window_summary: ActiveWindowSummaryPayload | null;
+}
+
+export type InputMonitorFailed = null;
+
+/**
+ * Action selected while a post-break manual decision is pending.
+ */
+export type PostBreakDecisionAction = "continue" | "stop_cycle";
+
+/**
+ * Policy for deciding what happens when a break session finishes.
+ */
+export type PostBreakTransitionPolicy =
+  | "require_manual_continue"
+  | "start_next_work_automatically";
+
+/**
+ * Settings fields that are limited to a numeric range.
+ */
+export type RangedSettingField =
+  | "work_duration_secs"
+  | "short_break_duration_secs"
+  | "long_break_duration_secs"
+  | "long_break_interval"
+  | "notification_sound_volume_percent";
+
+export type SessionCompleted = SessionCompletedPayload;
+
+/**
+ * Payload sent to frontend when a session completes
+ */
+export interface SessionCompletedPayload {
+  transition_reason: SessionTransitionReason;
+  completed_session_type: SessionType;
+  next_status: TimerStatus;
+  next_session_type: SessionType;
+  requires_manual_continue_decision: boolean;
+}
+
+/**
+ * Reason emitted for a session-boundary transition.
+ */
+export type SessionTransitionReason =
+  | "work_to_break"
+  | "break_waiting_decision"
+  | "break_auto_started"
+  | "scheduled_stop_executed";
+
+/**
+ * Session type representing work or break sessions
+ */
+export type SessionType = "work" | "short_break" | "long_break";
+
+export type SettingChange<T> = T;
+
+export type SettingsChanged = SettingsChangedPayload;
+
+/**
+ * Payload sent to frontend when the settings in effect change
+ */
+export interface SettingsChangedPayload {
+  settings: SettingsInput;
+  settings_file_status: SettingsFileStatus;
+}
+
+/**
+ * The settings a save changes; every field left out keeps its current
+ * value. The weekly schedule is replaced as a whole because overlaps are
+ * judged across weekdays. An unknown field or an explicit `null` is
+ * rejected, so a misspelled or empty value never passes for "unchanged".
+ */
+export interface SettingsChanges {
+  work_duration_secs?: SettingChange<number>;
+  short_break_duration_secs?: SettingChange<number>;
+  long_break_duration_secs?: SettingChange<number>;
+  long_break_interval?: SettingChange<number>;
+  post_break_transition_policy?: SettingChange<PostBreakTransitionPolicy>;
+  auto_run_feature_enabled?: SettingChange<boolean>;
+  weekly_auto_run_config?: SettingChange<WeeklyScheduleInput>;
+  notification_sound_volume_percent?: SettingChange<number>;
+  notification_sound_muted?: SettingChange<boolean>;
+}
+
+/**
+ * Whether the settings file could be used at startup.
+ */
+export type SettingsFileStatus =
+  /**
+   * The file was loaded, or none exists yet and defaults apply.
+   */
+  | "ok"
+  /**
+   * A file exists but could not be used, so defaults are in effect until
+   * the user saves settings again.
+   */
+  | "unusable";
+
+/**
+ * Settings as they arrive, before any rule is applied. Numbers are signed
+ * and times are text, so any whole number out of range and any unusable time
+ * become validation issues that name the input; only a value of the wrong
+ * kind, such as text where a number belongs, fails as malformed input.
+ */
+export interface SettingsInput {
+  work_duration_secs: number;
+  short_break_duration_secs: number;
+  long_break_duration_secs: number;
+  long_break_interval: number;
+  post_break_transition_policy: PostBreakTransitionPolicy;
+  auto_run_feature_enabled: boolean;
+  weekly_auto_run_config: WeeklyScheduleInput;
+  notification_sound_volume_percent: number;
+  notification_sound_muted: boolean;
+}
+
+/**
+ * One reason a settings save was rejected. Part of the public command
+ * contract, so each variant names the input and nothing internal.
+ */
+export type SettingsValidationIssue =
+  | {
+      code: "out_of_range";
+      field: RangedSettingField;
+      min: number;
+      max: number;
+    }
+  | { code: "invalid_time"; weekday: WeekdayKey; boundary: TimeBoundary }
+  | { code: "empty_time_range"; weekday: WeekdayKey }
+  | {
+      code: "overlapping_time_ranges";
+      primary_weekday: WeekdayKey;
+      secondary_weekday: WeekdayKey;
+    };
+
+export type TimeBoundary = "start" | "end";
+
+export type TimerEffectsChanged = TimerEffectsState;
+
+/**
+ * Latest attempts in this application run. None means not attempted;
+ * a failed lock operation leaves the physical window state uncertain.
+ */
+export interface TimerEffectsState {
+  revision: EffectRevision;
+  break_lock: BreakLockState;
+  last_timer_save: EffectStatus | null;
+}
+
+/**
+ * Reads and accepted commands return the same observation contract.
+ * A rejected command changes no timer state.
+ */
+export interface TimerSnapshot {
+  timer: FullStatePayload;
+  effects: TimerEffectsState;
+}
+
+/**
+ * Timer status representing the current phase
+ */
+export type TimerStatus = "idle" | "working" | "on_break";
+
+export type TimerTick = TimerTickPayload;
+
+/**
+ * Payload sent to frontend on each timer tick
+ */
+export interface TimerTickPayload {
+  status: TimerStatus;
+  remaining_seconds: number;
+  /**
+   * Total length of the current session; while idle, the length the next
+   * work session will have.
+   */
+  session_duration_secs: number;
+  session_type: SessionType;
+  current_cycle: number;
+  completed_pomodoros: number;
+  break_interaction_count: number;
+  away_during_break: boolean;
+}
+
+/**
+ * Monday-first weekday keys shared by the schedule and its validation issues.
+ */
+export type WeekdayKey = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+
+export interface WeeklyScheduleInput {
+  mon: DaySlotInput;
+  tue: DaySlotInput;
+  wed: DaySlotInput;
+  thu: DaySlotInput;
+  fri: DaySlotInput;
+  sat: DaySlotInput;
+  sun: DaySlotInput;
+}
+
+export const commands = {
+  isTrayAvailable: (): Promise<boolean> => invoke<boolean>("is_tray_available"),
+  hasInputMonitorFailed: (): Promise<boolean> =>
+    invoke<boolean>("has_input_monitor_failed"),
+  getEmergencyShortcutStatus: (): Promise<EmergencyShortcutStatus> =>
+    invoke<EmergencyShortcutStatus>("get_emergency_shortcut_status"),
+  exitWithoutTray: (): Promise<null> => invoke<null>("exit_without_tray"),
+  startWork: (): Promise<TimerSnapshot> => invoke<TimerSnapshot>("start_work"),
+  resolvePostBreakDecision: (
+    action: PostBreakDecisionAction,
+  ): Promise<TimerSnapshot> =>
+    invoke<TimerSnapshot>("resolve_post_break_decision", { action }),
+  setAwayDuringBreak: (away: boolean): Promise<TimerSnapshot> =>
+    invoke<TimerSnapshot>("set_away_during_break", { away }),
+  emergencyStop: (): Promise<TimerSnapshot> =>
+    invoke<TimerSnapshot>("emergency_stop"),
+  updateSettings: (changes: SettingsChanges): Promise<TimerSnapshot> =>
+    invoke<TimerSnapshot>("update_settings", { changes }),
+  getFullState: (): Promise<TimerSnapshot> =>
+    invoke<TimerSnapshot>("get_full_state"),
+  resolveBootAutoStartPrompt: (startNow: boolean): Promise<TimerSnapshot> =>
+    invoke<TimerSnapshot>("resolve_boot_auto_start_prompt", { startNow }),
+  retryFailedTimerEffects: (): Promise<TimerSnapshot> =>
+    invoke<TimerSnapshot>("retry_failed_timer_effects"),
+};
+
+export const events = {
+  activeWindowChanged: {
+    listen: (
+      callback: EventCallback<ActiveWindowChanged>,
+    ): Promise<UnlistenFn> =>
+      listen<ActiveWindowChanged>("active_window_changed", callback),
+  },
+  autoRunStopPending: {
+    listen: (
+      callback: EventCallback<AutoRunStopPending>,
+    ): Promise<UnlistenFn> =>
+      listen<AutoRunStopPending>("auto_run_stop_pending", callback),
+  },
+  autoRunStopped: {
+    listen: (callback: EventCallback<AutoRunStopped>): Promise<UnlistenFn> =>
+      listen<AutoRunStopped>("auto_run_stopped", callback),
+  },
+  bootAutoStartOfferClosed: {
+    listen: (
+      callback: EventCallback<BootAutoStartOfferClosed>,
+    ): Promise<UnlistenFn> =>
+      listen<BootAutoStartOfferClosed>(
+        "boot_auto_start_offer_closed",
+        callback,
+      ),
+  },
+  emergencyShortcutChanged: {
+    listen: (
+      callback: EventCallback<EmergencyShortcutChanged>,
+    ): Promise<UnlistenFn> =>
+      listen<EmergencyShortcutChanged>("emergency_shortcut_changed", callback),
+  },
+  inputMonitorFailed: {
+    listen: (
+      callback: EventCallback<InputMonitorFailed>,
+    ): Promise<UnlistenFn> =>
+      listen<InputMonitorFailed>("input_monitor_failed", callback),
+  },
+  sessionCompleted: {
+    listen: (callback: EventCallback<SessionCompleted>): Promise<UnlistenFn> =>
+      listen<SessionCompleted>("session_completed", callback),
+  },
+  settingsChanged: {
+    listen: (callback: EventCallback<SettingsChanged>): Promise<UnlistenFn> =>
+      listen<SettingsChanged>("settings_changed", callback),
+  },
+  timerEffectsChanged: {
+    listen: (
+      callback: EventCallback<TimerEffectsChanged>,
+    ): Promise<UnlistenFn> =>
+      listen<TimerEffectsChanged>("timer_effects_changed", callback),
+  },
+  timerTick: {
+    listen: (callback: EventCallback<TimerTick>): Promise<UnlistenFn> =>
+      listen<TimerTick>("timer_tick", callback),
+  },
+};

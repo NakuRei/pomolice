@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "ipc:generate": "node scripts/ipc-bindings.mjs",
+    "ipc:check": "node scripts/ipc-bindings.mjs --check",
+    "typecheck": "tsc -b",
     "build": "tsc -b && vite build",
     "build:linux": "docker build --platform linux/amd64 --file docker/ubuntu22.Dockerfile --output type=local,dest=artifacts/ubuntu22 .",
     "test:linux:portal": "docker build --platform linux/amd64 --file docker/portal-registration.Dockerfile --tag pomolice-portal-registration:local .",

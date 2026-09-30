@@ -58,7 +58,7 @@ describe("accepted timer operations", () => {
     },
   ])("keeps $name accepted when an effect failed", async ({ name, run }) => {
     const effects = createTimerEffectsForTest({
-      revision: 1,
+      revision: "1",
       last_timer_save: "failed",
     });
     vi.mocked(invoke).mockResolvedValue(
@@ -73,14 +73,14 @@ describe("accepted timer operations", () => {
   it("does not resurrect a failure from an old reply after recovery", () => {
     useTimerEffectsStore.getState().observe(
       createTimerEffectsForTest({
-        revision: 3,
+        revision: "3",
         last_timer_save: "succeeded",
       }),
     );
     useTimerEffectsStore
       .getState()
       .observe(
-        createTimerEffectsForTest({ revision: 2, last_timer_save: "failed" }),
+        createTimerEffectsForTest({ revision: "2", last_timer_save: "failed" }),
       );
     expect(useTimerEffectsStore.getState().effects?.last_timer_save).toBe(
       "succeeded",
@@ -91,12 +91,12 @@ describe("accepted timer operations", () => {
     useTimerEffectsStore
       .getState()
       .observe(
-        createTimerEffectsForTest({ revision: 1, last_timer_save: "failed" }),
+        createTimerEffectsForTest({ revision: "1", last_timer_save: "failed" }),
       );
     vi.mocked(invoke).mockResolvedValue(
       createTimerSnapshotForTest({
         effects: createTimerEffectsForTest({
-          revision: 2,
+          revision: "2",
           last_timer_save: "succeeded",
         }),
       }),
@@ -135,7 +135,7 @@ describe("lock observation", () => {
     resetTimerStoreForTest();
     useTimerEffectsStore.getState().observe(
       createTimerEffectsForTest({
-        revision: 1,
+        revision: "1",
         break_lock: {
           target: "unlocked",
           last_attempt: { action: "release", status: "failed" },

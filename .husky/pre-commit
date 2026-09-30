@@ -3,3 +3,5 @@ npm run format:rust:check
 npm run lint:rust
 npm run test
 npm run test:rust
+npm run ipc:check
+npm run typecheck

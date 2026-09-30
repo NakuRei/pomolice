@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useTimerStore } from "@/store/timerStore";
-import { TimerStatus } from "@/types/timer";
+
 import { Button } from "../shared/Button";
 import { DialogActionRow } from "../shared/DialogActionRow";
 import { AppDialog } from "../shared/AppDialog";
@@ -22,7 +22,7 @@ export function EmergencyStopButton(): React.ReactElement | null {
   const titleId = useId();
   const cancelButtonReference = useRef<HTMLButtonElement>(null);
 
-  const isWorking = status === TimerStatus.WORKING;
+  const isWorking = status === "working";
 
   const handleEmergencyStopClick = (): void => {
     setShowConfirmDialog(true);

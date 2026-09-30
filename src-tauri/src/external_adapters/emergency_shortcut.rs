@@ -1,25 +1,11 @@
+use crate::ipc::responses::EmergencyShortcutStatus;
 use parking_lot::Mutex;
-use serde::Serialize;
-#[cfg(target_os = "linux")]
-use tauri::Emitter;
 use tauri::Manager;
+#[cfg(target_os = "linux")]
+use tauri_specta::Event;
 
 #[cfg(target_os = "linux")]
 mod portal;
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub(crate) enum EmergencyShortcutStatus {
-    InputMonitor,
-    #[cfg(target_os = "linux")]
-    Registering,
-    #[cfg(target_os = "linux")]
-    Registered {
-        trigger: String,
-    },
-    #[cfg(target_os = "linux")]
-    Unavailable,
-}
 
 pub(crate) struct EmergencyShortcutState(pub(crate) Mutex<EmergencyShortcutStatus>);
 
@@ -74,5 +60,5 @@ pub(crate) fn setup(app: &tauri::AppHandle) {
 #[cfg(target_os = "linux")]
 fn publish_status(app: &tauri::AppHandle, status: EmergencyShortcutStatus) {
     *app.state::<EmergencyShortcutState>().0.lock() = status.clone();
-    let _ = app.emit_to("main", "emergency_shortcut_changed", status);
+    let _ = crate::ipc::events::EmergencyShortcutChanged(status).emit_to(app, "main");
 }

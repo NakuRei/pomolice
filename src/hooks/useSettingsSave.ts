@@ -1,9 +1,7 @@
+import type { SettingsValidationIssue } from "@/ipc/generated";
 import { useState } from "react";
 import { useTimerStore } from "@/store/timerStore";
-import type {
-  SettingsChanges,
-  SettingsValidationIssue,
-} from "@/types/settings";
+import type { SettingsChanges } from "@/types/settings";
 
 export interface SettingsSave {
   /** What the backend rejected on the last save, until the user edits it. */

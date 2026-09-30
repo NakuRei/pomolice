@@ -1,3 +1,4 @@
+import type { SettingsInput } from "@/ipc/generated";
 import { answerSettingsSavesForTest } from "@/test/settingsSaveFixture";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
@@ -21,13 +22,13 @@ import {
   createWeeklyAutoRunConfigForTest,
 } from "@/test/settingsFixture";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
-import type { Settings, SettingsPayload } from "@/types/settings";
+import type { Settings } from "@/types/settings";
 import { SettingsTopPage } from "./SettingsTopPage";
 
-function savedSettingsChanges(): Partial<SettingsPayload>[] {
+function savedSettingsChanges(): Partial<SettingsInput>[] {
   return mockInvoke.mock.calls
     .filter(([command]) => command === "update_settings")
-    .map(([, args]) => args?.changes as Partial<SettingsPayload>);
+    .map(([, args]) => args?.changes as Partial<SettingsInput>);
 }
 
 /** Renders the page the way the settings screen does: from the store. */

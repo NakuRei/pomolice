@@ -1,3 +1,4 @@
+import type { SettingsInput, SettingsValidationIssue } from "@/ipc/generated";
 import { answerSettingsSavesForTest } from "@/test/settingsSaveFixture";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -20,11 +21,7 @@ import {
   createWeeklyAutoRunConfigForTest,
 } from "@/test/settingsFixture";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
-import type {
-  Settings,
-  SettingsPayload,
-  SettingsValidationIssue,
-} from "@/types/settings";
+import type { Settings } from "@/types/settings";
 import { SettingsAutoRunPage } from "./SettingsAutoRunPage";
 
 function acceptSettingsSaves(): void {
@@ -39,10 +36,10 @@ function rejectSettingsSaves(issues: SettingsValidationIssue[]): void {
   });
 }
 
-function savedSettingsChanges(): Partial<SettingsPayload>[] {
+function savedSettingsChanges(): Partial<SettingsInput>[] {
   return mockInvoke.mock.calls
     .filter(([command]) => command === "update_settings")
-    .map(([, args]) => args?.changes as Partial<SettingsPayload>);
+    .map(([, args]) => args?.changes as Partial<SettingsInput>);
 }
 
 function renderAutoRunPage(

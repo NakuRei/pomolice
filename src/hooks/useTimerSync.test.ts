@@ -1,4 +1,11 @@
-import type { TimerSnapshot, TimerEffectsState } from "@/types/timerEffects";
+import type {
+  TimerSnapshot,
+  TimerEffectsState,
+  FullStatePayload,
+  SessionCompletedPayload,
+  TimerTickPayload,
+} from "@/ipc/generated";
+
 /**
  * useTimerSync Hook Tests
  *
@@ -20,13 +27,7 @@ import {
 } from "@/test/timerEffectsFixture";
 import { useTimerEffectsStore } from "@/store/timerEffectsStore";
 import { useTimerStore } from "@/store/timerStore";
-import {
-  TimerStatus,
-  SessionType,
-  type FullStatePayload,
-  type SessionCompletedPayload,
-  type TimerTickPayload,
-} from "@/types/timer";
+
 import { useErrorStore } from "@/store/errorStore";
 import {
   createSettingsForTest,
@@ -133,10 +134,10 @@ function emitTimerTick(
 ): void {
   handler({
     payload: {
-      status: TimerStatus.WORKING,
+      status: "working",
       remaining_seconds: 1499,
       session_duration_secs: 1500,
-      session_type: SessionType.WORK,
+      session_type: "work",
       current_cycle: 1,
       completed_pomodoros: 0,
       break_interaction_count: 0,
@@ -153,9 +154,9 @@ function emitSessionCompleted(
   handler({
     payload: {
       transition_reason: "break_waiting_decision",
-      completed_session_type: SessionType.SHORT_BREAK,
-      next_status: TimerStatus.IDLE,
-      next_session_type: SessionType.WORK,
+      completed_session_type: "short_break",
+      next_status: "idle",
+      next_session_type: "work",
       requires_manual_continue_decision: true,
       ...overrides,
     },
@@ -271,7 +272,7 @@ describe("useTimerSync", () => {
     act(() => {
       effectsChanged({
         payload: createTimerEffectsForTest({
-          revision: 2,
+          revision: "2",
           last_timer_save: "succeeded",
         }),
       });
@@ -281,7 +282,7 @@ describe("useTimerSync", () => {
         createFullStatePayload(
           {},
           createTimerEffectsForTest({
-            revision: 1,
+            revision: "1",
             last_timer_save: "failed",
           }),
         ),
@@ -589,7 +590,7 @@ describe("useTimerSync", () => {
   it("restores the running timer and marks the connection available", async () => {
     mockInvoke.mockResolvedValue(
       createFullStatePayload({
-        status: TimerStatus.WORKING,
+        status: "working",
         remaining_seconds: 777,
         current_cycle: 2,
       }),
@@ -598,7 +599,7 @@ describe("useTimerSync", () => {
 
     await waitFor(() => {
       expect(useTimerStore.getState()).toMatchObject({
-        status: TimerStatus.WORKING,
+        status: "working",
         remainingSeconds: 777,
         currentCycle: 2,
         isConnected: true,
@@ -610,7 +611,7 @@ describe("useTimerSync", () => {
     const tickHandler = await renderAndGetTimerEventHandler("timer_tick");
     emitTimerTick(tickHandler);
 
-    expect(useTimerStore.getState().status).toBe(TimerStatus.WORKING);
+    expect(useTimerStore.getState().status).toBe("working");
     expect(useTimerStore.getState().remainingSeconds).toBe(1499);
   });
 
@@ -629,9 +630,9 @@ describe("useTimerSync", () => {
       await renderAndGetTimerEventHandler("session_completed");
     emitSessionCompleted(sessionHandler, {
       transition_reason: "work_to_break",
-      completed_session_type: SessionType.WORK,
-      next_status: TimerStatus.ON_BREAK,
-      next_session_type: SessionType.LONG_BREAK,
+      completed_session_type: "work",
+      next_status: "on_break",
+      next_session_type: "long_break",
       requires_manual_continue_decision: false,
     });
 
@@ -650,7 +651,7 @@ describe("useTimerSync", () => {
     const sessionHandler =
       await renderAndGetTimerEventHandler("session_completed");
     emitSessionCompleted(sessionHandler, {
-      completed_session_type: SessionType.LONG_BREAK,
+      completed_session_type: "long_break",
     });
 
     await waitFor(() => {
@@ -669,7 +670,7 @@ describe("useTimerSync", () => {
       await renderAndGetTimerEventHandler("session_completed");
     emitSessionCompleted(sessionHandler, {
       transition_reason: "break_auto_started",
-      next_status: TimerStatus.WORKING,
+      next_status: "working",
       requires_manual_continue_decision: false,
     });
 

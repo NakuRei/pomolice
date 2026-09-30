@@ -1,4 +1,4 @@
-import type { WeekdayKey } from "../types/weeklyAutoRun";
+import type { WeekdayKey } from "@/ipc/generated";
 
 interface WeekdayLabelSet {
   short: string;

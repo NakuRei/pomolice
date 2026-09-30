@@ -1,11 +1,18 @@
-use serde::Serialize;
 use tauri::ipc::InvokeError;
 
 use crate::error::PomoliceError;
-use crate::settings::SettingsValidationIssue;
+use crate::ipc::settings::SettingsValidationIssue;
 
 #[derive(
-    Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, strum::EnumCount, strum::EnumIter,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Serialize,
+    strum::EnumCount,
+    strum::EnumIter,
+    specta::Type,
 )]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum BackendErrorCode {
@@ -18,7 +25,7 @@ pub(crate) enum BackendErrorCode {
     InvalidCommandInput,
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, specta::Type)]
 pub(crate) struct BackendErrorResponse {
     code: BackendErrorCode,
     message: &'static str,
@@ -83,22 +90,14 @@ pub(crate) fn public_command_argument_rejection_error() -> InvokeError {
     ))
 }
 
-impl Serialize for PomoliceError {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        BackendErrorResponse::from(self).serialize(serializer)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
 
     use crate::error::PersistenceFailure;
-    use crate::settings::{RangedSettingField, SettingsValidationErrors};
+    use crate::ipc::settings::RangedSettingField;
+    use crate::settings::SettingsValidationErrors;
     use crate::shared_tests::join_error::join_error_from_panic;
     use crate::types::{TimerStatus, WeekdayKey};
 
@@ -191,7 +190,8 @@ mod tests {
 
         for (error, code, message) in cases {
             assert_eq!(
-                serde_json::to_value(&error).expect("command error should serialize"),
+                serde_json::to_value(BackendErrorResponse::from(&error))
+                    .expect("command error should serialize"),
                 json!({ "code": code, "message": message }),
                 "unexpected public response for {error:?}"
             );
@@ -213,7 +213,8 @@ mod tests {
         ]));
 
         assert_eq!(
-            serde_json::to_value(&error).expect("command error should serialize"),
+            serde_json::to_value(BackendErrorResponse::from(&error))
+                .expect("command error should serialize"),
             json!({
                 "code": "invalid_settings",
                 "message": "Invalid settings",

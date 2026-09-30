@@ -1,8 +1,5 @@
-import {
-  settingsChangesToPayload,
-  type Settings,
-  type SettingsPayload,
-} from "@/types/settings";
+import type { SettingsInput } from "@/ipc/generated";
+import { settingsChangesToPayload, type Settings } from "@/types/settings";
 import type {
   DayAutoRunSlot,
   WeeklyAutoRunConfig,
@@ -48,9 +45,9 @@ export function createSettingsForTest(
 }
 
 /** The full settings as the backend sends them in a full state. */
-export function settingsPayloadForTest(settings: Settings): SettingsPayload {
+export function settingsPayloadForTest(settings: Settings): SettingsInput {
   // Every field of a complete `Settings` is present in its changes payload.
-  return settingsChangesToPayload(settings) as SettingsPayload;
+  return settingsChangesToPayload(settings) as SettingsInput;
 }
 
 /**
@@ -60,9 +57,9 @@ export function settingsPayloadForTest(settings: Settings): SettingsPayload {
 export function settingsPayloadAfterChangesForTest(
   current: Settings,
   changes: unknown,
-): SettingsPayload {
+): SettingsInput {
   return {
     ...settingsPayloadForTest(current),
-    ...(changes as Partial<SettingsPayload>),
+    ...(changes as Partial<SettingsInput>),
   };
 }

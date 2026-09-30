@@ -73,7 +73,7 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
 
-    use crate::settings::SettingsValidationIssue;
+    use crate::ipc::settings::SettingsValidationIssue;
     use crate::shared_tests::join_error::join_error_from_panic;
     use crate::types::WeekdayKey;
     use strum::IntoEnumIterator;

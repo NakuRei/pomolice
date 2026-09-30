@@ -1,10 +1,10 @@
-import { formatDurationText } from "@/components/shared/durationText";
-import { WEEKDAY_LABELS_BY_KEY } from "@/constants/weekdayLabels";
 import type {
   RangedSettingField,
   SettingsValidationIssue,
-} from "@/types/settings";
-import type { WeekdayKey } from "@/types/weeklyAutoRun";
+  WeekdayKey,
+} from "@/ipc/generated";
+import { formatDurationText } from "@/components/shared/durationText";
+import { WEEKDAY_LABELS_BY_KEY } from "@/constants/weekdayLabels";
 
 const RANGE_UNIT_BY_FIELD: Record<RangedSettingField, "duration" | "回" | "%"> =
   {

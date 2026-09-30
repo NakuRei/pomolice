@@ -1,5 +1,5 @@
+import type { EmergencyShortcutStatus } from "@/ipc/generated";
 import { create } from "zustand";
-import type { EmergencyShortcutStatus } from "@/types/emergencyShortcut";
 
 export const useEmergencyShortcutStore = create<{
   status: EmergencyShortcutStatus | null;

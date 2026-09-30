@@ -1,8 +1,8 @@
 import { useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { commands, events } from "@/ipc/generated";
+import { type UnlistenFn } from "@tauri-apps/api/event";
 import { useEmergencyShortcutStore } from "@/store/emergencyShortcutStore";
-import type { EmergencyShortcutStatus } from "@/types/emergencyShortcut";
+
 import { StatusNotice } from "./StatusNotice";
 
 export function EmergencyShortcutNotice(): React.ReactElement | null {
@@ -19,8 +19,7 @@ export function EmergencyShortcutNotice(): React.ReactElement | null {
     async function connect(): Promise<void> {
       let subscribed = false;
       try {
-        const unsubscribe = await listen<EmergencyShortcutStatus>(
-          "emergency_shortcut_changed",
+        const unsubscribe = await events.emergencyShortcutChanged.listen(
           (event) => {
             if (!active) return;
             receivedNotification = true;
@@ -41,9 +40,7 @@ export function EmergencyShortcutNotice(): React.ReactElement | null {
           useEmergencyShortcutStore.setState({ connectionFailed: true });
       }
       try {
-        const snapshot = await invoke<EmergencyShortcutStatus>(
-          "get_emergency_shortcut_status",
-        );
+        const snapshot = await commands.getEmergencyShortcutStatus();
         if (active && !receivedNotification) {
           useEmergencyShortcutStore.setState({
             status: snapshot,

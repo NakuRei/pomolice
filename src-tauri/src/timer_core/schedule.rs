@@ -1,15 +1,14 @@
 use chrono::{DateTime, Local};
 
 use super::{Effect, TimerCore};
+use crate::ipc::responses::{ActiveWindowChangedPayload, SettingsChangedPayload};
+use crate::ipc::settings::SettingsFileStatus;
 use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
 use crate::schedule_boundary::{
     collect_crossed_end_boundaries, collect_crossed_start_boundaries, ActiveWindow,
 };
-use crate::settings::{SettingsFileStatus, UserSettings};
-use crate::types::{
-    ActiveWindowChangedPayload, BoundaryOccurrenceId, ScheduleStopState, SettingsChangedPayload,
-    TimerStatus, WorkStartOrigin,
-};
+use crate::settings::UserSettings;
+use crate::types::{BoundaryOccurrenceId, ScheduleStopState, TimerStatus, WorkStartOrigin};
 
 /// What the weekly schedule tracks between ticks. Whether it is enabled
 /// and its slots are part of the user settings.
@@ -45,10 +44,10 @@ impl TimerCore {
             &[("timer_status", format!("{:?}", self.status()))],
         );
         let mut effects = vec![
-            Effect::EmitSettingsChanged(SettingsChangedPayload {
-                settings: self.settings.clone(),
+            Effect::EmitSettingsChanged(Box::new(SettingsChangedPayload {
+                settings: self.settings.clone().into(),
                 settings_file_status: self.settings_file_status,
-            }),
+            })),
             self.publish(now),
         ];
         // The schedule decides which window is active, so a new schedule is

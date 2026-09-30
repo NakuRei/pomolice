@@ -1,4 +1,4 @@
-import { SessionType, type SessionTypeValue } from "@/types/timer";
+import type { SessionType } from "@/ipc/generated";
 
 /**
  * Visual state of one segment in the cycle bar.
@@ -53,7 +53,7 @@ export interface CycleSegment {
  */
 export interface CycleSegmentsInput {
   currentCycle: number;
-  sessionType: SessionTypeValue;
+  sessionType: SessionType;
   remainingSeconds: number;
   sessionDurationSeconds: number;
   longBreakInterval: number;
@@ -144,7 +144,7 @@ function buildBreakSegment(
  */
 export function deriveCycleSegments(input: CycleSegmentsInput): CycleSegment[] {
   const elapsedRatio = activeSessionElapsedRatio(input);
-  const isWorkSession = input.sessionType === SessionType.WORK;
+  const isWorkSession = input.sessionType === "work";
   const currentCycle = Math.min(input.currentCycle, input.longBreakInterval);
   const segments: CycleSegment[] = [];
 

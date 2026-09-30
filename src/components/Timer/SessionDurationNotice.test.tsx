@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { useTimerStore } from "@/store/timerStore";
-import { SessionType, TimerStatus } from "@/types/timer";
+
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { createSettingsForTest } from "@/test/settingsFixture";
 import { SessionDurationNotice } from "./SessionDurationNotice";
@@ -15,8 +15,8 @@ describe("SessionDurationNotice", () => {
 
   it("shows the running length and the next length when a save changed it", () => {
     useTimerStore.setState({
-      status: TimerStatus.WORKING,
-      sessionType: SessionType.WORK,
+      status: "working",
+      sessionType: "work",
       sessionDurationSeconds: 25 * 60,
       settings: createSettingsForTest({ workDurationSecs: 30 * 60 }),
     });
@@ -30,8 +30,8 @@ describe("SessionDurationNotice", () => {
 
   it("compares a break with the saved length of that kind of break", () => {
     useTimerStore.setState({
-      status: TimerStatus.ON_BREAK,
-      sessionType: SessionType.LONG_BREAK,
+      status: "on_break",
+      sessionType: "long_break",
       sessionDurationSeconds: 15 * 60,
       settings: createSettingsForTest({ longBreakDurationSecs: 20 * 60 }),
     });
@@ -45,8 +45,8 @@ describe("SessionDurationNotice", () => {
 
   it("shows nothing when the running session already has the saved length", () => {
     useTimerStore.setState({
-      status: TimerStatus.WORKING,
-      sessionType: SessionType.WORK,
+      status: "working",
+      sessionType: "work",
       sessionDurationSeconds: 25 * 60,
       settings: createSettingsForTest({ workDurationSecs: 25 * 60 }),
     });
@@ -58,7 +58,7 @@ describe("SessionDurationNotice", () => {
 
   it("shows nothing while idle", () => {
     useTimerStore.setState({
-      status: TimerStatus.IDLE,
+      status: "idle",
       sessionDurationSeconds: 25 * 60,
       settings: createSettingsForTest({ workDurationSecs: 30 * 60 }),
     });
@@ -70,7 +70,7 @@ describe("SessionDurationNotice", () => {
 
   it("shows nothing before the settings have arrived", () => {
     useTimerStore.setState({
-      status: TimerStatus.WORKING,
+      status: "working",
       sessionDurationSeconds: 25 * 60,
       settings: null,
     });

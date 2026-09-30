@@ -26,11 +26,12 @@ use phase::{BreakSessionState, TimerPhase};
 use schedule::ScheduleState;
 
 use crate::error::Result;
+use crate::ipc::responses::{BootAutoStartOfferPayload, FullStatePayload, TimerTickPayload};
+use crate::ipc::settings::SettingsFileStatus;
 use crate::schedule_boundary::{is_now_inside_schedule_window, ActiveWindow};
-use crate::settings::{SettingsFileStatus, UserSettings};
+use crate::settings::UserSettings;
 use crate::types::{
-    BootAutoStartOfferPayload, FullStatePayload, PersistedState, SessionDurationSecs, SessionType,
-    TimerStatus, TimerTickPayload, PERSISTED_STATE_SCHEMA_VERSION,
+    PersistedState, SessionDurationSecs, SessionType, TimerStatus, PERSISTED_STATE_SCHEMA_VERSION,
 };
 
 pub(crate) struct TimerCore {
@@ -151,7 +152,7 @@ impl TimerCore {
             break_interaction_count: tick.break_interaction_count,
             away_during_break: tick.away_during_break,
             post_break_decision_pending: self.post_break_decision_pending(),
-            settings: self.settings.clone(),
+            settings: self.settings.clone().into(),
             settings_file_status: self.settings_file_status,
             boot_auto_start_offer,
             active_window_summary,

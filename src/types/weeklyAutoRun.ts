@@ -1,7 +1,4 @@
-/**
- * Weekday keys normalized for IPC payloads and frontend state.
- */
-export type WeekdayKey = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+import type { WeekdayKey } from "@/ipc/generated";
 
 /**
  * Rust `chrono::Weekday` tokens used in serialized payloads.

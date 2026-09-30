@@ -1,11 +1,11 @@
+import type { TimerSnapshot, BackendErrorResponse } from "@/ipc/generated";
 import { useTimerEffectsStore } from "./timerEffectsStore";
 import {
   createTimerEffectsForTest,
   createTimerSnapshotForTest,
 } from "@/test/timerEffectsFixture";
-import type { TimerSnapshot } from "@/types/timerEffects";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { BackendErrorResponse } from "@/errors/classifyBackendError";
 
 type InvokeCommand = (
   command: string,
@@ -23,7 +23,6 @@ import { useErrorStore, type AppError } from "./errorStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { createBootAutoStartOfferForTest } from "@/test/bootAutoStartOfferFixture";
 import { useTimerStore } from "./timerStore";
-import { TimerStatus } from "@/types/timer";
 
 interface TimerControlAvailabilityCase {
   label: string;
@@ -115,7 +114,7 @@ describe("timerStore backend command errors", () => {
     async ({ request, expectedCommand, expectedArguments }) => {
       useTimerStore.setState({
         isConnected: true,
-        status: TimerStatus.IDLE,
+        status: "idle",
         requiresManualContinueDecision: true,
         bootAutoStartOffer: createBootAutoStartOfferForTest(),
       });
@@ -308,7 +307,7 @@ describe("timerStore backend command errors", () => {
       bootAutoStartOffer: createBootAutoStartOfferForTest(),
     });
     const effects = createTimerEffectsForTest({
-      revision: 1,
+      revision: "1",
       last_timer_save: "failed",
     });
     mockInvoke.mockResolvedValueOnce(createTimerSnapshotForTest({ effects }));
@@ -353,7 +352,7 @@ describe("timerStore backend command errors", () => {
         completeDuplicate = resolve;
       });
       const effects = createTimerEffectsForTest({
-        revision: 1,
+        revision: "1",
         last_timer_save: "failed",
       });
       const outcome = createTimerSnapshotForTest({ effects });

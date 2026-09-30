@@ -1,5 +1,5 @@
 import { useTimerStore } from "@/store/timerStore";
-import { SessionType } from "@/types/timer";
+
 import { useSkipFlowStore } from "@/store/skipFlowStore";
 import { FootprintsIcon, SkipForwardIcon } from "@/components/icons/AppIcons";
 import { CycleProgress } from "@/components/Timer/CycleProgress";
@@ -82,7 +82,7 @@ export function FullscreenBreak(): React.ReactElement {
             sessionType={sessionType}
             className="tracking-[0.3em]"
           >
-            {sessionType === SessionType.LONG_BREAK ? "LONG BREAK" : "BREAK"}
+            {sessionType === "long_break" ? "LONG BREAK" : "BREAK"}
           </TimerPhaseLabel>
           <TimerNumber />
         </div>

@@ -10,20 +10,20 @@ use tokio::sync::Semaphore;
 use crate::error::{PersistenceFailure, PomoliceError, Result};
 use crate::external_adapters::clock::Clock;
 use crate::external_adapters::persistence::{PersistedDocument, PersistenceManager, SaveError};
-use crate::logging_event::{log_error_event, log_warn_event, BackendLogEvent};
-use crate::settings::{
-    PersistedSettings, SettingsChanges, SettingsInput, UserSettings, SETTINGS_SCHEMA_VERSION,
-};
-use crate::timer_core::{BreakLockTarget, Effect, Event, TimerCore};
-use crate::timer_effects::{
+use crate::ipc::responses::TimerTickPayload;
+use crate::ipc::responses::{
     BreakLockAction, BreakLockOutcome, BreakLockState, EffectStatus, TimerEffectsState,
     TimerSnapshot,
 };
-use crate::types::{PersistedState, TimerTickPayload};
+use crate::ipc::settings::{SettingsChanges, SettingsInput};
+use crate::logging_event::{log_error_event, log_warn_event, BackendLogEvent};
+use crate::settings::{PersistedSettings, UserSettings, SETTINGS_SCHEMA_VERSION};
+use crate::timer_core::{BreakLockTarget, Effect, Event, TimerCore};
+use crate::types::PersistedState;
 
 /// Where effects go. The application handle is the only production sink.
 pub(crate) trait EffectSink {
-    fn emit(&self, event_name: &str, payload: &(impl serde::Serialize + Clone));
+    fn emit<E: tauri_specta::Event + serde::Serialize + Clone>(&self, payload: &E);
     fn update_tray(&self, payload: &TimerTickPayload);
     async fn enter_break_lock(&self) -> Result<()>;
     async fn release_break_lock(&self) -> Result<()>;
@@ -206,26 +206,27 @@ impl TimerRuntime {
         for effect in effects {
             match effect {
                 Effect::PublishTimerState(payload) => {
-                    sink.emit("timer_tick", &payload);
-                    sink.update_tray(&payload);
+                    let event = crate::ipc::events::TimerTick(payload);
+                    sink.emit(&event);
+                    sink.update_tray(&event.0);
                 }
                 Effect::EmitSessionCompleted(payload) => {
-                    sink.emit("session_completed", &payload);
+                    sink.emit(&crate::ipc::events::SessionCompleted(payload));
                 }
                 Effect::EmitAutoRunStopPending => {
-                    sink.emit("auto_run_stop_pending", &serde_json::json!({}));
+                    sink.emit(&crate::ipc::events::AutoRunStopPending);
                 }
                 Effect::EmitAutoRunStopped => {
-                    sink.emit("auto_run_stopped", &serde_json::json!({}));
+                    sink.emit(&crate::ipc::events::AutoRunStopped);
                 }
                 Effect::EmitActiveWindowChanged(payload) => {
-                    sink.emit("active_window_changed", &payload);
+                    sink.emit(&crate::ipc::events::ActiveWindowChanged(payload));
                 }
                 Effect::EmitSettingsChanged(payload) => {
-                    sink.emit("settings_changed", &payload);
+                    sink.emit(&crate::ipc::events::SettingsChanged(*payload));
                 }
                 Effect::EmitBootAutoStartOfferClosed => {
-                    sink.emit("boot_auto_start_offer_closed", &serde_json::json!({}));
+                    sink.emit(&crate::ipc::events::BootAutoStartOfferClosed);
                 }
                 Effect::Persist => {
                     outcomes.last_timer_save = Some(if self.persist(now).await.is_ok() {
@@ -242,12 +243,12 @@ impl TimerRuntime {
         }
 
         if outcomes != previous {
-            outcomes.revision += 1;
+            outcomes.revision.0 += 1;
             *self
                 .effects
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner) = outcomes;
-            sink.emit("timer_effects_changed", &outcomes);
+            sink.emit(&crate::ipc::events::TimerEffectsChanged(outcomes));
         }
     }
 
@@ -327,13 +328,14 @@ async fn attempt_break_lock(sink: &impl EffectSink, action: BreakLockAction) -> 
 
 #[cfg(test)]
 mod tests {
+    use crate::ipc::settings::SettingChange;
     mod full_state;
     mod outcomes;
 
     use super::*;
     use crate::external_adapters::clock::testing::FixedClock;
     use crate::external_adapters::persistence::{PersistenceLoadOutcome, SaveError};
-    use crate::settings::SettingsFileStatus;
+    use crate::ipc::settings::SettingsFileStatus;
     use crate::types::{PostBreakDecisionAction, PostBreakTransitionPolicy, TimerStatus};
     use chrono::{Local, TimeZone, Utc};
     use std::path::PathBuf;
@@ -409,12 +411,12 @@ mod tests {
     }
 
     impl EffectSink for RecordingSink {
-        fn emit(&self, event_name: &str, payload: &(impl serde::Serialize + Clone)) {
+        fn emit<E: tauri_specta::Event + serde::Serialize + Clone>(&self, payload: &E) {
             self.emitted
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .push((
-                    event_name.to_string(),
+                    E::NAME.to_string(),
                     serde_json::to_value(payload).expect("payload should serialize"),
                 ));
         }
@@ -504,13 +506,13 @@ mod tests {
 
     fn one_second_work() -> SettingsChanges {
         SettingsChanges {
-            work_duration_secs: Some(1),
+            work_duration_secs: SettingChange::Set(1),
             ..SettingsChanges::default()
         }
     }
 
-    fn daytime_slot(enabled: bool) -> crate::settings::DaySlotInput {
-        crate::settings::DaySlotInput {
+    fn daytime_slot(enabled: bool) -> crate::ipc::settings::DaySlotInput {
+        crate::ipc::settings::DaySlotInput {
             enabled,
             start_time: "09:00".to_string(),
             end_time: "18:00".to_string(),
@@ -669,7 +671,7 @@ mod tests {
             .update_settings(
                 &sink,
                 SettingsChanges {
-                    post_break_transition_policy: Some(
+                    post_break_transition_policy: SettingChange::Set(
                         PostBreakTransitionPolicy::StartNextWorkAutomatically,
                     ),
                     ..SettingsChanges::default()
@@ -714,14 +716,17 @@ mod tests {
             .update_settings(
                 &sink,
                 SettingsChanges {
-                    auto_run_feature_enabled: Some(true),
+                    auto_run_feature_enabled: SettingChange::Set(true),
                     ..SettingsChanges::default()
                 },
             )
             .await
             .expect("settings save should not touch the timer state file");
 
-        assert_eq!(runtime.read_full_state().await.timer.settings, settings);
+        assert_eq!(
+            runtime.read_full_state().await.timer.settings,
+            settings.clone().into()
+        );
         assert_eq!(saved_settings(&runtime), Some(settings));
     }
 
@@ -745,7 +750,7 @@ mod tests {
         assert!(sink.emitted_names().is_empty());
         assert_eq!(
             runtime.read_full_state().await.timer.settings,
-            UserSettings::default()
+            UserSettings::default().into()
         );
     }
 
@@ -759,14 +764,14 @@ mod tests {
             runtime.update_settings(
                 &sink,
                 SettingsChanges {
-                    notification_sound_muted: Some(true),
+                    notification_sound_muted: SettingChange::Set(true),
                     ..SettingsChanges::default()
                 },
             ),
             runtime.update_settings(
                 &sink,
                 SettingsChanges {
-                    post_break_transition_policy: Some(
+                    post_break_transition_policy: SettingChange::Set(
                         PostBreakTransitionPolicy::StartNextWorkAutomatically,
                     ),
                     ..SettingsChanges::default()
@@ -781,7 +786,10 @@ mod tests {
             post_break_transition_policy: PostBreakTransitionPolicy::StartNextWorkAutomatically,
             ..UserSettings::default()
         };
-        assert_eq!(runtime.read_full_state().await.timer.settings, expected);
+        assert_eq!(
+            runtime.read_full_state().await.timer.settings,
+            expected.clone().into()
+        );
         assert_eq!(saved_settings(&runtime), Some(expected));
     }
 
@@ -791,7 +799,7 @@ mod tests {
         let runtime = idle_runtime(&create_temp_dir("same-setting-twice"), &clock);
         let sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded);
         let muted = |value: bool| SettingsChanges {
-            notification_sound_muted: Some(value),
+            notification_sound_muted: SettingChange::Set(value),
             ..SettingsChanges::default()
         };
 
@@ -829,14 +837,14 @@ mod tests {
             .update_settings(
                 &sink,
                 SettingsChanges {
-                    weekly_auto_run_config: Some(tuesday_only.clone()),
+                    weekly_auto_run_config: SettingChange::Set(tuesday_only.clone()),
                     ..SettingsChanges::default()
                 },
             )
             .await
             .expect("tuesday save should succeed");
         let mut monday_overnight = tuesday_only;
-        monday_overnight.mon = crate::settings::DaySlotInput {
+        monday_overnight.mon = crate::ipc::settings::DaySlotInput {
             enabled: true,
             start_time: "23:00".to_string(),
             end_time: "10:00".to_string(),
@@ -846,7 +854,7 @@ mod tests {
             .update_settings(
                 &sink,
                 SettingsChanges {
-                    weekly_auto_run_config: Some(monday_overnight),
+                    weekly_auto_run_config: SettingChange::Set(monday_overnight),
                     ..SettingsChanges::default()
                 },
             )
@@ -856,7 +864,7 @@ mod tests {
             Err(PomoliceError::InvalidSettings(errors)) => assert_eq!(
                 errors.issues(),
                 [
-                    crate::settings::SettingsValidationIssue::OverlappingTimeRanges {
+                    crate::ipc::settings::SettingsValidationIssue::OverlappingTimeRanges {
                         primary_weekday: crate::types::WeekdayKey::Mon,
                         secondary_weekday: crate::types::WeekdayKey::Tue,
                     }
@@ -879,7 +887,7 @@ mod tests {
 
         assert_eq!(
             runtime.read_full_state().await.timer.settings,
-            UserSettings::default()
+            UserSettings::default().into()
         );
         assert_eq!(saved_settings(&runtime), None);
         assert!(sink.emitted_names().is_empty());

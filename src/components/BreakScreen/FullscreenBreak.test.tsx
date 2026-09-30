@@ -20,7 +20,7 @@ import { FullscreenBreak } from "./FullscreenBreak";
 import { useEmergencyShortcutStore } from "@/store/emergencyShortcutStore";
 import { useErrorStore } from "@/store/errorStore";
 import { useTimerStore } from "@/store/timerStore";
-import { SessionType, TimerStatus } from "@/types/timer";
+
 import { useSkipFlowStore } from "@/store/skipFlowStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { createSettingsForTest } from "@/test/settingsFixture";
@@ -113,9 +113,9 @@ describe("FullscreenBreak", () => {
     useErrorStore.getState().clearAllErrors();
     setSettings();
     useTimerStore.setState({
-      sessionType: SessionType.SHORT_BREAK,
+      sessionType: "short_break",
       remainingSeconds: 300,
-      status: TimerStatus.ON_BREAK,
+      status: "on_break",
       isConnected: true,
     });
   });
@@ -126,7 +126,7 @@ describe("FullscreenBreak", () => {
   });
 
   describe("Rendering", () => {
-    it.each([SessionType.SHORT_BREAK, SessionType.LONG_BREAK])(
+    it.each(["short_break", "long_break"] as const)(
       "shows emergency release instructions during %s without opening the skip flow",
       (sessionType) => {
         useTimerStore.setState({ sessionType });
@@ -153,7 +153,7 @@ describe("FullscreenBreak", () => {
     });
 
     it("should display 'long break' for long break", () => {
-      useTimerStore.setState({ sessionType: SessionType.LONG_BREAK });
+      useTimerStore.setState({ sessionType: "long_break" });
 
       render(<FullscreenBreak />);
 
@@ -204,10 +204,10 @@ describe("FullscreenBreak", () => {
 
     it("does not rewrite the reported timer phase when displaying break controls", () => {
       useTimerStore.getState().handleTimerTick({
-        status: TimerStatus.IDLE,
+        status: "idle",
         remaining_seconds: 300,
         session_duration_secs: 300,
-        session_type: SessionType.SHORT_BREAK,
+        session_type: "short_break",
         current_cycle: 1,
         completed_pomodoros: 0,
         break_interaction_count: 0,
@@ -216,7 +216,7 @@ describe("FullscreenBreak", () => {
 
       render(<FullscreenBreak />);
 
-      expect(useTimerStore.getState().status).toBe(TimerStatus.IDLE);
+      expect(useTimerStore.getState().status).toBe("idle");
       expect(
         screen.getByRole("button", { name: "休憩をスキップ" }),
       ).toBeInTheDocument();
@@ -315,10 +315,10 @@ describe("FullscreenBreak", () => {
 
     function receiveBreakTick(awayDuringBreak: boolean): void {
       useTimerStore.getState().handleTimerTick({
-        status: TimerStatus.ON_BREAK,
+        status: "on_break",
         remaining_seconds: 300,
         session_duration_secs: 300,
-        session_type: SessionType.SHORT_BREAK,
+        session_type: "short_break",
         current_cycle: 1,
         completed_pomodoros: 1,
         break_interaction_count: 0,

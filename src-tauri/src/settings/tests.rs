@@ -1,6 +1,7 @@
 use serde_json::json;
 
 use super::*;
+use crate::ipc::settings::{SettingChange, SettingsChanges};
 
 fn day_slot(enabled: bool, start_time: &str, end_time: &str) -> DaySlotInput {
     DaySlotInput {
@@ -276,7 +277,7 @@ fn changes_replace_only_the_fields_they_name() {
 #[test]
 fn a_changed_weekly_schedule_replaces_the_whole_week() {
     let changes = SettingsChanges {
-        weekly_auto_run_config: Some(WeeklyScheduleInput {
+        weekly_auto_run_config: SettingChange::Set(WeeklyScheduleInput {
             mon: disabled_day(),
             tue: day_slot(true, "10:00", "11:00"),
             wed: disabled_day(),

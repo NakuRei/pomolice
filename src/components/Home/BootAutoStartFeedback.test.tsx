@@ -1,19 +1,20 @@
+import type { TimerSnapshot, BackendErrorResponse } from "@/ipc/generated";
 import { TimerEffectsNotice } from "@/components/shared/TimerEffectsNotice";
 import { useTimerEffectsStore } from "@/store/timerEffectsStore";
 import {
   createTimerEffectsForTest,
   createTimerSnapshotForTest,
 } from "@/test/timerEffectsFixture";
-import type { TimerSnapshot } from "@/types/timerEffects";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { HomeScreen } from "./HomeScreen";
-import type { BackendErrorResponse } from "@/errors/classifyBackendError";
+
 import { useErrorStore } from "@/store/errorStore";
 import { useTimerStore } from "@/store/timerStore";
-import { TimerStatus } from "@/types/timer";
+
 import { createBootAutoStartOfferForTest } from "@/test/bootAutoStartOfferFixture";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { createSettingsForTest } from "@/test/settingsFixture";
@@ -71,11 +72,11 @@ describe("startup confirmation feedback", () => {
       const user = userEvent.setup();
       await user.click(screen.getByRole("button", { name: "開始する" }));
       const effects = createTimerEffectsForTest({
-        revision: 1,
+        revision: "1",
         last_timer_save: "failed",
       });
       act(() => {
-        useTimerStore.setState({ status: TimerStatus.WORKING });
+        useTimerStore.setState({ status: "working" });
         if (order === "close first")
           useTimerStore.getState().clearBootAutoStartOffer();
         useTimerEffectsStore.getState().observe(effects);
@@ -96,12 +97,12 @@ describe("startup confirmation feedback", () => {
       expect(screen.getByRole("alert")).toHaveTextContent(
         "タイマーの状態の保存に失敗しました",
       );
-      expect(useTimerStore.getState().status).toBe(TimerStatus.WORKING);
+      expect(useTimerStore.getState().status).toBe("working");
       expect(invoke).toHaveBeenCalledTimes(1);
       vi.mocked(invoke).mockResolvedValueOnce(
         createTimerSnapshotForTest({
           effects: createTimerEffectsForTest({
-            revision: 2,
+            revision: "2",
             last_timer_save: "succeeded",
           }),
         }),

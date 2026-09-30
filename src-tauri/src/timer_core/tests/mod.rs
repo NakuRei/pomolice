@@ -27,7 +27,8 @@ mod settings_changes;
 
 use super::*;
 use crate::error::PomoliceError;
-use crate::settings::{SettingsFileStatus, UserSettings};
+use crate::ipc::settings::SettingsFileStatus;
+use crate::settings::UserSettings;
 use crate::types::{
     BreakAttendance, DayAutoRunSlot, HhMm, LongBreakDurationSecs, LongBreakIntervalCount,
     PostBreakDecisionAction, PostBreakTransitionPolicy, ScheduleStopState, SessionDurationSecs,

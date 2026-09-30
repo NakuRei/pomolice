@@ -1,3 +1,4 @@
+import type { SettingsInput } from "@/ipc/generated";
 import { answerSettingsSavesForTest } from "@/test/settingsSaveFixture";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -23,14 +24,14 @@ vi.mock("@/services/notifications", () => ({
 
 import { createSettingsForTest } from "@/test/settingsFixture";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
-import type { Settings, SettingsPayload } from "@/types/settings";
+import type { Settings } from "@/types/settings";
 import { playNotificationSoundPreview } from "@/services/notifications";
 import { SettingsNotificationPage } from "./SettingsNotificationPage";
 
-function savedSettingsChanges(): Partial<SettingsPayload>[] {
+function savedSettingsChanges(): Partial<SettingsInput>[] {
   return mockInvoke.mock.calls
     .filter(([command]) => command === "update_settings")
-    .map(([, args]) => args?.changes as Partial<SettingsPayload>);
+    .map(([, args]) => args?.changes as Partial<SettingsInput>);
 }
 
 function renderNotificationPage(

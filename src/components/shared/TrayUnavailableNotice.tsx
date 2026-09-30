@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { commands } from "@/ipc/generated";
 import { useEffect, useState } from "react";
 import { Button } from "./Button";
 import { StatusNotice } from "./StatusNotice";
@@ -14,7 +14,7 @@ export function TrayUnavailableNotice(): React.ReactElement | null {
 
   useEffect(() => {
     let active = true;
-    void invoke<boolean>("is_tray_available").then(
+    void commands.isTrayAvailable().then(
       (available) => {
         if (active) {
           setStatus(available ? "available" : "unavailable");
@@ -34,7 +34,7 @@ export function TrayUnavailableNotice(): React.ReactElement | null {
   const exitApplication = async (): Promise<void> => {
     setExitStatus("exiting");
     try {
-      await invoke("exit_without_tray");
+      await commands.exitWithoutTray();
     } catch {
       setExitStatus("failed");
     }

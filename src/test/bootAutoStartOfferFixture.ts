@@ -1,4 +1,4 @@
-import type { BootAutoStartOfferPayload } from "@/types/timer";
+import type { BootAutoStartOfferPayload } from "@/ipc/generated";
 
 export function createBootAutoStartOfferForTest(): BootAutoStartOfferPayload {
   return {

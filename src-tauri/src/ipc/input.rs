@@ -1,6 +1,6 @@
 use tauri::ipc::{CommandArg, CommandItem, InvokeError};
 
-use crate::commands::error_response::public_command_argument_rejection_error;
+use crate::ipc::errors::public_command_argument_rejection_error;
 use crate::logging_event::{log_warn_event, BackendLogEvent};
 
 pub(crate) struct CommandInputRejectionContext {
@@ -11,6 +11,12 @@ pub(crate) struct CommandInputRejectionContext {
 
 pub(crate) struct ObservedCommandArg<T> {
     value: T,
+}
+
+impl<T: specta::Type> specta::function::FunctionArg for ObservedCommandArg<T> {
+    fn to_datatype(types: &mut specta::TypeMap) -> Option<specta::datatype::DataType> {
+        <T as specta::function::FunctionArg>::to_datatype(types)
+    }
 }
 
 impl<T> ObservedCommandArg<T> {

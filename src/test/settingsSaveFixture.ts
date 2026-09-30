@@ -1,6 +1,7 @@
+import type { TimerSnapshot } from "@/ipc/generated";
 import { useTimerStore } from "@/store/timerStore";
 import { createTimerSnapshotForTest } from "./timerEffectsFixture";
-import type { TimerSnapshot } from "@/types/timerEffects";
+
 import {
   createSettingsForTest,
   settingsPayloadAfterChangesForTest,

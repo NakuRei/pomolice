@@ -1,7 +1,7 @@
 use serde_json::json;
 use tauri::ipc::InvokeError;
 
-use crate::commands::input_rejection::{
+use crate::ipc::input::{
     observe_command_arg_result, observe_command_arg_result_with_logger,
     CommandInputRejectionContext,
 };

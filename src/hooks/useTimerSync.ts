@@ -6,18 +6,13 @@
 
 import { useEffect } from "react";
 import { useTimerEffectsStore } from "@/store/timerEffectsStore";
-import type { TimerSnapshot, TimerEffectsState } from "@/types/timerEffects";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core";
+
+import { type UnlistenFn } from "@tauri-apps/api/event";
+import { commands, events } from "@/ipc/generated";
 import { createLogger } from "../logging/logger";
 import { FRONTEND_LOG_EVENT_IDS } from "../logging/logEvents";
 import { useTimerStore } from "../store/timerStore";
-import {
-  type ActiveWindowChangedPayload,
-  type SettingsChangedPayload,
-  type TimerTickPayload,
-  type SessionCompletedPayload,
-} from "@/types/timer";
+
 import {
   notifyWorkComplete,
   notifyBreakAutoStarted,
@@ -97,21 +92,17 @@ export function useTimerSync(): void {
 
     async function registerBackendListeners(): Promise<boolean> {
       // Listen for timer tick events
-      const unlistenTick = await listen<TimerTickPayload>(
-        "timer_tick",
-        (event) => {
-          if (mounted) {
-            handleTimerTick(event.payload);
-          }
-        },
-      );
+      const unlistenTick = await events.timerTick.listen((event) => {
+        if (mounted) {
+          handleTimerTick(event.payload);
+        }
+      });
       if (!registerActiveListener(unlistenTick)) {
         return false;
       }
 
       // Listen for session completed events
-      const unlistenSessionCompleted = await listen<SessionCompletedPayload>(
-        "session_completed",
+      const unlistenSessionCompleted = await events.sessionCompleted.listen(
         (event) => {
           if (mounted) {
             handleSessionCompleted(event.payload);
@@ -132,8 +123,7 @@ export function useTimerSync(): void {
         return false;
       }
 
-      const unlistenAutoRunStopPending = await listen(
-        "auto_run_stop_pending",
+      const unlistenAutoRunStopPending = await events.autoRunStopPending.listen(
         () => {
           if (mounted) {
             showAutoRunStopPendingInfo();
@@ -144,7 +134,7 @@ export function useTimerSync(): void {
         return false;
       }
 
-      const unlistenAutoRunStopped = await listen("auto_run_stopped", () => {
+      const unlistenAutoRunStopped = await events.autoRunStopped.listen(() => {
         if (mounted) {
           showAutoRunStoppedInfo();
         }
@@ -154,20 +144,16 @@ export function useTimerSync(): void {
       }
 
       const unlistenActiveWindowChanged =
-        await listen<ActiveWindowChangedPayload>(
-          "active_window_changed",
-          (event) => {
-            if (mounted) {
-              handleActiveWindowChanged(event.payload);
-            }
-          },
-        );
+        await events.activeWindowChanged.listen((event) => {
+          if (mounted) {
+            handleActiveWindowChanged(event.payload);
+          }
+        });
       if (!registerActiveListener(unlistenActiveWindowChanged)) {
         return false;
       }
 
-      const unlistenSettingsChanged = await listen<SettingsChangedPayload>(
-        "settings_changed",
+      const unlistenSettingsChanged = await events.settingsChanged.listen(
         (event) => {
           if (mounted) {
             handleSettingsChanged(event.payload);
@@ -178,17 +164,14 @@ export function useTimerSync(): void {
         return false;
       }
 
-      const unlistenBootOfferClosed = await listen(
-        "boot_auto_start_offer_closed",
-        () => {
+      const unlistenBootOfferClosed =
+        await events.bootAutoStartOfferClosed.listen(() => {
           if (mounted) {
             clearBootAutoStartOffer();
           }
-        },
-      );
+        });
       if (!registerActiveListener(unlistenBootOfferClosed)) return false;
-      const unlistenEffects = await listen<TimerEffectsState>(
-        "timer_effects_changed",
+      const unlistenEffects = await events.timerEffectsChanged.listen(
         (event) => {
           if (mounted) observeEffects(event.payload);
         },
@@ -221,7 +204,7 @@ export function useTimerSync(): void {
         }
 
         failureSource = "command_transport";
-        const fullState = await invoke<TimerSnapshot>("get_full_state");
+        const fullState = await commands.getFullState();
         failureSource = "setup";
         if (!mounted) {
           return;

@@ -1,8 +1,13 @@
+import type {
+  TimerSnapshot,
+  TimerEffectsState,
+  FullStatePayload,
+} from "@/ipc/generated";
 import {
   useTimerEffectsStore,
   selectBreakLockObservation,
 } from "./timerEffectsStore";
-import type { TimerSnapshot, TimerEffectsState } from "@/types/timerEffects";
+
 import { createTimerSnapshotForTest } from "@/test/timerEffectsFixture";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 type InvokeCommand = (
@@ -18,7 +23,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import { useTimerStore } from "./timerStore";
-import { TimerStatus, SessionType, type FullStatePayload } from "@/types/timer";
+
 import { resetTimerStoreForTest } from "../test/resetTimerStore";
 import { createBootAutoStartOfferForTest } from "@/test/bootAutoStartOfferFixture";
 import { useErrorStore } from "./errorStore";
@@ -48,7 +53,7 @@ describe("timerStore", () => {
   describe("Initial State", () => {
     it("should have correct initial status", () => {
       const state = useTimerStore.getState();
-      expect(state.status).toBe(TimerStatus.IDLE);
+      expect(state.status).toBe("idle");
     });
 
     it("should have correct initial remaining seconds (25 minutes)", () => {
@@ -58,7 +63,7 @@ describe("timerStore", () => {
 
     it("should have correct initial session type", () => {
       const state = useTimerStore.getState();
-      expect(state.sessionType).toBe(SessionType.WORK);
+      expect(state.sessionType).toBe("work");
     });
 
     it("should have initial completed pomodoros as 0", () => {
@@ -79,15 +84,15 @@ describe("timerStore", () => {
 
   describe("Constants", () => {
     it("should export TimerStatus constants", () => {
-      expect(TimerStatus.IDLE).toBe("idle");
-      expect(TimerStatus.WORKING).toBe("working");
-      expect(TimerStatus.ON_BREAK).toBe("on_break");
+      expect("idle").toBe("idle");
+      expect("working").toBe("working");
+      expect("on_break").toBe("on_break");
     });
 
     it("should export SessionType constants", () => {
-      expect(SessionType.WORK).toBe("work");
-      expect(SessionType.SHORT_BREAK).toBe("short_break");
-      expect(SessionType.LONG_BREAK).toBe("long_break");
+      expect("work").toBe("work");
+      expect("short_break").toBe("short_break");
+      expect("long_break").toBe("long_break");
     });
   });
 
@@ -97,10 +102,10 @@ describe("timerStore", () => {
         const { handleTimerTick } = useTimerStore.getState();
 
         handleTimerTick({
-          status: TimerStatus.WORKING,
+          status: "working",
           remaining_seconds: 1234,
           session_duration_secs: 1500,
-          session_type: SessionType.WORK,
+          session_type: "work",
           current_cycle: 2,
           completed_pomodoros: 1,
           break_interaction_count: 0,
@@ -108,10 +113,10 @@ describe("timerStore", () => {
         });
 
         const state = useTimerStore.getState();
-        expect(state.status).toBe(TimerStatus.WORKING);
+        expect(state.status).toBe("working");
         expect(state.remainingSeconds).toBe(1234);
         expect(state.sessionDurationSeconds).toBe(1500);
-        expect(state.sessionType).toBe(SessionType.WORK);
+        expect(state.sessionType).toBe("work");
         expect(state.currentCycle).toBe(2);
         expect(state.completedPomodoros).toBe(1);
       });
@@ -120,10 +125,10 @@ describe("timerStore", () => {
         const { handleTimerTick } = useTimerStore.getState();
 
         handleTimerTick({
-          status: TimerStatus.ON_BREAK,
+          status: "on_break",
           remaining_seconds: 300,
           session_duration_secs: 300,
-          session_type: SessionType.SHORT_BREAK,
+          session_type: "short_break",
           current_cycle: 1,
           completed_pomodoros: 1,
           break_interaction_count: 3,
@@ -131,14 +136,14 @@ describe("timerStore", () => {
         });
 
         const state = useTimerStore.getState();
-        expect(state.status).toBe(TimerStatus.ON_BREAK);
-        expect(state.sessionType).toBe(SessionType.SHORT_BREAK);
+        expect(state.status).toBe("on_break");
+        expect(state.sessionType).toBe("short_break");
         expect(state.breakInteractionCount).toBe(3);
       });
 
       it("preserves the reported timer phase independently of a confirmed lock", () => {
         useTimerEffectsStore.getState().observe({
-          revision: 1,
+          revision: "1",
           last_timer_save: null,
           break_lock: {
             target: "locked",
@@ -146,15 +151,15 @@ describe("timerStore", () => {
           },
         });
         useTimerStore.setState({
-          status: TimerStatus.WORKING,
+          status: "working",
           isConnected: true,
         });
 
         useTimerStore.getState().handleTimerTick({
-          status: TimerStatus.IDLE,
+          status: "idle",
           remaining_seconds: 0,
           session_duration_secs: 1500,
-          session_type: SessionType.WORK,
+          session_type: "work",
           current_cycle: 1,
           completed_pomodoros: 1,
           break_interaction_count: 0,
@@ -162,7 +167,7 @@ describe("timerStore", () => {
         });
 
         const state = useTimerStore.getState();
-        expect(state.status).toBe(TimerStatus.IDLE);
+        expect(state.status).toBe("idle");
         expect(
           selectBreakLockObservation(useTimerEffectsStore.getState()),
         ).toBe("locked");
@@ -191,9 +196,9 @@ describe("timerStore", () => {
 
         handleSessionCompleted({
           transition_reason: "break_waiting_decision",
-          completed_session_type: SessionType.SHORT_BREAK,
-          next_status: TimerStatus.IDLE,
-          next_session_type: SessionType.WORK,
+          completed_session_type: "short_break",
+          next_status: "idle",
+          next_session_type: "work",
           requires_manual_continue_decision: true,
         });
 
@@ -206,9 +211,9 @@ describe("timerStore", () => {
 
         handleSessionCompleted({
           transition_reason: "work_to_break",
-          completed_session_type: SessionType.WORK,
-          next_status: TimerStatus.ON_BREAK,
-          next_session_type: SessionType.SHORT_BREAK,
+          completed_session_type: "work",
+          next_status: "on_break",
+          next_session_type: "short_break",
           requires_manual_continue_decision: false,
         });
 
@@ -222,9 +227,9 @@ describe("timerStore", () => {
 
         handleSessionCompleted({
           transition_reason: "break_auto_started",
-          completed_session_type: SessionType.SHORT_BREAK,
-          next_status: TimerStatus.WORKING,
-          next_session_type: SessionType.WORK,
+          completed_session_type: "short_break",
+          next_status: "working",
+          next_session_type: "work",
           requires_manual_continue_decision: false,
         });
 
@@ -238,9 +243,9 @@ describe("timerStore", () => {
 
         handleSessionCompleted({
           transition_reason: "scheduled_stop_executed",
-          completed_session_type: SessionType.SHORT_BREAK,
-          next_status: TimerStatus.IDLE,
-          next_session_type: SessionType.WORK,
+          completed_session_type: "short_break",
+          next_status: "idle",
+          next_session_type: "work",
           requires_manual_continue_decision: false,
         });
 
@@ -255,7 +260,7 @@ describe("timerStore", () => {
 
         useTimerStore.getState().handleFullState(
           createFullStatePayload({
-            status: TimerStatus.WORKING,
+            status: "working",
             remaining_seconds: 1200,
             session_duration_secs: 1500,
             current_cycle: 3,
@@ -265,7 +270,7 @@ describe("timerStore", () => {
         );
 
         const state = useTimerStore.getState();
-        expect(state.status).toBe(TimerStatus.WORKING);
+        expect(state.status).toBe("working");
         expect(state.remainingSeconds).toBe(1200);
         expect(state.sessionDurationSeconds).toBe(1500);
         expect(state.currentCycle).toBe(3);
@@ -290,7 +295,7 @@ describe("timerStore", () => {
           createFullStatePayload(
             {},
             {
-              revision: 1,
+              revision: "1",
               last_timer_save: null,
               break_lock: {
                 target: "locked",
@@ -299,7 +304,7 @@ describe("timerStore", () => {
             },
           ),
         );
-        expect(useTimerStore.getState().status).toBe(TimerStatus.IDLE);
+        expect(useTimerStore.getState().status).toBe("idle");
         expect(
           selectBreakLockObservation(useTimerEffectsStore.getState()),
         ).toBe("locked");

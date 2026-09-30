@@ -3,6 +3,10 @@
 // save from the frontend or the file on disk — goes through `SettingsInput`,
 // so a single set of rules decides what is valid.
 
+use crate::ipc::settings::{
+    DaySlotInput, RangedSettingField, SettingsInput, SettingsValidationIssue, TimeBoundary,
+    WeeklyScheduleInput,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -22,17 +26,6 @@ pub(crate) struct PersistedSettings {
     pub settings: UserSettings,
 }
 
-/// Whether the settings file could be used at startup.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum SettingsFileStatus {
-    /// The file was loaded, or none exists yet and defaults apply.
-    Ok,
-    /// A file exists but could not be used, so defaults are in effect until
-    /// the user saves settings again.
-    Unusable,
-}
-
 /// Validated user settings. Each field carries its own range, and the weekly
 /// schedule is free of overlaps.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,175 +40,6 @@ pub(crate) struct UserSettings {
     pub weekly_auto_run_config: WeeklyAutoRunConfig,
     pub notification_sound_volume_percent: NotificationSoundVolumePercent,
     pub notification_sound_muted: bool,
-}
-
-/// Settings as they arrive, before any rule is applied. Numbers are signed
-/// and times are text, so any whole number out of range and any unusable time
-/// become validation issues that name the input; only a value of the wrong
-/// kind, such as text where a number belongs, fails as malformed input.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct SettingsInput {
-    pub work_duration_secs: i64,
-    pub short_break_duration_secs: i64,
-    pub long_break_duration_secs: i64,
-    pub long_break_interval: i64,
-    pub post_break_transition_policy: PostBreakTransitionPolicy,
-    pub auto_run_feature_enabled: bool,
-    pub weekly_auto_run_config: WeeklyScheduleInput,
-    pub notification_sound_volume_percent: i64,
-    pub notification_sound_muted: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct WeeklyScheduleInput {
-    pub mon: DaySlotInput,
-    pub tue: DaySlotInput,
-    pub wed: DaySlotInput,
-    pub thu: DaySlotInput,
-    pub fri: DaySlotInput,
-    pub sat: DaySlotInput,
-    pub sun: DaySlotInput,
-}
-
-impl WeeklyScheduleInput {
-    fn slot(&self, weekday: WeekdayKey) -> &DaySlotInput {
-        match weekday {
-            WeekdayKey::Mon => &self.mon,
-            WeekdayKey::Tue => &self.tue,
-            WeekdayKey::Wed => &self.wed,
-            WeekdayKey::Thu => &self.thu,
-            WeekdayKey::Fri => &self.fri,
-            WeekdayKey::Sat => &self.sat,
-            WeekdayKey::Sun => &self.sun,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct DaySlotInput {
-    pub enabled: bool,
-    pub start_time: String,
-    pub end_time: String,
-}
-
-/// The settings a save changes; every field left out keeps its current
-/// value. The weekly schedule is replaced as a whole because overlaps are
-/// judged across weekdays. An unknown field or an explicit `null` is
-/// rejected, so a misspelled or empty value never passes for "unchanged".
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct SettingsChanges {
-    #[serde(default, deserialize_with = "present_value")]
-    pub work_duration_secs: Option<i64>,
-    #[serde(default, deserialize_with = "present_value")]
-    pub short_break_duration_secs: Option<i64>,
-    #[serde(default, deserialize_with = "present_value")]
-    pub long_break_duration_secs: Option<i64>,
-    #[serde(default, deserialize_with = "present_value")]
-    pub long_break_interval: Option<i64>,
-    #[serde(default, deserialize_with = "present_value")]
-    pub post_break_transition_policy: Option<PostBreakTransitionPolicy>,
-    #[serde(default, deserialize_with = "present_value")]
-    pub auto_run_feature_enabled: Option<bool>,
-    #[serde(default, deserialize_with = "present_value")]
-    pub weekly_auto_run_config: Option<WeeklyScheduleInput>,
-    #[serde(default, deserialize_with = "present_value")]
-    pub notification_sound_volume_percent: Option<i64>,
-    #[serde(default, deserialize_with = "present_value")]
-    pub notification_sound_muted: Option<bool>,
-}
-
-/// Deserializes a field that is present, so `null` fails like any other
-/// value of the wrong type instead of reading as "left out".
-fn present_value<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    T::deserialize(deserializer).map(Some)
-}
-
-impl SettingsChanges {
-    pub(crate) fn is_empty(&self) -> bool {
-        *self == Self::default()
-    }
-
-    /// `current` with every changed field replaced. The result is validated
-    /// as a whole, so a change is judged together with the values it joins.
-    pub(crate) fn applied_to(self, current: SettingsInput) -> SettingsInput {
-        SettingsInput {
-            work_duration_secs: self
-                .work_duration_secs
-                .unwrap_or(current.work_duration_secs),
-            short_break_duration_secs: self
-                .short_break_duration_secs
-                .unwrap_or(current.short_break_duration_secs),
-            long_break_duration_secs: self
-                .long_break_duration_secs
-                .unwrap_or(current.long_break_duration_secs),
-            long_break_interval: self
-                .long_break_interval
-                .unwrap_or(current.long_break_interval),
-            post_break_transition_policy: self
-                .post_break_transition_policy
-                .unwrap_or(current.post_break_transition_policy),
-            auto_run_feature_enabled: self
-                .auto_run_feature_enabled
-                .unwrap_or(current.auto_run_feature_enabled),
-            weekly_auto_run_config: self
-                .weekly_auto_run_config
-                .unwrap_or(current.weekly_auto_run_config),
-            notification_sound_volume_percent: self
-                .notification_sound_volume_percent
-                .unwrap_or(current.notification_sound_volume_percent),
-            notification_sound_muted: self
-                .notification_sound_muted
-                .unwrap_or(current.notification_sound_muted),
-        }
-    }
-}
-
-/// Settings fields that are limited to a numeric range.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum RangedSettingField {
-    WorkDurationSecs,
-    ShortBreakDurationSecs,
-    LongBreakDurationSecs,
-    LongBreakInterval,
-    NotificationSoundVolumePercent,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum TimeBoundary {
-    Start,
-    End,
-}
-
-/// One reason a settings save was rejected. Part of the public command
-/// contract, so each variant names the input and nothing internal.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "code", rename_all = "snake_case")]
-pub(crate) enum SettingsValidationIssue {
-    OutOfRange {
-        field: RangedSettingField,
-        min: u64,
-        max: u64,
-    },
-    InvalidTime {
-        weekday: WeekdayKey,
-        boundary: TimeBoundary,
-    },
-    EmptyTimeRange {
-        weekday: WeekdayKey,
-    },
-    OverlappingTimeRanges {
-        primary_weekday: WeekdayKey,
-        secondary_weekday: WeekdayKey,
-    },
 }
 
 /// Every issue found in one settings input, never only the first.

@@ -1,8 +1,9 @@
+import type { EmergencyShortcutStatus } from "@/ipc/generated";
 import { act, render, screen } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type EventCallback } from "@tauri-apps/api/event";
 import { beforeEach, expect, it, vi } from "vitest";
-import type { EmergencyShortcutStatus } from "@/types/emergencyShortcut";
+
 import {
   EmergencyShortcutHint,
   EmergencyShortcutNotice,

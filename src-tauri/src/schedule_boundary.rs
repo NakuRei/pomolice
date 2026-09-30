@@ -5,9 +5,8 @@ use chrono::{
     TimeZone, Weekday,
 };
 
-use crate::types::{
-    ActiveWindowSummaryPayload, BoundaryOccurrenceId, DayAutoRunSlot, WeeklyAutoRunConfig,
-};
+use crate::ipc::responses::ActiveWindowSummaryPayload;
+use crate::types::{BoundaryOccurrenceId, DayAutoRunSlot, WeeklyAutoRunConfig};
 
 const MAX_BOUNDARY_LOOKBACK_DAYS: i64 = 7;
 const MAX_BOUNDARY_OCCURRENCES_PER_TICK: usize = 128;
@@ -36,7 +35,15 @@ pub(crate) struct ActiveWindow {
 impl ActiveWindow {
     pub(crate) fn to_summary_payload(&self) -> ActiveWindowSummaryPayload {
         ActiveWindowSummaryPayload {
-            weekday_key: self.slot_key.clone(),
+            weekday_key: match self.anchor_local_date.weekday() {
+                Weekday::Mon => crate::types::WeekdayKey::Mon,
+                Weekday::Tue => crate::types::WeekdayKey::Tue,
+                Weekday::Wed => crate::types::WeekdayKey::Wed,
+                Weekday::Thu => crate::types::WeekdayKey::Thu,
+                Weekday::Fri => crate::types::WeekdayKey::Fri,
+                Weekday::Sat => crate::types::WeekdayKey::Sat,
+                Weekday::Sun => crate::types::WeekdayKey::Sun,
+            },
             start_time: self.start_time.clone(),
             end_time: self.end_time.clone(),
             crosses_midnight: self.crosses_midnight,

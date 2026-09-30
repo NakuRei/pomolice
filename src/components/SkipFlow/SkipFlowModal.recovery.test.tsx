@@ -41,7 +41,7 @@ function observeSaveFailure(): void {
     useTimerEffectsStore
       .getState()
       .observe(
-        createTimerEffectsForTest({ revision: 1, last_timer_save: "failed" }),
+        createTimerEffectsForTest({ revision: "1", last_timer_save: "failed" }),
       );
   });
 }
@@ -50,7 +50,7 @@ function replyWithRecoveredSave(): void {
   vi.mocked(invoke).mockResolvedValue(
     createTimerSnapshotForTest({
       effects: createTimerEffectsForTest({
-        revision: 2,
+        revision: "2",
         last_timer_save: "succeeded",
       }),
     }),
@@ -123,7 +123,7 @@ describe("effect recovery during the skip flow", () => {
     vi.mocked(invoke).mockResolvedValue(
       createTimerSnapshotForTest({
         effects: createTimerEffectsForTest({
-          revision: 1,
+          revision: "1",
           last_timer_save: "failed",
         }),
       }),

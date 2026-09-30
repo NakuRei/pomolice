@@ -2,14 +2,13 @@ import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InfoMessageBanner } from "./InfoMessageBanner";
 import { useTimerStore } from "@/store/timerStore";
-import { SessionType, TimerStatus } from "@/types/timer";
 
 describe("InfoMessageBanner", () => {
   beforeEach(() => {
     useTimerStore.setState({
-      status: TimerStatus.IDLE,
+      status: "idle",
       remainingSeconds: 25 * 60,
-      sessionType: SessionType.WORK,
+      sessionType: "work",
       currentCycle: 0,
       completedPomodoros: 0,
       breakInteractionCount: 0,

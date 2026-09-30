@@ -54,7 +54,7 @@ const IDLE_FULL_STATE = vi.hoisted(() => ({
     settings_file_status: "ok",
   },
   effects: {
-    revision: 0,
+    revision: "0",
     break_lock: { target: "unlocked", last_attempt: null },
     last_timer_save: null,
   },
@@ -307,7 +307,7 @@ describe("App", () => {
 
     act(() => {
       useTimerEffectsStore.getState().observe({
-        revision: 1,
+        revision: "1",
         last_timer_save: null,
         break_lock: {
           target: "locked",
@@ -321,7 +321,7 @@ describe("App", () => {
 
     act(() => {
       useTimerEffectsStore.getState().observe({
-        revision: 2,
+        revision: "2",
         last_timer_save: null,
         break_lock: {
           target: "unlocked",

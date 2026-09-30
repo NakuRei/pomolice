@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { TimerEffectsNotice } from "./TimerEffectsNotice";
 import { EmergencyStopButton } from "../EmergencyStop/EmergencyStopButton";
 import { useTimerStore } from "@/store/timerStore";
-import { TimerStatus } from "@/types/timer";
+
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { useTimerEffectsStore } from "@/store/timerEffectsStore";
 import {
@@ -25,7 +25,7 @@ describe("timer effect failures", () => {
   it("shows save and unlock failures together and clears them only after recovery", async () => {
     useTimerEffectsStore.getState().observe(
       createTimerEffectsForTest({
-        revision: 1,
+        revision: "1",
         break_lock: {
           target: "unlocked",
           last_attempt: { action: "release", status: "failed" },
@@ -36,7 +36,7 @@ describe("timer effect failures", () => {
     vi.mocked(invoke).mockResolvedValue(
       createTimerSnapshotForTest({
         effects: createTimerEffectsForTest({
-          revision: 2,
+          revision: "2",
           break_lock: {
             target: "unlocked",
             last_attempt: { action: "release", status: "succeeded" },
@@ -66,7 +66,7 @@ describe("timer effect failures", () => {
     try {
       useTimerEffectsStore.getState().observe(
         createTimerEffectsForTest({
-          revision: 1,
+          revision: "1",
           last_timer_save: "failed",
         }),
       );
@@ -83,13 +83,13 @@ describe("timer effect failures", () => {
   });
 
   it("keeps a save failure visible after an accepted emergency stop closes its dialog", async () => {
-    useTimerStore.setState({ status: TimerStatus.WORKING });
+    useTimerStore.setState({ status: "working" });
     vi.mocked(invoke).mockImplementationOnce(() => {
-      useTimerStore.setState({ status: TimerStatus.IDLE });
+      useTimerStore.setState({ status: "idle" });
       return Promise.resolve(
         createTimerSnapshotForTest({
           effects: createTimerEffectsForTest({
-            revision: 1,
+            revision: "1",
             last_timer_save: "failed",
           }),
         }),

@@ -1,19 +1,9 @@
+import type {
+  SettingsValidationIssue,
+  BackendErrorCode,
+  BackendErrorResponse,
+} from "@/ipc/generated";
 import type { ErrorSeverity } from "../store/errorStore";
-import type { SettingsValidationIssue } from "../types/settings";
-
-export type BackendErrorCode =
-  | "unauthorized_window"
-  | "invalid_state_transition"
-  | "rate_limited"
-  | "invalid_settings"
-  | "window_control_error"
-  | "persistence_error"
-  | "invalid_command_input";
-
-export interface BackendErrorResponse {
-  code: BackendErrorCode;
-  message: string;
-}
 
 /** The result of classifying a structured backend error response. */
 export interface BackendErrorClassification {
@@ -105,9 +95,7 @@ export function settingsValidationIssuesOf(
   }
 
   const { issues } = error as BackendErrorResponse & { issues?: unknown };
-  return Array.isArray(issues) && issues.length > 0
-    ? (issues as SettingsValidationIssue[])
-    : null;
+  return Array.isArray(issues) && issues.length > 0 ? issues : null;
 }
 
 export function formatBackendErrorDetail(error: unknown): string {

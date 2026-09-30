@@ -1,16 +1,17 @@
+import type { SessionType } from "@/ipc/generated";
 import { useTimerStore } from "@/store/timerStore";
-import { SessionType, TimerStatus, type SessionTypeValue } from "@/types/timer";
+
 import type { Settings } from "@/types/settings";
 import { formatDurationText } from "../shared/durationText";
 
 function configuredDurationSeconds(
   settings: Settings,
-  sessionType: SessionTypeValue,
+  sessionType: SessionType,
 ): number {
-  const durationSecondsBySessionType: Record<SessionTypeValue, number> = {
-    [SessionType.WORK]: settings.workDurationSecs,
-    [SessionType.SHORT_BREAK]: settings.shortBreakDurationSecs,
-    [SessionType.LONG_BREAK]: settings.longBreakDurationSecs,
+  const durationSecondsBySessionType: Record<SessionType, number> = {
+    work: settings.workDurationSecs,
+    short_break: settings.shortBreakDurationSecs,
+    long_break: settings.longBreakDurationSecs,
   };
   return durationSecondsBySessionType[sessionType];
 }
@@ -28,7 +29,7 @@ export function SessionDurationNotice(): React.ReactElement | null {
   );
   const settings = useTimerStore((state) => state.settings);
 
-  if (settings === null || status === TimerStatus.IDLE) {
+  if (settings === null || status === "idle") {
     return null;
   }
 

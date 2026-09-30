@@ -1,5 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { commands, events } from "@/ipc/generated";
+import { type UnlistenFn } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import { Button } from "./Button";
 import { StatusNotice } from "./StatusNotice";
@@ -30,7 +30,7 @@ export function InputMonitorFailureNotice(): React.ReactElement | null {
     async function connect(): Promise<void> {
       let notificationsAvailable = false;
       try {
-        const unsubscribe = await listen("input_monitor_failed", () => {
+        const unsubscribe = await events.inputMonitorFailed.listen(() => {
           if (active) setFailureObserved(true);
         });
         if (!active) {
@@ -44,7 +44,7 @@ export function InputMonitorFailureNotice(): React.ReactElement | null {
       }
 
       try {
-        const observed = await invoke<boolean>("has_input_monitor_failed");
+        const observed = await commands.hasInputMonitorFailed();
         acceptSnapshot(observed, notificationsAvailable);
       } catch {
         if (active) setConnectionFailed(true);

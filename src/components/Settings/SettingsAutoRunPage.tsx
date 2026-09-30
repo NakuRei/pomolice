@@ -1,12 +1,9 @@
+import type { SettingsValidationIssue, WeekdayKey } from "@/ipc/generated";
 import { useId, useState } from "react";
 import { useFocusHeadingOnMount } from "@/hooks/useFocusHeadingOnMount";
 import { useSettingsSave } from "@/hooks/useSettingsSave";
-import type { Settings, SettingsValidationIssue } from "@/types/settings";
-import {
-  WEEKDAY_KEYS,
-  type WeeklyAutoRunConfig,
-  type WeekdayKey,
-} from "@/types/weeklyAutoRun";
+import type { Settings } from "@/types/settings";
+import { WEEKDAY_KEYS, type WeeklyAutoRunConfig } from "@/types/weeklyAutoRun";
 import { StatusNotice } from "../shared/StatusNotice";
 import { SwitchButton } from "../shared/SwitchButton";
 import { AutoRunDayRow } from "./AutoRunDayRow";

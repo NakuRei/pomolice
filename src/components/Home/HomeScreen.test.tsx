@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { HomeScreen, type HomeScreenProps } from "./HomeScreen";
 import { useErrorStore } from "@/store/errorStore";
 import { useTimerStore } from "@/store/timerStore";
-import { SessionType, TimerStatus } from "@/types/timer";
+
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { createSettingsForTest } from "@/test/settingsFixture";
 
@@ -29,9 +29,9 @@ describe("HomeScreen", () => {
     resetTimerStoreForTest();
     useTimerStore.setState({
       settings: createSettingsForTest(),
-      status: TimerStatus.IDLE,
+      status: "idle",
       remainingSeconds: 25 * 60,
-      sessionType: SessionType.WORK,
+      sessionType: "work",
       currentCycle: 0,
       completedPomodoros: 0,
       breakInteractionCount: 0,
@@ -45,10 +45,10 @@ describe("HomeScreen", () => {
   });
 
   it.each([
-    { sessionType: SessionType.WORK, label: "FOCUS", name: "作業時間" },
-    { sessionType: SessionType.SHORT_BREAK, label: "BREAK", name: "短い休憩" },
-    { sessionType: SessionType.LONG_BREAK, label: "LONG", name: "長い休憩" },
-  ])(
+    { sessionType: "work", label: "FOCUS", name: "作業時間" },
+    { sessionType: "short_break", label: "BREAK", name: "短い休憩" },
+    { sessionType: "long_break", label: "LONG", name: "長い休憩" },
+  ] as const)(
     "labels the $sessionType session as $label, named $name for assistive technology",
     ({ sessionType, label, name }) => {
       useTimerStore.setState({ sessionType });
@@ -74,12 +74,12 @@ describe("HomeScreen", () => {
   });
 
   it("keeps the phase label whether or not the timer runs", () => {
-    useTimerStore.setState({ status: TimerStatus.WORKING });
+    useTimerStore.setState({ status: "working" });
     render(<HomeScreen {...createProps()} />);
     expect(screen.getByText("FOCUS")).toBeInTheDocument();
 
     act(() => {
-      useTimerStore.setState({ status: TimerStatus.IDLE });
+      useTimerStore.setState({ status: "idle" });
     });
     expect(screen.getByText("FOCUS")).toBeInTheDocument();
   });
@@ -113,7 +113,7 @@ describe("HomeScreen", () => {
     expect(screen.getByRole("button", { name: "通知音" })).toBeInTheDocument();
   });
 
-  it.each([TimerStatus.IDLE, TimerStatus.WORKING])(
+  it.each(["idle", "working"] as const)(
     "does not show break emergency release guidance while %s",
     (status) => {
       useTimerStore.setState({ status });

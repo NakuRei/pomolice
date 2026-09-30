@@ -1,5 +1,5 @@
 import { useTimerStore } from "@/store/timerStore";
-import { TimerStatus } from "@/types/timer";
+
 import { PlayIcon } from "@/components/icons/AppIcons";
 import { EmergencyStopButton } from "../EmergencyStop/EmergencyStopButton";
 import { Button } from "../shared/Button";
@@ -12,8 +12,8 @@ export function TimerControls(): React.ReactElement {
   const status = useTimerStore((state) => state.status);
   const start = useTimerStore((state) => state.start);
 
-  const isIdle = status === TimerStatus.IDLE;
-  const isWorking = status === TimerStatus.WORKING;
+  const isIdle = status === "idle";
+  const isWorking = status === "working";
 
   const handleStart = (): void => {
     // Errors from start() are reported to errorStore by timerStore — the home

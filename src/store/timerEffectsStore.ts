@@ -1,11 +1,7 @@
+import { type TimerEffectsState, commands } from "@/ipc/generated";
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
 import { classifyBackendError } from "@/errors/classifyBackendError";
-import type {
-  BreakLockObservation,
-  TimerEffectsState,
-  TimerSnapshot,
-} from "@/types/timerEffects";
+import type { BreakLockObservation } from "@/types/timerEffects";
 
 interface TimerEffectsStore {
   effects: TimerEffectsState | null;
@@ -21,7 +17,10 @@ export const useTimerEffectsStore = create<TimerEffectsStore>((set, get) => ({
   retryError: null,
   observe: (effects): void => {
     const current = get().effects;
-    if (current === null || effects.revision > current.revision) {
+    if (
+      current === null ||
+      BigInt(effects.revision) > BigInt(current.revision)
+    ) {
       set({ effects, retryError: null });
     }
   },
@@ -29,7 +28,7 @@ export const useTimerEffectsStore = create<TimerEffectsStore>((set, get) => ({
     if (get().retrying) return;
     set({ retrying: true, retryError: null });
     try {
-      const outcome = await invoke<TimerSnapshot>("retry_failed_timer_effects");
+      const outcome = await commands.retryFailedTimerEffects();
       get().observe(outcome.effects);
     } catch (error) {
       set({ retryError: classifyBackendError(error).userMessage });

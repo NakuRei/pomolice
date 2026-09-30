@@ -1,14 +1,15 @@
-import { SessionType, type SessionTypeValue } from "@/types/timer";
+import type { SessionType } from "@/ipc/generated";
+
 import { TIMER_NUMBER_FONT_SIZE } from "./TimerNumber";
 
 const SESSION_PHASE_ACCESSIBLE_NAME = {
-  [SessionType.WORK]: "作業時間",
-  [SessionType.SHORT_BREAK]: "短い休憩",
-  [SessionType.LONG_BREAK]: "長い休憩",
+  work: "作業時間",
+  short_break: "短い休憩",
+  long_break: "長い休憩",
 } as const;
 
 interface TimerPhaseLabelProps {
-  sessionType: SessionTypeValue;
+  sessionType: SessionType;
   className?: string;
   /** Short on-screen text; the accessible name comes from the session type. */
   children: string;

@@ -4,7 +4,6 @@ import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TimerControls } from "./TimerControls";
 import { useTimerStore } from "@/store/timerStore";
-import { TimerStatus, SessionType } from "@/types/timer";
 
 type InvokeCommand = (
   command: string,
@@ -40,9 +39,9 @@ describe("TimerControls", () => {
     mockInvoke.mockResolvedValue(createTimerSnapshotForTest());
     // Reset store to initial state before each test
     useTimerStore.setState({
-      status: TimerStatus.IDLE,
+      status: "idle",
       remainingSeconds: 25 * 60,
-      sessionType: SessionType.WORK,
+      sessionType: "work",
       currentCycle: 0,
       completedPomodoros: 0,
       breakInteractionCount: 0,
@@ -85,7 +84,7 @@ describe("TimerControls", () => {
 
   describe("Working State", () => {
     beforeEach(() => {
-      useTimerStore.setState({ status: TimerStatus.WORKING });
+      useTimerStore.setState({ status: "working" });
     });
 
     it("should not render start button when timer is working", () => {
@@ -128,7 +127,7 @@ describe("TimerControls", () => {
 
       // Simulate backend response updating state
       act(() => {
-        useTimerStore.setState({ status: TimerStatus.WORKING });
+        useTimerStore.setState({ status: "working" });
       });
 
       // Rerender to reflect state change
@@ -145,7 +144,7 @@ describe("TimerControls", () => {
 
       // Simulate working state from backend
       act(() => {
-        useTimerStore.setState({ status: TimerStatus.WORKING });
+        useTimerStore.setState({ status: "working" });
       });
       rerender(<TimerControls />);
       expect(
@@ -154,7 +153,7 @@ describe("TimerControls", () => {
 
       // Simulate emergency stop response from backend
       act(() => {
-        useTimerStore.setState({ status: TimerStatus.IDLE });
+        useTimerStore.setState({ status: "idle" });
       });
       rerender(<TimerControls />);
 

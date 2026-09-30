@@ -1,7 +1,8 @@
+import type { SettingsValidationIssue } from "@/ipc/generated";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { SettingsValidationIssue } from "@/types/settings";
+
 import { AutoRunDayRow } from "./AutoRunDayRow";
 import {
   summarizeDayIssues,

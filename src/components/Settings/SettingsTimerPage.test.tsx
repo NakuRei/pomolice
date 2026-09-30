@@ -1,3 +1,4 @@
+import type { SettingsInput } from "@/ipc/generated";
 import { answerSettingsSavesForTest } from "@/test/settingsSaveFixture";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
@@ -16,20 +17,20 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import { useTimerStore } from "@/store/timerStore";
-import { TimerStatus } from "@/types/timer";
+
 import { createSettingsForTest } from "@/test/settingsFixture";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
-import type { Settings, SettingsPayload } from "@/types/settings";
+import type { Settings } from "@/types/settings";
 import { SettingsTimerPage } from "./SettingsTimerPage";
 
 function acceptSettingsSaves(): void {
   mockInvoke.mockImplementation(answerSettingsSavesForTest);
 }
 
-function savedSettingsChanges(): Partial<SettingsPayload>[] {
+function savedSettingsChanges(): Partial<SettingsInput>[] {
   return mockInvoke.mock.calls
     .filter(([command]) => command === "update_settings")
-    .map(([, args]) => args?.changes as Partial<SettingsPayload>);
+    .map(([, args]) => args?.changes as Partial<SettingsInput>);
 }
 
 function renderTimerPage(
@@ -156,7 +157,7 @@ describe("SettingsTimerPage", () => {
   });
 
   it("keeps inputs editable while the timer runs and says the change applies from the next session", () => {
-    useTimerStore.setState({ status: TimerStatus.WORKING });
+    useTimerStore.setState({ status: "working" });
 
     renderTimerPage();
 

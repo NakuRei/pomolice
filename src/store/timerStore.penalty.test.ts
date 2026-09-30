@@ -1,10 +1,11 @@
+import type { TimerTickPayload } from "@/ipc/generated";
 import {
   useTimerEffectsStore,
   selectBreakLockObservation,
 } from "./timerEffectsStore";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useTimerStore } from "./timerStore";
-import { SessionType, TimerStatus, type TimerTickPayload } from "@/types/timer";
+
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import {
   createSettingsForTest,
@@ -12,10 +13,10 @@ import {
 } from "@/test/settingsFixture";
 
 const breakTick: TimerTickPayload = {
-  status: TimerStatus.ON_BREAK,
+  status: "on_break",
   remaining_seconds: 300,
   session_duration_secs: 300,
-  session_type: SessionType.SHORT_BREAK,
+  session_type: "short_break",
   current_cycle: 1,
   completed_pomodoros: 1,
   break_interaction_count: 0,
@@ -64,7 +65,7 @@ describe("backend penalty state", () => {
       timer: {
         ...breakTick,
         remaining_seconds: 250,
-        session_type: SessionType.LONG_BREAK,
+        session_type: "long_break",
         current_cycle: 4,
         completed_pomodoros: 4,
         break_interaction_count: 7,
@@ -76,7 +77,7 @@ describe("backend penalty state", () => {
         settings_file_status: "ok",
       },
       effects: {
-        revision: 1,
+        revision: "1",
         last_timer_save: null,
         break_lock: {
           target: "locked",
@@ -94,7 +95,7 @@ describe("backend penalty state", () => {
   it("timer ticks never overwrite the independently reported lock result", () => {
     const { handleTimerTick } = useTimerStore.getState();
     useTimerEffectsStore.getState().observe({
-      revision: 1,
+      revision: "1",
       last_timer_save: null,
       break_lock: {
         target: "locked",
@@ -109,10 +110,10 @@ describe("backend penalty state", () => {
 
     handleTimerTick({
       ...breakTick,
-      status: TimerStatus.WORKING,
+      status: "working",
       remaining_seconds: 1500,
       session_duration_secs: 1500,
-      session_type: SessionType.WORK,
+      session_type: "work",
       current_cycle: 2,
       away_during_break: false,
     });
@@ -120,6 +121,6 @@ describe("backend penalty state", () => {
     expect(selectBreakLockObservation(useTimerEffectsStore.getState())).toBe(
       "locked",
     );
-    expect(useTimerStore.getState().status).toBe(TimerStatus.WORKING);
+    expect(useTimerStore.getState().status).toBe("working");
   });
 });

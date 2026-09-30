@@ -12,9 +12,10 @@ use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, Runtime};
 
+use crate::ipc::responses::TimerTickPayload;
 use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
 use crate::tray_icon_renderer;
-use crate::types::{TimerStatus, TimerTickPayload};
+use crate::types::TimerStatus;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TrayGlyphMode {

@@ -14,16 +14,15 @@ import { NotificationMuteToggleButton } from "../shared/NotificationMuteToggleBu
 import { SettingsFileNotice } from "../shared/SettingsFileNotice";
 import { ToastStack } from "../shared/ToastStack";
 import { useTimerStore } from "@/store/timerStore";
-import { SessionType } from "@/types/timer";
 
 const HEADER_LINE_CLASS_NAME = "text-sm tracking-widest md:text-lg";
 const SIDE_PADDING_CLASS_NAME = "px-8 md:px-20";
 const CONTENT_WIDTH_CLASS_NAME = "mx-auto w-full max-w-4xl";
 
 const SESSION_PHASE_LABEL = {
-  [SessionType.WORK]: "FOCUS",
-  [SessionType.SHORT_BREAK]: "BREAK",
-  [SessionType.LONG_BREAK]: "LONG",
+  work: "FOCUS",
+  short_break: "BREAK",
+  long_break: "LONG",
 } as const;
 
 /**

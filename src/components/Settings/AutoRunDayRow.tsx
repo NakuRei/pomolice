@@ -1,6 +1,7 @@
+import type { WeekdayKey } from "@/ipc/generated";
 import { useId } from "react";
 import { WEEKDAY_LABELS_BY_KEY } from "@/constants/weekdayLabels";
-import { type DayAutoRunSlot, type WeekdayKey } from "@/types/weeklyAutoRun";
+import { type DayAutoRunSlot } from "@/types/weeklyAutoRun";
 import type { DayIssueSummary } from "./settingsIssueMessages";
 
 interface AutoRunDayRowProps {

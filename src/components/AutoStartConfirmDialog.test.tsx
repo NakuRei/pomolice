@@ -10,7 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { AutoStartConfirmDialog } from "./AutoStartConfirmDialog";
 import { useTimerStore } from "@/store/timerStore";
-import { SessionType, TimerStatus } from "@/types/timer";
+
 import { createBootAutoStartOfferForTest } from "@/test/bootAutoStartOfferFixture";
 import { createTimerSnapshotForTest } from "@/test/timerEffectsFixture";
 
@@ -42,9 +42,9 @@ describe("AutoStartConfirmDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useTimerStore.setState({
-      status: TimerStatus.IDLE,
+      status: "idle",
       remainingSeconds: 25 * 60,
-      sessionType: SessionType.WORK,
+      sessionType: "work",
       currentCycle: 0,
       completedPomodoros: 0,
       breakInteractionCount: 0,

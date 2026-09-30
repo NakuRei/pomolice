@@ -1,10 +1,10 @@
 use serde::Serialize;
 
-use crate::types::{
+use crate::ipc::responses::{
     ActiveWindowChangedPayload, SessionCompletedPayload, SettingsChangedPayload, TimerTickPayload,
 };
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum BreakLockTarget {
     Locked,
@@ -21,7 +21,7 @@ pub(crate) enum Effect {
     EmitAutoRunStopPending,
     EmitAutoRunStopped,
     EmitActiveWindowChanged(ActiveWindowChangedPayload),
-    EmitSettingsChanged(SettingsChangedPayload),
+    EmitSettingsChanged(Box<SettingsChangedPayload>),
     EmitBootAutoStartOfferClosed,
     Persist,
     SetBreakLockTarget(BreakLockTarget),

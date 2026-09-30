@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { CycleProgress } from "./CycleProgress";
 import { useTimerStore } from "@/store/timerStore";
-import { SessionType } from "@/types/timer";
+
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { createSettingsForTest } from "@/test/settingsFixture";
 
@@ -56,27 +56,27 @@ describe("CycleProgress", () => {
 
   it.each([
     {
-      sessionType: SessionType.WORK,
+      sessionType: "work",
       currentCycle: 2,
       remainingSeconds: 750,
       sessionDurationSeconds: 1500,
       segmentKey: "work-2",
     },
     {
-      sessionType: SessionType.SHORT_BREAK,
+      sessionType: "short_break",
       currentCycle: 2,
       remainingSeconds: 150,
       sessionDurationSeconds: 300,
       segmentKey: "break-2",
     },
     {
-      sessionType: SessionType.LONG_BREAK,
+      sessionType: "long_break",
       currentCycle: 4,
       remainingSeconds: 450,
       sessionDurationSeconds: 900,
       segmentKey: "break-4",
     },
-  ])(
+  ] as const)(
     "fills the running $sessionType against the length it started with",
     ({ segmentKey, ...timerState }) => {
       useTimerStore.setState({
@@ -102,7 +102,7 @@ describe("CycleProgress", () => {
       useTimerStore.setState({
         settings: createSettingsForTest({ longBreakInterval: 2 }),
         currentCycle: 3,
-        sessionType: SessionType.WORK,
+        sessionType: "work",
         remainingSeconds: 750,
         sessionDurationSeconds: 1500,
       });

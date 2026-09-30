@@ -1,13 +1,10 @@
+import type { RangedSettingField } from "@/ipc/generated";
 import { useState } from "react";
 import { useFocusHeadingOnMount } from "@/hooks/useFocusHeadingOnMount";
 import { useSettingsSave } from "@/hooks/useSettingsSave";
 import { useTimerStore } from "@/store/timerStore";
-import { TimerStatus } from "@/types/timer";
-import type {
-  RangedSettingField,
-  Settings,
-  SettingsChanges,
-} from "@/types/settings";
+
+import type { Settings, SettingsChanges } from "@/types/settings";
 import { DurationInput } from "./DurationInput";
 import {
   formatDurationInputText,
@@ -163,7 +160,7 @@ export function SettingsTimerPage({
           testId: "settings-interval",
         })}
 
-        {timerStatus !== TimerStatus.IDLE && (
+        {timerStatus !== "idle" && (
           <p
             className="text-xs text-text-muted"
             data-testid="settings-duration-applies-next-session"

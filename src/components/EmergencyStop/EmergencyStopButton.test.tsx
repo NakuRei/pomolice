@@ -11,7 +11,6 @@ import userEvent from "@testing-library/user-event";
 import { EmergencyStopButton } from "./EmergencyStopButton";
 import { useErrorStore } from "@/store/errorStore";
 import { useTimerStore } from "@/store/timerStore";
-import { TimerStatus, SessionType } from "@/types/timer";
 
 // Mock Tauri invoke
 vi.mock("@tauri-apps/api/core", () => ({
@@ -53,7 +52,7 @@ function renderEmergencyStopButton(): HTMLDivElement {
 }
 
 function renderWorkingEmergencyStopButton(): HTMLDivElement {
-  useTimerStore.setState({ status: TimerStatus.WORKING });
+  useTimerStore.setState({ status: "working" });
   return renderEmergencyStopButton();
 }
 
@@ -70,9 +69,9 @@ describe("EmergencyStopButton", () => {
     // Reset store to initial state
     useErrorStore.getState().clearAllErrors();
     useTimerStore.setState({
-      status: TimerStatus.IDLE,
+      status: "idle",
       remainingSeconds: 25 * 60,
-      sessionType: SessionType.WORK,
+      sessionType: "work",
       currentCycle: 0,
       completedPomodoros: 0,
       breakInteractionCount: 0,
@@ -225,7 +224,7 @@ describe("EmergencyStopButton", () => {
         within(dialog).getByRole("button", { name: "キャンセル" }),
       );
 
-      expect(useTimerStore.getState().status).toBe(TimerStatus.WORKING);
+      expect(useTimerStore.getState().status).toBe("working");
     });
 
     it("should close dialog after confirming", async () => {
@@ -293,7 +292,7 @@ describe("EmergencyStopButton", () => {
       const { invoke } = await import("@tauri-apps/api/core");
       const user = userEvent.setup();
       useTimerStore.setState({
-        status: TimerStatus.WORKING,
+        status: "working",
         remainingSeconds: 500,
         currentCycle: 2,
       });
@@ -310,7 +309,7 @@ describe("EmergencyStopButton", () => {
     it("should preserve pomodoro count (handled by backend)", async () => {
       const user = userEvent.setup();
       useTimerStore.setState({
-        status: TimerStatus.WORKING,
+        status: "working",
         completedPomodoros: 3,
         currentCycle: 3,
       });

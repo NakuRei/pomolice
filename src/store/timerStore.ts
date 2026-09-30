@@ -1,10 +1,25 @@
+import {
+  type TimerSnapshot,
+  type SettingsFileStatus,
+  type SettingsValidationIssue,
+  type PostBreakDecisionAction,
+  type PostBreakTransitionPolicy,
+  type TimerStatus,
+  type SessionType,
+  type TimerTickPayload,
+  type SessionCompletedPayload,
+  type BootAutoStartOfferPayload,
+  type ActiveWindowSummaryPayload,
+  type ActiveWindowChangedPayload,
+  type SettingsChangedPayload,
+  commands,
+} from "@/ipc/generated";
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
 import { immer } from "zustand/middleware/immer";
-import { invoke } from "@tauri-apps/api/core";
 import { useErrorStore } from "./errorStore";
 import { useTimerEffectsStore } from "./timerEffectsStore";
-import type { TimerSnapshot } from "@/types/timerEffects";
+
 import {
   classifyBackendError,
   formatPublicCommandErrorDetail,
@@ -15,25 +30,7 @@ import {
   settingsFromPayload,
   type Settings,
   type SettingsChanges,
-  type SettingsFileStatus,
-  type SettingsValidationIssue,
 } from "../types/settings";
-import type {
-  PostBreakDecisionAction,
-  PostBreakTransitionPolicy,
-} from "../types/sessionTransitionPolicy";
-
-import {
-  TimerStatus,
-  SessionType,
-  type SessionTypeValue,
-  type TimerTickPayload,
-  type SessionCompletedPayload,
-  type BootAutoStartOfferPayload,
-  type ActiveWindowSummaryPayload,
-  type ActiveWindowChangedPayload,
-  type SettingsChangedPayload,
-} from "@/types/timer";
 
 export type InfoMessageId = "auto_run_stop_pending" | "auto_run_stopped";
 
@@ -54,7 +51,7 @@ interface TimerState {
   /** Total length of the current session; it keeps the length the session
    * started with even after settings are saved. */
   sessionDurationSeconds: number;
-  sessionType: SessionTypeValue;
+  sessionType: SessionType;
   currentCycle: number;
   completedPomodoros: number;
   breakInteractionCount: number;
@@ -146,10 +143,10 @@ function shouldSuppressInfoMessageByTtl(
  * Initial state for the timer
  */
 const initialState: TimerState = {
-  status: TimerStatus.IDLE,
+  status: "idle",
   remainingSeconds: 25 * 60, // Will be updated from backend
   sessionDurationSeconds: 25 * 60, // Will be updated from backend
-  sessionType: SessionType.WORK,
+  sessionType: "work",
   currentCycle: 0,
   completedPomodoros: 0,
   breakInteractionCount: 0,
@@ -183,7 +180,7 @@ export const useTimerStore = create<TimerStore>()(
       // Backend decides manual_inside_window/manual_outside_window from server-side clock and schedule.
       start: async (): Promise<void> => {
         try {
-          const outcome = await invoke<TimerSnapshot>("start_work");
+          const outcome = await commands.startWork();
           useTimerEffectsStore.getState().observe(outcome.effects);
           useErrorStore.getState().clearError("start_work");
         } catch (error) {
@@ -212,10 +209,7 @@ export const useTimerStore = create<TimerStore>()(
         action: PostBreakDecisionAction,
       ): Promise<void> => {
         try {
-          const outcome = await invoke<TimerSnapshot>(
-            "resolve_post_break_decision",
-            { action },
-          );
+          const outcome = await commands.resolvePostBreakDecision(action);
           useTimerEffectsStore.getState().observe(outcome.effects);
           set((state) => {
             state.requiresManualContinueDecision = false;
@@ -245,7 +239,7 @@ export const useTimerStore = create<TimerStore>()(
       // Emergency stop
       emergencyStop: async (): Promise<void> => {
         try {
-          const outcome = await invoke<TimerSnapshot>("emergency_stop");
+          const outcome = await commands.emergencyStop();
           useTimerEffectsStore.getState().observe(outcome.effects);
           useErrorStore.getState().clearError("emergency_stop");
         } catch (error) {
@@ -274,9 +268,9 @@ export const useTimerStore = create<TimerStore>()(
         try {
           // Read settings from ordered events so a delayed reply cannot
           // overwrite a newer settings change.
-          const outcome = await invoke<TimerSnapshot>("update_settings", {
-            changes: settingsChangesToPayload(changes),
-          });
+          const outcome = await commands.updateSettings(
+            settingsChangesToPayload(changes),
+          );
           useTimerEffectsStore.getState().observe(outcome.effects);
           useErrorStore.getState().clearError("update_settings");
           return { status: "saved" };
@@ -323,9 +317,7 @@ export const useTimerStore = create<TimerStore>()(
 
       setAwayDuringBreak: async (away: boolean): Promise<void> => {
         try {
-          const outcome = await invoke<TimerSnapshot>("set_away_during_break", {
-            away,
-          });
+          const outcome = await commands.setAwayDuringBreak(away);
           useTimerEffectsStore.getState().observe(outcome.effects);
           useErrorStore.getState().clearError("set_away_during_break");
         } catch (error) {
@@ -353,10 +345,7 @@ export const useTimerStore = create<TimerStore>()(
         const previousError =
           useErrorStore.getState().errors.resolve_boot_auto_start_prompt;
         try {
-          const outcome = await invoke<TimerSnapshot>(
-            "resolve_boot_auto_start_prompt",
-            { startNow },
-          );
+          const outcome = await commands.resolveBootAutoStartPrompt(startNow);
           useTimerEffectsStore.getState().observe(outcome.effects);
           set((state) => {
             state.bootAutoStartOffer = null;

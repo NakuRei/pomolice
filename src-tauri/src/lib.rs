@@ -1,21 +1,21 @@
 use std::sync::Arc;
-use tauri::{async_runtime, Emitter, Manager};
+use tauri::{async_runtime, Manager};
 use tauri_plugin_notification::NotificationExt;
+use tauri_specta::Event as _;
 
 type RunResult = std::result::Result<(), Box<dyn std::error::Error>>;
 
 mod app_effects;
 mod break_lock;
-mod commands;
 mod error;
 mod external_adapters;
+mod ipc;
 mod log_redaction;
 mod logging_event;
 mod schedule_boundary;
 mod settings;
 mod state;
 mod timer_core;
-mod timer_effects;
 mod timer_runtime;
 mod tray_icon_renderer;
 mod types;
@@ -77,7 +77,7 @@ fn setup_app(app: &tauri::App) {
             on_escape_combo,
             on_input_detected,
             move || {
-                let _ = app_for_input_failure.emit_to("main", "input_monitor_failed", ());
+                let _ = ipc::events::InputMonitorFailed.emit_to(&app_for_input_failure, "main");
             },
         ));
     let has_persisted_state = restore_status == state::AppRestoreStatus::Restored;
@@ -128,17 +128,20 @@ fn app_context<R: tauri::Runtime>() -> tauri::Context<R> {
 pub fn run() -> RunResult {
     let tauri_context = app_context();
 
+    let ipc = ipc::builder();
+    let invoke_handler = ipc.invoke_handler();
     let app = tauri::Builder::default()
         // Raw Input registration interferes with rdev keyboard hooks on Windows while focused.
         .device_event_filter(tauri::DeviceEventFilter::Always)
         .plugin(external_adapters::logging::build_log_plugin())
         .plugin(tauri_plugin_notification::init())
-        .setup(|app| {
+        .setup(move |app| {
+            ipc.mount_events(app);
             setup_app(app);
             Ok(())
         })
         .on_window_event(handle_window_event)
-        .invoke_handler(commands::invoke_handler())
+        .invoke_handler(invoke_handler)
         .build(tauri_context)?;
 
     app.run(|app_handle, event| {
@@ -161,12 +164,11 @@ mod shared_tests;
 mod run_event_tests {
     use crate::external_adapters::clock::{testing::FixedClock, Clock};
     use crate::external_adapters::persistence::{PersistenceLoadOutcome, PersistenceManager};
+    use crate::ipc::settings::SettingsFileStatus;
     use crate::logging_event::{
         render_persistence_write_failure_message, PERSISTENCE_WRITE_TRIGGER_RUN_EVENT_EXIT,
     };
-    use crate::settings::{
-        PersistedSettings, SettingsFileStatus, UserSettings, SETTINGS_SCHEMA_VERSION,
-    };
+    use crate::settings::{PersistedSettings, UserSettings, SETTINGS_SCHEMA_VERSION};
     use crate::state;
     use crate::types::{
         PersistedState, ScheduleStopState, SessionDurationSecs, SessionType, TimerStatus,
@@ -241,7 +243,7 @@ mod run_event_tests {
         app_state
     }
 
-    fn full_state_at_startup(dir: &Path) -> crate::types::FullStatePayload {
+    fn full_state_at_startup(dir: &Path) -> crate::ipc::responses::FullStatePayload {
         let app_state = start_app_state(dir);
         tauri::async_runtime::block_on(app_state.timer.read_full_state()).timer
     }
@@ -302,7 +304,7 @@ mod run_event_tests {
 
         let full_state = full_state_at_startup(&temp_dir);
 
-        assert_eq!(full_state.settings, settings);
+        assert_eq!(full_state.settings, settings.into());
         assert_eq!(full_state.remaining_seconds, 50 * 60);
         assert_eq!(full_state.settings_file_status, SettingsFileStatus::Ok);
 
@@ -315,7 +317,7 @@ mod run_event_tests {
 
         let full_state = full_state_at_startup(&temp_dir);
 
-        assert_eq!(full_state.settings, UserSettings::default());
+        assert_eq!(full_state.settings, UserSettings::default().into());
         assert_eq!(full_state.settings_file_status, SettingsFileStatus::Ok);
 
         cleanup_temp_dir(&temp_dir);
@@ -329,7 +331,7 @@ mod run_event_tests {
 
         let full_state = full_state_at_startup(&temp_dir);
 
-        assert_eq!(full_state.settings, UserSettings::default());
+        assert_eq!(full_state.settings, UserSettings::default().into());
         assert_eq!(
             full_state.settings_file_status,
             SettingsFileStatus::Unusable

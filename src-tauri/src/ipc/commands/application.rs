@@ -1,12 +1,12 @@
 use tauri::{Manager, Runtime, WebviewWindow};
 
-use crate::commands::error_response::{BackendErrorCode, BackendErrorResponse};
-use crate::external_adapters::emergency_shortcut::{
-    EmergencyShortcutState, EmergencyShortcutStatus,
-};
+use crate::external_adapters::emergency_shortcut::EmergencyShortcutState;
 use crate::external_adapters::tray_icon;
+use crate::ipc::errors::{BackendErrorCode, BackendErrorResponse};
+use crate::ipc::responses::EmergencyShortcutStatus;
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn get_emergency_shortcut_status<R: Runtime>(
     window: WebviewWindow<R>,
 ) -> Result<EmergencyShortcutStatus, BackendErrorResponse> {
@@ -19,6 +19,7 @@ pub(crate) async fn get_emergency_shortcut_status<R: Runtime>(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn has_input_monitor_failed<R: Runtime>(
     window: WebviewWindow<R>,
 ) -> Result<bool, BackendErrorResponse> {
@@ -33,6 +34,7 @@ pub(crate) async fn has_input_monitor_failed<R: Runtime>(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn is_tray_available<R: Runtime>(
     window: WebviewWindow<R>,
 ) -> Result<bool, BackendErrorResponse> {
@@ -45,6 +47,7 @@ pub(crate) async fn is_tray_available<R: Runtime>(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn exit_without_tray<R: Runtime>(
     window: WebviewWindow<R>,
 ) -> Result<(), BackendErrorResponse> {

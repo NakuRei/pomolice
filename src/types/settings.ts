@@ -1,5 +1,11 @@
-import type { PostBreakTransitionPolicy } from "./sessionTransitionPolicy";
-import type { WeeklyAutoRunConfig, WeekdayKey } from "./weeklyAutoRun";
+import {
+  type SettingsChanges as SettingsWireChanges,
+  type PostBreakTransitionPolicy,
+  type WeekdayKey,
+  type SettingsInput,
+  type DaySlotInput,
+} from "@/ipc/generated";
+import type { WeeklyAutoRunConfig } from "./weeklyAutoRun";
 
 /**
  * User settings as the backend owns them. Durations are in seconds.
@@ -20,61 +26,6 @@ export interface Settings {
   notificationSoundMuted: boolean;
 }
 
-interface DaySlotPayload {
-  enabled: boolean;
-  start_time: string;
-  end_time: string;
-}
-
-/** Wire shape of `Settings`, shared by `update_settings` and the full state. */
-export interface SettingsPayload {
-  work_duration_secs: number;
-  short_break_duration_secs: number;
-  long_break_duration_secs: number;
-  long_break_interval: number;
-  post_break_transition_policy: PostBreakTransitionPolicy;
-  auto_run_feature_enabled: boolean;
-  weekly_auto_run_config: Record<WeekdayKey, DaySlotPayload>;
-  notification_sound_volume_percent: number;
-  notification_sound_muted: boolean;
-}
-
-/**
- * `unusable` means a settings file existed but could not be read, so the
- * backend runs on defaults until the user saves settings again.
- */
-export type SettingsFileStatus = "ok" | "unusable";
-
-export type RangedSettingField =
-  | "work_duration_secs"
-  | "short_break_duration_secs"
-  | "long_break_duration_secs"
-  | "long_break_interval"
-  | "notification_sound_volume_percent";
-
-/** One reason the backend rejected a settings save. */
-export type SettingsValidationIssue =
-  | {
-      code: "out_of_range";
-      field: RangedSettingField;
-      min: number;
-      max: number;
-    }
-  | {
-      code: "invalid_time";
-      weekday: WeekdayKey;
-      boundary: "start" | "end";
-    }
-  | {
-      code: "empty_time_range";
-      weekday: WeekdayKey;
-    }
-  | {
-      code: "overlapping_time_ranges";
-      primary_weekday: WeekdayKey;
-      secondary_weekday: WeekdayKey;
-    };
-
 function mapWeekdays<T>(
   build: (weekday: WeekdayKey) => T,
 ): Record<WeekdayKey, T> {
@@ -89,7 +40,7 @@ function mapWeekdays<T>(
   };
 }
 
-export function settingsFromPayload(payload: SettingsPayload): Settings {
+export function settingsFromPayload(payload: SettingsInput): Settings {
   const weeklyAutoRunConfig = mapWeekdays((weekday) => {
     const slot = payload.weekly_auto_run_config[weekday];
     return {
@@ -120,7 +71,7 @@ export type SettingsChanges = Partial<Settings>;
 
 function weeklyAutoRunConfigToPayload(
   weeklyAutoRunConfig: WeeklyAutoRunConfig,
-): Record<WeekdayKey, DaySlotPayload> {
+): Record<WeekdayKey, DaySlotInput> {
   return mapWeekdays((weekday) => {
     const slot = weeklyAutoRunConfig[weekday];
     return {
@@ -134,8 +85,8 @@ function weeklyAutoRunConfigToPayload(
 /** Wire shape of `SettingsChanges`: only the changed fields are present. */
 export function settingsChangesToPayload(
   changes: SettingsChanges,
-): Partial<SettingsPayload> {
-  const payload: Partial<SettingsPayload> = {};
+): SettingsWireChanges {
+  const payload: SettingsWireChanges = {};
   if (changes.workDurationSecs !== undefined) {
     payload.work_duration_secs = changes.workDurationSecs;
   }

@@ -1,7 +1,8 @@
+import type { PostBreakTransitionPolicy } from "@/ipc/generated";
 import { WEEKDAY_LABELS_BY_KEY } from "@/constants/weekdayLabels";
 import { useFocusHeadingOnMount } from "@/hooks/useFocusHeadingOnMount";
 import { useTimerStore } from "@/store/timerStore";
-import type { PostBreakTransitionPolicy } from "@/types/sessionTransitionPolicy";
+
 import type { Settings } from "@/types/settings";
 import { WEEKDAY_KEYS, type WeeklyAutoRunConfig } from "@/types/weeklyAutoRun";
 import { Button } from "../shared/Button";

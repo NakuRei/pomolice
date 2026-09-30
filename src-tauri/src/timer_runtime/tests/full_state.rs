@@ -102,7 +102,7 @@ async fn a_tick_closes_the_startup_offer_and_announces_it_once() {
         .is_none());
     assert_eq!(
         sink.emitted_payloads("boot_auto_start_offer_closed"),
-        vec![serde_json::json!({})]
+        vec![serde_json::Value::Null]
     );
 }
 

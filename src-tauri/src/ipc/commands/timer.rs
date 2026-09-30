@@ -1,38 +1,44 @@
 use tauri::{Manager, Runtime, State, WebviewWindow};
 
-use crate::commands::input_rejection::ObservedCommandArg;
-use crate::error::{PomoliceError, Result};
+use crate::error::PomoliceError;
+use crate::ipc::errors::BackendErrorResponse;
+use crate::ipc::input::ObservedCommandArg;
+use crate::ipc::responses::TimerSnapshot;
+use crate::ipc::settings::SettingsChanges;
 use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
-use crate::settings::SettingsChanges;
 use crate::state::AppState;
 use crate::timer_core::Event;
-use crate::timer_effects::TimerSnapshot;
 use crate::types::{BreakAttendance, PostBreakDecisionAction};
 
 /// Start a work session with the saved settings.
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn start_work<R: Runtime>(
     window: WebviewWindow<R>,
     state: State<'_, AppState>,
-) -> Result<TimerSnapshot> {
+) -> Result<TimerSnapshot, BackendErrorResponse> {
     log_command_invoked("start_work", &window);
-    authorize_main_window(&window, "start_work")?;
+    authorize_main_window(&window, "start_work")
+        .map_err(|error| BackendErrorResponse::from(&error))?;
     state
         .timer
         .dispatch(window.app_handle(), Event::StartWorkRequested)
         .await
+        .map_err(|error| BackendErrorResponse::from(&error))
 }
 
 /// Resolve manual post-break decision from continue dialog.
 ///
 /// This command is valid only while `post_break_decision_pending = true`.
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn resolve_post_break_decision<R: Runtime>(
     window: WebviewWindow<R>,
     state: State<'_, AppState>,
     action: ObservedCommandArg<PostBreakDecisionAction>,
-) -> Result<TimerSnapshot> {
-    authorize_main_window(&window, "resolve_post_break_decision")?;
+) -> Result<TimerSnapshot, BackendErrorResponse> {
+    authorize_main_window(&window, "resolve_post_break_decision")
+        .map_err(|error| BackendErrorResponse::from(&error))?;
     let action = action.into_inner();
     state
         .timer
@@ -41,17 +47,20 @@ pub(crate) async fn resolve_post_break_decision<R: Runtime>(
             Event::PostBreakDecisionResolved { action },
         )
         .await
+        .map_err(|error| BackendErrorResponse::from(&error))
 }
 
 /// Valid only while the timer is on break.
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn set_away_during_break<R: Runtime>(
     window: WebviewWindow<R>,
     state: State<'_, AppState>,
     away: ObservedCommandArg<bool>,
-) -> Result<TimerSnapshot> {
+) -> Result<TimerSnapshot, BackendErrorResponse> {
     log_command_invoked("set_away_during_break", &window);
-    authorize_main_window(&window, "set_away_during_break")?;
+    authorize_main_window(&window, "set_away_during_break")
+        .map_err(|error| BackendErrorResponse::from(&error))?;
     let attendance = BreakAttendance::from_away_flag(away.into_inner());
     state
         .timer
@@ -60,20 +69,24 @@ pub(crate) async fn set_away_during_break<R: Runtime>(
             Event::BreakAttendanceSet { attendance },
         )
         .await
+        .map_err(|error| BackendErrorResponse::from(&error))
 }
 
 /// Emergency stop - reset all state
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn emergency_stop<R: Runtime>(
     window: WebviewWindow<R>,
     state: State<'_, AppState>,
-) -> Result<TimerSnapshot> {
+) -> Result<TimerSnapshot, BackendErrorResponse> {
     log_command_invoked("emergency_stop", &window);
-    authorize_main_window(&window, "emergency_stop")?;
+    authorize_main_window(&window, "emergency_stop")
+        .map_err(|error| BackendErrorResponse::from(&error))?;
     state
         .timer
         .dispatch(window.app_handle(), Event::EmergencyStopRequested)
         .await
+        .map_err(|error| BackendErrorResponse::from(&error))
 }
 
 /// Change the given user settings; the rest keep their values. Accepted in
@@ -81,51 +94,61 @@ pub(crate) async fn emergency_stop<R: Runtime>(
 /// apply from the next one. A rejected save changes nothing and names every
 /// input to fix.
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn update_settings<R: Runtime>(
     window: WebviewWindow<R>,
     state: State<'_, AppState>,
     changes: ObservedCommandArg<SettingsChanges>,
-) -> Result<TimerSnapshot> {
+) -> Result<TimerSnapshot, BackendErrorResponse> {
     log_command_invoked("update_settings", &window);
-    authorize_main_window(&window, "update_settings")?;
+    authorize_main_window(&window, "update_settings")
+        .map_err(|error| BackendErrorResponse::from(&error))?;
     state
         .timer
         .update_settings(window.app_handle(), changes.into_inner())
         .await
+        .map_err(|error| BackendErrorResponse::from(&error))
 }
 
 /// Read the current state without advancing the timer.
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn get_full_state<R: Runtime>(
     window: WebviewWindow<R>,
     state: State<'_, AppState>,
-) -> Result<TimerSnapshot> {
-    authorize_main_window(&window, "get_full_state")?;
+) -> Result<TimerSnapshot, BackendErrorResponse> {
+    authorize_main_window(&window, "get_full_state")
+        .map_err(|error| BackendErrorResponse::from(&error))?;
     Ok(state.timer.read_full_state().await)
 }
 
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn retry_failed_timer_effects<R: Runtime>(
     window: WebviewWindow<R>,
     state: State<'_, AppState>,
-) -> Result<TimerSnapshot> {
-    authorize_main_window(&window, "retry_failed_timer_effects")?;
+) -> Result<TimerSnapshot, BackendErrorResponse> {
+    authorize_main_window(&window, "retry_failed_timer_effects")
+        .map_err(|error| BackendErrorResponse::from(&error))?;
     Ok(state.timer.retry_failed_effects(window.app_handle()).await)
 }
 
 /// Resolve startup auto-start confirmation prompt.
 #[tauri::command]
+#[specta::specta]
 pub(crate) async fn resolve_boot_auto_start_prompt<R: Runtime>(
     window: WebviewWindow<R>,
     state: State<'_, AppState>,
     start_now: ObservedCommandArg<bool>,
-) -> Result<TimerSnapshot> {
-    authorize_main_window(&window, "resolve_boot_auto_start_prompt")?;
+) -> Result<TimerSnapshot, BackendErrorResponse> {
+    authorize_main_window(&window, "resolve_boot_auto_start_prompt")
+        .map_err(|error| BackendErrorResponse::from(&error))?;
     let start_now = start_now.into_inner();
     state
         .timer
         .dispatch(window.app_handle(), Event::BootPromptResolved { start_now })
         .await
+        .map_err(|error| BackendErrorResponse::from(&error))
 }
 
 fn log_command_invoked<R: Runtime>(command_name: &'static str, window: &WebviewWindow<R>) {
@@ -138,7 +161,7 @@ fn log_command_invoked<R: Runtime>(command_name: &'static str, window: &WebviewW
     );
 }
 
-fn authorize_main_window_label(window_label: &str) -> Result<()> {
+fn authorize_main_window_label(window_label: &str) -> crate::error::Result<()> {
     if window_label == "main" {
         return Ok(());
     }
@@ -149,7 +172,7 @@ fn authorize_main_window_label(window_label: &str) -> Result<()> {
 fn authorize_main_window<R: Runtime>(
     window: &WebviewWindow<R>,
     command_name: &'static str,
-) -> Result<()> {
+) -> crate::error::Result<()> {
     let window_label = window.label();
     if let Err(error) = authorize_main_window_label(window_label) {
         log_warn_event(

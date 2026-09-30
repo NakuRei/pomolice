@@ -4,8 +4,9 @@ use super::boot_auto_start::initial_boot_auto_start_offer;
 use super::phase::{BreakKind, BreakSessionState, TimerPhase};
 use super::schedule::ScheduleState;
 use super::TimerCore;
+use crate::ipc::settings::SettingsFileStatus;
 use crate::logging_event::{log_warn_event, BackendLogEvent};
-use crate::settings::{SettingsFileStatus, UserSettings};
+use crate::settings::UserSettings;
 use crate::types::{
     LongBreakDurationSecs, PersistedState, ScheduleStopState, SessionDurationSecs, SessionType,
     ShortBreakDurationSecs, TimerStatus, WorkDurationSecs,

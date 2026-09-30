@@ -19,7 +19,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 import { useErrorStore } from "./errorStore";
 import { useTimerStore } from "./timerStore";
-import { SessionType, TimerStatus } from "@/types/timer";
+
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import {
   createSettingsForTest,
@@ -51,12 +51,12 @@ describe("timerStore settings saving", () => {
       const settings = createSettingsForTest();
       useTimerStore.setState({
         settings,
-        status: TimerStatus.ON_BREAK,
-        sessionType: SessionType.SHORT_BREAK,
+        status: "on_break",
+        sessionType: "short_break",
         remainingSeconds: 299,
       });
       useTimerEffectsStore.getState().observe({
-        revision: 2,
+        revision: "2",
         last_timer_save: null,
         break_lock: {
           target: "locked",
@@ -70,7 +70,7 @@ describe("timerStore settings saving", () => {
 
       const state = useTimerStore.getState();
       expect(state.settings).toBe(stateBeforeTheReply.settings);
-      expect(state.status).toBe(TimerStatus.ON_BREAK);
+      expect(state.status).toBe("on_break");
       expect(state.remainingSeconds).toBe(299);
       expect(selectBreakLockObservation(useTimerEffectsStore.getState())).toBe(
         "locked",

@@ -4,21 +4,21 @@
 
 use std::time::Duration;
 
-use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 use tokio::time::MissedTickBehavior;
 
 use crate::break_lock;
 use crate::external_adapters::tray_icon;
+use crate::ipc::responses::TimerTickPayload;
 use crate::state::AppState;
 use crate::timer_core::Event;
 use crate::timer_runtime::EffectSink;
-use crate::types::TimerTickPayload;
 
 const TICK_INTERVAL: Duration = Duration::from_secs(1);
 
 impl<R: Runtime> EffectSink for AppHandle<R> {
-    fn emit(&self, event_name: &str, payload: &(impl serde::Serialize + Clone)) {
-        let _ = Emitter::emit(self, event_name, payload);
+    fn emit<E: tauri_specta::Event + serde::Serialize + Clone>(&self, payload: &E) {
+        let _ = payload.emit(self);
     }
 
     fn update_tray(&self, payload: &TimerTickPayload) {

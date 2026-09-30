@@ -1,3 +1,4 @@
+import type { SessionType } from "@/ipc/generated";
 /**
  * Notifications Service
  * Wrapper for Tauri notification commands
@@ -13,7 +14,6 @@ import { resolveResource } from "@tauri-apps/api/path";
 import { createLogger } from "../logging/logger";
 import { FRONTEND_LOG_EVENT_IDS } from "../logging/logEvents";
 import { useTimerStore } from "../store/timerStore";
-import { type SessionTypeValue } from "@/types/timer";
 
 const notificationSoundResourcePathByType = {
   work: "resources/sounds/work.wav",
@@ -300,7 +300,7 @@ async function sendSessionCompleteNotification(
  * Show notification when work session is complete
  */
 export async function notifyWorkComplete(
-  nextSessionType: SessionTypeValue | null,
+  nextSessionType: SessionType | null,
 ): Promise<void> {
   const nextSessionSoundType =
     nextSessionType === "long_break" ? "long_break" : "short_break";

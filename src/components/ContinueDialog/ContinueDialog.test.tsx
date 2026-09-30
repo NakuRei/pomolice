@@ -10,7 +10,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { ContinueDialog } from "./ContinueDialog";
 import { useTimerStore } from "@/store/timerStore";
-import { TimerStatus, SessionType } from "@/types/timer";
+
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 
 type ResolvePostBreakDecision = ReturnType<
@@ -40,9 +40,9 @@ describe("ContinueDialog", () => {
   beforeEach(() => {
     resetTimerStoreForTest();
     useTimerStore.setState({
-      status: TimerStatus.IDLE,
+      status: "idle",
       remainingSeconds: 25 * 60,
-      sessionType: SessionType.WORK,
+      sessionType: "work",
       currentCycle: 0,
       completedPomodoros: 0,
       breakInteractionCount: 0,
@@ -101,7 +101,7 @@ describe("ContinueDialog", () => {
     beforeEach(() => {
       useTimerStore.setState({
         requiresManualContinueDecision: true,
-        status: TimerStatus.IDLE,
+        status: "idle",
         currentCycle: 2,
         completedPomodoros: 2,
       });

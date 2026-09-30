@@ -1,3 +1,4 @@
+import type { BackendErrorCode } from "@/ipc/generated";
 import { describe, expect, it } from "vitest";
 import {
   classifyBackendError,
@@ -5,7 +6,6 @@ import {
   formatPublicCommandErrorDetail,
   settingsValidationIssuesOf,
   type BackendErrorClassification,
-  type BackendErrorCode,
 } from "./classifyBackendError";
 
 function expectOnlyClassificationResponsibilities(

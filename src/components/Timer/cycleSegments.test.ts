@@ -1,10 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { deriveCycleSegments, type CycleSegmentsInput } from "./cycleSegments";
-import { SessionType } from "@/types/timer";
 
 const BASE_INPUT: CycleSegmentsInput = {
   currentCycle: 0,
-  sessionType: SessionType.WORK,
+  sessionType: "work",
   remainingSeconds: 1500,
   sessionDurationSeconds: 1500,
   longBreakInterval: 4,
@@ -62,10 +61,10 @@ describe("deriveCycleSegments", () => {
   });
 
   it("fills the running work segment by elapsed time", () => {
-    const input = {
+    const input: CycleSegmentsInput = {
       ...BASE_INPUT,
       currentCycle: 1,
-      sessionType: SessionType.WORK,
+      sessionType: "work",
       remainingSeconds: 1125,
     };
 
@@ -78,10 +77,10 @@ describe("deriveCycleSegments", () => {
   });
 
   it("completes the work segment once its break has started", () => {
-    const input = {
+    const input: CycleSegmentsInput = {
       ...BASE_INPUT,
       currentCycle: 1,
-      sessionType: SessionType.SHORT_BREAK,
+      sessionType: "short_break",
       remainingSeconds: 150,
       sessionDurationSeconds: 300,
     };
@@ -96,10 +95,10 @@ describe("deriveCycleSegments", () => {
   });
 
   it("completes every segment of the cycles already passed", () => {
-    const input = {
+    const input: CycleSegmentsInput = {
       ...BASE_INPUT,
       currentCycle: 3,
-      sessionType: SessionType.WORK,
+      sessionType: "work",
       remainingSeconds: 1500,
     };
 
@@ -114,10 +113,10 @@ describe("deriveCycleSegments", () => {
   });
 
   it("measures the running session against the duration it started with", () => {
-    const input = {
+    const input: CycleSegmentsInput = {
       ...BASE_INPUT,
       currentCycle: 4,
-      sessionType: SessionType.LONG_BREAK,
+      sessionType: "long_break",
       remainingSeconds: 300,
       sessionDurationSeconds: 1200,
     };
@@ -128,10 +127,10 @@ describe("deriveCycleSegments", () => {
   });
 
   it("shows a cycle past the interval as the last cycle, before the long break", () => {
-    const input = {
+    const input: CycleSegmentsInput = {
       ...BASE_INPUT,
       currentCycle: 5,
-      sessionType: SessionType.WORK,
+      sessionType: "work",
       remainingSeconds: 750,
       longBreakInterval: 3,
     };
@@ -149,7 +148,7 @@ describe("deriveCycleSegments", () => {
   });
 
   it("follows the configured cycle count", () => {
-    const input = { ...BASE_INPUT, longBreakInterval: 2 };
+    const input: CycleSegmentsInput = { ...BASE_INPUT, longBreakInterval: 2 };
 
     expect(deriveCycleSegments(input).map((segment) => segment.key)).toEqual([
       "work-1",
