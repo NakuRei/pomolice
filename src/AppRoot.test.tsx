@@ -5,7 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { AppRoot } from "./AppRoot";
 import { useTimerObservationStore } from "./store/timerObservationStore";
 import { useTimerSyncStore } from "./store/timerSyncStore";
-import { useTimerOperationStore } from "./store/timerOperationStore";
+import { useTimerOperationStore } from "./operations/operationStore";
 import { useSkipFlowStore } from "./store/skipFlowStore";
 import { resetTimerStoreForTest } from "./test/resetTimerStore";
 import {

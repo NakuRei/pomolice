@@ -13,7 +13,10 @@ import type {
   ActiveWindowChangedPayload,
   SettingsChangedPayload,
 } from "@/ipc/generated";
-import { settingsFromPayload, type Settings } from "@/types/settings";
+import {
+  settingsFromPayload,
+  type Settings,
+} from "@/features/settings/settings";
 import type { BreakLockObservation } from "@/types/timerEffects";
 
 interface TimerObservations {

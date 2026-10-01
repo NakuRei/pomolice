@@ -24,7 +24,7 @@ vi.mock("@/services/notifications", () => ({
 
 import { createSettingsForTest } from "@/test/settingsFixture";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
-import type { Settings } from "@/types/settings";
+import type { Settings } from "../settings";
 import { playNotificationSoundPreview } from "@/services/notifications";
 import { SettingsNotificationPage } from "./SettingsNotificationPage";
 

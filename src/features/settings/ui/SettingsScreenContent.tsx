@@ -1,5 +1,5 @@
 import { useTimerObservationStore } from "@/store/timerObservationStore";
-import type { AppScreen, SettingsScreen } from "../../types/appScreen";
+import type { AppScreen, SettingsScreen } from "@/types/appScreen";
 import { SettingsAutoRunPage } from "./SettingsAutoRunPage";
 import { SettingsNotificationPage } from "./SettingsNotificationPage";
 import { SettingsScreenLayout } from "./SettingsScreenLayout";

@@ -4,7 +4,7 @@ import type {
   OperationOutcome,
   TimerOperation,
   TimerOperationKind,
-} from "@/timer/operation";
+} from "./operation";
 interface TimerOperations {
   operations: Partial<Record<TimerOperationKind, OperationRecord>>;
   nextId: number;

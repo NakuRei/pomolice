@@ -1,5 +1,5 @@
 import { useTimerObservationStore } from "@/store/timerObservationStore";
-import { useTimerOperationStore } from "@/store/timerOperationStore";
+import { useTimerOperationStore } from "@/operations/operationStore";
 import { useTimerSyncStore } from "@/store/timerSyncStore";
 import { useTimerNoticeStore } from "@/store/timerNoticeStore";
 export function resetTimerStoreForTest(): void {

@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HomeScreen, type HomeScreenProps } from "./HomeScreen";
-import { useTimerOperationStore } from "@/store/timerOperationStore";
+import { useTimerOperationStore } from "@/operations/operationStore";
 
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { createSettingsForTest } from "@/test/settingsFixture";

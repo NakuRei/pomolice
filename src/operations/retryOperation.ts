@@ -1,16 +1,16 @@
 import { useTimerObservationStore } from "@/store/timerObservationStore";
 import type { OperationRecord, TimerOperation } from "./operation";
-import { useTimerOperationStore } from "@/store/timerOperationStore";
+import { useTimerOperationStore } from "./operationStore";
 import { classifyCommandFailure } from "@/errors/classifyBackendError";
 import {
   startWork,
   emergencyStop,
   resolvePostBreakDecision,
   setAwayDuringBreak,
-  saveSettings,
   resolveBootAutoStartPrompt,
   retryFailedEffects,
-} from "./commands";
+} from "@/timer/commands";
+import { saveSettings } from "@/features/settings/commands";
 
 export function canRetryOperation(
   record: OperationRecord,

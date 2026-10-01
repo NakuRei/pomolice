@@ -1,9 +1,6 @@
 import { useTimerObservationStore } from "@/store/timerObservationStore";
-import {
-  emergencyStop,
-  setAwayDuringBreak,
-  toggleNotificationSoundMuted,
-} from "@/timer/commands";
+import { emergencyStop, setAwayDuringBreak } from "@/timer/commands";
+import { toggleNotificationSoundMuted } from "@/features/settings/commands";
 
 import { useSkipFlowStore } from "@/store/skipFlowStore";
 import { FootprintsIcon, SkipForwardIcon } from "@/components/icons/AppIcons";

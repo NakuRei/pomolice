@@ -6,7 +6,7 @@ import {
   saveSettings,
   toggleNotificationSoundMuted,
   savePostBreakTransitionPolicy,
-} from "@/timer/commands";
+} from "./commands";
 import { createTimerSnapshotForTest } from "@/test/timerEffectsFixture";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -22,15 +22,12 @@ vi.mock("@tauri-apps/api/core", () => ({
     mockInvoke(command, args),
 }));
 
-import { useTimerOperationStore } from "@/store/timerOperationStore";
+import { useTimerOperationStore } from "@/operations/operationStore";
 
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
-import {
-  createSettingsForTest,
-  settingsPayloadForTest,
-} from "@/test/settingsFixture";
+import { createSettingsForTest } from "@/test/settingsFixture";
 
-describe("timerStore settings saving", () => {
+describe("settings commands", () => {
   beforeEach(() => {
     mockInvoke.mockReset();
     useTimerOperationStore.setState(
@@ -219,20 +216,6 @@ describe("timerStore settings saving", () => {
           post_break_transition_policy: "start_next_work_automatically",
         },
       });
-    });
-  });
-
-  describe("observeSettingsChanged()", () => {
-    it("takes the settings and file status the backend announces", () => {
-      const settings = createSettingsForTest({ notificationSoundMuted: true });
-
-      useTimerObservationStore.getState().observeSettingsChanged({
-        settings: settingsPayloadForTest(settings),
-        settings_file_status: "ok",
-      });
-
-      expect(useTimerObservationStore.getState().settings).toEqual(settings);
-      expect(useTimerObservationStore.getState().settingsFileStatus).toBe("ok");
     });
   });
 

@@ -1,23 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { useTimerObservationStore } from "@/store/timerObservationStore";
-import { useTimerOperationStore } from "@/store/timerOperationStore";
+import { useTimerOperationStore } from "./operationStore";
 import {
   startWork,
   emergencyStop,
   resolvePostBreakDecision,
   resolveBootAutoStartPrompt,
 } from "@/timer/commands";
-import {
-  canRetryOperation,
-  retryRejectedOperation,
-} from "@/timer/retryOperation";
+import { canRetryOperation, retryRejectedOperation } from "./retryOperation";
 import {
   classifyCommandFailure,
   formatCommandFailureDetail,
 } from "@/errors/classifyBackendError";
 import type { TimerSnapshot } from "@/ipc/generated";
-import type { TimerCommandResult } from "@/timer/operation";
+import type { TimerCommandResult } from "./operation";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { createBootAutoStartOfferForTest } from "@/test/bootAutoStartOfferFixture";
 import {

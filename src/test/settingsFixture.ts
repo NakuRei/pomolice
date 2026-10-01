@@ -1,9 +1,12 @@
 import type { SettingsInput } from "@/ipc/generated";
-import { settingsChangesToPayload, type Settings } from "@/types/settings";
+import {
+  settingsChangesToPayload,
+  type Settings,
+} from "@/features/settings/settings";
 import type {
   DayAutoRunSlot,
   WeeklyAutoRunConfig,
-} from "@/types/weeklyAutoRun";
+} from "@/features/settings/weeklyAutoRun";
 
 const DISABLED_DAY: DayAutoRunSlot = {
   enabled: false,

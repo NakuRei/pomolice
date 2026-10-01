@@ -1,6 +1,6 @@
 import type { RefObject } from "react";
 import { BackArrowIcon } from "@/components/icons/AppIcons";
-import { IconButton } from "../shared/IconButton";
+import { IconButton } from "@/components/shared/IconButton";
 
 interface SettingsPageHeaderProps {
   title: string;

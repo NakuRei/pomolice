@@ -19,7 +19,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 import { createSettingsForTest } from "@/test/settingsFixture";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
-import type { Settings } from "@/types/settings";
+import type { Settings } from "../settings";
 import { SettingsTimerPage } from "./SettingsTimerPage";
 
 function acceptSettingsSaves(): void {

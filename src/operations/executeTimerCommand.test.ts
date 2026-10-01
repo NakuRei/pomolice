@@ -1,22 +1,19 @@
-import {
-  useTimerObservationStore,
-  selectBreakLockObservation,
-} from "@/store/timerObservationStore";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
+import { useTimerObservationStore } from "@/store/timerObservationStore";
+import { useTimerOperationStore } from "@/operations/operationStore";
 import {
   startWork,
   emergencyStop,
   resolvePostBreakDecision,
   setAwayDuringBreak,
-  saveSettings,
   resolveBootAutoStartPrompt,
-  retryFailedEffects,
 } from "@/timer/commands";
-import { canRetryOperation } from "@/timer/retryOperation";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { invoke } from "@tauri-apps/api/core";
-import { useTimerOperationStore } from "@/store/timerOperationStore";
+import { saveSettings } from "@/features/settings/commands";
+import { canRetryOperation } from "./retryOperation";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { createBootAutoStartOfferForTest } from "@/test/bootAutoStartOfferFixture";
+import type { CommandResponse, TimerSnapshot } from "@/ipc/generated";
 import {
   createTimerEffectsForTest,
   createTimerSnapshotForTest,
@@ -24,7 +21,7 @@ import {
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
-describe("accepted timer operations", () => {
+describe("timer command execution", () => {
   beforeEach(() => {
     vi.mocked(invoke).mockReset();
     resetTimerStoreForTest();
@@ -127,86 +124,47 @@ describe("accepted timer operations", () => {
     },
   );
 
-  it("does not resurrect a failure from an old reply after recovery", () => {
-    useTimerObservationStore.getState().observeEffects(
-      createTimerEffectsForTest({
-        revision: "3",
-        last_timer_save: "succeeded",
-      }),
-    );
+  it("retains an unknown result when its notice is dismissed or state is observed", async () => {
+    vi.mocked(invoke).mockRejectedValue({ code: "rate_limited" });
+    expect((await startWork()).status).toBe("unavailable");
+    const record = useTimerOperationStore.getState().operations.start_work;
+    if (!record) throw new Error("missing operation");
+    useTimerOperationStore.getState().dismiss("start_work", record.id);
     useTimerObservationStore
       .getState()
-      .observeEffects(
-        createTimerEffectsForTest({ revision: "2", last_timer_save: "failed" }),
-      );
-    expect(useTimerObservationStore.getState().effects?.last_timer_save).toBe(
-      "succeeded",
-    );
-  });
-
-  it("retries the failed effects without resending the accepted timer command", async () => {
-    useTimerObservationStore
-      .getState()
-      .observeEffects(
-        createTimerEffectsForTest({ revision: "1", last_timer_save: "failed" }),
-      );
-    vi.mocked(invoke).mockResolvedValue({
-      status: "accepted",
-      value: createTimerSnapshotForTest({
-        effects: createTimerEffectsForTest({
-          revision: "2",
-          last_timer_save: "succeeded",
-        }),
-      }),
+      .observeFullState(createTimerSnapshotForTest());
+    expect(
+      useTimerOperationStore.getState().operations.start_work,
+    ).toMatchObject({
+      outcome: { status: "unavailable" },
+      dismissed: true,
     });
-    await retryFailedEffects();
-    expect(invoke).toHaveBeenCalledExactlyOnceWith(
-      "retry_failed_timer_effects",
-    );
-    expect(useTimerObservationStore.getState().effects?.last_timer_save).toBe(
-      "succeeded",
-    );
+    expect(invoke).toHaveBeenCalledTimes(1);
   });
-});
 
-describe("lock observation", () => {
-  it.each([
-    { attempt: null, observed: "unknown" },
-    { attempt: { action: "enter", status: "succeeded" }, observed: "locked" },
-    {
-      attempt: { action: "release", status: "succeeded" },
-      observed: "unlocked",
-    },
-    { attempt: { action: "enter", status: "failed" }, observed: "unknown" },
-    { attempt: { action: "release", status: "failed" }, observed: "unknown" },
-  ] as const)("derives $observed from $attempt", ({ attempt, observed }) => {
-    expect(
-      selectBreakLockObservation({
-        effects: createTimerEffectsForTest({
-          break_lock: { target: "unlocked", last_attempt: attempt },
+  it("does not let a late reply erase the result of a newer settings request", async () => {
+    let finish: (value: CommandResponse<TimerSnapshot>) => void = () => {
+      throw new Error("missing first request");
+    };
+    vi.mocked(invoke).mockImplementationOnce(
+      () =>
+        new Promise<CommandResponse<TimerSnapshot>>((resolve) => {
+          finish = resolve;
         }),
-      }),
-    ).toBe(observed);
-  });
-
-  it("never treats a failed release as a confirmed lock or a timer phase", () => {
-    resetTimerStoreForTest();
-    useTimerObservationStore.getState().observeEffects(
-      createTimerEffectsForTest({
-        revision: "1",
-        break_lock: {
-          target: "unlocked",
-          last_attempt: { action: "release", status: "failed" },
-        },
-      }),
     );
+    const first = saveSettings({ notificationSoundMuted: true });
+    vi.mocked(invoke).mockResolvedValueOnce({
+      status: "rejected",
+      error: { code: "persistence_error" },
+    });
+    await saveSettings({ notificationSoundMuted: false });
+    finish({ status: "accepted", value: createTimerSnapshotForTest() });
+    await first;
     expect(
-      selectBreakLockObservation(useTimerObservationStore.getState()),
-    ).toBe("unknown");
-    expect(useTimerObservationStore.getState().status).toBeNull();
-    expect(
-      useTimerObservationStore.getState().effects?.break_lock.last_attempt
-        ?.status,
-    ).toBe("failed");
+      useTimerOperationStore.getState().operations.update_settings?.outcome,
+    ).toEqual({
+      status: "rejected",
+      error: { code: "persistence_error" },
+    });
   });
 });

@@ -2,12 +2,12 @@ import {
   useTimerObservationStore,
   selectBreakLockObservation,
 } from "@/store/timerObservationStore";
-import { toggleNotificationSoundMuted } from "@/timer/commands";
+import { toggleNotificationSoundMuted } from "@/features/settings/commands";
 import { useEffect, useState } from "react";
 import { AppShell } from "./AppShell";
 import { FullscreenBreak } from "./components/BreakScreen/FullscreenBreak";
 import { HomeScreen } from "./components/Home/HomeScreen";
-import { SettingsScreenContent } from "./components/Settings/SettingsScreenContent";
+import { SettingsScreenContent } from "./features/settings/ui/SettingsScreenContent";
 import { useTimerSync } from "./hooks/useTimerSync";
 import type { AppScreen, SettingsScreen } from "./types/appScreen";
 

@@ -1,7 +1,7 @@
 import { useTimerObservationStore } from "@/store/timerObservationStore";
 import type { SessionType } from "@/ipc/generated";
 
-import type { Settings } from "@/types/settings";
+import type { Settings } from "@/features/settings/settings";
 import { formatDurationText } from "../shared/durationText";
 
 function configuredDurationSeconds(

@@ -1,5 +1,5 @@
 import { useTimerObservationStore } from "@/store/timerObservationStore";
-import { useTimerOperationStore } from "@/store/timerOperationStore";
+import { useTimerOperationStore } from "@/operations/operationStore";
 import { retryFailedEffects } from "@/timer/commands";
 import type { TimerEffectsState } from "@/ipc/generated";
 import { StatusNotice } from "./StatusNotice";

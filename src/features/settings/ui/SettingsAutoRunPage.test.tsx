@@ -21,7 +21,7 @@ import {
   createWeeklyAutoRunConfigForTest,
 } from "@/test/settingsFixture";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
-import type { Settings } from "@/types/settings";
+import type { Settings } from "../settings";
 import { SettingsAutoRunPage } from "./SettingsAutoRunPage";
 
 function acceptSettingsSaves(): void {

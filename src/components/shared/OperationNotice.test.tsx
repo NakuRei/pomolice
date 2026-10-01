@@ -2,7 +2,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { OperationNotice } from "./OperationNotice";
-import { useTimerOperationStore } from "@/store/timerOperationStore";
+import { useTimerOperationStore } from "@/operations/operationStore";
 import { startWork, emergencyStop } from "@/timer/commands";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { createTimerSnapshotForTest } from "@/test/timerEffectsFixture";

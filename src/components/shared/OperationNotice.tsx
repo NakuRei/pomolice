@@ -1,15 +1,15 @@
 import { useTimerObservationStore } from "@/store/timerObservationStore";
 import { useEffect } from "react";
-import { useTimerOperationStore } from "@/store/timerOperationStore";
+import { useTimerOperationStore } from "@/operations/operationStore";
 import { classifyCommandFailure } from "@/errors/classifyBackendError";
 import {
   canRetryOperation,
   retryRejectedOperation,
-} from "@/timer/retryOperation";
+} from "@/operations/retryOperation";
 import {
   getOperationFailure,
   type TimerOperationKind,
-} from "@/timer/operation";
+} from "@/operations/operation";
 import type { CommandFailure } from "@/ipc/receiveCommandResponse";
 import { WarningTriangleIcon } from "@/components/icons/AppIcons";
 import { StatusNotice } from "./StatusNotice";

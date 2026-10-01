@@ -1,4 +1,4 @@
-import { Button } from "../shared/Button";
+import { Button } from "@/components/shared/Button";
 
 /**
  * Shared action row for settings editor pages.

@@ -22,7 +22,7 @@ import {
   createWeeklyAutoRunConfigForTest,
 } from "@/test/settingsFixture";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
-import type { Settings } from "@/types/settings";
+import type { Settings } from "../settings";
 import { SettingsTopPage } from "./SettingsTopPage";
 
 function savedSettingsChanges(): Partial<SettingsInput>[] {

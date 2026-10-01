@@ -4,7 +4,7 @@ import type {
   TimerSnapshot,
 } from "@/ipc/generated";
 import type { CommandFailure } from "@/ipc/receiveCommandResponse";
-import type { SettingsChanges } from "@/types/settings";
+import type { SettingsChanges } from "@/features/settings/settings";
 
 export type TimerOperation =
   | { kind: "start_work" }

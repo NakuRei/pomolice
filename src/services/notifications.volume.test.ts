@@ -7,7 +7,7 @@ import {
   type MockHtmlAudio,
   resetMockHtmlAudio,
 } from "@/test/mockHtmlAudio";
-import type { Settings } from "@/types/settings";
+import type { Settings } from "@/features/settings/settings";
 
 async function setSavedSettings(
   overrides: Partial<Settings> | null,

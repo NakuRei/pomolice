@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
-import { InfoMessageBanner } from "../shared/InfoMessageBanner";
-import { OperationNotice } from "../shared/OperationNotice";
-import { SettingsFileNotice } from "../shared/SettingsFileNotice";
+import { InfoMessageBanner } from "@/components/shared/InfoMessageBanner";
+import { OperationNotice } from "@/components/shared/OperationNotice";
+import { SettingsFileNotice } from "@/components/shared/SettingsFileNotice";
 
 interface SettingsScreenLayoutProps {
   children: ReactNode;

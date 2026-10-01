@@ -1,36 +1,8 @@
 import { useTimerObservationStore } from "@/store/timerObservationStore";
-import {
-  commands,
-  type CommandResponse,
-  type TimerSnapshot,
-  type PostBreakDecisionAction,
-  type PostBreakTransitionPolicy,
-} from "@/ipc/generated";
-import { receiveCommandResponse } from "@/ipc/receiveCommandResponse";
-import { useTimerOperationStore } from "@/store/timerOperationStore";
-import {
-  settingsChangesToPayload,
-  type SettingsChanges,
-} from "@/types/settings";
-import type { TimerCommandResult, TimerOperation } from "./operation";
+import { commands, type PostBreakDecisionAction } from "@/ipc/generated";
+import { executeTimerCommand } from "@/operations/executeTimerCommand";
+import type { TimerCommandResult } from "@/operations/operation";
 
-async function executeTimerCommand(
-  request: TimerOperation,
-  send: () => Promise<CommandResponse<TimerSnapshot>>,
-): Promise<TimerCommandResult> {
-  const id = useTimerOperationStore.getState().begin(request);
-  const result = await receiveCommandResponse(send());
-  if (result.status === "accepted")
-    useTimerObservationStore.getState().observeEffects(result.value.effects);
-  useTimerOperationStore
-    .getState()
-    .complete(
-      request.kind,
-      id,
-      result.status === "accepted" ? { status: "accepted" } : result,
-    );
-  return result;
-}
 export function startWork(): Promise<TimerCommandResult> {
   return executeTimerCommand({ kind: "start_work" }, commands.startWork);
 }
@@ -56,15 +28,6 @@ export function setAwayDuringBreak(away: boolean): Promise<TimerCommandResult> {
     commands.setAwayDuringBreak(away),
   );
 }
-export function saveSettings(
-  changes: SettingsChanges,
-): Promise<TimerCommandResult> {
-  const submitted = structuredClone(changes);
-  return executeTimerCommand(
-    { kind: "update_settings", changes: submitted },
-    () => commands.updateSettings(settingsChangesToPayload(submitted)),
-  );
-}
 export async function resolveBootAutoStartPrompt(
   startNow: boolean,
 ): Promise<TimerCommandResult> {
@@ -85,18 +48,4 @@ export function retryFailedEffects(): Promise<TimerCommandResult> {
     pendingEffectRetry = null;
   });
   return pendingEffectRetry;
-}
-export async function toggleNotificationSoundMuted(): Promise<
-  TimerCommandResult | undefined
-> {
-  const settings = useTimerObservationStore.getState().settings;
-  if (settings === null) return undefined;
-  return saveSettings({
-    notificationSoundMuted: !settings.notificationSoundMuted,
-  });
-}
-export function savePostBreakTransitionPolicy(
-  policy: PostBreakTransitionPolicy,
-): Promise<TimerCommandResult> {
-  return saveSettings({ postBreakTransitionPolicy: policy });
 }

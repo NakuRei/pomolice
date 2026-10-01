@@ -2,9 +2,9 @@ import { useTimerObservationStore } from "@/store/timerObservationStore";
 import type { RangedSettingField } from "@/ipc/generated";
 import { useState } from "react";
 import { useFocusHeadingOnMount } from "@/hooks/useFocusHeadingOnMount";
-import { useSettingsSave } from "@/hooks/useSettingsSave";
+import { useSettingsSave } from "../useSettingsSave";
 
-import type { Settings, SettingsChanges } from "@/types/settings";
+import type { Settings, SettingsChanges } from "../settings";
 import { DurationInput } from "./DurationInput";
 import {
   formatDurationInputText,

@@ -27,7 +27,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 import { resetTimerStoreForTest } from "../test/resetTimerStore";
 import { createBootAutoStartOfferForTest } from "@/test/bootAutoStartOfferFixture";
-import { useTimerOperationStore } from "@/store/timerOperationStore";
+import { useTimerOperationStore } from "@/operations/operationStore";
 import {
   createSettingsForTest,
   settingsPayloadForTest,

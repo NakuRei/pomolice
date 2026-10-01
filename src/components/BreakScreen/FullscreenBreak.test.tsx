@@ -19,12 +19,12 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 import { FullscreenBreak } from "./FullscreenBreak";
 import { useEmergencyShortcutStore } from "@/store/emergencyShortcutStore";
-import { useTimerOperationStore } from "@/store/timerOperationStore";
+import { useTimerOperationStore } from "@/operations/operationStore";
 
 import { useSkipFlowStore } from "@/store/skipFlowStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { createSettingsForTest } from "@/test/settingsFixture";
-import type { Settings } from "@/types/settings";
+import type { Settings } from "@/features/settings/settings";
 import {
   LONG_TYPING_PHRASES,
   SHORT_TYPING_PHRASES,

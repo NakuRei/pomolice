@@ -4,10 +4,10 @@ import {
   playNotificationSoundPreview,
   type NotificationSoundType,
 } from "@/services/notifications";
-import { useSettingsSave } from "@/hooks/useSettingsSave";
-import type { Settings } from "@/types/settings";
-import { Button } from "../shared/Button";
-import { NotificationMuteToggleButton } from "../shared/NotificationMuteToggleButton";
+import { useSettingsSave } from "../useSettingsSave";
+import type { Settings } from "../settings";
+import { Button } from "@/components/shared/Button";
+import { NotificationMuteToggleButton } from "@/components/shared/NotificationMuteToggleButton";
 import { SettingsPageHeader } from "./SettingsPageHeader";
 import { SettingsSaveCancelFooter } from "./SettingsSaveCancelFooter";
 import { rangedFieldIssueMessage } from "./settingsIssueMessages";

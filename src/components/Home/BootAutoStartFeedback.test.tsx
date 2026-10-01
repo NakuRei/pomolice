@@ -13,8 +13,8 @@ import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { HomeScreen } from "./HomeScreen";
 
-import { useTimerOperationStore } from "@/store/timerOperationStore";
-import { retryRejectedOperation } from "@/timer/retryOperation";
+import { useTimerOperationStore } from "@/operations/operationStore";
+import { retryRejectedOperation } from "@/operations/retryOperation";
 
 import { createBootAutoStartOfferForTest } from "@/test/bootAutoStartOfferFixture";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
