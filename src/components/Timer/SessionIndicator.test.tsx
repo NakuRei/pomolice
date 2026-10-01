@@ -1,12 +1,12 @@
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { SessionIndicator } from "./SessionIndicator";
-import { useTimerStore } from "@/store/timerStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { createSettingsForTest } from "@/test/settingsFixture";
 
 function setLongBreakInterval(longBreakInterval: number): void {
-  useTimerStore.setState({
+  useTimerObservationStore.setState({
     settings: createSettingsForTest({ longBreakInterval }),
   });
 }
@@ -23,13 +23,14 @@ describe("SessionIndicator", () => {
 
   describe("Visibility", () => {
     it("should not render when cycle is 0", () => {
+      useTimerObservationStore.setState({ currentCycle: 0 });
       render(<SessionIndicator />);
       const indicator = screen.queryByText(/ポモドーロ \d+\/\d+/u);
       expect(indicator).not.toBeInTheDocument();
     });
 
     it("should not render before the settings have arrived", () => {
-      useTimerStore.setState({ currentCycle: 2, settings: null });
+      useTimerObservationStore.setState({ currentCycle: 2, settings: null });
       render(<SessionIndicator />);
 
       expect(
@@ -51,7 +52,7 @@ describe("SessionIndicator", () => {
     ])(
       "should display the current cycle summary: $expectedText",
       ({ currentCycle, longBreakInterval, expectedText }) => {
-        useTimerStore.setState({ currentCycle });
+        useTimerObservationStore.setState({ currentCycle });
         setLongBreakInterval(longBreakInterval);
         render(<SessionIndicator />);
 
@@ -60,12 +61,12 @@ describe("SessionIndicator", () => {
     );
 
     it("should update when cycle changes", () => {
-      useTimerStore.setState({ currentCycle: 1 });
+      useTimerObservationStore.setState({ currentCycle: 1 });
       render(<SessionIndicator />);
       expect(getSessionIndicator()).toHaveTextContent("ポモドーロ 1/4");
 
       act(() => {
-        useTimerStore.setState({ currentCycle: 3 });
+        useTimerObservationStore.setState({ currentCycle: 3 });
       });
       expect(getSessionIndicator()).toHaveTextContent("ポモドーロ 3/4");
     });
@@ -73,14 +74,14 @@ describe("SessionIndicator", () => {
 
   describe("Settings Integration", () => {
     it("should reflect custom long break interval", () => {
-      useTimerStore.setState({ currentCycle: 2 });
+      useTimerObservationStore.setState({ currentCycle: 2 });
       setLongBreakInterval(6);
       render(<SessionIndicator />);
       expect(getSessionIndicator()).toHaveTextContent("ポモドーロ 2/6");
     });
 
     it("should update when settings change", () => {
-      useTimerStore.setState({ currentCycle: 1 });
+      useTimerObservationStore.setState({ currentCycle: 1 });
       render(<SessionIndicator />);
       expect(getSessionIndicator()).toHaveTextContent("ポモドーロ 1/4");
 
@@ -93,7 +94,7 @@ describe("SessionIndicator", () => {
 
   describe("Lowered Interval", () => {
     it("shows a cycle past the interval as the last cycle", () => {
-      useTimerStore.setState({ currentCycle: 4 });
+      useTimerObservationStore.setState({ currentCycle: 4 });
       setLongBreakInterval(3);
       render(<SessionIndicator />);
 
@@ -107,7 +108,7 @@ describe("SessionIndicator", () => {
 
   describe("Accessibility", () => {
     it("should have aria-label", () => {
-      useTimerStore.setState({ currentCycle: 2 });
+      useTimerObservationStore.setState({ currentCycle: 2 });
       render(<SessionIndicator />);
       const indicator = getSessionIndicator();
       expect(indicator).toHaveAttribute("aria-label", "ポモドーロ 2 / 4");

@@ -1,9 +1,9 @@
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HomeScreen, type HomeScreenProps } from "./HomeScreen";
-import { useErrorStore } from "@/store/errorStore";
-import { useTimerStore } from "@/store/timerStore";
+import { useTimerOperationStore } from "@/store/timerOperationStore";
 
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { createSettingsForTest } from "@/test/settingsFixture";
@@ -25,22 +25,24 @@ function createProps(
 describe("HomeScreen", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useErrorStore.getState().clearAllErrors();
+    useTimerOperationStore.setState(
+      useTimerOperationStore.getInitialState(),
+      true,
+    );
     resetTimerStoreForTest();
-    useTimerStore.setState({
+    useTimerObservationStore.setState({
       settings: createSettingsForTest(),
       status: "idle",
       remainingSeconds: 25 * 60,
+      sessionDurationSeconds: 25 * 60,
       sessionType: "work",
       currentCycle: 0,
       completedPomodoros: 0,
       breakInteractionCount: 0,
       requiresManualContinueDecision: false,
-      isConnected: false,
+
       bootAutoStartOffer: null,
       activeWindowSummary: null,
-      infoMessage: null,
-      infoMessageShownAtById: {},
     });
   });
 
@@ -51,7 +53,7 @@ describe("HomeScreen", () => {
   ] as const)(
     "labels the $sessionType session as $label, named $name for assistive technology",
     ({ sessionType, label, name }) => {
-      useTimerStore.setState({ sessionType });
+      useTimerObservationStore.setState({ sessionType });
 
       render(<HomeScreen {...createProps()} />);
 
@@ -68,24 +70,41 @@ describe("HomeScreen", () => {
     expect(timer).toHaveAttribute("aria-atomic", "true");
 
     act(() => {
-      useTimerStore.setState({ remainingSeconds: 1499 });
+      useTimerObservationStore.setState({ remainingSeconds: 1499 });
     });
     expect(screen.getByText("24:59")).toBeInTheDocument();
   });
 
+  it("does not invent a timer phase or duration before receiving state", () => {
+    resetTimerStoreForTest();
+    render(
+      <HomeScreen
+        {...createProps({
+          notificationSoundMuted: null,
+          isAutoRunWindowActive: null,
+        })}
+      />,
+    );
+    expect(screen.getByTestId("timer-display")).toHaveTextContent("--:--");
+    expect(screen.queryByText("FOCUS")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("start-button")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("cycle-progress")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("header-auto-run")).not.toBeInTheDocument();
+  });
+
   it("keeps the phase label whether or not the timer runs", () => {
-    useTimerStore.setState({ status: "working" });
+    useTimerObservationStore.setState({ status: "working" });
     render(<HomeScreen {...createProps()} />);
     expect(screen.getByText("FOCUS")).toBeInTheDocument();
 
     act(() => {
-      useTimerStore.setState({ status: "idle" });
+      useTimerObservationStore.setState({ status: "idle" });
     });
     expect(screen.getByText("FOCUS")).toBeInTheDocument();
   });
 
   it("tells the user when the saved settings could not be read", () => {
-    useTimerStore.setState({ settingsFileStatus: "unusable" });
+    useTimerObservationStore.setState({ settingsFileStatus: "unusable" });
 
     render(<HomeScreen {...createProps()} />);
 
@@ -116,7 +135,7 @@ describe("HomeScreen", () => {
   it.each(["idle", "working"] as const)(
     "does not show break emergency release guidance while %s",
     (status) => {
-      useTimerStore.setState({ status });
+      useTimerObservationStore.setState({ status });
       render(<HomeScreen {...createProps()} />);
       expect(screen.queryByText(/緊急解除/u)).not.toBeInTheDocument();
     },
@@ -153,14 +172,12 @@ describe("HomeScreen", () => {
   });
 
   it("shows why a settings save failed", () => {
-    useErrorStore.getState().reportError({
-      id: "update_settings",
-      message: "データの保存に失敗しました",
-      technicalDetail: "persistence_error",
-      severity: "recoverable",
-      origin: "backend_command",
-      canRetry: false,
-      retryFn: null,
+    const id = useTimerOperationStore
+      .getState()
+      .begin({ kind: "update_settings", changes: { workDurationSecs: 60 } });
+    useTimerOperationStore.getState().complete("update_settings", id, {
+      status: "rejected",
+      error: { code: "persistence_error" },
     });
 
     render(<HomeScreen {...createProps()} />);

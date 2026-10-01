@@ -1,3 +1,4 @@
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import { acceptedCommand } from "@/test/commandResponseFixture";
 import type {
   TimerSnapshot,
@@ -26,10 +27,13 @@ import {
   createTimerEffectsForTest,
   createTimerSnapshotForTest,
 } from "@/test/timerEffectsFixture";
-import { useTimerEffectsStore } from "@/store/timerEffectsStore";
-import { useTimerStore } from "@/store/timerStore";
 
-import { useErrorStore } from "@/store/errorStore";
+import { useTimerSyncStore } from "@/store/timerSyncStore";
+import { useTimerNoticeStore } from "@/store/timerNoticeStore";
+import {
+  describeTimerSyncFailure,
+  formatTimerSyncConnectionErrorDetail,
+} from "./timerSyncConnectionError";
 import {
   createSettingsForTest,
   settingsPayloadForTest,
@@ -200,7 +204,6 @@ describe("useTimerSync", () => {
     vi.useRealTimers();
     vi.clearAllMocks();
     vi.mocked(isPermissionGranted).mockResolvedValue(false);
-    useErrorStore.getState().clearAllErrors();
 
     resetTimerStoreForTest();
 
@@ -232,8 +235,10 @@ describe("useTimerSync", () => {
     renderTimerSync();
     await flushTimerSyncSetup();
 
-    expect(useTimerStore.getState().isConnected).toBe(true);
-    expect(useTimerStore.getState().settings).toEqual(backendSettings);
+    expect(useTimerSyncStore.getState().connection.status).toBe("ready");
+    expect(useTimerObservationStore.getState().settings).toEqual(
+      backendSettings,
+    );
     expect(invokedCommandNames()).toEqual(["get_full_state"]);
   });
 
@@ -256,9 +261,11 @@ describe("useTimerSync", () => {
 
     renderTimerSync();
     await waitFor(() => {
-      expect(useTimerStore.getState().isConnected).toBe(true);
+      expect(useTimerSyncStore.getState().connection.status).toBe("ready");
     });
-    expect(useTimerStore.getState().bootAutoStartOffer).toEqual(offer);
+    expect(useTimerObservationStore.getState().bootAutoStartOffer).toEqual(
+      offer,
+    );
     expect(invokedCommandNames()).toEqual(["get_full_state"]);
   });
 
@@ -296,7 +303,7 @@ describe("useTimerSync", () => {
       );
       await pending;
     });
-    expect(useTimerEffectsStore.getState().effects?.last_timer_save).toBe(
+    expect(useTimerObservationStore.getState().effects?.last_timer_save).toBe(
       "succeeded",
     );
   });
@@ -311,15 +318,17 @@ describe("useTimerSync", () => {
       "boot_auto_start_offer_closed",
     );
     await waitFor(() => {
-      expect(useTimerStore.getState().bootAutoStartOffer).toEqual(offer);
+      expect(useTimerObservationStore.getState().bootAutoStartOffer).toEqual(
+        offer,
+      );
     });
 
     act(() => {
       closeOffer({ payload: {} });
     });
 
-    expect(useTimerStore.getState().bootAutoStartOffer).toBeNull();
-    expect(useTimerStore.getState().isConnected).toBe(true);
+    expect(useTimerObservationStore.getState().bootAutoStartOffer).toBeNull();
+    expect(useTimerSyncStore.getState().connection.status).toBe("ready");
   });
 
   it("does not reopen an expired offer when an earlier full state arrives late", async () => {
@@ -349,8 +358,8 @@ describe("useTimerSync", () => {
       await pendingFullState;
     });
 
-    expect(useTimerStore.getState().bootAutoStartOffer).toBeNull();
-    expect(useTimerStore.getState().isConnected).toBe(true);
+    expect(useTimerObservationStore.getState().bootAutoStartOffer).toBeNull();
+    expect(useTimerSyncStore.getState().connection.status).toBe("ready");
   });
 
   it("receives session completion events while the initial full state is pending", async () => {
@@ -373,7 +382,9 @@ describe("useTimerSync", () => {
     });
     emitSessionCompleted(sessionHandler);
 
-    expect(useTimerStore.getState().requiresManualContinueDecision).toBe(true);
+    expect(
+      useTimerObservationStore.getState().requiresManualContinueDecision,
+    ).toBe(true);
 
     await act(async () => {
       resolveFullState(createFullStatePayload());
@@ -394,20 +405,20 @@ describe("useTimerSync", () => {
     await flushTimerSyncSetup();
     await advanceThroughTimerSyncConnectionRetries();
 
-    const connectionError = useErrorStore.getState().errors.connection;
-    expect(connectionError).toMatchObject({
-      id: "connection",
-      technicalDetail: "window_control_error",
-      severity: "recoverable",
-      origin: "backend_connection",
-      canRetry: true,
+    const connection = useTimerSyncStore.getState().connection;
+    expect(connection).toEqual({
+      status: "failed",
+      failure: { status: "rejected", error: backendError },
     });
-    expect(connectionError?.retryFn).toEqual(expect.any(Function));
-    expect(connectionError?.message).toEqual(expect.any(String));
-    expect(connectionError?.message).not.toBe("");
-    expect(connectionError?.message).not.toContain("failed to read full state");
-    expect(connectionError?.message).not.toContain("C:\\Users\\nak");
-    expect(connectionError?.message).not.toContain("secret");
+    if (connection.status !== "failed")
+      throw new Error("Expected failed connection");
+    expect(describeTimerSyncFailure(connection.failure)).toMatchObject({
+      canRetry: true,
+      userMessage: "ウィンドウ操作に失敗しました",
+    });
+    expect(formatTimerSyncConnectionErrorDetail(connection.failure)).toBe(
+      "window_control_error",
+    );
   });
 
   it("retries raw get_full_state invoke failures as connection failures", async () => {
@@ -421,22 +432,22 @@ describe("useTimerSync", () => {
 
     await flushTimerSyncSetup();
     expect(getCommandInvokeCount("get_full_state")).toBe(1);
-    expect(useErrorStore.getState().errors.connection).toBeUndefined();
+    expect(useTimerSyncStore.getState().connection.status).toBe("retry_wait");
 
     await advanceThroughTimerSyncConnectionRetries();
 
     expect(getCommandInvokeCount("get_full_state")).toBe(4);
-    const connectionError = useErrorStore.getState().errors.connection;
-    expect(connectionError).toMatchObject({
-      id: "connection",
-      message:
-        "バックエンドに接続できません。アプリが正常に動作しない可能性があります。",
-      technicalDetail: "Command response unavailable",
-      severity: "critical",
-      origin: "backend_connection",
-      canRetry: true,
+    const connection = useTimerSyncStore.getState().connection;
+    expect(connection).toMatchObject({
+      status: "failed",
+      failure: { status: "unavailable" },
     });
-    expect(connectionError?.retryFn).toEqual(expect.any(Function));
+    if (connection.status !== "failed")
+      throw new Error("Expected failed connection");
+    expect(describeTimerSyncFailure(connection.failure).canRetry).toBe(true);
+    expect(formatTimerSyncConnectionErrorDetail(connection.failure)).toBe(
+      "Command response unavailable",
+    );
   });
 
   it("reports non-retryable get_full_state command failures without automatic retries", async () => {
@@ -451,20 +462,17 @@ describe("useTimerSync", () => {
 
     await flushTimerSyncSetup();
 
-    const connectionError = useErrorStore.getState().errors.connection;
-    expect(connectionError).toMatchObject({
-      id: "connection",
-      technicalDetail: "invalid_state_transition",
-      severity: "recoverable",
-      origin: "backend_connection",
-      canRetry: false,
-      retryFn: null,
+    const connection = useTimerSyncStore.getState().connection;
+    expect(connection).toEqual({
+      status: "failed",
+      failure: { status: "rejected", error: backendError },
     });
-    expect(connectionError?.message).toEqual(expect.any(String));
-    expect(connectionError?.message).not.toBe("");
-    expect(connectionError?.message).not.toContain("invalid type");
-    expect(connectionError?.message).not.toContain("C:\\Users\\nak");
-    expect(connectionError?.message).not.toContain("secret");
+    if (connection.status !== "failed")
+      throw new Error("Expected failed connection");
+    expect(describeTimerSyncFailure(connection.failure)).toMatchObject({
+      canRetry: false,
+      userMessage: "現在の状態では実行できません",
+    });
 
     expect(getCommandInvokeCount("get_full_state")).toBe(1);
 
@@ -516,22 +524,21 @@ describe("useTimerSync", () => {
 
     await vi.advanceTimersByTimeAsync(3999);
     expect(getTimerTickListenCount()).toBe(3);
-    expect(useErrorStore.getState().errors.connection).toBeUndefined();
+    expect(useTimerSyncStore.getState().connection.status).toBe("retry_wait");
     await vi.advanceTimersByTimeAsync(1);
     expect(getTimerTickListenCount()).toBe(4);
 
-    const connectionError = useErrorStore.getState().errors.connection;
-    expect(connectionError).toMatchObject({
-      id: "connection",
-      message:
-        "バックエンドに接続できません。アプリが正常に動作しない可能性があります。",
-      technicalDetail: "Error: listen failed",
-      severity: "critical",
-      origin: "backend_connection",
-      canRetry: true,
+    const connection = useTimerSyncStore.getState().connection;
+    expect(connection).toMatchObject({
+      status: "failed",
+      failure: { status: "setup" },
     });
-    expect(connectionError?.retryFn).toEqual(expect.any(Function));
-    expect(useTimerStore.getState().isConnected).toBe(false);
+    if (connection.status !== "failed")
+      throw new Error("Expected failed connection");
+    expect(describeTimerSyncFailure(connection.failure).canRetry).toBe(true);
+    expect(formatTimerSyncConnectionErrorDetail(connection.failure)).toBe(
+      "Error: listen failed",
+    );
 
     await vi.advanceTimersByTimeAsync(60_000);
     expect(getTimerTickListenCount()).toBe(4);
@@ -548,24 +555,20 @@ describe("useTimerSync", () => {
 
     await advanceThroughTimerSyncConnectionRetries();
 
-    expect(useErrorStore.getState().errors.connection?.retryFn).toEqual(
-      expect.any(Function),
-    );
-
-    const retryFn = useErrorStore.getState().errors.connection?.retryFn;
-    if (!retryFn) {
-      throw new Error("Expected connection retry function");
-    }
+    expect(useTimerSyncStore.getState().connection.status).toBe("failed");
 
     mockListen.mockClear();
-    await retryFn();
+    act(() => {
+      useTimerSyncStore.getState().reconnect();
+    });
+    await flushTimerSyncSetup();
 
-    expect(useErrorStore.getState().errors.connection).toBeUndefined();
+    expect(useTimerSyncStore.getState().connection.status).toBe("retry_wait");
     expect(getTimerTickListenCount()).toBe(1);
 
     await advanceThroughTimerSyncConnectionRetries();
     expect(getTimerTickListenCount()).toBe(4);
-    expect(useErrorStore.getState().errors.connection?.canRetry).toBe(true);
+    expect(useTimerSyncStore.getState().connection.status).toBe("failed");
   });
 
   it("should reconnect successfully when manual retry setup succeeds", async () => {
@@ -577,18 +580,17 @@ describe("useTimerSync", () => {
     await flushTimerSyncSetup();
     await advanceThroughTimerSyncConnectionRetries();
 
-    const retryFn = useErrorStore.getState().errors.connection?.retryFn;
-    if (!retryFn) {
-      throw new Error("Expected connection retry function");
-    }
+    expect(useTimerSyncStore.getState().connection.status).toBe("failed");
 
     mockListen.mockClear();
     mockInvoke.mockClear();
     mockListen.mockResolvedValue(noopUnlisten);
-    await retryFn();
+    act(() => {
+      useTimerSyncStore.getState().reconnect();
+    });
+    await flushTimerSyncSetup();
 
-    expect(useErrorStore.getState().errors.connection).toBeUndefined();
-    expect(useTimerStore.getState().isConnected).toBe(true);
+    expect(useTimerSyncStore.getState().connection.status).toBe("ready");
     expect(mockInvoke.mock.calls).toContainEqual(["get_full_state", undefined]);
     expect(mockListen.mock.calls.map(([event]) => event)).toContain(
       "timer_tick",
@@ -607,11 +609,10 @@ describe("useTimerSync", () => {
     renderTimerSync();
 
     await waitFor(() => {
-      expect(useTimerStore.getState()).toMatchObject({
+      expect(useTimerObservationStore.getState()).toMatchObject({
         status: "working",
         remainingSeconds: 777,
         currentCycle: 2,
-        isConnected: true,
       });
     });
   });
@@ -620,8 +621,8 @@ describe("useTimerSync", () => {
     const tickHandler = await renderAndGetTimerEventHandler("timer_tick");
     emitTimerTick(tickHandler);
 
-    expect(useTimerStore.getState().status).toBe("working");
-    expect(useTimerStore.getState().remainingSeconds).toBe(1499);
+    expect(useTimerObservationStore.getState().status).toBe("working");
+    expect(useTimerObservationStore.getState().remainingSeconds).toBe(1499);
   });
 
   it("should handle session_completed events", async () => {
@@ -629,7 +630,9 @@ describe("useTimerSync", () => {
       await renderAndGetTimerEventHandler("session_completed");
     emitSessionCompleted(sessionHandler);
 
-    expect(useTimerStore.getState().requiresManualContinueDecision).toBe(true);
+    expect(
+      useTimerObservationStore.getState().requiresManualContinueDecision,
+    ).toBe(true);
   });
 
   it("notifies the user with the long-break sound when work ends before a long break", async () => {
@@ -728,7 +731,7 @@ describe("useTimerSync", () => {
 
     expect(unlisten).toHaveBeenCalledTimes(1);
     expect(mockInvoke).not.toHaveBeenCalled();
-    expect(useTimerStore.getState().isConnected).toBe(false);
+    expect(useTimerSyncStore.getState().connection.status).toBe("idle");
   });
 
   it("cancels a pending connection retry on unmount", async () => {
@@ -746,7 +749,7 @@ describe("useTimerSync", () => {
 
     expect(mockListen).not.toHaveBeenCalled();
     expect(mockInvoke).not.toHaveBeenCalled();
-    expect(useErrorStore.getState().errors.connection).toBeUndefined();
+    expect(useTimerSyncStore.getState().connection.status).toBe("idle");
   });
 
   it("releases every listener and ignores full state resolved after unmount", async () => {
@@ -771,9 +774,8 @@ describe("useTimerSync", () => {
     });
 
     const remainingSecondsBeforeUnmount = 823;
-    useTimerStore.setState({
+    useTimerObservationStore.setState({
       remainingSeconds: remainingSecondsBeforeUnmount,
-      isConnected: false,
     });
     const { unmount } = renderTimerSync();
 
@@ -796,11 +798,11 @@ describe("useTimerSync", () => {
       await Promise.resolve();
     });
 
-    expect(useTimerStore.getState().remainingSeconds).toBe(
+    expect(useTimerObservationStore.getState().remainingSeconds).toBe(
       remainingSecondsBeforeUnmount,
     );
-    expect(useTimerStore.getState().isConnected).toBe(false);
-    expect(useTimerStore.getState().settings).toBeNull();
+    expect(useTimerSyncStore.getState().connection.status).toBe("idle");
+    expect(useTimerObservationStore.getState().settings).toBeNull();
   });
 
   it("should show stop-pending info on auto_run_stop_pending events", async () => {
@@ -809,7 +811,7 @@ describe("useTimerSync", () => {
     );
     stopPendingListener({ payload: {} });
 
-    expect(useTimerStore.getState().infoMessage?.id).toBe(
+    expect(useTimerNoticeStore.getState().infoMessage?.id).toBe(
       "auto_run_stop_pending",
     );
   });
@@ -819,7 +821,9 @@ describe("useTimerSync", () => {
       await renderAndGetTimerEventHandler("auto_run_stopped");
     stoppedListener({ payload: {} });
 
-    expect(useTimerStore.getState().infoMessage?.id).toBe("auto_run_stopped");
+    expect(useTimerNoticeStore.getState().infoMessage?.id).toBe(
+      "auto_run_stopped",
+    );
   });
 
   it("takes the settings announced by settings_changed events", async () => {
@@ -836,6 +840,6 @@ describe("useTimerSync", () => {
       },
     });
 
-    expect(useTimerStore.getState().settings).toEqual(savedSettings);
+    expect(useTimerObservationStore.getState().settings).toEqual(savedSettings);
   });
 });

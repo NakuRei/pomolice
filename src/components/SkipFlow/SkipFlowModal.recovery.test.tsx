@@ -1,9 +1,9 @@
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { useSkipFlowStore } from "@/store/skipFlowStore";
-import { useTimerEffectsStore } from "@/store/timerEffectsStore";
 import { SHORT_TYPING_PHRASES } from "@/data/typingPhrases";
 import {
   createTimerEffectsForTest,
@@ -38,9 +38,9 @@ function renderBreakView(): HTMLDivElement {
 
 function observeSaveFailure(): void {
   act(() => {
-    useTimerEffectsStore
+    useTimerObservationStore
       .getState()
-      .observe(
+      .observeEffects(
         createTimerEffectsForTest({ revision: "1", last_timer_save: "failed" }),
       );
   });
@@ -63,7 +63,10 @@ describe("effect recovery during the skip flow", () => {
     vi.mocked(invoke).mockReset();
     document.body.innerHTML = "";
     useSkipFlowStore.getState().resetSkipFlow();
-    useTimerEffectsStore.setState(useTimerEffectsStore.getInitialState(), true);
+    useTimerObservationStore.setState(
+      useTimerObservationStore.getInitialState(),
+      true,
+    );
   });
 
   it("allows keyboard recovery inside the modal without losing the step or typed text", async () => {

@@ -1,7 +1,7 @@
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import { acceptedCommand } from "@/test/commandResponseFixture";
 import type { TimerSnapshot, BackendErrorResponse } from "@/ipc/generated";
 import { TimerEffectsNotice } from "@/components/shared/TimerEffectsNotice";
-import { useTimerEffectsStore } from "@/store/timerEffectsStore";
 import {
   createTimerEffectsForTest,
   createTimerSnapshotForTest,
@@ -13,8 +13,8 @@ import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { HomeScreen } from "./HomeScreen";
 
-import { useErrorStore } from "@/store/errorStore";
-import { useTimerStore } from "@/store/timerStore";
+import { useTimerOperationStore } from "@/store/timerOperationStore";
+import { retryRejectedOperation } from "@/timer/retryOperation";
 
 import { createBootAutoStartOfferForTest } from "@/test/bootAutoStartOfferFixture";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
@@ -50,10 +50,13 @@ describe("startup confirmation feedback", () => {
       .mockReset()
       .mockResolvedValue(acceptedCommand(createTimerSnapshotForTest()));
     resetTimerStoreForTest();
-    useErrorStore.getState().clearAllErrors();
-    useTimerStore.setState({
+    useTimerOperationStore.setState(
+      useTimerOperationStore.getInitialState(),
+      true,
+    );
+    useTimerObservationStore.setState({
       settings: createSettingsForTest(),
-      isConnected: true,
+
       bootAutoStartOffer: createBootAutoStartOfferForTest(),
     });
   });
@@ -78,10 +81,10 @@ describe("startup confirmation feedback", () => {
         last_timer_save: "failed",
       });
       act(() => {
-        useTimerStore.setState({ status: "working" });
+        useTimerObservationStore.setState({ status: "working" });
         if (order === "close first")
-          useTimerStore.getState().clearBootAutoStartOffer();
-        useTimerEffectsStore.getState().observe(effects);
+          useTimerObservationStore.getState().clearBootAutoStartOffer();
+        useTimerObservationStore.getState().observeEffects(effects);
       });
       if (order === "failure first") {
         const dialog = screen.getByRole("dialog", {
@@ -99,7 +102,7 @@ describe("startup confirmation feedback", () => {
       expect(screen.getByRole("alert")).toHaveTextContent(
         "タイマーの状態の保存に失敗しました",
       );
-      expect(useTimerStore.getState().status).toBe("working");
+      expect(useTimerObservationStore.getState().status).toBe("working");
       expect(invoke).toHaveBeenCalledTimes(1);
       vi.mocked(invoke).mockResolvedValueOnce({
         status: "accepted",
@@ -151,8 +154,9 @@ describe("startup confirmation feedback", () => {
       );
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
       expect(
-        useErrorStore.getState().errors.resolve_boot_auto_start_prompt,
-      ).toBeUndefined();
+        useTimerOperationStore.getState().operations
+          .resolve_boot_auto_start_prompt,
+      ).toMatchObject({ outcome: { status: "accepted" } });
     },
   );
 
@@ -166,14 +170,15 @@ describe("startup confirmation feedback", () => {
       .setup()
       .click(screen.getByRole("button", { name: "開始する" }));
     const retry =
-      useErrorStore.getState().errors.resolve_boot_auto_start_prompt?.retryFn;
+      useTimerOperationStore.getState().operations
+        .resolve_boot_auto_start_prompt;
     if (!retry) {
       throw new Error("Expected a retry while the offer is valid");
     }
     expect(screen.getByRole("button", { name: "再試行" })).toBeInTheDocument();
 
     act(() => {
-      useTimerStore.getState().clearBootAutoStartOffer();
+      useTimerObservationStore.getState().clearBootAutoStartOffer();
     });
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -182,7 +187,7 @@ describe("startup confirmation feedback", () => {
       screen.queryByRole("button", { name: "再試行" }),
     ).not.toBeInTheDocument();
     await act(async () => {
-      await retry();
+      await retryRejectedOperation(retry);
     });
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("alert")).toHaveTextContent("少々お待ちください");

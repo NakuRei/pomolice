@@ -1,10 +1,11 @@
+import { useTimerObservationStore } from "@/store/timerObservationStore";
+import { emergencyStop } from "@/timer/commands";
 import { useEffect, useId, useRef, useState } from "react";
-import { useTimerStore } from "@/store/timerStore";
 
 import { Button } from "../shared/Button";
 import { DialogActionRow } from "../shared/DialogActionRow";
 import { AppDialog } from "../shared/AppDialog";
-import { InlineError } from "../shared/InlineError";
+import { OperationNotice } from "../shared/OperationNotice";
 
 /**
  * EmergencyStopButton Component
@@ -16,8 +17,8 @@ import { InlineError } from "../shared/InlineError";
  * - No penalty applied (emergency situations are respected)
  */
 export function EmergencyStopButton(): React.ReactElement | null {
-  const status = useTimerStore((state) => state.status);
-  const emergencyStop = useTimerStore((state) => state.emergencyStop);
+  const status = useTimerObservationStore((state) => state.status);
+
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const titleId = useId();
   const cancelButtonReference = useRef<HTMLButtonElement>(null);
@@ -30,11 +31,9 @@ export function EmergencyStopButton(): React.ReactElement | null {
 
   const handleConfirm = (): void => {
     // Keep the dialog open on failure so the user can see the error and retry
-    emergencyStop()
-      .then(() => {
-        setShowConfirmDialog(false);
-      })
-      .catch(() => undefined);
+    void emergencyStop().then((result) => {
+      if (result.status === "accepted") setShowConfirmDialog(false);
+    });
   };
 
   const handleCancel = (): void => {
@@ -102,7 +101,10 @@ export function EmergencyStopButton(): React.ReactElement | null {
           </p>
           {/* Dialog stays open on failure; error shown here with retry button */}
           <div className="mb-4">
-            <InlineError errorId="emergency_stop" onRetry={handleConfirm} />
+            <OperationNotice
+              operation="emergency_stop"
+              onRetry={handleConfirm}
+            />
           </div>
           <DialogActionRow className="justify-end gap-3">
             <Button

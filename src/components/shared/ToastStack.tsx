@@ -8,7 +8,7 @@ import type { ReactNode } from "react";
  * ```tsx
  * <ToastStack>
  *   <InfoMessageBanner />
- *   <InlineError errorId="start_work" />
+ *   <OperationNotice operation="start_work" />
  * </ToastStack>
  * ```
  */

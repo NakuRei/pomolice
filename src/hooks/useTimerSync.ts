@@ -6,13 +6,17 @@ import { receiveCommandResponse } from "@/ipc/receiveCommandResponse";
  */
 
 import { useEffect } from "react";
-import { useTimerEffectsStore } from "@/store/timerEffectsStore";
+import {
+  useTimerSyncStore,
+  type TimerSyncFailure,
+} from "@/store/timerSyncStore";
+import { useTimerNoticeStore } from "@/store/timerNoticeStore";
 
 import { type UnlistenFn } from "@tauri-apps/api/event";
 import { commands, events } from "@/ipc/generated";
 import { createLogger } from "../logging/logger";
 import { FRONTEND_LOG_EVENT_IDS } from "../logging/logEvents";
-import { useTimerStore } from "../store/timerStore";
+import { useTimerObservationStore } from "../store/timerObservationStore";
 
 import {
   notifyWorkComplete,
@@ -24,12 +28,7 @@ import {
   TIMER_SYNC_MAX_CONNECTION_RETRIES,
   timerSyncRetryDelayMs,
 } from "./timerSyncConnectionRetryPolicy";
-import {
-  type TimerSyncFailure,
-  clearTimerSyncConnectionError,
-  formatTimerSyncConnectionErrorDetail,
-  reportTimerSyncConnectionError,
-} from "./timerSyncConnectionError";
+import { formatTimerSyncConnectionErrorDetail } from "./timerSyncConnectionError";
 import { classifyCommandFailure } from "../errors/classifyBackendError";
 
 const logger = createLogger("timer_sync");
@@ -38,27 +37,33 @@ const logger = createLogger("timer_sync");
  * Hook to sync timer state from backend.
  * Call this once in your app root component.
  *
- * On failure, automatically retries using the timer sync connection retry
- * policy. After exhausting retries, reports a "connection" error to the error
- * store so the UI can surface a ConnectionBanner.
  */
 export function useTimerSync(): void {
-  const observeEffects = useTimerEffectsStore((state) => state.observe);
-  const handleTimerTick = useTimerStore((s) => s.handleTimerTick);
-  const handleSessionCompleted = useTimerStore((s) => s.handleSessionCompleted);
-  const handleFullState = useTimerStore((s) => s.handleFullState);
-  const clearBootAutoStartOffer = useTimerStore(
+  const observeEffects = useTimerObservationStore(
+    (state) => state.observeEffects,
+  );
+  const generation = useTimerSyncStore((state) => state.generation);
+  const setConnection = useTimerSyncStore((state) => state.setConnection);
+  const observeTimerTick = useTimerObservationStore((s) => s.observeTimerTick);
+  const observeSessionCompleted = useTimerObservationStore(
+    (s) => s.observeSessionCompleted,
+  );
+  const observeFullState = useTimerObservationStore((s) => s.observeFullState);
+  const clearBootAutoStartOffer = useTimerObservationStore(
     (s) => s.clearBootAutoStartOffer,
   );
-  const handleActiveWindowChanged = useTimerStore(
-    (s) => s.handleActiveWindowChanged,
+  const observeActiveWindowChanged = useTimerObservationStore(
+    (s) => s.observeActiveWindowChanged,
   );
-  const handleSettingsChanged = useTimerStore((s) => s.handleSettingsChanged);
-  const setConnected = useTimerStore((s) => s.setConnected);
-  const showAutoRunStopPendingInfo = useTimerStore(
+  const observeSettingsChanged = useTimerObservationStore(
+    (s) => s.observeSettingsChanged,
+  );
+  const showAutoRunStopPendingInfo = useTimerNoticeStore(
     (s) => s.showAutoRunStopPendingInfo,
   );
-  const showAutoRunStoppedInfo = useTimerStore((s) => s.showAutoRunStoppedInfo);
+  const showAutoRunStoppedInfo = useTimerNoticeStore(
+    (s) => s.showAutoRunStoppedInfo,
+  );
 
   useEffect(() => {
     const listeners: UnlistenFn[] = [];
@@ -93,7 +98,7 @@ export function useTimerSync(): void {
       // Listen for timer tick events
       const unlistenTick = await events.timerTick.listen((event) => {
         if (mounted) {
-          handleTimerTick(event.payload);
+          observeTimerTick(event.payload);
         }
       });
       if (!registerActiveListener(unlistenTick)) {
@@ -104,7 +109,7 @@ export function useTimerSync(): void {
       const unlistenSessionCompleted = await events.sessionCompleted.listen(
         (event) => {
           if (mounted) {
-            handleSessionCompleted(event.payload);
+            observeSessionCompleted(event.payload);
 
             // Notification routing is decided only by transition_reason.
             const { transition_reason, next_session_type } = event.payload;
@@ -145,7 +150,7 @@ export function useTimerSync(): void {
       const unlistenActiveWindowChanged =
         await events.activeWindowChanged.listen((event) => {
           if (mounted) {
-            handleActiveWindowChanged(event.payload);
+            observeActiveWindowChanged(event.payload);
           }
         });
       if (!registerActiveListener(unlistenActiveWindowChanged)) {
@@ -155,7 +160,7 @@ export function useTimerSync(): void {
       const unlistenSettingsChanged = await events.settingsChanged.listen(
         (event) => {
           if (mounted) {
-            handleSettingsChanged(event.payload);
+            observeSettingsChanged(event.payload);
           }
         },
       );
@@ -179,6 +184,7 @@ export function useTimerSync(): void {
     }
 
     async function setup(retryAttempt = 0): Promise<void> {
+      setConnection({ status: "connecting", attempt: retryAttempt });
       const listenerStartIndex = listeners.length;
       function reportConnectionFailure(failure: TimerSyncFailure): void {
         logger.error(
@@ -196,17 +202,18 @@ export function useTimerSync(): void {
           failure.status !== "rejected" ||
           classifyCommandFailure(failure).canRetry;
         if (canRetry && shouldRetryTimerSyncConnection(retryAttempt)) {
+          setConnection({
+            status: "retry_wait",
+            attempt: retryAttempt,
+            failure,
+          });
           clearRetryTimeout();
           retryTimeoutId = setTimeout(() => {
             retryTimeoutId = null;
             if (mounted) void setup(retryAttempt + 1);
           }, timerSyncRetryDelayMs(retryAttempt));
         } else {
-          setConnected(false);
-          reportTimerSyncConnectionError(failure, async () => {
-            clearTimerSyncConnectionError();
-            await setup(0);
-          });
+          setConnection({ status: "failed", failure });
         }
       }
       try {
@@ -217,8 +224,8 @@ export function useTimerSync(): void {
           reportConnectionFailure(response);
           return;
         }
-        handleFullState(response.value);
-        clearTimerSyncConnectionError();
+        observeFullState(response.value);
+        setConnection({ status: "ready" });
       } catch (cause) {
         reportConnectionFailure({ status: "setup", cause });
       }
@@ -230,16 +237,18 @@ export function useTimerSync(): void {
       mounted = false;
       clearRetryTimeout();
       clearListenersFrom(0);
+      setConnection({ status: "idle" });
     };
   }, [
-    handleTimerTick,
-    handleSessionCompleted,
-    handleFullState,
+    observeTimerTick,
+    observeSessionCompleted,
+    observeFullState,
     clearBootAutoStartOffer,
     observeEffects,
-    handleActiveWindowChanged,
-    handleSettingsChanged,
-    setConnected,
+    observeActiveWindowChanged,
+    observeSettingsChanged,
+    setConnection,
+    generation,
     showAutoRunStopPendingInfo,
     showAutoRunStoppedInfo,
   ]);

@@ -1,12 +1,15 @@
+import {
+  useTimerObservationStore,
+  selectBreakLockObservation,
+} from "@/store/timerObservationStore";
+import { setAwayDuringBreak } from "@/timer/commands";
+import { useTimerNoticeStore } from "@/store/timerNoticeStore";
+import { useTimerSyncStore } from "@/store/timerSyncStore";
 import type {
   TimerSnapshot,
   TimerEffectsState,
   FullStatePayload,
 } from "@/ipc/generated";
-import {
-  useTimerEffectsStore,
-  selectBreakLockObservation,
-} from "./timerEffectsStore";
 
 import { createTimerSnapshotForTest } from "@/test/timerEffectsFixture";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -22,11 +25,9 @@ vi.mock("@tauri-apps/api/core", () => ({
     mockInvoke(command, args),
 }));
 
-import { useTimerStore } from "./timerStore";
-
 import { resetTimerStoreForTest } from "../test/resetTimerStore";
 import { createBootAutoStartOfferForTest } from "@/test/bootAutoStartOfferFixture";
-import { useErrorStore } from "./errorStore";
+import { useTimerOperationStore } from "@/store/timerOperationStore";
 import {
   createSettingsForTest,
   settingsPayloadForTest,
@@ -43,7 +44,7 @@ function createFullStatePayload(
   };
 }
 
-describe("timerStore", () => {
+describe("@/store/timerObservationStore", () => {
   beforeEach(() => {
     mockInvoke.mockReset();
     mockInvoke.mockResolvedValue({
@@ -55,33 +56,33 @@ describe("timerStore", () => {
 
   describe("Initial State", () => {
     it("should have correct initial status", () => {
-      const state = useTimerStore.getState();
-      expect(state.status).toBe("idle");
+      const state = useTimerObservationStore.getState();
+      expect(state.status).toBeNull();
     });
 
-    it("should have correct initial remaining seconds (25 minutes)", () => {
-      const state = useTimerStore.getState();
-      expect(state.remainingSeconds).toBe(25 * 60);
+    it("leaves remaining seconds unknown until observed", () => {
+      const state = useTimerObservationStore.getState();
+      expect(state.remainingSeconds).toBeNull();
     });
 
     it("should have correct initial session type", () => {
-      const state = useTimerStore.getState();
-      expect(state.sessionType).toBe("work");
+      const state = useTimerObservationStore.getState();
+      expect(state.sessionType).toBeNull();
     });
 
-    it("should have initial completed pomodoros as 0", () => {
-      const state = useTimerStore.getState();
-      expect(state.completedPomodoros).toBe(0);
+    it("leaves completed pomodoros unknown until observed", () => {
+      const state = useTimerObservationStore.getState();
+      expect(state.completedPomodoros).toBeNull();
     });
 
-    it("should have initial current cycle as 0", () => {
-      const state = useTimerStore.getState();
-      expect(state.currentCycle).toBe(0);
+    it("leaves current cycle unknown until observed", () => {
+      const state = useTimerObservationStore.getState();
+      expect(state.currentCycle).toBeNull();
     });
 
     it("should not show continue dialog initially", () => {
-      const state = useTimerStore.getState();
-      expect(state.requiresManualContinueDecision).toBe(false);
+      const state = useTimerObservationStore.getState();
+      expect(state.requiresManualContinueDecision).toBeNull();
     });
   });
 
@@ -100,11 +101,11 @@ describe("timerStore", () => {
   });
 
   describe("Event Handlers", () => {
-    describe("handleTimerTick()", () => {
+    describe("observeTimerTick()", () => {
       it("should update state from tick payload", () => {
-        const { handleTimerTick } = useTimerStore.getState();
+        const { observeTimerTick } = useTimerObservationStore.getState();
 
-        handleTimerTick({
+        observeTimerTick({
           status: "working",
           remaining_seconds: 1234,
           session_duration_secs: 1500,
@@ -115,7 +116,7 @@ describe("timerStore", () => {
           away_during_break: false,
         });
 
-        const state = useTimerStore.getState();
+        const state = useTimerObservationStore.getState();
         expect(state.status).toBe("working");
         expect(state.remainingSeconds).toBe(1234);
         expect(state.sessionDurationSeconds).toBe(1500);
@@ -125,9 +126,9 @@ describe("timerStore", () => {
       });
 
       it("should update break state", () => {
-        const { handleTimerTick } = useTimerStore.getState();
+        const { observeTimerTick } = useTimerObservationStore.getState();
 
-        handleTimerTick({
+        observeTimerTick({
           status: "on_break",
           remaining_seconds: 300,
           session_duration_secs: 300,
@@ -138,14 +139,14 @@ describe("timerStore", () => {
           away_during_break: false,
         });
 
-        const state = useTimerStore.getState();
+        const state = useTimerObservationStore.getState();
         expect(state.status).toBe("on_break");
         expect(state.sessionType).toBe("short_break");
         expect(state.breakInteractionCount).toBe(3);
       });
 
       it("preserves the reported timer phase independently of a confirmed lock", () => {
-        useTimerEffectsStore.getState().observe({
+        useTimerObservationStore.getState().observeEffects({
           revision: "1",
           last_timer_save: null,
           break_lock: {
@@ -153,12 +154,11 @@ describe("timerStore", () => {
             last_attempt: { action: "enter", status: "succeeded" },
           },
         });
-        useTimerStore.setState({
+        useTimerObservationStore.setState({
           status: "working",
-          isConnected: true,
         });
 
-        useTimerStore.getState().handleTimerTick({
+        useTimerObservationStore.getState().observeTimerTick({
           status: "idle",
           remaining_seconds: 0,
           session_duration_secs: 1500,
@@ -169,10 +169,10 @@ describe("timerStore", () => {
           away_during_break: false,
         });
 
-        const state = useTimerStore.getState();
+        const state = useTimerObservationStore.getState();
         expect(state.status).toBe("idle");
         expect(
-          selectBreakLockObservation(useTimerEffectsStore.getState()),
+          selectBreakLockObservation(useTimerObservationStore.getState()),
         ).toBe("locked");
       });
     });
@@ -187,20 +187,21 @@ describe("timerStore", () => {
           },
         });
 
-        await expect(
-          useTimerStore.getState().setAwayDuringBreak(true),
-        ).rejects.toBeDefined();
+        await expect(setAwayDuringBreak(true)).resolves.toMatchObject({
+          status: "rejected",
+          error: { code: "invalid_state_transition" },
+        });
         expect(
-          useErrorStore.getState().errors.set_away_during_break,
+          useTimerOperationStore.getState().operations.set_away_during_break,
         ).toBeDefined();
       });
     });
 
-    describe("handleSessionCompleted()", () => {
+    describe("observeSessionCompleted()", () => {
       it("should show continue dialog when break completes", () => {
-        const { handleSessionCompleted } = useTimerStore.getState();
+        const { observeSessionCompleted } = useTimerObservationStore.getState();
 
-        handleSessionCompleted({
+        observeSessionCompleted({
           transition_reason: "break_waiting_decision",
           completed_session_type: "short_break",
           next_status: "idle",
@@ -208,14 +209,14 @@ describe("timerStore", () => {
           requires_manual_continue_decision: true,
         });
 
-        const state = useTimerStore.getState();
+        const state = useTimerObservationStore.getState();
         expect(state.requiresManualContinueDecision).toBe(true);
       });
 
       it("should not show continue dialog when work completes", () => {
-        const { handleSessionCompleted } = useTimerStore.getState();
+        const { observeSessionCompleted } = useTimerObservationStore.getState();
 
-        handleSessionCompleted({
+        observeSessionCompleted({
           transition_reason: "work_to_break",
           completed_session_type: "work",
           next_status: "on_break",
@@ -223,15 +224,17 @@ describe("timerStore", () => {
           requires_manual_continue_decision: false,
         });
 
-        const state = useTimerStore.getState();
+        const state = useTimerObservationStore.getState();
         expect(state.requiresManualContinueDecision).toBe(false);
       });
 
       it("should keep continue dialog hidden when break auto-starts next work", () => {
-        const { handleSessionCompleted } = useTimerStore.getState();
-        useTimerStore.setState({ requiresManualContinueDecision: true });
+        const { observeSessionCompleted } = useTimerObservationStore.getState();
+        useTimerObservationStore.setState({
+          requiresManualContinueDecision: true,
+        });
 
-        handleSessionCompleted({
+        observeSessionCompleted({
           transition_reason: "break_auto_started",
           completed_session_type: "short_break",
           next_status: "working",
@@ -239,15 +242,17 @@ describe("timerStore", () => {
           requires_manual_continue_decision: false,
         });
 
-        const state = useTimerStore.getState();
+        const state = useTimerObservationStore.getState();
         expect(state.requiresManualContinueDecision).toBe(false);
       });
 
       it("should keep continue dialog hidden when scheduled stop executes", () => {
-        const { handleSessionCompleted } = useTimerStore.getState();
-        useTimerStore.setState({ requiresManualContinueDecision: true });
+        const { observeSessionCompleted } = useTimerObservationStore.getState();
+        useTimerObservationStore.setState({
+          requiresManualContinueDecision: true,
+        });
 
-        handleSessionCompleted({
+        observeSessionCompleted({
           transition_reason: "scheduled_stop_executed",
           completed_session_type: "short_break",
           next_status: "idle",
@@ -255,16 +260,16 @@ describe("timerStore", () => {
           requires_manual_continue_decision: false,
         });
 
-        const state = useTimerStore.getState();
+        const state = useTimerObservationStore.getState();
         expect(state.requiresManualContinueDecision).toBe(false);
       });
     });
 
-    describe("handleFullState()", () => {
+    describe("observeFullState()", () => {
       it("should update all state from full payload", () => {
         const settings = createSettingsForTest({ workDurationSecs: 50 * 60 });
 
-        useTimerStore.getState().handleFullState(
+        useTimerObservationStore.getState().observeFullState(
           createFullStatePayload({
             status: "working",
             remaining_seconds: 1200,
@@ -275,7 +280,7 @@ describe("timerStore", () => {
           }),
         );
 
-        const state = useTimerStore.getState();
+        const state = useTimerObservationStore.getState();
         expect(state.status).toBe("working");
         expect(state.remainingSeconds).toBe(1200);
         expect(state.sessionDurationSeconds).toBe(1500);
@@ -283,21 +288,23 @@ describe("timerStore", () => {
         expect(state.completedPomodoros).toBe(2);
         expect(state.settings).toEqual(settings);
         expect(state.settingsFileStatus).toBe("ok");
-        expect(state.isConnected).toBe(true);
+        expect(useTimerSyncStore.getState().connection.status).toBe("idle");
       });
 
       it("exposes that the settings file could not be used", () => {
-        useTimerStore
+        useTimerObservationStore
           .getState()
-          .handleFullState(
+          .observeFullState(
             createFullStatePayload({ settings_file_status: "unusable" }),
           );
 
-        expect(useTimerStore.getState().settingsFileStatus).toBe("unusable");
+        expect(useTimerObservationStore.getState().settingsFileStatus).toBe(
+          "unusable",
+        );
       });
 
       it("keeps timer phase separate from the lock in a full snapshot", () => {
-        useTimerStore.getState().handleFullState(
+        useTimerObservationStore.getState().observeFullState(
           createFullStatePayload(
             {},
             {
@@ -310,16 +317,16 @@ describe("timerStore", () => {
             },
           ),
         );
-        expect(useTimerStore.getState().status).toBe("idle");
+        expect(useTimerObservationStore.getState().status).toBe("idle");
         expect(
-          selectBreakLockObservation(useTimerEffectsStore.getState()),
+          selectBreakLockObservation(useTimerObservationStore.getState()),
         ).toBe("locked");
       });
 
       it("should keep startup prompt state from backend full payload", () => {
-        const { handleFullState } = useTimerStore.getState();
+        const { observeFullState } = useTimerObservationStore.getState();
 
-        handleFullState(
+        observeFullState(
           createFullStatePayload({
             current_cycle: 1,
             boot_auto_start_offer: createBootAutoStartOfferForTest(),
@@ -332,7 +339,7 @@ describe("timerStore", () => {
           }),
         );
 
-        const state = useTimerStore.getState();
+        const state = useTimerObservationStore.getState();
         expect(state.bootAutoStartOffer).toEqual(
           createBootAutoStartOfferForTest(),
         );
@@ -345,17 +352,17 @@ describe("timerStore", () => {
       });
     });
 
-    describe("setConnected()", () => {
+    describe("setConnection()", () => {
       it("should update connection status", () => {
-        const { setConnected } = useTimerStore.getState();
+        const { setConnection } = useTimerSyncStore.getState();
 
-        expect(useTimerStore.getState().isConnected).toBe(false);
+        expect(useTimerSyncStore.getState().connection.status).toBe("idle");
 
-        setConnected(true);
-        expect(useTimerStore.getState().isConnected).toBe(true);
+        setConnection({ status: "ready" });
+        expect(useTimerSyncStore.getState().connection.status).toBe("ready");
 
-        setConnected(false);
-        expect(useTimerStore.getState().isConnected).toBe(false);
+        setConnection({ status: "idle" });
+        expect(useTimerSyncStore.getState().connection.status).toBe("idle");
       });
     });
 
@@ -365,11 +372,11 @@ describe("timerStore", () => {
       });
 
       it("should show stop-pending info message", () => {
-        const { showAutoRunStopPendingInfo } = useTimerStore.getState();
+        const { showAutoRunStopPendingInfo } = useTimerNoticeStore.getState();
 
         showAutoRunStopPendingInfo();
 
-        const state = useTimerStore.getState();
+        const state = useTimerNoticeStore.getState();
         expect(state.infoMessage).not.toBeNull();
         expect(state.infoMessage?.id).toBe("auto_run_stop_pending");
         expect(state.infoMessage?.message).toBe(
@@ -381,47 +388,47 @@ describe("timerStore", () => {
       it("should suppress duplicate stop-pending info within ttl", () => {
         vi.useFakeTimers({ now: 1000 });
         const { showAutoRunStopPendingInfo, clearInfoMessage } =
-          useTimerStore.getState();
+          useTimerNoticeStore.getState();
 
         showAutoRunStopPendingInfo();
-        expect(useTimerStore.getState().infoMessage?.id).toBe(
+        expect(useTimerNoticeStore.getState().infoMessage?.id).toBe(
           "auto_run_stop_pending",
         );
         clearInfoMessage();
 
         vi.setSystemTime(5999);
         showAutoRunStopPendingInfo();
-        expect(useTimerStore.getState().infoMessage).toBeNull();
+        expect(useTimerNoticeStore.getState().infoMessage).toBeNull();
 
         vi.setSystemTime(6000);
         showAutoRunStopPendingInfo();
-        expect(useTimerStore.getState().infoMessage?.id).toBe(
+        expect(useTimerNoticeStore.getState().infoMessage?.id).toBe(
           "auto_run_stop_pending",
         );
       });
 
       it("should show auto-run stopped info message", () => {
-        const { showAutoRunStoppedInfo } = useTimerStore.getState();
+        const { showAutoRunStoppedInfo } = useTimerNoticeStore.getState();
 
         showAutoRunStoppedInfo();
 
-        const state = useTimerStore.getState();
+        const state = useTimerNoticeStore.getState();
         expect(state.infoMessage).not.toBeNull();
         expect(state.infoMessage?.id).toBe("auto_run_stopped");
       });
 
       it("should clear info message only when expected id matches", () => {
         const { showAutoRunStoppedInfo, clearInfoMessage } =
-          useTimerStore.getState();
+          useTimerNoticeStore.getState();
 
         showAutoRunStoppedInfo();
         clearInfoMessage("auto_run_stop_pending");
-        expect(useTimerStore.getState().infoMessage?.id).toBe(
+        expect(useTimerNoticeStore.getState().infoMessage?.id).toBe(
           "auto_run_stopped",
         );
 
         clearInfoMessage("auto_run_stopped");
-        expect(useTimerStore.getState().infoMessage).toBeNull();
+        expect(useTimerNoticeStore.getState().infoMessage).toBeNull();
       });
     });
   });

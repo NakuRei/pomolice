@@ -1,4 +1,7 @@
-import { useTimerEffectsStore } from "@/store/timerEffectsStore";
+import { useTimerObservationStore } from "@/store/timerObservationStore";
+import { useTimerOperationStore } from "@/store/timerOperationStore";
+import { retryFailedEffects } from "@/timer/commands";
+import type { TimerEffectsState } from "@/ipc/generated";
 import { StatusNotice } from "./StatusNotice";
 import { Button } from "./Button";
 
@@ -7,16 +10,27 @@ const LOCK_FAILURE_MESSAGES = {
   release: "画面のロック解除に失敗しました。",
 };
 
-export function TimerEffectsNotice(): React.ReactElement | null {
-  const effects = useTimerEffectsStore((state) => state.effects);
-  const retrying = useTimerEffectsStore((state) => state.retrying);
-  const retryError = useTimerEffectsStore((state) => state.retryError);
-  const retry = useTimerEffectsStore((state) => state.retry);
-  if (effects === null) return null;
+function effectFailureMessages(effects: TimerEffectsState | null): string[] {
+  if (effects === null) return [];
+  const messages: string[] = [];
   const lock = effects.break_lock.last_attempt;
-  const lockFailed = lock?.status === "failed";
-  const saveFailed = effects.last_timer_save === "failed";
-  if (!lockFailed && !saveFailed) return null;
+  if (lock?.status === "failed")
+    messages.push(LOCK_FAILURE_MESSAGES[lock.action]);
+  if (effects.last_timer_save === "failed")
+    messages.push(
+      "タイマーの状態の保存に失敗しました。操作は反映されています。",
+    );
+  return messages;
+}
+
+export function TimerEffectsNotice(): React.ReactElement | null {
+  const effects = useTimerObservationStore((state) => state.effects);
+  const retrying = useTimerOperationStore(
+    (state) =>
+      state.operations.retry_failed_timer_effects?.outcome.status === "pending",
+  );
+  const messages = effectFailureMessages(effects);
+  if (messages.length === 0) return null;
 
   return (
     <StatusNotice
@@ -27,18 +41,16 @@ export function TimerEffectsNotice(): React.ReactElement | null {
           appearance="secondary"
           disabled={retrying}
           onClick={() => {
-            void retry();
+            void retryFailedEffects();
           }}
         >
           {retrying ? "再試行中…" : "再試行"}
         </Button>
       }
     >
-      {lockFailed && <p>{LOCK_FAILURE_MESSAGES[lock.action]}</p>}
-      {saveFailed && (
-        <p>タイマーの状態の保存に失敗しました。操作は反映されています。</p>
-      )}
-      {retryError !== null && <p>{retryError}</p>}
+      {messages.map((message) => (
+        <p key={message}>{message}</p>
+      ))}
     </StatusNotice>
   );
 }

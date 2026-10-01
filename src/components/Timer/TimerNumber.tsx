@@ -1,4 +1,4 @@
-import { useTimerStore } from "@/store/timerStore";
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import { formatTime } from "@/formatters/timeFormatter";
 
 export const TIMER_NUMBER_FONT_SIZE = "clamp(52px, min(18vw, 30vh), 220px)";
@@ -13,7 +13,9 @@ const TIMER_NUMBER_TRIM = {
 } as const;
 
 export function TimerNumber(): React.ReactElement {
-  const remainingSeconds = useTimerStore((state) => state.remainingSeconds);
+  const remainingSeconds = useTimerObservationStore(
+    (state) => state.remainingSeconds,
+  );
 
   return (
     <div
@@ -23,7 +25,7 @@ export function TimerNumber(): React.ReactElement {
       aria-live="polite"
       aria-atomic="true"
     >
-      {formatTime(remainingSeconds)}
+      {remainingSeconds === null ? "--:--" : formatTime(remainingSeconds)}
     </div>
   );
 }

@@ -1,10 +1,9 @@
-import type { TimerTickPayload } from "@/ipc/generated";
 import {
-  useTimerEffectsStore,
+  useTimerObservationStore,
   selectBreakLockObservation,
-} from "./timerEffectsStore";
+} from "@/store/timerObservationStore";
+import type { TimerTickPayload } from "@/ipc/generated";
 import { beforeEach, describe, expect, it } from "vitest";
-import { useTimerStore } from "./timerStore";
 
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import {
@@ -27,41 +26,41 @@ describe("backend penalty state", () => {
   beforeEach(resetTimerStoreForTest);
 
   it("reflects the penalty count and countdown reset from successive backend ticks", () => {
-    const { handleTimerTick } = useTimerStore.getState();
-    handleTimerTick({
+    const { observeTimerTick } = useTimerObservationStore.getState();
+    observeTimerTick({
       ...breakTick,
       remaining_seconds: 30,
       break_interaction_count: 5,
     });
 
-    expect(useTimerStore.getState()).toMatchObject({
+    expect(useTimerObservationStore.getState()).toMatchObject({
       remainingSeconds: 30,
       breakInteractionCount: 5,
     });
 
-    handleTimerTick({ ...breakTick, break_interaction_count: 6 });
+    observeTimerTick({ ...breakTick, break_interaction_count: 6 });
 
-    expect(useTimerStore.getState()).toMatchObject({
+    expect(useTimerObservationStore.getState()).toMatchObject({
       remainingSeconds: 300,
       breakInteractionCount: 6,
     });
   });
 
   it("clears the previous penalty count when the backend starts a new break", () => {
-    const { handleTimerTick } = useTimerStore.getState();
-    handleTimerTick({ ...breakTick, break_interaction_count: 10 });
+    const { observeTimerTick } = useTimerObservationStore.getState();
+    observeTimerTick({ ...breakTick, break_interaction_count: 10 });
 
-    handleTimerTick({
+    observeTimerTick({
       ...breakTick,
       current_cycle: 2,
       completed_pomodoros: 2,
     });
 
-    expect(useTimerStore.getState().breakInteractionCount).toBe(0);
+    expect(useTimerObservationStore.getState().breakInteractionCount).toBe(0);
   });
 
   it("restores the penalty count and fullscreen break from the full backend state", () => {
-    useTimerStore.getState().handleFullState({
+    useTimerObservationStore.getState().observeFullState({
       timer: {
         ...breakTick,
         remaining_seconds: 250,
@@ -86,15 +85,15 @@ describe("backend penalty state", () => {
       },
     });
 
-    expect(useTimerStore.getState().breakInteractionCount).toBe(7);
-    expect(selectBreakLockObservation(useTimerEffectsStore.getState())).toBe(
-      "locked",
-    );
+    expect(useTimerObservationStore.getState().breakInteractionCount).toBe(7);
+    expect(
+      selectBreakLockObservation(useTimerObservationStore.getState()),
+    ).toBe("locked");
   });
 
   it("timer ticks never overwrite the independently reported lock result", () => {
-    const { handleTimerTick } = useTimerStore.getState();
-    useTimerEffectsStore.getState().observe({
+    const { observeTimerTick } = useTimerObservationStore.getState();
+    useTimerObservationStore.getState().observeEffects({
       revision: "1",
       last_timer_save: null,
       break_lock: {
@@ -102,13 +101,13 @@ describe("backend penalty state", () => {
         last_attempt: { action: "enter", status: "succeeded" },
       },
     });
-    handleTimerTick(breakTick);
+    observeTimerTick(breakTick);
 
-    expect(selectBreakLockObservation(useTimerEffectsStore.getState())).toBe(
-      "locked",
-    );
+    expect(
+      selectBreakLockObservation(useTimerObservationStore.getState()),
+    ).toBe("locked");
 
-    handleTimerTick({
+    observeTimerTick({
       ...breakTick,
       status: "working",
       remaining_seconds: 1500,
@@ -118,9 +117,9 @@ describe("backend penalty state", () => {
       away_during_break: false,
     });
 
-    expect(selectBreakLockObservation(useTimerEffectsStore.getState())).toBe(
-      "locked",
-    );
-    expect(useTimerStore.getState().status).toBe("working");
+    expect(
+      selectBreakLockObservation(useTimerObservationStore.getState()),
+    ).toBe("locked");
+    expect(useTimerObservationStore.getState().status).toBe("working");
   });
 });

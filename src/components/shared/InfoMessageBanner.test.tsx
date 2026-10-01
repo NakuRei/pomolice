@@ -1,24 +1,11 @@
+import { useTimerNoticeStore } from "@/store/timerNoticeStore";
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InfoMessageBanner } from "./InfoMessageBanner";
-import { useTimerStore } from "@/store/timerStore";
 
 describe("InfoMessageBanner", () => {
   beforeEach(() => {
-    useTimerStore.setState({
-      status: "idle",
-      remainingSeconds: 25 * 60,
-      sessionType: "work",
-      currentCycle: 0,
-      completedPomodoros: 0,
-      breakInteractionCount: 0,
-      requiresManualContinueDecision: false,
-      isConnected: false,
-      bootAutoStartOffer: null,
-      activeWindowSummary: null,
-      infoMessage: null,
-      infoMessageShownAtById: {},
-    });
+    useTimerNoticeStore.setState(useTimerNoticeStore.getInitialState(), true);
   });
 
   afterEach(() => {
@@ -31,7 +18,7 @@ describe("InfoMessageBanner", () => {
   });
 
   it("renders current info message", () => {
-    useTimerStore.setState({
+    useTimerNoticeStore.setState({
       infoMessage: {
         id: "auto_run_stop_pending",
         message: "現在セッション終了後に停止予定",
@@ -51,7 +38,7 @@ describe("InfoMessageBanner", () => {
 
   it("clears the message after ttl", () => {
     vi.useFakeTimers();
-    useTimerStore.setState({
+    useTimerNoticeStore.setState({
       infoMessage: {
         id: "auto_run_stopped",
         message: "自動停止しました",
@@ -67,6 +54,6 @@ describe("InfoMessageBanner", () => {
     });
 
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
-    expect(useTimerStore.getState().infoMessage).toBeNull();
+    expect(useTimerNoticeStore.getState().infoMessage).toBeNull();
   });
 });

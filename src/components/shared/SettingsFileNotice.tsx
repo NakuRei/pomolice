@@ -1,5 +1,5 @@
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import { WarningTriangleIcon } from "@/components/icons/AppIcons";
-import { useTimerStore } from "@/store/timerStore";
 import { StatusNotice } from "./StatusNotice";
 
 /**
@@ -7,7 +7,9 @@ import { StatusNotice } from "./StatusNotice";
  * defaults are in effect until they save settings again.
  */
 export function SettingsFileNotice(): React.ReactElement | null {
-  const settingsFileStatus = useTimerStore((state) => state.settingsFileStatus);
+  const settingsFileStatus = useTimerObservationStore(
+    (state) => state.settingsFileStatus,
+  );
 
   if (settingsFileStatus !== "unusable") {
     return null;

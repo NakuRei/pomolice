@@ -1,7 +1,7 @@
+import { savePostBreakTransitionPolicy } from "@/timer/commands";
 import type { PostBreakTransitionPolicy } from "@/ipc/generated";
 import { WEEKDAY_LABELS_BY_KEY } from "@/constants/weekdayLabels";
 import { useFocusHeadingOnMount } from "@/hooks/useFocusHeadingOnMount";
-import { useTimerStore } from "@/store/timerStore";
 
 import type { Settings } from "@/types/settings";
 import { WEEKDAY_KEYS, type WeeklyAutoRunConfig } from "@/types/weeklyAutoRun";
@@ -178,9 +178,6 @@ export function SettingsTopPage({
   openNotificationSettings,
 }: SettingsTopPageProps): React.ReactElement {
   const topHeadingReference = useFocusHeadingOnMount();
-  const savePostBreakTransitionPolicy = useTimerStore(
-    (state) => state.savePostBreakTransitionPolicy,
-  );
 
   const timerSummaryText =
     settings === null

@@ -1,19 +1,22 @@
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { CycleProgress } from "./CycleProgress";
-import { useTimerStore } from "@/store/timerStore";
 
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { createSettingsForTest } from "@/test/settingsFixture";
+import { createTimerSnapshotForTest } from "@/test/timerEffectsFixture";
 
 describe("CycleProgress", () => {
   beforeEach(() => {
     resetTimerStoreForTest();
-    useTimerStore.setState({ settings: createSettingsForTest() });
+    useTimerObservationStore
+      .getState()
+      .observeFullState(createTimerSnapshotForTest());
   });
 
   it("shows nothing until the settings have arrived", () => {
-    useTimerStore.setState({ settings: null });
+    useTimerObservationStore.setState({ settings: null });
 
     render(<CycleProgress />);
 
@@ -29,7 +32,7 @@ describe("CycleProgress", () => {
   });
 
   it("updates the cycle summary when the timer or settings change", () => {
-    useTimerStore.setState({ currentCycle: 1 });
+    useTimerObservationStore.setState({ currentCycle: 1 });
 
     render(<CycleProgress />);
     expect(
@@ -37,14 +40,14 @@ describe("CycleProgress", () => {
     ).toBeInTheDocument();
 
     act(() => {
-      useTimerStore.setState({ currentCycle: 2 });
+      useTimerObservationStore.setState({ currentCycle: 2 });
     });
     expect(
       screen.getByRole("img", { name: "ポモドーロ 2 / 4" }),
     ).toBeInTheDocument();
 
     act(() => {
-      useTimerStore.setState({
+      useTimerObservationStore.setState({
         settings: createSettingsForTest({ longBreakInterval: 5 }),
       });
     });
@@ -79,7 +82,7 @@ describe("CycleProgress", () => {
   ] as const)(
     "fills the running $sessionType against the length it started with",
     ({ segmentKey, ...timerState }) => {
-      useTimerStore.setState({
+      useTimerObservationStore.setState({
         settings: createSettingsForTest({
           workDurationSecs: 3000,
           shortBreakDurationSecs: 600,
@@ -99,7 +102,7 @@ describe("CycleProgress", () => {
 
   it("shows a cycle past a lowered interval as the last cycle", () => {
     act(() => {
-      useTimerStore.setState({
+      useTimerObservationStore.setState({
         settings: createSettingsForTest({ longBreakInterval: 2 }),
         currentCycle: 3,
         sessionType: "work",

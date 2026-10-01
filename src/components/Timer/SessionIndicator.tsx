@@ -1,4 +1,4 @@
-import { useTimerStore } from "@/store/timerStore";
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 
 /**
  * SessionIndicator Component
@@ -11,13 +11,17 @@ import { useTimerStore } from "@/store/timerStore";
  * Example: "ポモドーロ 2/4" means 2nd pomodoro out of 4 before long break
  */
 export function SessionIndicator(): React.ReactElement | null {
-  const currentCycle = useTimerStore((state) => state.currentCycle);
-  const longBreakInterval = useTimerStore(
+  const currentCycle = useTimerObservationStore((state) => state.currentCycle);
+  const longBreakInterval = useTimerObservationStore(
     (state) => state.settings?.longBreakInterval ?? null,
   );
 
   // Don't show if cycle hasn't started yet
-  if (currentCycle === 0 || longBreakInterval === null) {
+  if (
+    currentCycle === null ||
+    currentCycle === 0 ||
+    longBreakInterval === null
+  ) {
     return null;
   }
 

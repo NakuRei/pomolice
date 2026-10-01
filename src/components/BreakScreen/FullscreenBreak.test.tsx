@@ -1,3 +1,4 @@
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import { answerSettingsSavesForTest } from "@/test/settingsSaveFixture";
 import { createTimerSnapshotForTest } from "@/test/timerEffectsFixture";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -18,8 +19,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 import { FullscreenBreak } from "./FullscreenBreak";
 import { useEmergencyShortcutStore } from "@/store/emergencyShortcutStore";
-import { useErrorStore } from "@/store/errorStore";
-import { useTimerStore } from "@/store/timerStore";
+import { useTimerOperationStore } from "@/store/timerOperationStore";
 
 import { useSkipFlowStore } from "@/store/skipFlowStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
@@ -31,7 +31,9 @@ import {
 } from "@/data/typingPhrases";
 
 function setSettings(overrides: Partial<Settings> = {}): void {
-  useTimerStore.setState({ settings: createSettingsForTest(overrides) });
+  useTimerObservationStore.setState({
+    settings: createSettingsForTest(overrides),
+  });
 }
 
 function getBreakTimerDisplay(timeText: string): HTMLElement {
@@ -113,13 +115,18 @@ describe("FullscreenBreak", () => {
     });
     resetTimerStoreForTest();
     useSkipFlowStore.getState().resetSkipFlow();
-    useErrorStore.getState().clearAllErrors();
+    useTimerOperationStore.setState(
+      useTimerOperationStore.getInitialState(),
+      true,
+    );
     setSettings();
-    useTimerStore.setState({
+    useTimerObservationStore.setState({
       sessionType: "short_break",
       remainingSeconds: 300,
+      sessionDurationSeconds: 300,
+      currentCycle: 0,
+      isAwayDuringBreak: false,
       status: "on_break",
-      isConnected: true,
     });
   });
 
@@ -129,10 +136,27 @@ describe("FullscreenBreak", () => {
   });
 
   describe("Rendering", () => {
+    it("keeps release guidance and the skip flow available before timer details arrive", async () => {
+      resetTimerStoreForTest();
+      const user = userEvent.setup();
+      render(<FullscreenBreak />);
+
+      expect(screen.getByText(/緊急解除/u)).toHaveTextContent(
+        "Ctrl + Alt + Shift + E",
+      );
+      expect(screen.getByTestId("timer-display")).toHaveTextContent("--:--");
+      expect(screen.queryByText("BREAK")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("cycle-progress")).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "休憩をスキップ" }));
+      expect(
+        screen.getByText(/Are you sure you want to skip/iu),
+      ).toBeInTheDocument();
+    });
+
     it.each(["short_break", "long_break"] as const)(
       "shows emergency release instructions during %s without opening the skip flow",
       (sessionType) => {
-        useTimerStore.setState({ sessionType });
+        useTimerObservationStore.setState({ sessionType });
         render(<FullscreenBreak />);
         const guidance = screen.getByText(/緊急解除/u);
         expect(guidance).toHaveTextContent("Ctrl + Alt + Shift + E");
@@ -140,7 +164,7 @@ describe("FullscreenBreak", () => {
     );
 
     it("should render the initial short-break ui", () => {
-      useTimerStore.setState({ currentCycle: 2 });
+      useTimerObservationStore.setState({ currentCycle: 2 });
 
       render(<FullscreenBreak />);
 
@@ -156,7 +180,7 @@ describe("FullscreenBreak", () => {
     });
 
     it("should display 'long break' for long break", () => {
-      useTimerStore.setState({ sessionType: "long_break" });
+      useTimerObservationStore.setState({ sessionType: "long_break" });
 
       render(<FullscreenBreak />);
 
@@ -181,7 +205,7 @@ describe("FullscreenBreak", () => {
     });
 
     it("hides the mute toggle until the settings have arrived", () => {
-      useTimerStore.setState({ settings: null });
+      useTimerObservationStore.setState({ settings: null });
 
       render(<FullscreenBreak />);
 
@@ -209,7 +233,7 @@ describe("FullscreenBreak", () => {
     });
 
     it("does not rewrite the reported timer phase when displaying break controls", () => {
-      useTimerStore.getState().handleTimerTick({
+      useTimerObservationStore.getState().observeTimerTick({
         status: "idle",
         remaining_seconds: 300,
         session_duration_secs: 300,
@@ -222,7 +246,7 @@ describe("FullscreenBreak", () => {
 
       render(<FullscreenBreak />);
 
-      expect(useTimerStore.getState().status).toBe("idle");
+      expect(useTimerObservationStore.getState().status).toBe("idle");
       expect(
         screen.getByRole("button", { name: "休憩をスキップ" }),
       ).toBeInTheDocument();
@@ -268,7 +292,7 @@ describe("FullscreenBreak", () => {
       expect(getBreakTimerDisplay("05:00")).toBeInTheDocument();
 
       act(() => {
-        useTimerStore.setState({ remainingSeconds: 60 }); // 1:00
+        useTimerObservationStore.setState({ remainingSeconds: 60 }); // 1:00
       });
       rerender(<FullscreenBreak />);
 
@@ -276,7 +300,7 @@ describe("FullscreenBreak", () => {
     });
 
     it("should handle single digit seconds", () => {
-      useTimerStore.setState({ remainingSeconds: 5 });
+      useTimerObservationStore.setState({ remainingSeconds: 5 });
 
       render(<FullscreenBreak />);
 
@@ -320,7 +344,7 @@ describe("FullscreenBreak", () => {
     }
 
     function receiveBreakTick(awayDuringBreak: boolean): void {
-      useTimerStore.getState().handleTimerTick({
+      useTimerObservationStore.getState().observeTimerTick({
         status: "on_break",
         remaining_seconds: 300,
         session_duration_secs: 300,

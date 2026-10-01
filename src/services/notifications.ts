@@ -1,3 +1,4 @@
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import type { SessionType } from "@/ipc/generated";
 /**
  * Notifications Service
@@ -13,7 +14,6 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { resolveResource } from "@tauri-apps/api/path";
 import { createLogger } from "../logging/logger";
 import { FRONTEND_LOG_EVENT_IDS } from "../logging/logEvents";
-import { useTimerStore } from "../store/timerStore";
 
 const notificationSoundResourcePathByType = {
   work: "resources/sounds/work.wav",
@@ -252,7 +252,7 @@ async function sendSessionCompleteNotification(
   }
 
   try {
-    const { settings } = useTimerStore.getState();
+    const { settings } = useTimerObservationStore.getState();
     // Without settings from the backend the user's sound choice is unknown,
     // so no sound is played.
     const soundIsMuted = settings === null || settings.notificationSoundMuted;

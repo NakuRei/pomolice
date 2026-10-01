@@ -1,8 +1,8 @@
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import type { RangedSettingField } from "@/ipc/generated";
 import { useState } from "react";
 import { useFocusHeadingOnMount } from "@/hooks/useFocusHeadingOnMount";
 import { useSettingsSave } from "@/hooks/useSettingsSave";
-import { useTimerStore } from "@/store/timerStore";
 
 import type { Settings, SettingsChanges } from "@/types/settings";
 import { DurationInput } from "./DurationInput";
@@ -94,7 +94,7 @@ export function SettingsTimerPage({
   openSettingsTopScreen,
 }: SettingsTimerPageProps): React.ReactElement {
   const headingReference = useFocusHeadingOnMount();
-  const timerStatus = useTimerStore((state) => state.status);
+  const timerStatus = useTimerObservationStore((state) => state.status);
   const { issues, isSaving, save, settleIssues } = useSettingsSave(
     openSettingsTopScreen,
   );
@@ -160,7 +160,7 @@ export function SettingsTimerPage({
           testId: "settings-interval",
         })}
 
-        {timerStatus !== "idle" && (
+        {(timerStatus === "working" || timerStatus === "on_break") && (
           <p
             className="text-xs text-text-muted"
             data-testid="settings-duration-applies-next-session"

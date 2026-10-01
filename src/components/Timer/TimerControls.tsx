@@ -1,4 +1,5 @@
-import { useTimerStore } from "@/store/timerStore";
+import { useTimerObservationStore } from "@/store/timerObservationStore";
+import { startWork } from "@/timer/commands";
 
 import { PlayIcon } from "@/components/icons/AppIcons";
 import { EmergencyStopButton } from "../EmergencyStop/EmergencyStopButton";
@@ -9,16 +10,13 @@ import { Button } from "../shared/Button";
  * Holds the single footer action: start while idle, emergency stop while running.
  */
 export function TimerControls(): React.ReactElement {
-  const status = useTimerStore((state) => state.status);
-  const start = useTimerStore((state) => state.start);
+  const status = useTimerObservationStore((state) => state.status);
 
   const isIdle = status === "idle";
   const isWorking = status === "working";
 
   const handleStart = (): void => {
-    // Errors from start() are reported to errorStore by timerStore — the home
-    // screen's toast stack handles display.
-    start().catch(() => undefined);
+    void startWork();
   };
 
   return (

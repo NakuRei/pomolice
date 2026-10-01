@@ -1,3 +1,4 @@
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import { createTimerSnapshotForTest } from "@/test/timerEffectsFixture";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -9,8 +10,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { EmergencyStopButton } from "./EmergencyStopButton";
-import { useErrorStore } from "@/store/errorStore";
-import { useTimerStore } from "@/store/timerStore";
+import { useTimerOperationStore } from "@/store/timerOperationStore";
 
 // Mock Tauri invoke
 vi.mock("@tauri-apps/api/core", () => ({
@@ -55,7 +55,7 @@ function renderEmergencyStopButton(): HTMLDivElement {
 }
 
 function renderWorkingEmergencyStopButton(): HTMLDivElement {
-  useTimerStore.setState({ status: "working" });
+  useTimerObservationStore.setState({ status: "working" });
   return renderEmergencyStopButton();
 }
 
@@ -70,8 +70,11 @@ describe("EmergencyStopButton", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Reset store to initial state
-    useErrorStore.getState().clearAllErrors();
-    useTimerStore.setState({
+    useTimerOperationStore.setState(
+      useTimerOperationStore.getInitialState(),
+      true,
+    );
+    useTimerObservationStore.setState({
       status: "idle",
       remainingSeconds: 25 * 60,
       sessionType: "work",
@@ -79,7 +82,6 @@ describe("EmergencyStopButton", () => {
       completedPomodoros: 0,
       breakInteractionCount: 0,
       requiresManualContinueDecision: false,
-      isConnected: false,
     });
   });
   describe("Visibility", () => {
@@ -227,7 +229,7 @@ describe("EmergencyStopButton", () => {
         within(dialog).getByRole("button", { name: "キャンセル" }),
       );
 
-      expect(useTimerStore.getState().status).toBe("working");
+      expect(useTimerObservationStore.getState().status).toBe("working");
     });
 
     it("should close dialog after confirming", async () => {
@@ -297,7 +299,7 @@ describe("EmergencyStopButton", () => {
     it("should call backend emergency_stop command", async () => {
       const { invoke } = await import("@tauri-apps/api/core");
       const user = userEvent.setup();
-      useTimerStore.setState({
+      useTimerObservationStore.setState({
         status: "working",
         remainingSeconds: 500,
         currentCycle: 2,
@@ -314,7 +316,7 @@ describe("EmergencyStopButton", () => {
 
     it("should preserve pomodoro count (handled by backend)", async () => {
       const user = userEvent.setup();
-      useTimerStore.setState({
+      useTimerObservationStore.setState({
         status: "working",
         completedPomodoros: 3,
         currentCycle: 3,
@@ -327,7 +329,7 @@ describe("EmergencyStopButton", () => {
       );
 
       // The backend handles state, so pomodoro count is preserved until backend responds
-      const state = useTimerStore.getState();
+      const state = useTimerObservationStore.getState();
       expect(state.completedPomodoros).toBe(3);
     });
   });

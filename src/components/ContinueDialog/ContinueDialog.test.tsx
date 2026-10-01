@@ -1,4 +1,7 @@
+import { resolvePostBreakDecision as sendPostBreakDecision } from "@/timer/commands";
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import { describe, it, expect, beforeEach, vi } from "vitest";
+vi.mock("@/timer/commands", () => ({ resolvePostBreakDecision: vi.fn() }));
 import {
   render,
   screen,
@@ -9,16 +12,13 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ContinueDialog } from "./ContinueDialog";
-import { useTimerStore } from "@/store/timerStore";
 
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 
-type ResolvePostBreakDecision = ReturnType<
-  typeof useTimerStore.getState
->["resolvePostBreakDecision"];
+type ResolvePostBreakDecision = typeof sendPostBreakDecision;
 
 function showContinueDialog(completedPomodoros = 3): void {
-  useTimerStore.setState({
+  useTimerObservationStore.setState({
     requiresManualContinueDecision: true,
     completedPomodoros,
   });
@@ -29,17 +29,15 @@ function getContinueDialog(): HTMLElement {
 }
 
 function replacePostBreakDecisionActionForTest(): ResolvePostBreakDecision {
-  const resolvePostBreakDecision = vi
-    .fn<ResolvePostBreakDecision>()
-    .mockResolvedValue(undefined);
-  useTimerStore.setState({ resolvePostBreakDecision });
-  return resolvePostBreakDecision;
+  return vi
+    .mocked(sendPostBreakDecision)
+    .mockResolvedValue({ status: "rejected", error: { code: "rate_limited" } });
 }
 
 describe("ContinueDialog", () => {
   beforeEach(() => {
     resetTimerStoreForTest();
-    useTimerStore.setState({
+    useTimerObservationStore.setState({
       status: "idle",
       remainingSeconds: 25 * 60,
       sessionType: "work",
@@ -47,7 +45,6 @@ describe("ContinueDialog", () => {
       completedPomodoros: 0,
       breakInteractionCount: 0,
       requiresManualContinueDecision: false,
-      isConnected: false,
     });
   });
 
@@ -99,7 +96,7 @@ describe("ContinueDialog", () => {
 
   describe("Button Actions", () => {
     beforeEach(() => {
-      useTimerStore.setState({
+      useTimerObservationStore.setState({
         requiresManualContinueDecision: true,
         status: "idle",
         currentCycle: 2,
@@ -161,7 +158,7 @@ describe("ContinueDialog", () => {
       expect(getContinueDialog()).toHaveTextContent("完了したポモドーロ: 5");
 
       act(() => {
-        useTimerStore.setState({ completedPomodoros: 10 });
+        useTimerObservationStore.setState({ completedPomodoros: 10 });
       });
 
       expect(getContinueDialog()).toHaveTextContent("完了したポモドーロ: 10");
@@ -174,7 +171,9 @@ describe("ContinueDialog", () => {
       expect(getContinueDialog()).toBeInTheDocument();
 
       act(() => {
-        useTimerStore.setState({ requiresManualContinueDecision: false });
+        useTimerObservationStore.setState({
+          requiresManualContinueDecision: false,
+        });
       });
 
       expect(

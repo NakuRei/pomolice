@@ -1,3 +1,4 @@
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   act,
@@ -9,7 +10,6 @@ import {
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { AutoStartConfirmDialog } from "./AutoStartConfirmDialog";
-import { useTimerStore } from "@/store/timerStore";
 
 import { createBootAutoStartOfferForTest } from "@/test/bootAutoStartOfferFixture";
 import { createTimerSnapshotForTest } from "@/test/timerEffectsFixture";
@@ -31,7 +31,7 @@ const MONDAY_DAYTIME_WINDOW = {
 } as const;
 
 function setDialogVisible(): void {
-  useTimerStore.setState({
+  useTimerObservationStore.setState({
     bootAutoStartOffer: createBootAutoStartOfferForTest(),
     activeWindowSummary: MONDAY_DAYTIME_WINDOW,
   });
@@ -44,7 +44,7 @@ function getAutoStartConfirmDialog(): HTMLElement {
 describe("AutoStartConfirmDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useTimerStore.setState({
+    useTimerObservationStore.setState({
       status: "idle",
       remainingSeconds: 25 * 60,
       sessionType: "work",
@@ -52,7 +52,7 @@ describe("AutoStartConfirmDialog", () => {
       completedPomodoros: 0,
       breakInteractionCount: 0,
       requiresManualContinueDecision: false,
-      isConnected: true,
+
       bootAutoStartOffer: null,
       activeWindowSummary: null,
     });
@@ -66,7 +66,7 @@ describe("AutoStartConfirmDialog", () => {
   });
 
   it("does not render before the startup offer is known", () => {
-    useTimerStore.setState({ bootAutoStartOffer: undefined });
+    useTimerObservationStore.setState({ bootAutoStartOffer: undefined });
     render(<AutoStartConfirmDialog />);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
@@ -76,7 +76,7 @@ describe("AutoStartConfirmDialog", () => {
     render(<AutoStartConfirmDialog />);
 
     act(() => {
-      useTimerStore.getState().clearBootAutoStartOffer();
+      useTimerObservationStore.getState().clearBootAutoStartOffer();
     });
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -88,9 +88,9 @@ describe("AutoStartConfirmDialog", () => {
     render(<AutoStartConfirmDialog />);
 
     act(() => {
-      useTimerStore
+      useTimerObservationStore
         .getState()
-        .handleActiveWindowChanged({ active_window_summary: null });
+        .observeActiveWindowChanged({ active_window_summary: null });
     });
 
     expect(getAutoStartConfirmDialog()).toBeInTheDocument();
@@ -100,7 +100,7 @@ describe("AutoStartConfirmDialog", () => {
   });
 
   it("does not render when only the live active window exists without a boot prompt", () => {
-    useTimerStore.setState({
+    useTimerObservationStore.setState({
       bootAutoStartOffer: null,
       activeWindowSummary: MONDAY_DAYTIME_WINDOW,
     });
@@ -192,7 +192,7 @@ describe("AutoStartConfirmDialog", () => {
     });
 
     act(() => {
-      useTimerStore.setState({
+      useTimerObservationStore.setState({
         bootAutoStartOffer: null,
         activeWindowSummary: null,
       });

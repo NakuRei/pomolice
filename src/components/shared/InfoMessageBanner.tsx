@@ -1,14 +1,12 @@
 import { useEffect } from "react";
-import { useTimerStore } from "@/store/timerStore";
+import { useTimerNoticeStore } from "@/store/timerNoticeStore";
 import { StatusNotice } from "./StatusNotice";
 
-/**
- * Displays short-lived informational messages from timerStore.
- * This is intentionally separate from errorStore-based banners.
- */
 export function InfoMessageBanner(): React.ReactElement | null {
-  const infoMessage = useTimerStore((state) => state.infoMessage);
-  const clearInfoMessage = useTimerStore((state) => state.clearInfoMessage);
+  const infoMessage = useTimerNoticeStore((state) => state.infoMessage);
+  const clearInfoMessage = useTimerNoticeStore(
+    (state) => state.clearInfoMessage,
+  );
 
   useEffect(() => {
     if (!infoMessage) {

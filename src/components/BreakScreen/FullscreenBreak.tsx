@@ -1,4 +1,9 @@
-import { useTimerStore } from "@/store/timerStore";
+import { useTimerObservationStore } from "@/store/timerObservationStore";
+import {
+  emergencyStop,
+  setAwayDuringBreak,
+  toggleNotificationSoundMuted,
+} from "@/timer/commands";
 
 import { useSkipFlowStore } from "@/store/skipFlowStore";
 import { FootprintsIcon, SkipForwardIcon } from "@/components/icons/AppIcons";
@@ -7,7 +12,7 @@ import { TimerNumber } from "@/components/Timer/TimerNumber";
 import { TimerPhaseLabel } from "@/components/Timer/TimerPhaseLabel";
 import SkipFlowModal from "../SkipFlow/SkipFlowModal";
 import { Button } from "../shared/Button";
-import { InlineError } from "../shared/InlineError";
+import { OperationNotice } from "../shared/OperationNotice";
 import { NotificationMuteToggleButton } from "../shared/NotificationMuteToggleButton";
 import { EmergencyShortcutHint } from "../shared/EmergencyShortcutNotice";
 
@@ -18,27 +23,23 @@ const SIDE_PADDING_CLASS_NAME = "px-8 md:px-24";
  * component only displays the break state and offers the skip flow.
  */
 export function FullscreenBreak(): React.ReactElement {
-  const sessionType = useTimerStore((state) => state.sessionType);
-  const settings = useTimerStore((state) => state.settings);
-  const toggleNotificationSoundMuted = useTimerStore(
-    (state) => state.toggleNotificationSoundMuted,
+  const sessionType = useTimerObservationStore((state) => state.sessionType);
+  const settings = useTimerObservationStore((state) => state.settings);
+
+  const isAwayDuringBreak = useTimerObservationStore(
+    (state) => state.isAwayDuringBreak,
   );
-  const isAwayDuringBreak = useTimerStore((state) => state.isAwayDuringBreak);
-  const setAwayDuringBreak = useTimerStore((state) => state.setAwayDuringBreak);
+
   const isActive = useSkipFlowStore((state) => state.isActive);
   const startSkipFlow = useSkipFlowStore((state) => state.startSkipFlow);
   const resetSkipFlow = useSkipFlowStore((state) => state.resetSkipFlow);
-  const emergencyStop = useTimerStore((state) => state.emergencyStop);
 
   const handleSkipClick = (): void => {
     startSkipFlow();
   };
 
-  // Completing every step ends the break through emergency stop, which exits
-  // fullscreen and resets to idle. Errors are reported to errorStore by
-  // timerStore.
   const handleSkipComplete = (): void => {
-    emergencyStop().catch(() => undefined);
+    void emergencyStop();
     resetSkipFlow();
   };
 
@@ -49,11 +50,14 @@ export function FullscreenBreak(): React.ReactElement {
   // Being away only suspends the automatic start of the next work session, so
   // an unattended machine does not run through work sessions nobody is doing.
   // The break itself keeps running and stays locked.
-  const offersAway =
-    settings?.postBreakTransitionPolicy === "start_next_work_automatically";
+  const offersAway = useTimerObservationStore(
+    (state) =>
+      state.settings?.postBreakTransitionPolicy ===
+        "start_next_work_automatically" && state.isAwayDuringBreak !== null,
+  );
 
   const handleAwayToggle = (): void => {
-    setAwayDuringBreak(!isAwayDuringBreak).catch(() => undefined);
+    if (isAwayDuringBreak !== null) void setAwayDuringBreak(!isAwayDuringBreak);
   };
 
   return (
@@ -71,19 +75,21 @@ export function FullscreenBreak(): React.ReactElement {
         )}
       </div>
       <div className={SIDE_PADDING_CLASS_NAME}>
-        <InlineError errorId="update_settings" />
+        <OperationNotice operation="update_settings" />
       </div>
 
       <div
         className={`flex min-h-0 flex-1 flex-col items-center justify-center gap-15 md:gap-16.5 ${SIDE_PADDING_CLASS_NAME}`}
       >
         <div className="flex flex-col items-center gap-11.25 md:gap-12.5">
-          <TimerPhaseLabel
-            sessionType={sessionType}
-            className="tracking-[0.3em]"
-          >
-            {sessionType === "long_break" ? "LONG BREAK" : "BREAK"}
-          </TimerPhaseLabel>
+          {sessionType !== null && (
+            <TimerPhaseLabel
+              sessionType={sessionType}
+              className="tracking-[0.3em]"
+            >
+              {sessionType === "long_break" ? "LONG BREAK" : "BREAK"}
+            </TimerPhaseLabel>
+          )}
           <TimerNumber />
         </div>
 
@@ -99,7 +105,7 @@ export function FullscreenBreak(): React.ReactElement {
           <EmergencyShortcutHint />
         </div>
         <div className="flex flex-col items-center gap-4">
-          {offersAway && isAwayDuringBreak && (
+          {offersAway && isAwayDuringBreak === true && (
             <p role="status" className="text-sm text-text-muted">
               離席中：休憩後は自動で作業を開始しません
             </p>
@@ -119,7 +125,7 @@ export function FullscreenBreak(): React.ReactElement {
                 onClick={handleAwayToggle}
                 className="shadow-2xl shadow-accent-glow"
               >
-                {isAwayDuringBreak ? (
+                {isAwayDuringBreak === true ? (
                   "戻りました"
                 ) : (
                   <>

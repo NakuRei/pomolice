@@ -1,13 +1,12 @@
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { TimerEffectsNotice } from "./TimerEffectsNotice";
 import { EmergencyStopButton } from "../EmergencyStop/EmergencyStopButton";
-import { useTimerStore } from "@/store/timerStore";
 
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
-import { useTimerEffectsStore } from "@/store/timerEffectsStore";
 import {
   createTimerEffectsForTest,
   createTimerSnapshotForTest,
@@ -19,11 +18,14 @@ describe("timer effect failures", () => {
   beforeEach(() => {
     vi.mocked(invoke).mockReset();
     resetTimerStoreForTest();
-    useTimerEffectsStore.setState(useTimerEffectsStore.getInitialState(), true);
+    useTimerObservationStore.setState(
+      useTimerObservationStore.getInitialState(),
+      true,
+    );
   });
 
   it("shows save and unlock failures together and clears them only after recovery", async () => {
-    useTimerEffectsStore.getState().observe(
+    useTimerObservationStore.getState().observeEffects(
       createTimerEffectsForTest({
         revision: "1",
         break_lock: {
@@ -65,7 +67,7 @@ describe("timer effect failures", () => {
   it("keeps a failure visible until a successful effect is observed", () => {
     vi.useFakeTimers();
     try {
-      useTimerEffectsStore.getState().observe(
+      useTimerObservationStore.getState().observeEffects(
         createTimerEffectsForTest({
           revision: "1",
           last_timer_save: "failed",
@@ -83,10 +85,46 @@ describe("timer effect failures", () => {
     }
   });
 
+  it("disables duplicate recovery while pending and keeps failures after acceptance", async () => {
+    const effects = createTimerEffectsForTest({
+      revision: "1",
+      last_timer_save: "failed",
+    });
+    useTimerObservationStore.getState().observeEffects(effects);
+    let finishRetry: (response: unknown) => void = () => {
+      throw new Error("Expected a pending recovery request");
+    };
+    vi.mocked(invoke).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishRetry = resolve;
+        }),
+    );
+    render(<TimerEffectsNotice />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "再試行" }));
+    expect(screen.getByRole("button", { name: "再試行中…" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "再試行中…" }));
+    expect(invoke).toHaveBeenCalledExactlyOnceWith(
+      "retry_failed_timer_effects",
+    );
+    await act(async () => {
+      finishRetry({
+        status: "accepted",
+        value: createTimerSnapshotForTest({ effects }),
+      });
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "タイマーの状態の保存に失敗しました",
+    );
+    expect(screen.getByRole("button", { name: "再試行" })).toBeEnabled();
+  });
+
   it("keeps a save failure visible after an accepted emergency stop closes its dialog", async () => {
-    useTimerStore.setState({ status: "working" });
+    useTimerObservationStore.setState({ status: "working" });
     vi.mocked(invoke).mockImplementationOnce(() => {
-      useTimerStore.setState({ status: "idle" });
+      useTimerObservationStore.setState({ status: "idle" });
       return Promise.resolve({
         status: "accepted",
         value: createTimerSnapshotForTest({

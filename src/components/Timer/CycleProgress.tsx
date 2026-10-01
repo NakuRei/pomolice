@@ -1,4 +1,4 @@
-import { useTimerStore } from "@/store/timerStore";
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import { deriveCycleSegments } from "@/components/Timer/cycleSegments";
 
 const SEGMENT_FILL_CLASS_NAME_BY_STATE = {
@@ -13,17 +13,25 @@ const SEGMENT_FILL_CLASS_NAME_BY_STATE = {
  * break that follows it, filled by how far the running session has come.
  */
 export function CycleProgress(): React.ReactElement | null {
-  const currentCycle = useTimerStore((state) => state.currentCycle);
-  const sessionType = useTimerStore((state) => state.sessionType);
-  const remainingSeconds = useTimerStore((state) => state.remainingSeconds);
-  const sessionDurationSeconds = useTimerStore(
+  const currentCycle = useTimerObservationStore((state) => state.currentCycle);
+  const sessionType = useTimerObservationStore((state) => state.sessionType);
+  const remainingSeconds = useTimerObservationStore(
+    (state) => state.remainingSeconds,
+  );
+  const sessionDurationSeconds = useTimerObservationStore(
     (state) => state.sessionDurationSeconds,
   );
-  const longBreakInterval = useTimerStore(
+  const longBreakInterval = useTimerObservationStore(
     (state) => state.settings?.longBreakInterval ?? null,
   );
 
-  if (longBreakInterval === null) {
+  if (
+    longBreakInterval === null ||
+    currentCycle === null ||
+    sessionType === null ||
+    remainingSeconds === null ||
+    sessionDurationSeconds === null
+  ) {
     return null;
   }
 

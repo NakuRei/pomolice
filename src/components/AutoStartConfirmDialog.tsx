@@ -1,18 +1,17 @@
+import { useTimerObservationStore } from "@/store/timerObservationStore";
+import { resolveBootAutoStartPrompt } from "@/timer/commands";
 import { useEffect, useId, useRef } from "react";
 import { WEEKDAY_LABELS_BY_KEY } from "../constants/weekdayLabels";
-import { useTimerStore } from "../store/timerStore";
 import { Button } from "./shared/Button";
 import { DialogActionRow } from "./shared/DialogActionRow";
 import { AppDialog } from "./shared/AppDialog";
-import { InlineError } from "./shared/InlineError";
+import { OperationNotice } from "./shared/OperationNotice";
 
 export function AutoStartConfirmDialog(): React.ReactElement | null {
-  const promptWindow = useTimerStore(
+  const promptWindow = useTimerObservationStore(
     (state) => state.bootAutoStartOffer?.window,
   );
-  const resolveBootAutoStartPrompt = useTimerStore(
-    (state) => state.resolveBootAutoStartPrompt,
-  );
+
   const titleId = useId();
   const startButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -34,14 +33,14 @@ export function AutoStartConfirmDialog(): React.ReactElement | null {
         return;
       }
       event.preventDefault();
-      void resolveBootAutoStartPrompt(false).catch(() => undefined);
+      void resolveBootAutoStartPrompt(false);
     };
 
     window.addEventListener("keydown", onKeyDown);
     return (): void => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [isVisible, resolveBootAutoStartPrompt]);
+  }, [isVisible]);
 
   if (!promptWindow) {
     return null;
@@ -70,14 +69,14 @@ export function AutoStartConfirmDialog(): React.ReactElement | null {
         開始すると終了時刻連動でセッション区切り停止されます。
       </p>
       <div className="mb-4">
-        <InlineError errorId="resolve_boot_auto_start_prompt" />
+        <OperationNotice operation="resolve_boot_auto_start_prompt" />
       </div>
       <DialogActionRow>
         <Button
           ref={startButtonRef}
           appearance="primary"
           onClick={() => {
-            void resolveBootAutoStartPrompt(true).catch(() => undefined);
+            void resolveBootAutoStartPrompt(true);
           }}
           className="flex-1"
           testId="auto-start-confirm-start"
@@ -87,7 +86,7 @@ export function AutoStartConfirmDialog(): React.ReactElement | null {
         <Button
           appearance="secondary"
           onClick={() => {
-            void resolveBootAutoStartPrompt(false).catch(() => undefined);
+            void resolveBootAutoStartPrompt(false);
           }}
           className="flex-1"
           testId="auto-start-confirm-later"

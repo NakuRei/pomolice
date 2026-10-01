@@ -1,3 +1,4 @@
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import type { SettingsInput } from "@/ipc/generated";
 import { answerSettingsSavesForTest } from "@/test/settingsSaveFixture";
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -16,7 +17,6 @@ vi.mock("@tauri-apps/api/core", () => ({
     mockInvoke(command, args),
 }));
 
-import { useTimerStore } from "@/store/timerStore";
 import {
   createSettingsForTest,
   createWeeklyAutoRunConfigForTest,
@@ -37,7 +37,7 @@ function SettingsTopPageFromStore({
 }: {
   openHomeScreen?: () => void;
 }): React.ReactElement {
-  const settings = useTimerStore((state) => state.settings);
+  const settings = useTimerObservationStore((state) => state.settings);
   return (
     <SettingsTopPage
       settings={settings}
@@ -50,7 +50,7 @@ function SettingsTopPageFromStore({
 }
 
 function renderWithSettings(settings: Settings | null): void {
-  useTimerStore.setState({ settings });
+  useTimerObservationStore.setState({ settings });
   render(<SettingsTopPageFromStore />);
 }
 
@@ -128,7 +128,7 @@ describe("SettingsTopPage", () => {
   it("renders the shared back button on settings top and calls home navigation", async () => {
     const user = userEvent.setup();
     const openHomeScreen = vi.fn();
-    useTimerStore.setState({ settings: createSettingsForTest() });
+    useTimerObservationStore.setState({ settings: createSettingsForTest() });
     render(<SettingsTopPageFromStore openHomeScreen={openHomeScreen} />);
 
     await user.click(screen.getByRole("button", { name: "ホームへ戻る" }));

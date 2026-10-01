@@ -1,448 +1,231 @@
-import type { TimerSnapshot, BackendErrorResponse } from "@/ipc/generated";
-import { useTimerEffectsStore } from "./timerEffectsStore";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
+import { useTimerObservationStore } from "@/store/timerObservationStore";
+import { useTimerOperationStore } from "@/store/timerOperationStore";
+import {
+  startWork,
+  emergencyStop,
+  resolvePostBreakDecision,
+  resolveBootAutoStartPrompt,
+} from "@/timer/commands";
+import {
+  canRetryOperation,
+  retryRejectedOperation,
+} from "@/timer/retryOperation";
+import {
+  classifyCommandFailure,
+  formatCommandFailureDetail,
+} from "@/errors/classifyBackendError";
+import type { TimerSnapshot } from "@/ipc/generated";
+import type { TimerCommandResult } from "@/timer/operation";
+import { resetTimerStoreForTest } from "@/test/resetTimerStore";
+import { createBootAutoStartOfferForTest } from "@/test/bootAutoStartOfferFixture";
 import {
   createTimerEffectsForTest,
   createTimerSnapshotForTest,
 } from "@/test/timerEffectsFixture";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
-type InvokeCommand = (
-  command: string,
-  args?: Record<string, unknown>,
-) => Promise<unknown>;
-
-const mockInvoke = vi.fn<InvokeCommand>();
-
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: (command: string, args?: Record<string, unknown>): Promise<unknown> =>
-    mockInvoke(command, args),
-}));
-
-import { useErrorStore, type AppError } from "./errorStore";
-import { resetTimerStoreForTest } from "@/test/resetTimerStore";
-import { createBootAutoStartOfferForTest } from "@/test/bootAutoStartOfferFixture";
-import { useTimerStore } from "./timerStore";
-
-interface TimerControlAvailabilityCase {
-  label: string;
-  request: () => Promise<void>;
-  expectedCommand: string;
-  expectedArguments?: Record<string, unknown>;
-}
-
-const timerControlAvailabilityCases: TimerControlAvailabilityCase[] = [
-  {
-    label: "start",
-    request: () => useTimerStore.getState().start(),
-    expectedCommand: "start_work",
-  },
-  {
-    label: "continue after a break",
-    request: () =>
-      useTimerStore.getState().resolvePostBreakDecision("continue"),
-    expectedCommand: "resolve_post_break_decision",
-    expectedArguments: { action: "continue" },
-  },
-  {
-    label: "stop the cycle after a break",
-    request: () =>
-      useTimerStore.getState().resolvePostBreakDecision("stop_cycle"),
-    expectedCommand: "resolve_post_break_decision",
-    expectedArguments: { action: "stop_cycle" },
-  },
-  {
-    label: "emergency stop",
-    request: () => useTimerStore.getState().emergencyStop(),
-    expectedCommand: "emergency_stop",
-  },
-  {
-    label: "accept the boot prompt",
-    request: () => useTimerStore.getState().resolveBootAutoStartPrompt(true),
-    expectedCommand: "resolve_boot_auto_start_prompt",
-    expectedArguments: { startNow: true },
-  },
-  {
-    label: "decline the boot prompt",
-    request: () => useTimerStore.getState().resolveBootAutoStartPrompt(false),
-    expectedCommand: "resolve_boot_auto_start_prompt",
-    expectedArguments: { startNow: false },
-  },
-];
-
-async function expectCommandRejection(
-  action: () => Promise<void>,
-  backendError: unknown,
-): Promise<void> {
-  await expect(action()).rejects.toBe(backendError);
-}
-
-function expectUserMessageExcludesDiagnostics(
-  error: AppError | undefined,
-  diagnosticFragments: string[],
-): void {
-  expect(error?.message).toEqual(expect.any(String));
-  expect(error?.message).not.toBe("");
-
-  for (const fragment of diagnosticFragments) {
-    expect(error?.message).not.toContain(fragment);
-  }
-}
-
-function expectTechnicalDetailExcludesDiagnostics(
-  error: AppError | undefined,
-  diagnosticFragments: string[],
-): void {
-  expect(error?.technicalDetail).toEqual(expect.any(String));
-  expect(error?.technicalDetail).not.toBe("");
-
-  for (const fragment of diagnosticFragments) {
-    expect(error?.technicalDetail).not.toContain(fragment);
-  }
-}
-
-describe("timerStore backend command errors", () => {
+describe("timer command failures", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    mockInvoke.mockResolvedValue({
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockResolvedValue({
       status: "accepted",
       value: createTimerSnapshotForTest(),
     });
-    useErrorStore.getState().clearAllErrors();
     resetTimerStoreForTest();
+    useTimerObservationStore.setState({
+      bootAutoStartOffer: createBootAutoStartOfferForTest(),
+      requiresManualContinueDecision: true,
+    });
   });
 
-  it.each(timerControlAvailabilityCases)(
-    "sends $label to the backend",
-    async ({ request, expectedCommand, expectedArguments }) => {
-      useTimerStore.setState({
-        isConnected: true,
-        status: "idle",
-        requiresManualContinueDecision: true,
-        bootAutoStartOffer: createBootAutoStartOfferForTest(),
-      });
-
-      await request();
-
-      expect(mockInvoke).toHaveBeenCalledTimes(1);
-      expect(mockInvoke.mock.calls[0]?.[0]).toBe(expectedCommand);
-      expect(mockInvoke.mock.calls[0]?.[1]).toEqual(expectedArguments);
+  it.each([
+    { command: "start_work", run: startWork, args: undefined },
+    { command: "emergency_stop", run: emergencyStop, args: undefined },
+    {
+      command: "resolve_post_break_decision",
+      run: (): Promise<TimerCommandResult> =>
+        resolvePostBreakDecision("continue"),
+      args: { action: "continue" },
+    },
+    {
+      command: "resolve_post_break_decision",
+      run: (): Promise<TimerCommandResult> =>
+        resolvePostBreakDecision("stop_cycle"),
+      args: { action: "stop_cycle" },
+    },
+    {
+      command: "resolve_boot_auto_start_prompt",
+      run: (): Promise<TimerCommandResult> => resolveBootAutoStartPrompt(true),
+      args: { startNow: true },
+    },
+    {
+      command: "resolve_boot_auto_start_prompt",
+      run: (): Promise<TimerCommandResult> => resolveBootAutoStartPrompt(false),
+      args: { startNow: false },
+    },
+  ])(
+    "sends $command with the selected answer",
+    async ({ command, run, args }) => {
+      await run();
+      expect(invoke).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(invoke).mock.calls[0]?.[0]).toBe(command);
+      expect(vi.mocked(invoke).mock.calls[0]?.[1]).toEqual(args);
     },
   );
 
-  it("stores safe structured details for start_work rejections", async () => {
-    const backendError: BackendErrorResponse = {
+  it.each([
+    {
+      kind: "start_work",
+      run: startWork,
       code: "window_control_error",
-    };
-    mockInvoke.mockResolvedValueOnce({
-      status: "rejected",
-      error: backendError,
-    });
-
-    await expectCommandRejection(
-      () => useTimerStore.getState().start(),
-      backendError,
-    );
-
-    expect(useErrorStore.getState().errors.start_work).toMatchObject({
-      id: "start_work",
-      technicalDetail: "window_control_error",
-      severity: "recoverable",
-      origin: "backend_command",
-      canRetry: true,
-    });
-    expectUserMessageExcludesDiagnostics(
-      useErrorStore.getState().errors.start_work,
-      ["failed to enter fullscreen", "C:\\Users\\nak", "secret"],
-    );
-    expect(useErrorStore.getState().errors.start_work?.retryFn).toEqual(
-      expect.any(Function),
-    );
-  });
-
-  it("stores safe structured details for resolve_post_break_decision rejections", async () => {
-    const backendError: BackendErrorResponse = {
+      retryable: true,
+    },
+    {
+      kind: "resolve_post_break_decision",
+      run: (): Promise<TimerCommandResult> =>
+        resolvePostBreakDecision("continue"),
       code: "invalid_state_transition",
-    };
-    mockInvoke.mockResolvedValueOnce({
-      status: "rejected",
-      error: backendError,
-    });
-
-    await expectCommandRejection(
-      () => useTimerStore.getState().resolvePostBreakDecision("continue"),
-      backendError,
-    );
-
-    expect(
-      useErrorStore.getState().errors.resolve_post_break_decision,
-    ).toMatchObject({
-      id: "resolve_post_break_decision",
-      technicalDetail: "invalid_state_transition",
-      severity: "recoverable",
-      origin: "backend_command",
-      canRetry: false,
-    });
-    expectUserMessageExcludesDiagnostics(
-      useErrorStore.getState().errors.resolve_post_break_decision,
-      ["no decision is pending", "C:\\Users\\nak", "secret"],
-    );
-    expect(
-      useErrorStore.getState().errors.resolve_post_break_decision?.retryFn,
-    ).toBeNull();
-  });
-
-  it("stores safe structured details for emergency_stop rejections", async () => {
-    const backendError: BackendErrorResponse = {
+      retryable: false,
+    },
+    {
+      kind: "emergency_stop",
+      run: emergencyStop,
       code: "rate_limited",
-    };
-    mockInvoke.mockResolvedValueOnce({
-      status: "rejected",
-      error: backendError,
-    });
-
-    await expectCommandRejection(
-      () => useTimerStore.getState().emergencyStop(),
-      backendError,
-    );
-
-    expect(useErrorStore.getState().errors.emergency_stop).toMatchObject({
-      id: "emergency_stop",
-      technicalDetail: "rate_limited",
-      severity: "critical",
-      origin: "backend_command",
-      canRetry: true,
-    });
-    expectUserMessageExcludesDiagnostics(
-      useErrorStore.getState().errors.emergency_stop,
-      ["please wait 300ms", "C:\\Users\\nak", "secret"],
-    );
-    expect(useErrorStore.getState().errors.emergency_stop?.retryFn).toEqual(
-      expect.any(Function),
-    );
-  });
-
-  it("keeps emergency_stop non-retryable for non-retryable backend errors", async () => {
-    const backendError: BackendErrorResponse = {
+      retryable: true,
+    },
+    {
+      kind: "emergency_stop",
+      run: emergencyStop,
       code: "invalid_state_transition",
-    };
-    mockInvoke.mockResolvedValueOnce({
-      status: "rejected",
-      error: backendError,
-    });
-
-    await expectCommandRejection(
-      () => useTimerStore.getState().emergencyStop(),
-      backendError,
-    );
-
-    expect(useErrorStore.getState().errors.emergency_stop).toMatchObject({
-      id: "emergency_stop",
-      technicalDetail: "invalid_state_transition",
-      severity: "critical",
-      origin: "backend_command",
-      canRetry: false,
-    });
-    expectUserMessageExcludesDiagnostics(
-      useErrorStore.getState().errors.emergency_stop,
-      ["already idle", "C:\\Users\\nak", "secret"],
-    );
-    expect(useErrorStore.getState().errors.emergency_stop?.retryFn).toBeNull();
-  });
-
-  it("stores safe details for invalid boot prompt command input", async () => {
-    const backendError = {
-      code: "invalid_command_input",
-    };
-    mockInvoke.mockRejectedValueOnce(backendError);
-
-    await expectCommandRejection(
-      () => useTimerStore.getState().resolveBootAutoStartPrompt(true),
-      backendError,
-    );
-
-    expect(
-      useErrorStore.getState().errors.resolve_boot_auto_start_prompt,
-    ).toMatchObject({
-      id: "resolve_boot_auto_start_prompt",
-      technicalDetail: "Command response unavailable",
-      severity: "recoverable",
-      origin: "backend_command",
-      canRetry: false,
-    });
-    expectUserMessageExcludesDiagnostics(
-      useErrorStore.getState().errors.resolve_boot_auto_start_prompt,
-      ["invalid type", "C:\\secret"],
-    );
-    expect(
-      useErrorStore.getState().errors.resolve_boot_auto_start_prompt?.retryFn,
-    ).toBeNull();
-  });
-
-  it("stores retry actions for retryable boot prompt rejections", async () => {
-    useTimerStore.setState({
-      bootAutoStartOffer: createBootAutoStartOfferForTest(),
-    });
-    const backendError: BackendErrorResponse = {
+      retryable: false,
+    },
+    {
+      kind: "resolve_boot_auto_start_prompt",
+      run: (): Promise<TimerCommandResult> => resolveBootAutoStartPrompt(false),
       code: "rate_limited",
-    };
-    mockInvoke.mockResolvedValueOnce({
-      status: "rejected",
-      error: backendError,
-    });
+      retryable: true,
+    },
+  ] as const)(
+    "retains $kind rejection and derives retry eligibility from $code",
+    async ({ kind, run, code, retryable }) => {
+      const response = { status: "rejected", error: { code } } as const;
+      vi.mocked(invoke).mockResolvedValueOnce(response);
+      await expect(run()).resolves.toEqual(response);
+      const record = useTimerOperationStore.getState().operations[kind];
+      expect(record?.outcome).toEqual(response);
+      expect(record && canRetryOperation(record, true)).toBe(retryable);
+      expect(classifyCommandFailure(response).userMessage).not.toBe("");
+      expect(formatCommandFailureDetail(response)).toBe(code);
+      expect(
+        useTimerObservationStore.getState().requiresManualContinueDecision,
+      ).toBe(true);
+    },
+  );
 
-    await expectCommandRejection(
-      () => useTimerStore.getState().resolveBootAutoStartPrompt(false),
-      backendError,
-    );
-
-    expect(
-      useErrorStore.getState().errors.resolve_boot_auto_start_prompt,
-    ).toMatchObject({
-      id: "resolve_boot_auto_start_prompt",
-      technicalDetail: "rate_limited",
-      severity: "recoverable",
-      origin: "backend_command",
-      canRetry: true,
-    });
-    expectUserMessageExcludesDiagnostics(
-      useErrorStore.getState().errors.resolve_boot_auto_start_prompt,
-      ["please wait 300ms"],
-    );
-    expect(
-      useErrorStore.getState().errors.resolve_boot_auto_start_prompt?.retryFn,
-    ).toEqual(expect.any(Function));
-  });
+  it.each([
+    { code: "invalid_command_input" },
+    { code: "unknown_error", message: "internal path C:/secret" },
+    new Error("panic at C:/Users/nak/secret"),
+  ])(
+    "keeps an undelivered response unknown without exposing diagnostics",
+    async (cause) => {
+      vi.mocked(invoke).mockRejectedValueOnce(cause);
+      const result = await resolveBootAutoStartPrompt(true);
+      expect(result).toEqual({ status: "unavailable", cause });
+      if (result.status !== "unavailable")
+        throw new Error("Expected unavailable response");
+      const record =
+        useTimerOperationStore.getState().operations
+          .resolve_boot_auto_start_prompt;
+      expect(record?.outcome).toEqual(result);
+      expect(record && canRetryOperation(record, true)).toBe(false);
+      expect(classifyCommandFailure(result).userMessage).toBe(
+        "操作の結果を確認できませんでした",
+      );
+      expect(formatCommandFailureDetail(result)).toBe(
+        "Command response unavailable",
+      );
+      expect(
+        useTimerObservationStore.getState().bootAutoStartOffer,
+      ).not.toBeNull();
+    },
+  );
 
   it("keeps a failed save separate from an accepted startup answer", async () => {
-    useTimerStore.setState({
-      bootAutoStartOffer: createBootAutoStartOfferForTest(),
-    });
     const effects = createTimerEffectsForTest({
       revision: "1",
       last_timer_save: "failed",
     });
-    mockInvoke.mockResolvedValueOnce({
+    vi.mocked(invoke).mockResolvedValueOnce({
       status: "accepted",
       value: createTimerSnapshotForTest({ effects }),
     });
-    await useTimerStore.getState().resolveBootAutoStartPrompt(true);
-    expect(useTimerStore.getState().bootAutoStartOffer).toBeNull();
+    await resolveBootAutoStartPrompt(true);
+    expect(useTimerObservationStore.getState().bootAutoStartOffer).toBeNull();
     expect(
-      useErrorStore.getState().errors.resolve_boot_auto_start_prompt,
-    ).toBeUndefined();
-    expect(useTimerEffectsStore.getState().effects).toEqual(effects);
-    expect(mockInvoke).toHaveBeenCalledTimes(1);
+      useTimerOperationStore.getState().operations
+        .resolve_boot_auto_start_prompt?.outcome,
+    ).toEqual({ status: "accepted" });
+    expect(useTimerObservationStore.getState().effects).toEqual(effects);
+    expect(invoke).toHaveBeenCalledTimes(1);
   });
 
-  it("does not offer a retry when a retryable failure arrives after the offer closed", async () => {
-    const backendError: BackendErrorResponse = {
-      code: "rate_limited",
-    };
-    useTimerStore.setState({
-      bootAutoStartOffer: createBootAutoStartOfferForTest(),
-    });
-    mockInvoke.mockResolvedValueOnce({
+  it("does not retry a rejection arriving after the startup offer closed", async () => {
+    vi.mocked(invoke).mockResolvedValueOnce({
       status: "rejected",
-      error: backendError,
+      error: { code: "rate_limited" },
     });
-
-    const request = useTimerStore.getState().resolveBootAutoStartPrompt(true);
-    useTimerStore.getState().clearBootAutoStartOffer();
-    await expect(request).rejects.toBe(backendError);
-
-    expect(
-      useErrorStore.getState().errors.resolve_boot_auto_start_prompt,
-    ).toMatchObject({
-      canRetry: false,
-      retryFn: null,
-    });
+    const pending = resolveBootAutoStartPrompt(true);
+    useTimerObservationStore.getState().clearBootAutoStartOffer();
+    await pending;
+    const record =
+      useTimerOperationStore.getState().operations
+        .resolve_boot_auto_start_prompt;
+    if (!record) throw new Error("Expected startup operation");
+    expect(canRetryOperation(record, false)).toBe(false);
+    await retryRejectedOperation(record);
+    expect(invoke).toHaveBeenCalledTimes(1);
   });
 
   it.each(["before failure", "after failure"])(
-    "keeps a save failure when a duplicate answer sent %s completes successfully",
+    "keeps failed effects when a duplicate answer sent %s completes",
     async (order) => {
-      let completeDuplicate: (result: TimerSnapshot) => void = () => {
-        throw new Error("Expected a pending command");
+      let completeDuplicate: (value: TimerSnapshot) => void = () => {
+        throw new Error("Expected pending response");
       };
-      const duplicateResponse = new Promise<TimerSnapshot>((resolve) => {
+      const duplicate = new Promise<TimerSnapshot>((resolve) => {
         completeDuplicate = resolve;
       });
-      const effects = createTimerEffectsForTest({
-        revision: "1",
-        last_timer_save: "failed",
+      const snapshot = createTimerSnapshotForTest({
+        effects: createTimerEffectsForTest({
+          revision: "1",
+          last_timer_save: "failed",
+        }),
       });
-      const outcome = createTimerSnapshotForTest({ effects });
-      useTimerStore.setState({
-        bootAutoStartOffer: createBootAutoStartOfferForTest(),
-      });
-      mockInvoke
-        .mockResolvedValueOnce({ status: "accepted", value: outcome })
+      vi.mocked(invoke)
+        .mockResolvedValueOnce({ status: "accepted", value: snapshot })
         .mockReturnValueOnce(
-          duplicateResponse.then((value) => ({ status: "accepted", value })),
+          duplicate.then((value) => ({ status: "accepted", value })),
         );
-      const firstAnswer = useTimerStore
-        .getState()
-        .resolveBootAutoStartPrompt(true);
-      const overlappingAnswer =
+      const first = resolveBootAutoStartPrompt(true);
+      const overlapping =
         order === "before failure"
-          ? useTimerStore.getState().resolveBootAutoStartPrompt(true)
+          ? resolveBootAutoStartPrompt(true)
           : undefined;
-      await firstAnswer;
-      const duplicateAnswer =
-        overlappingAnswer ??
-        useTimerStore.getState().resolveBootAutoStartPrompt(true);
-      completeDuplicate(outcome);
-      await duplicateAnswer;
-      expect(useTimerEffectsStore.getState().effects?.last_timer_save).toBe(
+      await first;
+      const second = overlapping ?? resolveBootAutoStartPrompt(true);
+      completeDuplicate(snapshot);
+      await second;
+      expect(useTimerObservationStore.getState().effects?.last_timer_save).toBe(
         "failed",
       );
       expect(
-        useErrorStore.getState().errors.resolve_boot_auto_start_prompt,
-      ).toBeUndefined();
+        useTimerOperationStore.getState().operations
+          .resolve_boot_auto_start_prompt?.outcome,
+      ).toEqual({ status: "accepted" });
     },
   );
-
-  it("uses generic details for unknown object rejections", async () => {
-    const backendError = {
-      code: "unknown_error",
-      message: "internal path C:\\secret",
-    };
-    mockInvoke.mockRejectedValueOnce(backendError);
-
-    await expect(useTimerStore.getState().start()).rejects.toBe(backendError);
-
-    expect(useErrorStore.getState().errors.start_work).toMatchObject({
-      canRetry: false,
-    });
-    expectUserMessageExcludesDiagnostics(
-      useErrorStore.getState().errors.start_work,
-      ["internal path", "C:\\secret"],
-    );
-    expectTechnicalDetailExcludesDiagnostics(
-      useErrorStore.getState().errors.start_work,
-      ["internal path", "C:\\secret"],
-    );
-    expect(useErrorStore.getState().errors.start_work?.retryFn).toBeNull();
-  });
-
-  it("uses generic details for raw command rejection values", async () => {
-    const backendError = new Error("panic at C:\\Users\\nak\\secret");
-    mockInvoke.mockRejectedValueOnce(backendError);
-
-    await expect(useTimerStore.getState().start()).rejects.toBe(backendError);
-
-    expect(useErrorStore.getState().errors.start_work).toMatchObject({
-      canRetry: false,
-    });
-    expectUserMessageExcludesDiagnostics(
-      useErrorStore.getState().errors.start_work,
-      ["panic", "C:\\Users\\nak", "secret"],
-    );
-    expectTechnicalDetailExcludesDiagnostics(
-      useErrorStore.getState().errors.start_work,
-      ["panic", "C:\\Users\\nak", "secret"],
-    );
-    expect(useErrorStore.getState().errors.start_work?.retryFn).toBeNull();
-  });
 });

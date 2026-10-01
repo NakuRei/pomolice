@@ -18,9 +18,10 @@ import type { Settings } from "@/types/settings";
 async function setSavedSettings(
   overrides: Partial<Settings> | null,
 ): Promise<void> {
-  const { useTimerStore } = await import("@/store/timerStore");
+  const { useTimerObservationStore } =
+    await import("@/store/timerObservationStore");
   const { createSettingsForTest } = await import("@/test/settingsFixture");
-  useTimerStore.setState({
+  useTimerObservationStore.setState({
     settings: overrides === null ? null : createSettingsForTest(overrides),
   });
 }

@@ -1,142 +1,40 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useErrorStore } from "@/store/errorStore";
+import { beforeEach, describe, expect, it } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { ConnectionBanner } from "./ConnectionBanner";
-
+import { useTimerSyncStore } from "@/store/timerSyncStore";
 describe("ConnectionBanner", () => {
   beforeEach(() => {
-    useErrorStore.getState().clearAllErrors();
+    useTimerSyncStore.setState(useTimerSyncStore.getInitialState(), true);
   });
-
-  it("renders nothing without a connection error", () => {
+  it("shows no failure while idle or synchronized", () => {
     render(<ConnectionBanner />);
-
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    act(() => {
+      useTimerSyncStore.getState().setConnection({ status: "ready" });
+    });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
-
-  it("renders connection error banner with alert semantics", () => {
-    useErrorStore.getState().reportError({
-      id: "connection",
-      message: "入力内容を確認してください",
-      technicalDetail: "setup failed",
-      severity: "critical",
-      origin: "backend_connection",
-      canRetry: false,
-      retryFn: null,
+  it("requests a new connection and keeps its progress owned by synchronization", () => {
+    useTimerSyncStore.getState().setConnection({
+      status: "failed",
+      failure: { status: "unavailable", cause: "offline" },
     });
-
     render(<ConnectionBanner />);
-
-    const banner = screen.getByRole("alert");
-
-    expect(banner).toHaveTextContent("入力内容を確認してください");
-  });
-
-  it("shows retry button only when canRetry is true", () => {
-    const retryFn = vi.fn(() => Promise.resolve());
-
-    useErrorStore.getState().reportError({
-      id: "connection",
-      message: "バックエンドに接続できません",
-      technicalDetail: "setup failed",
-      severity: "critical",
-      origin: "backend_connection",
-      canRetry: false,
-      retryFn: null,
-    });
-
-    render(<ConnectionBanner />);
-
-    expect(
-      screen.queryByRole("button", { name: "再試行" }),
-    ).not.toBeInTheDocument();
-
+    fireEvent.click(screen.getByRole("button", { name: "再試行" }));
+    expect(useTimerSyncStore.getState().generation).toBe(1);
+    expect(screen.getByRole("button", { name: "接続中" })).toBeDisabled();
     act(() => {
-      useErrorStore.getState().reportError({
-        id: "connection",
-        message: "バックエンドに接続できません",
-        technicalDetail: "setup failed",
-        severity: "critical",
-        origin: "backend_connection",
-        canRetry: true,
-        retryFn,
-      });
+      useTimerSyncStore.getState().setConnection({ status: "ready" });
     });
-
-    expect(screen.getByRole("button", { name: "再試行" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
-
-  it("shows retrying state while retryFn is pending", async () => {
-    const user = userEvent.setup();
-    let resolveRetry: () => void = () => {
-      throw new Error("Retry promise resolver was not initialized");
-    };
-    const retryPromise = new Promise<void>((resolve) => {
-      resolveRetry = resolve;
+  it("does not offer a retry for a nonretryable refusal", () => {
+    useTimerSyncStore.getState().setConnection({
+      status: "failed",
+      failure: { status: "rejected", error: { code: "unauthorized_window" } },
     });
-    const retryFn = vi.fn(() => retryPromise);
-
-    useErrorStore.getState().reportError({
-      id: "connection",
-      message: "バックエンドに接続できません",
-      technicalDetail: "setup failed",
-      severity: "critical",
-      origin: "backend_connection",
-      canRetry: true,
-      retryFn,
-    });
-
     render(<ConnectionBanner />);
-
-    const retryButton = screen.getByRole("button", { name: "再試行" });
-
-    await user.click(retryButton);
-
-    expect(retryFn).toHaveBeenCalledTimes(1);
-    expect(retryButton).toBeDisabled();
-    expect(screen.getByText("接続を試みています...")).toBeInTheDocument();
-
-    resolveRetry();
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "再試行" })).not.toBeDisabled();
-    });
-  });
-
-  it("returns to retryable state when retryFn rejects", async () => {
-    const user = userEvent.setup();
-    let rejectRetry: (error: Error) => void = () => {
-      throw new Error("Retry promise rejector was not initialized");
-    };
-    const retryPromise = new Promise<void>((_resolve, reject) => {
-      rejectRetry = reject;
-    });
-    const retryFn = vi.fn(() => retryPromise);
-
-    useErrorStore.getState().reportError({
-      id: "connection",
-      message: "バックエンドに接続できません",
-      technicalDetail: "setup failed",
-      severity: "critical",
-      origin: "backend_connection",
-      canRetry: true,
-      retryFn,
-    });
-
-    render(<ConnectionBanner />);
-
-    const retryButton = screen.getByRole("button", { name: "再試行" });
-
-    await user.click(retryButton);
-
-    expect(retryFn).toHaveBeenCalledTimes(1);
-    expect(retryButton).toBeDisabled();
-
-    rejectRetry(new Error("retry failed"));
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "再試行" })).not.toBeDisabled();
-    });
+    expect(screen.getByRole("alert")).toHaveTextContent("権限エラー");
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 });

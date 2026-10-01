@@ -1,6 +1,6 @@
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { useTimerStore } from "@/store/timerStore";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { SettingsFileNotice } from "./SettingsFileNotice";
 
@@ -10,7 +10,7 @@ describe("SettingsFileNotice", () => {
   });
 
   it("tells the user the saved settings could not be read", () => {
-    useTimerStore.setState({ settingsFileStatus: "unusable" });
+    useTimerObservationStore.setState({ settingsFileStatus: "unusable" });
 
     render(<SettingsFileNotice />);
 
@@ -20,7 +20,7 @@ describe("SettingsFileNotice", () => {
   });
 
   it("shows nothing while the settings file is usable", () => {
-    useTimerStore.setState({ settingsFileStatus: "ok" });
+    useTimerObservationStore.setState({ settingsFileStatus: "ok" });
 
     render(<SettingsFileNotice />);
 

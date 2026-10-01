@@ -1,9 +1,10 @@
+import { useTimerObservationStore } from "@/store/timerObservationStore";
+import { resolvePostBreakDecision } from "@/timer/commands";
 import { useEffect, useId, useRef } from "react";
-import { useTimerStore } from "@/store/timerStore";
 import { DialogActionRow } from "../shared/DialogActionRow";
 import { Button } from "../shared/Button";
 import { AppDialog } from "../shared/AppDialog";
-import { InlineError } from "../shared/InlineError";
+import { OperationNotice } from "../shared/OperationNotice";
 import { StatusNotice } from "../shared/StatusNotice";
 
 /**
@@ -15,24 +16,22 @@ import { StatusNotice } from "../shared/StatusNotice";
  * - "終了" button: Returns to idle state
  */
 export function ContinueDialog(): React.ReactElement | null {
-  const requiresManualContinueDecision = useTimerStore(
-    (state) => state.requiresManualContinueDecision,
+  const requiresManualContinueDecision = useTimerObservationStore(
+    (state) => state.requiresManualContinueDecision === true,
   );
-  const completedPomodoros = useTimerStore((state) => state.completedPomodoros);
-  const resolvePostBreakDecision = useTimerStore(
-    (state) => state.resolvePostBreakDecision,
+  const completedPomodoros = useTimerObservationStore(
+    (state) => state.completedPomodoros,
   );
+
   const titleId = useId();
   const continueButtonReference = useRef<HTMLButtonElement>(null);
 
   const handleContinue = (): void => {
-    // Errors are reported to errorStore by timerStore — InlineError handles display
-    resolvePostBreakDecision("continue").catch(() => undefined);
+    void resolvePostBreakDecision("continue");
   };
 
   const handleEnd = (): void => {
-    // Errors are reported to errorStore by timerStore — InlineError handles display
-    resolvePostBreakDecision("stop_cycle").catch(() => undefined);
+    void resolvePostBreakDecision("stop_cycle");
   };
 
   useEffect(() => {
@@ -54,7 +53,7 @@ export function ContinueDialog(): React.ReactElement | null {
       }
 
       event.preventDefault();
-      void resolvePostBreakDecision("stop_cycle").catch(() => undefined);
+      void resolvePostBreakDecision("stop_cycle");
     };
 
     window.addEventListener("keydown", onKeyDown);
@@ -62,7 +61,7 @@ export function ContinueDialog(): React.ReactElement | null {
     return (): void => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [requiresManualContinueDecision, resolvePostBreakDecision]);
+  }, [requiresManualContinueDecision]);
 
   if (!requiresManualContinueDecision) {
     return null;
@@ -90,7 +89,7 @@ export function ContinueDialog(): React.ReactElement | null {
       </StatusNotice>
       {/* Error area: shown when manual decision command fails */}
       <div className="mb-4">
-        <InlineError errorId="resolve_post_break_decision" />
+        <OperationNotice operation="resolve_post_break_decision" />
       </div>
       <DialogActionRow>
         <Button

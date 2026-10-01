@@ -1,6 +1,6 @@
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import { acceptedCommand } from "./commandResponseFixture";
 import type { TimerSnapshot, CommandResponse } from "@/ipc/generated";
-import { useTimerStore } from "@/store/timerStore";
 import { createTimerSnapshotForTest } from "./timerEffectsFixture";
 
 import {
@@ -17,8 +17,9 @@ export function answerSettingsSavesForTest(
   args?: Record<string, unknown>,
 ): Promise<CommandResponse<TimerSnapshot>> {
   if (command === "update_settings") {
-    const { settings, handleSettingsChanged } = useTimerStore.getState();
-    handleSettingsChanged({
+    const { settings, observeSettingsChanged } =
+      useTimerObservationStore.getState();
+    observeSettingsChanged({
       settings: settingsPayloadAfterChangesForTest(
         settings ?? createSettingsForTest(),
         args?.changes,

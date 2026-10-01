@@ -1,4 +1,4 @@
-import { useTimerEffectsStore } from "./store/timerEffectsStore";
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   act,
@@ -11,7 +11,6 @@ import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import App from "./App";
-import { useTimerStore } from "./store/timerStore";
 import { resetTimerStoreForTest } from "./test/resetTimerStore";
 import { createSettingsForTest } from "./test/settingsFixture";
 
@@ -117,8 +116,7 @@ async function openNotificationSettings(user: UserEvent): Promise<void> {
 describe("App", () => {
   beforeEach(() => {
     resetTimerStoreForTest();
-    useTimerStore.setState({
-      isConnected: true,
+    useTimerObservationStore.setState({
       settings: createSettingsForTest(),
     });
     vi.mocked(invoke).mockResolvedValue({
@@ -162,7 +160,10 @@ describe("App", () => {
     });
 
     render(<App />);
-    expect(screen.getByTestId("header-auto-run")).toHaveTextContent("MANUAL");
+    expect(screen.queryByTestId("header-auto-run")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("header-auto-run")).toHaveTextContent(
+      "MANUAL",
+    );
     await waitFor(() => {
       expect(backendEventHandlers.has("active_window_changed")).toBe(true);
     });
@@ -316,7 +317,7 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "設定" })).toBeInTheDocument();
 
     act(() => {
-      useTimerEffectsStore.getState().observe({
+      useTimerObservationStore.getState().observeEffects({
         revision: "1",
         last_timer_save: null,
         break_lock: {
@@ -330,7 +331,7 @@ describe("App", () => {
     });
 
     act(() => {
-      useTimerEffectsStore.getState().observe({
+      useTimerObservationStore.getState().observeEffects({
         revision: "2",
         last_timer_save: null,
         break_lock: {

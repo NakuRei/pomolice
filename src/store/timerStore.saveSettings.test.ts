@@ -1,7 +1,12 @@
 import {
-  useTimerEffectsStore,
+  useTimerObservationStore,
   selectBreakLockObservation,
-} from "./timerEffectsStore";
+} from "@/store/timerObservationStore";
+import {
+  saveSettings,
+  toggleNotificationSoundMuted,
+  savePostBreakTransitionPolicy,
+} from "@/timer/commands";
 import { createTimerSnapshotForTest } from "@/test/timerEffectsFixture";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -17,8 +22,7 @@ vi.mock("@tauri-apps/api/core", () => ({
     mockInvoke(command, args),
 }));
 
-import { useErrorStore } from "./errorStore";
-import { useTimerStore } from "./timerStore";
+import { useTimerOperationStore } from "@/store/timerOperationStore";
 
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import {
@@ -29,7 +33,10 @@ import {
 describe("timerStore settings saving", () => {
   beforeEach(() => {
     mockInvoke.mockReset();
-    useErrorStore.getState().clearAllErrors();
+    useTimerOperationStore.setState(
+      useTimerOperationStore.getInitialState(),
+      true,
+    );
     resetTimerStoreForTest();
   });
 
@@ -40,11 +47,9 @@ describe("timerStore settings saving", () => {
         value: createTimerSnapshotForTest(),
       });
 
-      const result = await useTimerStore
-        .getState()
-        .saveSettings({ workDurationSecs: 30 * 60 });
+      const result = await saveSettings({ workDurationSecs: 30 * 60 });
 
-      expect(result).toEqual({ status: "saved" });
+      expect(result).toMatchObject({ status: "accepted" });
       expect(mockInvoke).toHaveBeenCalledWith("update_settings", {
         changes: { work_duration_secs: 30 * 60 },
       });
@@ -52,13 +57,13 @@ describe("timerStore settings saving", () => {
 
     it("leaves every piece of state to the events, so a late reply cannot roll it back", async () => {
       const settings = createSettingsForTest();
-      useTimerStore.setState({
+      useTimerObservationStore.setState({
         settings,
         status: "on_break",
         sessionType: "short_break",
         remainingSeconds: 299,
       });
-      useTimerEffectsStore.getState().observe({
+      useTimerObservationStore.getState().observeEffects({
         revision: "2",
         last_timer_save: null,
         break_lock: {
@@ -66,21 +71,21 @@ describe("timerStore settings saving", () => {
           last_attempt: { action: "enter", status: "succeeded" },
         },
       });
-      const stateBeforeTheReply = useTimerStore.getState();
+      const stateBeforeTheReply = useTimerObservationStore.getState();
       mockInvoke.mockResolvedValueOnce({
         status: "accepted",
         value: createTimerSnapshotForTest(),
       });
 
-      await useTimerStore.getState().saveSettings({ workDurationSecs: 60 });
+      await saveSettings({ workDurationSecs: 60 });
 
-      const state = useTimerStore.getState();
+      const state = useTimerObservationStore.getState();
       expect(state.settings).toBe(stateBeforeTheReply.settings);
       expect(state.status).toBe("on_break");
       expect(state.remainingSeconds).toBe(299);
-      expect(selectBreakLockObservation(useTimerEffectsStore.getState())).toBe(
-        "locked",
-      );
+      expect(
+        selectBreakLockObservation(useTimerObservationStore.getState()),
+      ).toBe("locked");
     });
 
     it("returns every rejected input without reporting a global error", async () => {
@@ -106,18 +111,21 @@ describe("timerStore settings saving", () => {
         },
       });
 
-      const result = await useTimerStore
-        .getState()
-        .saveSettings(createSettingsForTest());
+      const result = await saveSettings(createSettingsForTest());
 
-      expect(result).toEqual({ status: "rejected", issues });
-      expect(useTimerStore.getState().settings).toBeNull();
-      expect(useErrorStore.getState().errors.update_settings).toBeUndefined();
+      expect(result).toMatchObject({
+        status: "rejected",
+        error: { code: "invalid_settings", issues },
+      });
+      expect(useTimerObservationStore.getState().settings).toBeNull();
+      expect(
+        useTimerOperationStore.getState().operations.update_settings?.outcome,
+      ).toEqual(result);
     });
 
     it("reports any other failure and keeps the previous settings", async () => {
       const previousSettings = createSettingsForTest();
-      useTimerStore.setState({ settings: previousSettings });
+      useTimerObservationStore.setState({ settings: previousSettings });
       mockInvoke.mockResolvedValueOnce({
         status: "rejected",
         error: {
@@ -126,16 +134,22 @@ describe("timerStore settings saving", () => {
         },
       });
 
-      const result = await useTimerStore
-        .getState()
-        .saveSettings(createSettingsForTest({ workDurationSecs: 60 }));
+      const result = await saveSettings(
+        createSettingsForTest({ workDurationSecs: 60 }),
+      );
 
-      expect(result).toEqual({ status: "failed" });
-      expect(useTimerStore.getState().settings).toEqual(previousSettings);
-      expect(useErrorStore.getState().errors.update_settings).toMatchObject({
-        id: "update_settings",
-        origin: "backend_command",
-        canRetry: true,
+      expect(result).toMatchObject({
+        status: "rejected",
+        error: { code: "persistence_error" },
+      });
+      expect(useTimerObservationStore.getState().settings).toEqual(
+        previousSettings,
+      );
+      expect(
+        useTimerOperationStore.getState().operations.update_settings,
+      ).toMatchObject({
+        request: { kind: "update_settings" },
+        outcome: result,
       });
     });
 
@@ -148,21 +162,23 @@ describe("timerStore settings saving", () => {
           message: "Persistence error",
         },
       });
-      await useTimerStore.getState().saveSettings(settings);
+      await saveSettings(settings);
       mockInvoke.mockResolvedValueOnce({
         status: "accepted",
         value: createTimerSnapshotForTest(),
       });
 
-      await useTimerStore.getState().saveSettings(settings);
+      await saveSettings(settings);
 
-      expect(useErrorStore.getState().errors.update_settings).toBeUndefined();
+      expect(
+        useTimerOperationStore.getState().operations.update_settings?.outcome,
+      ).toEqual({ status: "accepted" });
     });
   });
 
   describe("toggleNotificationSoundMuted()", () => {
     it("saves the settings with the mute flag flipped", async () => {
-      useTimerStore.setState({
+      useTimerObservationStore.setState({
         settings: createSettingsForTest({ notificationSoundMuted: false }),
       });
       mockInvoke.mockResolvedValueOnce({
@@ -170,7 +186,7 @@ describe("timerStore settings saving", () => {
         value: createTimerSnapshotForTest(),
       });
 
-      await useTimerStore.getState().toggleNotificationSoundMuted();
+      await toggleNotificationSoundMuted();
 
       expect(mockInvoke).toHaveBeenCalledWith("update_settings", {
         changes: { notification_sound_muted: true },
@@ -178,7 +194,7 @@ describe("timerStore settings saving", () => {
     });
 
     it("does nothing before the backend has sent the settings", async () => {
-      await useTimerStore.getState().toggleNotificationSoundMuted();
+      await toggleNotificationSoundMuted();
 
       expect(mockInvoke).not.toHaveBeenCalled();
     });
@@ -186,7 +202,7 @@ describe("timerStore settings saving", () => {
 
   describe("savePostBreakTransitionPolicy()", () => {
     it("saves the settings with the given policy", async () => {
-      useTimerStore.setState({
+      useTimerObservationStore.setState({
         settings: createSettingsForTest({
           postBreakTransitionPolicy: "require_manual_continue",
         }),
@@ -196,9 +212,7 @@ describe("timerStore settings saving", () => {
         value: createTimerSnapshotForTest(),
       });
 
-      await useTimerStore
-        .getState()
-        .savePostBreakTransitionPolicy("start_next_work_automatically");
+      await savePostBreakTransitionPolicy("start_next_work_automatically");
 
       expect(mockInvoke).toHaveBeenCalledWith("update_settings", {
         changes: {
@@ -208,17 +222,17 @@ describe("timerStore settings saving", () => {
     });
   });
 
-  describe("handleSettingsChanged()", () => {
+  describe("observeSettingsChanged()", () => {
     it("takes the settings and file status the backend announces", () => {
       const settings = createSettingsForTest({ notificationSoundMuted: true });
 
-      useTimerStore.getState().handleSettingsChanged({
+      useTimerObservationStore.getState().observeSettingsChanged({
         settings: settingsPayloadForTest(settings),
         settings_file_status: "ok",
       });
 
-      expect(useTimerStore.getState().settings).toEqual(settings);
-      expect(useTimerStore.getState().settingsFileStatus).toBe("ok");
+      expect(useTimerObservationStore.getState().settings).toEqual(settings);
+      expect(useTimerObservationStore.getState().settingsFileStatus).toBe("ok");
     });
   });
 
@@ -232,11 +246,14 @@ describe("timerStore settings saving", () => {
       },
     });
 
-    const result = await useTimerStore
-      .getState()
-      .saveSettings(createSettingsForTest());
+    const result = await saveSettings(createSettingsForTest());
 
-    expect(result).toEqual({ status: "failed" });
-    expect(useErrorStore.getState().errors.update_settings).toBeDefined();
+    expect(result).toMatchObject({
+      status: "rejected",
+      error: { code: "invalid_settings", issues: [] },
+    });
+    expect(
+      useTimerOperationStore.getState().operations.update_settings,
+    ).toBeDefined();
   });
 });

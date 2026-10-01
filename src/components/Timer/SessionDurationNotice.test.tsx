@@ -1,6 +1,6 @@
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { useTimerStore } from "@/store/timerStore";
 
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
 import { createSettingsForTest } from "@/test/settingsFixture";
@@ -14,7 +14,7 @@ describe("SessionDurationNotice", () => {
   });
 
   it("shows the running length and the next length when a save changed it", () => {
-    useTimerStore.setState({
+    useTimerObservationStore.setState({
       status: "working",
       sessionType: "work",
       sessionDurationSeconds: 25 * 60,
@@ -29,7 +29,7 @@ describe("SessionDurationNotice", () => {
   });
 
   it("compares a break with the saved length of that kind of break", () => {
-    useTimerStore.setState({
+    useTimerObservationStore.setState({
       status: "on_break",
       sessionType: "long_break",
       sessionDurationSeconds: 15 * 60,
@@ -44,7 +44,7 @@ describe("SessionDurationNotice", () => {
   });
 
   it("shows nothing when the running session already has the saved length", () => {
-    useTimerStore.setState({
+    useTimerObservationStore.setState({
       status: "working",
       sessionType: "work",
       sessionDurationSeconds: 25 * 60,
@@ -57,7 +57,7 @@ describe("SessionDurationNotice", () => {
   });
 
   it("shows nothing while idle", () => {
-    useTimerStore.setState({
+    useTimerObservationStore.setState({
       status: "idle",
       sessionDurationSeconds: 25 * 60,
       settings: createSettingsForTest({ workDurationSecs: 30 * 60 }),
@@ -69,7 +69,7 @@ describe("SessionDurationNotice", () => {
   });
 
   it("shows nothing before the settings have arrived", () => {
-    useTimerStore.setState({
+    useTimerObservationStore.setState({
       status: "working",
       sessionDurationSeconds: 25 * 60,
       settings: null,

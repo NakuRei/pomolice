@@ -1,9 +1,9 @@
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import { createTimerSnapshotForTest } from "@/test/timerEffectsFixture";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TimerControls } from "./TimerControls";
-import { useTimerStore } from "@/store/timerStore";
 
 type InvokeCommand = (
   command: string,
@@ -41,7 +41,7 @@ describe("TimerControls", () => {
       value: createTimerSnapshotForTest(),
     });
     // Reset store to initial state before each test
-    useTimerStore.setState({
+    useTimerObservationStore.setState({
       status: "idle",
       remainingSeconds: 25 * 60,
       sessionType: "work",
@@ -49,7 +49,6 @@ describe("TimerControls", () => {
       completedPomodoros: 0,
       breakInteractionCount: 0,
       requiresManualContinueDecision: false,
-      isConnected: false,
     });
   });
 
@@ -87,7 +86,7 @@ describe("TimerControls", () => {
 
   describe("Working State", () => {
     beforeEach(() => {
-      useTimerStore.setState({ status: "working" });
+      useTimerObservationStore.setState({ status: "working" });
     });
 
     it("should not render start button when timer is working", () => {
@@ -130,7 +129,7 @@ describe("TimerControls", () => {
 
       // Simulate backend response updating state
       act(() => {
-        useTimerStore.setState({ status: "working" });
+        useTimerObservationStore.setState({ status: "working" });
       });
 
       // Rerender to reflect state change
@@ -147,7 +146,7 @@ describe("TimerControls", () => {
 
       // Simulate working state from backend
       act(() => {
-        useTimerStore.setState({ status: "working" });
+        useTimerObservationStore.setState({ status: "working" });
       });
       rerender(<TimerControls />);
       expect(
@@ -156,7 +155,7 @@ describe("TimerControls", () => {
 
       // Simulate emergency stop response from backend
       act(() => {
-        useTimerStore.setState({ status: "idle" });
+        useTimerObservationStore.setState({ status: "idle" });
       });
       rerender(<TimerControls />);
 

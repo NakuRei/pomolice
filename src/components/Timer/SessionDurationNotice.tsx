@@ -1,5 +1,5 @@
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import type { SessionType } from "@/ipc/generated";
-import { useTimerStore } from "@/store/timerStore";
 
 import type { Settings } from "@/types/settings";
 import { formatDurationText } from "../shared/durationText";
@@ -22,14 +22,20 @@ function configuredDurationSeconds(
  * shown so the countdown does not look wrong.
  */
 export function SessionDurationNotice(): React.ReactElement | null {
-  const status = useTimerStore((state) => state.status);
-  const sessionType = useTimerStore((state) => state.sessionType);
-  const sessionDurationSeconds = useTimerStore(
+  const status = useTimerObservationStore((state) => state.status);
+  const sessionType = useTimerObservationStore((state) => state.sessionType);
+  const sessionDurationSeconds = useTimerObservationStore(
     (state) => state.sessionDurationSeconds,
   );
-  const settings = useTimerStore((state) => state.settings);
+  const settings = useTimerObservationStore((state) => state.settings);
 
-  if (settings === null || status === "idle") {
+  if (
+    settings === null ||
+    status === null ||
+    status === "idle" ||
+    sessionType === null ||
+    sessionDurationSeconds === null
+  ) {
     return null;
   }
 

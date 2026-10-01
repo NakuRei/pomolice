@@ -1,3 +1,4 @@
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import { AutoStartConfirmDialog } from "../AutoStartConfirmDialog";
 import { ContinueDialog } from "@/components/ContinueDialog/ContinueDialog";
 import { SettingsGearIcon } from "@/components/icons/AppIcons";
@@ -6,14 +7,12 @@ import { SessionDurationNotice } from "@/components/Timer/SessionDurationNotice"
 import { TimerControls } from "@/components/Timer/TimerControls";
 import { TimerNumber } from "@/components/Timer/TimerNumber";
 import { TimerPhaseLabel } from "@/components/Timer/TimerPhaseLabel";
-import { ConnectionBanner } from "../shared/ConnectionBanner";
 import { IconButton } from "../shared/IconButton";
 import { InfoMessageBanner } from "../shared/InfoMessageBanner";
-import { InlineError } from "../shared/InlineError";
+import { OperationNotice } from "../shared/OperationNotice";
 import { NotificationMuteToggleButton } from "../shared/NotificationMuteToggleButton";
 import { SettingsFileNotice } from "../shared/SettingsFileNotice";
 import { ToastStack } from "../shared/ToastStack";
-import { useTimerStore } from "@/store/timerStore";
 
 const HEADER_LINE_CLASS_NAME = "text-sm tracking-widest md:text-lg";
 const SIDE_PADDING_CLASS_NAME = "px-8 md:px-20";
@@ -43,7 +42,7 @@ const SESSION_PHASE_LABEL = {
 export interface HomeScreenProps {
   /** Null until the backend has sent the settings; the mute toggle is hidden until then. */
   notificationSoundMuted: boolean | null;
-  isAutoRunWindowActive: boolean;
+  isAutoRunWindowActive: boolean | null;
   isAutoContinueEnabled: boolean;
   requiresManualContinue: boolean;
   onToggleNotificationSoundMuted: () => void;
@@ -58,8 +57,8 @@ export function HomeScreen({
   onToggleNotificationSoundMuted,
   onOpenSettingsTopScreen,
 }: HomeScreenProps): React.ReactElement {
-  const sessionType = useTimerStore((state) => state.sessionType);
-  const hasBootAutoStartOffer = useTimerStore((state) =>
+  const sessionType = useTimerObservationStore((state) => state.sessionType);
+  const hasBootAutoStartOffer = useTimerObservationStore((state) =>
     Boolean(state.bootAutoStartOffer),
   );
 
@@ -67,7 +66,6 @@ export function HomeScreen({
     // Fills the space AppRoot leaves below its notices, rather than claiming
     // the whole viewport and pushing its own footer off-screen.
     <div className="flex h-full flex-col overflow-hidden bg-background bg-[radial-gradient(110%_65%_at_50%_0%,var(--color-primary-950)_0%,var(--color-background)_62%)] text-on-background">
-      <ConnectionBanner />
       <SettingsFileNotice />
 
       <div
@@ -94,14 +92,18 @@ export function HomeScreen({
               </div>
             )}
 
-            <div
-              className={`${HEADER_LINE_CLASS_NAME} ${
-                isAutoRunWindowActive ? "text-success-300" : "text-primary-600"
-              }`}
-              data-testid="header-auto-run"
-            >
-              {isAutoRunWindowActive ? "SCHEDULED" : "MANUAL"}
-            </div>
+            {isAutoRunWindowActive !== null && (
+              <div
+                className={`${HEADER_LINE_CLASS_NAME} ${
+                  isAutoRunWindowActive
+                    ? "text-success-300"
+                    : "text-primary-600"
+                }`}
+                data-testid="header-auto-run"
+              >
+                {isAutoRunWindowActive ? "SCHEDULED" : "MANUAL"}
+              </div>
+            )}
           </div>
 
           <div className="flex shrink-0 items-center gap-1.5">
@@ -127,12 +129,14 @@ export function HomeScreen({
         >
           <div className="flex items-baseline justify-between gap-4">
             <TimerNumber />
-            <TimerPhaseLabel
-              sessionType={sessionType}
-              className="tracking-[0.2em]"
-            >
-              {SESSION_PHASE_LABEL[sessionType]}
-            </TimerPhaseLabel>
+            {sessionType !== null && (
+              <TimerPhaseLabel
+                sessionType={sessionType}
+                className="tracking-[0.2em]"
+              >
+                {SESSION_PHASE_LABEL[sessionType]}
+              </TimerPhaseLabel>
+            )}
           </div>
           <CycleProgress />
           <SessionDurationNotice />
@@ -148,11 +152,11 @@ export function HomeScreen({
       <ToastStack>
         <InfoMessageBanner />
         {/* Shown when start_work fails; auto-clears after 5 seconds */}
-        <InlineError errorId="start_work" />
-        <InlineError errorId="update_settings" />
+        <OperationNotice operation="start_work" />
+        <OperationNotice operation="update_settings" />
         {!hasBootAutoStartOffer && (
-          <InlineError
-            errorId="resolve_boot_auto_start_prompt"
+          <OperationNotice
+            operation="resolve_boot_auto_start_prompt"
             onRetry={null}
           />
         )}

@@ -1,6 +1,6 @@
+import { saveSettings } from "@/timer/commands";
 import type { SettingsValidationIssue } from "@/ipc/generated";
 import { useState } from "react";
-import { useTimerStore } from "@/store/timerStore";
 import type { SettingsChanges } from "@/types/settings";
 
 export interface SettingsSave {
@@ -20,7 +20,6 @@ export interface SettingsSave {
  * failure is reported by the store.
  */
 export function useSettingsSave(onSaved: () => void): SettingsSave {
-  const saveSettings = useTimerStore((state) => state.saveSettings);
   const [issues, setIssues] = useState<SettingsValidationIssue[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -28,12 +27,15 @@ export function useSettingsSave(onSaved: () => void): SettingsSave {
     setIsSaving(true);
     const result = await saveSettings(changes);
     setIsSaving(false);
-    if (result.status === "saved") {
+    if (result.status === "accepted") {
       onSaved();
       return;
     }
-    if (result.status === "rejected") {
-      setIssues(result.issues);
+    if (
+      result.status === "rejected" &&
+      result.error.code === "invalid_settings"
+    ) {
+      setIssues(result.error.issues);
     }
   };
 

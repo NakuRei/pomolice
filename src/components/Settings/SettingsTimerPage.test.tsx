@@ -1,3 +1,4 @@
+import { useTimerObservationStore } from "@/store/timerObservationStore";
 import type { SettingsInput } from "@/ipc/generated";
 import { answerSettingsSavesForTest } from "@/test/settingsSaveFixture";
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -15,8 +16,6 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: Record<string, unknown>): Promise<unknown> =>
     mockInvoke(command, args),
 }));
-
-import { useTimerStore } from "@/store/timerStore";
 
 import { createSettingsForTest } from "@/test/settingsFixture";
 import { resetTimerStoreForTest } from "@/test/resetTimerStore";
@@ -160,7 +159,7 @@ describe("SettingsTimerPage", () => {
   });
 
   it("keeps inputs editable while the timer runs and says the change applies from the next session", () => {
-    useTimerStore.setState({ status: "working" });
+    useTimerObservationStore.setState({ status: "working" });
 
     renderTimerPage();
 
@@ -174,13 +173,17 @@ describe("SettingsTimerPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("does not show the next-session note while idle", () => {
-    renderTimerPage();
+  it.each([null, "idle"] as const)(
+    "does not claim a session is running when status is %s",
+    (status) => {
+      useTimerObservationStore.setState({ status });
+      renderTimerPage();
 
-    expect(
-      screen.queryByTestId("settings-duration-applies-next-session"),
-    ).not.toBeInTheDocument();
-  });
+      expect(
+        screen.queryByTestId("settings-duration-applies-next-session"),
+      ).not.toBeInTheDocument();
+    },
+  );
 
   it("focuses the timer heading on mount", async () => {
     renderTimerPage();

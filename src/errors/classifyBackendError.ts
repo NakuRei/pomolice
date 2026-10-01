@@ -1,6 +1,6 @@
 import type { BackendErrorResponse } from "@/ipc/generated";
 import type { CommandFailure } from "@/ipc/receiveCommandResponse";
-import type { ErrorSeverity } from "../store/errorStore";
+export type ErrorSeverity = "critical" | "recoverable" | "silent";
 
 export interface BackendErrorClassification {
   userMessage: string;

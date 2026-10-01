@@ -1,14 +1,14 @@
+import {
+  useTimerObservationStore,
+  selectBreakLockObservation,
+} from "@/store/timerObservationStore";
+import { toggleNotificationSoundMuted } from "@/timer/commands";
 import { useEffect, useState } from "react";
 import { AppShell } from "./AppShell";
 import { FullscreenBreak } from "./components/BreakScreen/FullscreenBreak";
 import { HomeScreen } from "./components/Home/HomeScreen";
 import { SettingsScreenContent } from "./components/Settings/SettingsScreenContent";
 import { useTimerSync } from "./hooks/useTimerSync";
-import {
-  useTimerEffectsStore,
-  selectBreakLockObservation,
-} from "./store/timerEffectsStore";
-import { useTimerStore } from "./store/timerStore";
 import type { AppScreen, SettingsScreen } from "./types/appScreen";
 
 const ESCAPE_BACK_TARGET_BY_SCREEN: Partial<Record<AppScreen, AppScreen>> = {
@@ -25,16 +25,14 @@ function App(): React.ReactElement {
   const [currentScreen, setCurrentScreen] = useState<AppScreen>("home");
   // Get fullscreen break state from store (updated by backend events)
   const isFullscreenBreak =
-    useTimerEffectsStore(selectBreakLockObservation) === "locked";
+    useTimerObservationStore(selectBreakLockObservation) === "locked";
   const [previousFullscreenBreakState, setPreviousFullscreenBreakState] =
     useState(isFullscreenBreak);
-  const settings = useTimerStore((state) => state.settings);
-  const activeWindowSummary = useTimerStore(
+  const settings = useTimerObservationStore((state) => state.settings);
+  const activeWindowSummary = useTimerObservationStore(
     (state) => state.activeWindowSummary,
   );
-  const toggleNotificationSoundMuted = useTimerStore(
-    (state) => state.toggleNotificationSoundMuted,
-  );
+
   const isAutoContinueEnabled =
     settings?.postBreakTransitionPolicy === "start_next_work_automatically";
   const requiresManualContinue =
@@ -82,7 +80,11 @@ function App(): React.ReactElement {
       renderHomeScreen={() => (
         <HomeScreen
           notificationSoundMuted={settings?.notificationSoundMuted ?? null}
-          isAutoRunWindowActive={activeWindowSummary !== null}
+          isAutoRunWindowActive={
+            activeWindowSummary === undefined
+              ? null
+              : activeWindowSummary !== null
+          }
           isAutoContinueEnabled={isAutoContinueEnabled}
           requiresManualContinue={requiresManualContinue}
           onToggleNotificationSoundMuted={() => {
