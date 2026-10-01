@@ -5,9 +5,9 @@ import {
   type NotificationSoundType,
 } from "@/services/notifications";
 import { useSettingsSave } from "../useSettingsSave";
-import type { Settings } from "../settings";
+import type { Settings } from "../../../backend/settings";
 import { Button } from "@/components/shared/Button";
-import { NotificationMuteToggleButton } from "@/components/shared/NotificationMuteToggleButton";
+import { NotificationMuteToggleButton } from "./NotificationMuteToggleButton";
 import { SettingsPageHeader } from "./SettingsPageHeader";
 import { SettingsSaveCancelFooter } from "./SettingsSaveCancelFooter";
 import { rangedFieldIssueMessage } from "./settingsIssueMessages";

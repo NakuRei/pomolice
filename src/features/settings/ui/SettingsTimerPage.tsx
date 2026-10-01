@@ -1,10 +1,10 @@
-import { useTimerObservationStore } from "@/store/timerObservationStore";
+import { useBackendObservationStore } from "@/backend/observationStore";
 import type { RangedSettingField } from "@/ipc/generated";
 import { useState } from "react";
 import { useFocusHeadingOnMount } from "@/hooks/useFocusHeadingOnMount";
 import { useSettingsSave } from "../useSettingsSave";
 
-import type { Settings, SettingsChanges } from "../settings";
+import type { Settings, SettingsChanges } from "../../../backend/settings";
 import { DurationInput } from "./DurationInput";
 import {
   formatDurationInputText,
@@ -94,7 +94,7 @@ export function SettingsTimerPage({
   openSettingsTopScreen,
 }: SettingsTimerPageProps): React.ReactElement {
   const headingReference = useFocusHeadingOnMount();
-  const timerStatus = useTimerObservationStore((state) => state.status);
+  const timerStatus = useBackendObservationStore((state) => state.status);
   const { issues, isSaving, save, settleIssues } = useSettingsSave(
     openSettingsTopScreen,
   );

@@ -1,4 +1,4 @@
-import { useTimerObservationStore } from "@/store/timerObservationStore";
+import { useBackendObservationStore } from "@/backend/observationStore";
 import {
   type commands,
   type CommandResponse,
@@ -31,16 +31,16 @@ describe("IPC contract", () => {
     ["9007199254740992", "9007199254740993"],
     ["18446744073709551614", "18446744073709551615"],
   ])("orders revisions %s and %s without losing precision", (older, newer) => {
-    useTimerObservationStore.setState({ effects: null });
+    useBackendObservationStore.setState({ effects: null });
     const previous = createTimerEffectsForTest({ revision: older });
     const latest = createTimerEffectsForTest({
       revision: newer,
       last_timer_save: "failed",
     });
-    const { observeEffects } = useTimerObservationStore.getState();
+    const { observeEffects } = useBackendObservationStore.getState();
     observeEffects(previous);
     observeEffects(latest);
     observeEffects(previous);
-    expect(useTimerObservationStore.getState().effects).toEqual(latest);
+    expect(useBackendObservationStore.getState().effects).toEqual(latest);
   });
 });

@@ -1,14 +1,13 @@
 import {
-  useTimerObservationStore,
+  useBackendObservationStore,
   selectBreakLockObservation,
-} from "@/store/timerObservationStore";
+} from "@/backend/observationStore";
 import { toggleNotificationSoundMuted } from "@/features/settings/commands";
 import { useEffect, useState } from "react";
 import { AppShell } from "./AppShell";
-import { FullscreenBreak } from "./components/BreakScreen/FullscreenBreak";
-import { HomeScreen } from "./components/Home/HomeScreen";
+import { FullscreenBreak } from "@/features/break/ui/FullscreenBreak";
+import { HomeScreen } from "@/features/timer/ui/HomeScreen";
 import { SettingsScreenContent } from "./features/settings/ui/SettingsScreenContent";
-import { useTimerSync } from "./hooks/useTimerSync";
 import type { AppScreen, SettingsScreen } from "./types/appScreen";
 
 const ESCAPE_BACK_TARGET_BY_SCREEN: Partial<Record<AppScreen, AppScreen>> = {
@@ -19,17 +18,14 @@ const ESCAPE_BACK_TARGET_BY_SCREEN: Partial<Record<AppScreen, AppScreen>> = {
 };
 
 function App(): React.ReactElement {
-  // Initialize timer sync with backend (single source of truth)
-  useTimerSync();
-
   const [currentScreen, setCurrentScreen] = useState<AppScreen>("home");
   // Get fullscreen break state from store (updated by backend events)
   const isFullscreenBreak =
-    useTimerObservationStore(selectBreakLockObservation) === "locked";
+    useBackendObservationStore(selectBreakLockObservation) === "locked";
   const [previousFullscreenBreakState, setPreviousFullscreenBreakState] =
     useState(isFullscreenBreak);
-  const settings = useTimerObservationStore((state) => state.settings);
-  const activeWindowSummary = useTimerObservationStore(
+  const settings = useBackendObservationStore((state) => state.settings);
+  const activeWindowSummary = useBackendObservationStore(
     (state) => state.activeWindowSummary,
   );
 

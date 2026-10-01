@@ -1,4 +1,4 @@
-import { useTimerObservationStore } from "@/store/timerObservationStore";
+import { useBackendObservationStore } from "@/backend/observationStore";
 import type { SettingsInput } from "@/ipc/generated";
 import { answerSettingsSavesForTest } from "@/test/settingsSaveFixture";
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -18,8 +18,8 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import { createSettingsForTest } from "@/test/settingsFixture";
-import { resetTimerStoreForTest } from "@/test/resetTimerStore";
-import type { Settings } from "../settings";
+import { resetAppStateForTest } from "@/test/resetAppState";
+import type { Settings } from "../../../backend/settings";
 import { SettingsTimerPage } from "./SettingsTimerPage";
 
 function acceptSettingsSaves(): void {
@@ -48,7 +48,7 @@ function renderTimerPage(
 describe("SettingsTimerPage", () => {
   beforeEach(() => {
     mockInvoke.mockReset();
-    resetTimerStoreForTest();
+    resetAppStateForTest();
     acceptSettingsSaves();
   });
 
@@ -159,7 +159,7 @@ describe("SettingsTimerPage", () => {
   });
 
   it("keeps inputs editable while the timer runs and says the change applies from the next session", () => {
-    useTimerObservationStore.setState({ status: "working" });
+    useBackendObservationStore.setState({ status: "working" });
 
     renderTimerPage();
 
@@ -176,7 +176,7 @@ describe("SettingsTimerPage", () => {
   it.each([null, "idle"] as const)(
     "does not claim a session is running when status is %s",
     (status) => {
-      useTimerObservationStore.setState({ status });
+      useBackendObservationStore.setState({ status });
       renderTimerPage();
 
       expect(

@@ -1,4 +1,4 @@
-import { useTimerObservationStore } from "@/store/timerObservationStore";
+import { useBackendObservationStore } from "@/backend/observationStore";
 import type { SettingsInput } from "@/ipc/generated";
 import { answerSettingsSavesForTest } from "@/test/settingsSaveFixture";
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -21,8 +21,8 @@ import {
   createSettingsForTest,
   createWeeklyAutoRunConfigForTest,
 } from "@/test/settingsFixture";
-import { resetTimerStoreForTest } from "@/test/resetTimerStore";
-import type { Settings } from "../settings";
+import { resetAppStateForTest } from "@/test/resetAppState";
+import type { Settings } from "../../../backend/settings";
 import { SettingsTopPage } from "./SettingsTopPage";
 
 function savedSettingsChanges(): Partial<SettingsInput>[] {
@@ -37,7 +37,7 @@ function SettingsTopPageFromStore({
 }: {
   openHomeScreen?: () => void;
 }): React.ReactElement {
-  const settings = useTimerObservationStore((state) => state.settings);
+  const settings = useBackendObservationStore((state) => state.settings);
   return (
     <SettingsTopPage
       settings={settings}
@@ -50,7 +50,7 @@ function SettingsTopPageFromStore({
 }
 
 function renderWithSettings(settings: Settings | null): void {
-  useTimerObservationStore.setState({ settings });
+  useBackendObservationStore.setState({ settings });
   render(<SettingsTopPageFromStore />);
 }
 
@@ -58,7 +58,7 @@ describe("SettingsTopPage", () => {
   beforeEach(() => {
     mockInvoke.mockReset();
     mockInvoke.mockImplementation(answerSettingsSavesForTest);
-    resetTimerStoreForTest();
+    resetAppStateForTest();
   });
 
   it("renders timer and auto-run summaries on settings top", () => {
@@ -128,7 +128,7 @@ describe("SettingsTopPage", () => {
   it("renders the shared back button on settings top and calls home navigation", async () => {
     const user = userEvent.setup();
     const openHomeScreen = vi.fn();
-    useTimerObservationStore.setState({ settings: createSettingsForTest() });
+    useBackendObservationStore.setState({ settings: createSettingsForTest() });
     render(<SettingsTopPageFromStore openHomeScreen={openHomeScreen} />);
 
     await user.click(screen.getByRole("button", { name: "ホームへ戻る" }));

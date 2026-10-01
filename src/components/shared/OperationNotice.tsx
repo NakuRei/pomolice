@@ -1,21 +1,18 @@
-import { useTimerObservationStore } from "@/store/timerObservationStore";
+import { useBackendObservationStore } from "@/backend/observationStore";
 import { useEffect } from "react";
-import { useTimerOperationStore } from "@/operations/operationStore";
+import { useOperationStore } from "@/backend/operationStore";
 import { classifyCommandFailure } from "@/errors/classifyBackendError";
 import {
   canRetryOperation,
   retryRejectedOperation,
-} from "@/operations/retryOperation";
-import {
-  getOperationFailure,
-  type TimerOperationKind,
-} from "@/operations/operation";
+} from "@/backend/retryOperation";
+import { getOperationFailure, type OperationKind } from "@/backend/operation";
 import type { CommandFailure } from "@/ipc/receiveCommandResponse";
 import { WarningTriangleIcon } from "@/components/icons/AppIcons";
 import { StatusNotice } from "./StatusNotice";
 
 interface OperationNoticeProps {
-  operation: TimerOperationKind;
+  operation: OperationKind;
   onRetry?: (() => void | Promise<void>) | null;
 }
 
@@ -31,9 +28,9 @@ export function OperationNotice({
   operation,
   onRetry,
 }: OperationNoticeProps): React.ReactElement | null {
-  const record = useTimerOperationStore((state) => state.operations[operation]);
-  const dismiss = useTimerOperationStore((state) => state.dismiss);
-  const hasBootOffer = useTimerObservationStore((state) =>
+  const record = useOperationStore((state) => state.operations[operation]);
+  const dismiss = useOperationStore((state) => state.dismiss);
+  const hasBootOffer = useBackendObservationStore((state) =>
     Boolean(state.bootAutoStartOffer),
   );
   const failure = getOperationFailure(record?.outcome);

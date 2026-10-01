@@ -7,15 +7,15 @@ import {
   type MockHtmlAudio,
   resetMockHtmlAudio,
 } from "@/test/mockHtmlAudio";
-import type { Settings } from "@/features/settings/settings";
+import type { Settings } from "@/backend/settings";
 
 async function setSavedSettings(
   overrides: Partial<Settings> | null,
 ): Promise<void> {
-  const { useTimerObservationStore } =
-    await import("@/store/timerObservationStore");
+  const { useBackendObservationStore } =
+    await import("@/backend/observationStore");
   const { createSettingsForTest } = await import("@/test/settingsFixture");
-  useTimerObservationStore.setState({
+  useBackendObservationStore.setState({
     settings: overrides === null ? null : createSettingsForTest(overrides),
   });
 }

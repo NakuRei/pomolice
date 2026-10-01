@@ -1,4 +1,4 @@
-import { useTimerObservationStore } from "@/store/timerObservationStore";
+import { useBackendObservationStore } from "@/backend/observationStore";
 import type { AppScreen, SettingsScreen } from "@/types/appScreen";
 import { SettingsAutoRunPage } from "./SettingsAutoRunPage";
 import { SettingsNotificationPage } from "./SettingsNotificationPage";
@@ -19,7 +19,7 @@ export function SettingsScreenContent({
   currentScreen,
   moveToScreen,
 }: SettingsScreenContentProps): React.ReactElement {
-  const settings = useTimerObservationStore((state) => state.settings);
+  const settings = useBackendObservationStore((state) => state.settings);
   const openSettingsTopScreen = (): void => {
     moveToScreen("settingsTop");
   };

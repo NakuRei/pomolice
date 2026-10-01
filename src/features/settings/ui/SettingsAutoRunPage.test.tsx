@@ -20,8 +20,8 @@ import {
   createSettingsForTest,
   createWeeklyAutoRunConfigForTest,
 } from "@/test/settingsFixture";
-import { resetTimerStoreForTest } from "@/test/resetTimerStore";
-import type { Settings } from "../settings";
+import { resetAppStateForTest } from "@/test/resetAppState";
+import type { Settings } from "../../../backend/settings";
 import { SettingsAutoRunPage } from "./SettingsAutoRunPage";
 
 function acceptSettingsSaves(): void {
@@ -61,7 +61,7 @@ function renderAutoRunPage(
 describe("SettingsAutoRunPage", () => {
   beforeEach(() => {
     mockInvoke.mockReset();
-    resetTimerStoreForTest();
+    resetAppStateForTest();
     acceptSettingsSaves();
   });
 

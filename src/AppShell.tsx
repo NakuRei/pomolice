@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { FullscreenBreakErrorBoundary } from "./components/ErrorBoundary/FullscreenBreakErrorBoundary";
-import { SettingsErrorBoundary } from "./components/ErrorBoundary/SettingsErrorBoundary";
+import { FullscreenBreakErrorBoundary } from "@/features/break/ui/FullscreenBreakErrorBoundary";
+import { SettingsErrorBoundary } from "@/features/settings/ui/SettingsErrorBoundary";
 import {
   SETTINGS_SCREEN_VALUES,
   type AppScreen,

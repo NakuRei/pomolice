@@ -11,7 +11,7 @@ import {
   vi,
 } from "vitest";
 import { AppShell } from "./AppShell";
-import { AppErrorBoundary } from "./components/ErrorBoundary/AppErrorBoundary";
+import { AppErrorBoundary } from "@/app/ui/AppErrorBoundary";
 import { FRONTEND_LOG_EVENT_IDS } from "./logging/logEvents";
 import { throwOnRender } from "./test/throwOnRender";
 import type { AppScreen } from "./types/appScreen";

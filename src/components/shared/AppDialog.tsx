@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { TimerEffectsNotice } from "./TimerEffectsNotice";
+import { TimerEffectsNotice } from "@/app/ui/TimerEffectsNotice";
 
 interface AppDialogProps {
   children: ReactNode;

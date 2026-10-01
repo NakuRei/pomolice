@@ -3,8 +3,11 @@ import type { PostBreakTransitionPolicy } from "@/ipc/generated";
 import { WEEKDAY_LABELS_BY_KEY } from "@/constants/weekdayLabels";
 import { useFocusHeadingOnMount } from "@/hooks/useFocusHeadingOnMount";
 
-import type { Settings } from "../settings";
-import { WEEKDAY_KEYS, type WeeklyAutoRunConfig } from "../weeklyAutoRun";
+import type { Settings } from "../../../backend/settings";
+import {
+  WEEKDAY_KEYS,
+  type WeeklyAutoRunConfig,
+} from "../../../backend/weeklyAutoRun";
 import { Button } from "@/components/shared/Button";
 import { formatDurationText } from "@/components/shared/durationText";
 import { SettingsPageHeader } from "./SettingsPageHeader";

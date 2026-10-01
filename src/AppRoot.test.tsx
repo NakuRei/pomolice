@@ -3,11 +3,11 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { AppRoot } from "./AppRoot";
-import { useTimerObservationStore } from "./store/timerObservationStore";
-import { useTimerSyncStore } from "./store/timerSyncStore";
-import { useTimerOperationStore } from "./operations/operationStore";
-import { useSkipFlowStore } from "./store/skipFlowStore";
-import { resetTimerStoreForTest } from "./test/resetTimerStore";
+import { useBackendObservationStore } from "./backend/observationStore";
+import { useBackendSyncStore } from "./backend/syncStore";
+import { useOperationStore } from "./backend/operationStore";
+import { useSkipFlowStore } from "@/features/break/skipFlowStore";
+import { resetAppStateForTest } from "@/test/resetAppState";
 import {
   createTimerEffectsForTest,
   createTimerSnapshotForTest,
@@ -15,10 +15,10 @@ import {
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
-vi.mock("./components/shared/TrayUnavailableNotice", () => ({
+vi.mock("@/app/ui/TrayUnavailableNotice", () => ({
   TrayUnavailableNotice: (): null => null,
 }));
-vi.mock("./components/shared/InputMonitorFailureNotice", () => ({
+vi.mock("@/app/ui/InputMonitorFailureNotice", () => ({
   InputMonitorFailureNotice: (): null => null,
 }));
 
@@ -32,7 +32,7 @@ const lockedEffects = createTimerEffectsForTest({
 
 describe("application recovery controls", () => {
   beforeEach(() => {
-    resetTimerStoreForTest();
+    resetAppStateForTest();
     useSkipFlowStore.getState().resetSkipFlow();
     vi.mocked(listen).mockReset().mockResolvedValue(vi.fn());
     vi.mocked(invoke)
@@ -57,7 +57,7 @@ describe("application recovery controls", () => {
       await Promise.resolve();
     });
     act(() => {
-      useTimerSyncStore.getState().setConnection({
+      useBackendSyncStore.getState().setConnection({
         status: "failed",
         failure: { status: "unavailable", cause: new Error("disconnected") },
       });
@@ -67,7 +67,7 @@ describe("application recovery controls", () => {
     expect(screen.getByRole("heading", { name: "設定" })).toBeInTheDocument();
     expect(screen.getAllByTestId("connection-banner")).toHaveLength(1);
     act(() => {
-      useTimerObservationStore.getState().observeEffects(lockedEffects);
+      useBackendObservationStore.getState().observeEffects(lockedEffects);
     });
     expect(
       screen.getByRole("button", { name: "休憩をスキップ" }),
@@ -82,7 +82,7 @@ describe("application recovery controls", () => {
       await Promise.resolve();
     });
     act(() => {
-      useTimerObservationStore.getState().observeEffects(
+      useBackendObservationStore.getState().observeEffects(
         createTimerEffectsForTest({
           revision: "1",
           last_timer_save: "failed",
@@ -107,7 +107,7 @@ describe("application recovery controls", () => {
     ).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "再試行" })).toHaveLength(1);
     act(() => {
-      useTimerObservationStore.getState().observeEffects(
+      useBackendObservationStore.getState().observeEffects(
         createTimerEffectsForTest({
           revision: "2",
           last_timer_save: "succeeded",
@@ -123,7 +123,7 @@ describe("application recovery controls", () => {
     });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     act(() => {
-      useTimerObservationStore.getState().observeEffects(
+      useBackendObservationStore.getState().observeEffects(
         createTimerEffectsForTest({
           revision: "3",
           break_lock: {
@@ -141,7 +141,7 @@ describe("application recovery controls", () => {
       "操作の結果を確認できませんでした",
     );
     expect(
-      useTimerOperationStore.getState().operations.retry_failed_timer_effects
+      useOperationStore.getState().operations.retry_failed_timer_effects
         ?.outcome.status,
     ).toBe("unavailable");
   });

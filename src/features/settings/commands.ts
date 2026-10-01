@@ -1,23 +1,19 @@
-import { commands, type PostBreakTransitionPolicy } from "@/ipc/generated";
-import { executeTimerCommand } from "@/operations/executeTimerCommand";
-import type { TimerCommandResult } from "@/operations/operation";
-import { useTimerObservationStore } from "@/store/timerObservationStore";
-import { settingsChangesToPayload, type SettingsChanges } from "./settings";
+import type { PostBreakTransitionPolicy } from "@/ipc/generated";
+import { executeOperation } from "@/backend/executeOperation";
+import type { OperationResult } from "@/backend/operation";
+import { useBackendObservationStore } from "@/backend/observationStore";
+import type { SettingsChanges } from "../../backend/settings";
 
 export function saveSettings(
   changes: SettingsChanges,
-): Promise<TimerCommandResult> {
-  const submitted = structuredClone(changes);
-  return executeTimerCommand(
-    { kind: "update_settings", changes: submitted },
-    () => commands.updateSettings(settingsChangesToPayload(submitted)),
-  );
+): Promise<OperationResult> {
+  return executeOperation({ kind: "update_settings", changes });
 }
 
 export async function toggleNotificationSoundMuted(): Promise<
-  TimerCommandResult | undefined
+  OperationResult | undefined
 > {
-  const settings = useTimerObservationStore.getState().settings;
+  const settings = useBackendObservationStore.getState().settings;
   if (settings === null) return undefined;
   return saveSettings({
     notificationSoundMuted: !settings.notificationSoundMuted,
@@ -26,6 +22,6 @@ export async function toggleNotificationSoundMuted(): Promise<
 
 export function savePostBreakTransitionPolicy(
   policy: PostBreakTransitionPolicy,
-): Promise<TimerCommandResult> {
+): Promise<OperationResult> {
   return saveSettings({ postBreakTransitionPolicy: policy });
 }

@@ -1,7 +1,7 @@
 import {
-  useTimerObservationStore,
+  useBackendObservationStore,
   selectBreakLockObservation,
-} from "@/store/timerObservationStore";
+} from "@/backend/observationStore";
 import {
   saveSettings,
   toggleNotificationSoundMuted,
@@ -22,19 +22,16 @@ vi.mock("@tauri-apps/api/core", () => ({
     mockInvoke(command, args),
 }));
 
-import { useTimerOperationStore } from "@/operations/operationStore";
+import { useOperationStore } from "@/backend/operationStore";
 
-import { resetTimerStoreForTest } from "@/test/resetTimerStore";
+import { resetAppStateForTest } from "@/test/resetAppState";
 import { createSettingsForTest } from "@/test/settingsFixture";
 
 describe("settings commands", () => {
   beforeEach(() => {
     mockInvoke.mockReset();
-    useTimerOperationStore.setState(
-      useTimerOperationStore.getInitialState(),
-      true,
-    );
-    resetTimerStoreForTest();
+    useOperationStore.setState(useOperationStore.getInitialState(), true);
+    resetAppStateForTest();
   });
 
   describe("saveSettings()", () => {
@@ -54,13 +51,13 @@ describe("settings commands", () => {
 
     it("leaves every piece of state to the events, so a late reply cannot roll it back", async () => {
       const settings = createSettingsForTest();
-      useTimerObservationStore.setState({
+      useBackendObservationStore.setState({
         settings,
         status: "on_break",
         sessionType: "short_break",
         remainingSeconds: 299,
       });
-      useTimerObservationStore.getState().observeEffects({
+      useBackendObservationStore.getState().observeEffects({
         revision: "2",
         last_timer_save: null,
         break_lock: {
@@ -68,7 +65,7 @@ describe("settings commands", () => {
           last_attempt: { action: "enter", status: "succeeded" },
         },
       });
-      const stateBeforeTheReply = useTimerObservationStore.getState();
+      const stateBeforeTheReply = useBackendObservationStore.getState();
       mockInvoke.mockResolvedValueOnce({
         status: "accepted",
         value: createTimerSnapshotForTest(),
@@ -76,12 +73,12 @@ describe("settings commands", () => {
 
       await saveSettings({ workDurationSecs: 60 });
 
-      const state = useTimerObservationStore.getState();
+      const state = useBackendObservationStore.getState();
       expect(state.settings).toBe(stateBeforeTheReply.settings);
       expect(state.status).toBe("on_break");
       expect(state.remainingSeconds).toBe(299);
       expect(
-        selectBreakLockObservation(useTimerObservationStore.getState()),
+        selectBreakLockObservation(useBackendObservationStore.getState()),
       ).toBe("locked");
     });
 
@@ -114,15 +111,15 @@ describe("settings commands", () => {
         status: "rejected",
         error: { code: "invalid_settings", issues },
       });
-      expect(useTimerObservationStore.getState().settings).toBeNull();
+      expect(useBackendObservationStore.getState().settings).toBeNull();
       expect(
-        useTimerOperationStore.getState().operations.update_settings?.outcome,
+        useOperationStore.getState().operations.update_settings?.outcome,
       ).toEqual(result);
     });
 
     it("reports any other failure and keeps the previous settings", async () => {
       const previousSettings = createSettingsForTest();
-      useTimerObservationStore.setState({ settings: previousSettings });
+      useBackendObservationStore.setState({ settings: previousSettings });
       mockInvoke.mockResolvedValueOnce({
         status: "rejected",
         error: {
@@ -139,11 +136,11 @@ describe("settings commands", () => {
         status: "rejected",
         error: { code: "persistence_error" },
       });
-      expect(useTimerObservationStore.getState().settings).toEqual(
+      expect(useBackendObservationStore.getState().settings).toEqual(
         previousSettings,
       );
       expect(
-        useTimerOperationStore.getState().operations.update_settings,
+        useOperationStore.getState().operations.update_settings,
       ).toMatchObject({
         request: { kind: "update_settings" },
         outcome: result,
@@ -168,14 +165,14 @@ describe("settings commands", () => {
       await saveSettings(settings);
 
       expect(
-        useTimerOperationStore.getState().operations.update_settings?.outcome,
+        useOperationStore.getState().operations.update_settings?.outcome,
       ).toEqual({ status: "accepted" });
     });
   });
 
   describe("toggleNotificationSoundMuted()", () => {
     it("saves the settings with the mute flag flipped", async () => {
-      useTimerObservationStore.setState({
+      useBackendObservationStore.setState({
         settings: createSettingsForTest({ notificationSoundMuted: false }),
       });
       mockInvoke.mockResolvedValueOnce({
@@ -199,7 +196,7 @@ describe("settings commands", () => {
 
   describe("savePostBreakTransitionPolicy()", () => {
     it("saves the settings with the given policy", async () => {
-      useTimerObservationStore.setState({
+      useBackendObservationStore.setState({
         settings: createSettingsForTest({
           postBreakTransitionPolicy: "require_manual_continue",
         }),
@@ -236,7 +233,7 @@ describe("settings commands", () => {
       error: { code: "invalid_settings", issues: [] },
     });
     expect(
-      useTimerOperationStore.getState().operations.update_settings,
+      useOperationStore.getState().operations.update_settings,
     ).toBeDefined();
   });
 });

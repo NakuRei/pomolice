@@ -1,16 +1,18 @@
 import { StrictMode } from "react";
+import { AppSynchronization } from "./app/AppSynchronization";
 import App from "./App";
-import { AppErrorBoundary } from "./components/ErrorBoundary/AppErrorBoundary";
-import { TrayUnavailableNotice } from "./components/shared/TrayUnavailableNotice";
-import { InputMonitorFailureNotice } from "./components/shared/InputMonitorFailureNotice";
-import { EmergencyShortcutNotice } from "./components/shared/EmergencyShortcutNotice";
-import { TimerEffectsNotice } from "./components/shared/TimerEffectsNotice";
-import { ConnectionBanner } from "./components/shared/ConnectionBanner";
+import { AppErrorBoundary } from "@/app/ui/AppErrorBoundary";
+import { TrayUnavailableNotice } from "@/app/ui/TrayUnavailableNotice";
+import { InputMonitorFailureNotice } from "@/app/ui/InputMonitorFailureNotice";
+import { EmergencyShortcutNotice } from "@/app/ui/EmergencyShortcutNotice";
+import { TimerEffectsNotice } from "@/app/ui/TimerEffectsNotice";
+import { ConnectionBanner } from "@/app/ui/ConnectionBanner";
 import { OperationNotice } from "./components/shared/OperationNotice";
 
 export function AppRoot(): React.ReactElement {
   return (
     <StrictMode>
+      <AppSynchronization />
       <div className="flex h-screen flex-col">
         <ConnectionBanner />
         <TrayUnavailableNotice />

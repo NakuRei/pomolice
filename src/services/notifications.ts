@@ -1,5 +1,3 @@
-import { useTimerObservationStore } from "@/store/timerObservationStore";
-import type { SessionType } from "@/ipc/generated";
 /**
  * Notifications Service
  * Wrapper for Tauri notification commands
@@ -63,7 +61,12 @@ export interface NotificationSoundPreviewResult {
   status: NotificationSoundPreviewStatus;
 }
 
-interface SessionCompleteNotificationPayload {
+export interface NotificationSoundPreferences {
+  muted: boolean;
+  volumePercent: number;
+}
+
+export interface NotificationPayload {
   title: string;
   body: string;
   soundType: NotificationSoundType;
@@ -243,8 +246,9 @@ async function ensureNotificationPermission(): Promise<boolean> {
 /**
  * Show notification after a session transition that should alert the user.
  */
-async function sendSessionCompleteNotification(
-  payload: SessionCompleteNotificationPayload,
+export async function sendSystemNotification(
+  payload: NotificationPayload,
+  readSoundPreferences: () => NotificationSoundPreferences | null,
 ): Promise<void> {
   const hasPermission = await ensureNotificationPermission();
   if (!hasPermission) {
@@ -252,10 +256,10 @@ async function sendSessionCompleteNotification(
   }
 
   try {
-    const { settings } = useTimerObservationStore.getState();
+    const preferences = readSoundPreferences();
     // Without settings from the backend the user's sound choice is unknown,
     // so no sound is played.
-    const soundIsMuted = settings === null || settings.notificationSoundMuted;
+    const soundIsMuted = preferences === null || preferences.muted;
     const shouldUseManagedWindowsSound = isWindowsPlatform() && !soundIsMuted;
     const bannerSound =
       isWindowsPlatform() || soundIsMuted
@@ -280,7 +284,7 @@ async function sendSessionCompleteNotification(
     }
 
     const notificationGain = convertNotificationVolumePercentToGain(
-      settings.notificationSoundVolumePercent,
+      preferences.volumePercent,
     );
     await playNotificationAudioAtGain(resolvedPath, notificationGain);
   } catch (error) {
@@ -294,53 +298,4 @@ async function sendSessionCompleteNotification(
       },
     );
   }
-}
-
-/**
- * Show notification when work session is complete
- */
-export async function notifyWorkComplete(
-  nextSessionType: SessionType | null,
-): Promise<void> {
-  const nextSessionSoundType =
-    nextSessionType === "long_break" ? "long_break" : "short_break";
-
-  await sendSessionCompleteNotification({
-    title: "休憩時間です！",
-    body: "お疲れ様でした。休憩を取りましょう。",
-    soundType: nextSessionSoundType,
-  });
-}
-
-/**
- * Show notification when break session is complete
- */
-export async function notifyBreakComplete(): Promise<void> {
-  await sendSessionCompleteNotification({
-    title: "作業に戻りましょう！",
-    body: "休憩が終わりました。次のポモドーロを始めましょう。",
-    soundType: "work",
-  });
-}
-
-/**
- * Show notification when break session auto-starts the next work session.
- */
-export async function notifyBreakAutoStarted(): Promise<void> {
-  await sendSessionCompleteNotification({
-    title: "休憩終了",
-    body: "休憩終了。次の作業を自動開始しました。",
-    soundType: "work",
-  });
-}
-
-/**
- * Show notification when long break session is complete
- */
-export async function notifyLongBreakComplete(): Promise<void> {
-  await sendSessionCompleteNotification({
-    title: "長い休憩完了！",
-    body: "サイクルが完了しました。次のサイクルを始めますか？",
-    soundType: "work",
-  });
 }

@@ -1,0 +1,115 @@
+import { useBackendObservationStore } from "@/backend/observationStore";
+import { resolvePostBreakDecision } from "@/features/timer/commands";
+import { useEffect, useId, useRef } from "react";
+import { DialogActionRow } from "@/components/shared/DialogActionRow";
+import { Button } from "@/components/shared/Button";
+import { AppDialog } from "@/components/shared/AppDialog";
+import { OperationNotice } from "@/components/shared/OperationNotice";
+import { StatusNotice } from "@/components/shared/StatusNotice";
+
+/**
+ * ContinueDialog Component
+ * Shows dialog after break completion asking if user wants to continue
+ *
+ * Phase 2: Displays after break session ends
+ * - "続ける" button: Starts next work session
+ * - "終了" button: Returns to idle state
+ */
+export function ContinueDialog(): React.ReactElement | null {
+  const requiresManualContinueDecision = useBackendObservationStore(
+    (state) => state.requiresManualContinueDecision === true,
+  );
+  const completedPomodoros = useBackendObservationStore(
+    (state) => state.completedPomodoros,
+  );
+
+  const titleId = useId();
+  const continueButtonReference = useRef<HTMLButtonElement>(null);
+
+  const handleContinue = (): void => {
+    void resolvePostBreakDecision("continue");
+  };
+
+  const handleEnd = (): void => {
+    void resolvePostBreakDecision("stop_cycle");
+  };
+
+  useEffect(() => {
+    if (!requiresManualContinueDecision) {
+      return;
+    }
+
+    continueButtonReference.current?.focus();
+  }, [requiresManualContinueDecision]);
+
+  useEffect(() => {
+    if (!requiresManualContinueDecision) {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+      event.preventDefault();
+      void resolvePostBreakDecision("stop_cycle");
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+
+    return (): void => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [requiresManualContinueDecision]);
+
+  if (!requiresManualContinueDecision) {
+    return null;
+  }
+
+  return (
+    <AppDialog overlayTestId="continue-dialog" labelledBy={titleId}>
+      <h2 id={titleId} className="mb-4 text-2xl font-bold text-text">
+        1サイクル完了しました！
+      </h2>
+      <p className="mb-2 text-text-muted">
+        お疲れ様でした。休憩が完了しました。
+      </p>
+      <p className="mb-6 text-text-muted">
+        完了したポモドーロ:{" "}
+        <span className="font-semibold">{completedPomodoros}</span>
+      </p>
+      <p className="mb-4 font-medium text-text">次のポモドーロを続けますか？</p>
+      <StatusNotice
+        tone="warning"
+        className="mb-4"
+        testId="continue-dialog-manual-decision-message"
+      >
+        現在、手動判断待ちです。続けるか終了を選んでください。
+      </StatusNotice>
+      {/* Error area: shown when manual decision command fails */}
+      <div className="mb-4">
+        <OperationNotice operation="resolve_post_break_decision" />
+      </div>
+      <DialogActionRow>
+        <Button
+          appearance="secondary"
+          onClick={handleEnd}
+          className="flex-1"
+          testId="continue-dialog-end"
+        >
+          終了
+        </Button>
+        <Button
+          ref={continueButtonReference}
+          appearance="primary"
+          onClick={handleContinue}
+          className="flex-1"
+          testId="continue-dialog-continue"
+        >
+          続ける
+        </Button>
+      </DialogActionRow>
+    </AppDialog>
+  );
+}

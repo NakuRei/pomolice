@@ -1,4 +1,5 @@
-import { useTimerObservationStore } from "@/store/timerObservationStore";
+import { useBackendSync } from "@/app/sync/useBackendSync";
+import { useBackendObservationStore } from "@/backend/observationStore";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   act,
@@ -11,7 +12,7 @@ import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import App from "./App";
-import { resetTimerStoreForTest } from "./test/resetTimerStore";
+import { resetAppStateForTest } from "@/test/resetAppState";
 import { createSettingsForTest } from "./test/settingsFixture";
 
 vi.mock("@tauri-apps/api/event", () => ({
@@ -113,10 +114,15 @@ async function openNotificationSettings(user: UserEvent): Promise<void> {
   );
 }
 
+function SynchronizedApp(): React.ReactElement {
+  useBackendSync();
+  return <App />;
+}
+
 describe("App", () => {
   beforeEach(() => {
-    resetTimerStoreForTest();
-    useTimerObservationStore.setState({
+    resetAppStateForTest();
+    useBackendObservationStore.setState({
       settings: createSettingsForTest(),
     });
     vi.mocked(invoke).mockResolvedValue({
@@ -143,7 +149,7 @@ describe("App", () => {
       }),
     );
 
-    render(<App />);
+    render(<SynchronizedApp />);
 
     await waitFor(() => {
       expect(screen.getByTestId("header-auto-run")).toHaveTextContent(
@@ -159,7 +165,7 @@ describe("App", () => {
       return Promise.resolve(vi.fn());
     });
 
-    render(<App />);
+    render(<SynchronizedApp />);
     expect(screen.queryByTestId("header-auto-run")).not.toBeInTheDocument();
     expect(await screen.findByTestId("header-auto-run")).toHaveTextContent(
       "MANUAL",
@@ -189,7 +195,7 @@ describe("App", () => {
   it("opens settings top screen when settings button is clicked", async () => {
     const user = userEvent.setup();
 
-    render(<App />);
+    render(<SynchronizedApp />);
     await openSettingsTop(user);
 
     expect(screen.getByRole("heading", { name: "設定" })).toBeInTheDocument();
@@ -199,7 +205,7 @@ describe("App", () => {
   it("returns to home screen when the settings top header back button is clicked", async () => {
     const user = userEvent.setup();
 
-    render(<App />);
+    render(<SynchronizedApp />);
     await openSettingsTop(user);
     await user.click(screen.getByRole("button", { name: "ホームへ戻る" }));
 
@@ -212,7 +218,7 @@ describe("App", () => {
   it("returns to home screen when Escape is pressed on settings top page", async () => {
     const user = userEvent.setup();
 
-    render(<App />);
+    render(<SynchronizedApp />);
     await openSettingsTop(user);
 
     fireEvent.keyDown(window, { key: "Escape" });
@@ -244,7 +250,7 @@ describe("App", () => {
     async ({ openPage, headingName }) => {
       const user = userEvent.setup();
 
-      render(<App />);
+      render(<SynchronizedApp />);
       await openPage(user);
 
       expect(
@@ -263,7 +269,7 @@ describe("App", () => {
       },
     });
 
-    render(<App />);
+    render(<SynchronizedApp />);
 
     const expectSettingsFileNotice = async (): Promise<void> => {
       expect(await screen.findByRole("status")).toHaveTextContent(
@@ -296,7 +302,7 @@ describe("App", () => {
   it("saves the flipped mute setting when the home mute toggle is clicked", async () => {
     const user = userEvent.setup();
 
-    render(<App />);
+    render(<SynchronizedApp />);
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith("get_full_state");
     });
@@ -311,13 +317,13 @@ describe("App", () => {
   it("returns to home screen after fullscreen break ends while settings top is open", async () => {
     const user = userEvent.setup();
 
-    render(<App />);
+    render(<SynchronizedApp />);
     await openSettingsTop(user);
 
     expect(screen.getByRole("heading", { name: "設定" })).toBeInTheDocument();
 
     act(() => {
-      useTimerObservationStore.getState().observeEffects({
+      useBackendObservationStore.getState().observeEffects({
         revision: "1",
         last_timer_save: null,
         break_lock: {
@@ -331,7 +337,7 @@ describe("App", () => {
     });
 
     act(() => {
-      useTimerObservationStore.getState().observeEffects({
+      useBackendObservationStore.getState().observeEffects({
         revision: "2",
         last_timer_save: null,
         break_lock: {
@@ -369,7 +375,7 @@ describe("App", () => {
     async ({ openPage, headingName }) => {
       const user = userEvent.setup();
 
-      render(<App />);
+      render(<SynchronizedApp />);
       await openPage(user);
 
       fireEvent.keyDown(window, { key: "Escape" });
