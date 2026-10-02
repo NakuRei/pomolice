@@ -23,7 +23,6 @@ vi.mock("@/app/ui/InputMonitorFailureNotice", () => ({
 }));
 
 const lockedEffects = createTimerEffectsForTest({
-  revision: "1",
   break_lock: {
     target: "locked",
     last_attempt: { action: "enter", status: "succeeded" },
@@ -67,7 +66,7 @@ describe("application recovery controls", () => {
     expect(screen.getByRole("heading", { name: "設定" })).toBeInTheDocument();
     expect(screen.getAllByTestId("connection-banner")).toHaveLength(1);
     act(() => {
-      useBackendObservationStore.getState().observeEffects(lockedEffects);
+      useBackendObservationStore.setState({ effects: lockedEffects });
     });
     expect(
       screen.getByRole("button", { name: "休憩をスキップ" }),
@@ -82,12 +81,11 @@ describe("application recovery controls", () => {
       await Promise.resolve();
     });
     act(() => {
-      useBackendObservationStore.getState().observeEffects(
-        createTimerEffectsForTest({
-          revision: "1",
+      useBackendObservationStore.setState({
+        effects: createTimerEffectsForTest({
           last_timer_save: "failed",
         }),
-      );
+      });
     });
     vi.mocked(invoke).mockRejectedValue(new Error("response lost"));
     await act(async () => {
@@ -107,12 +105,11 @@ describe("application recovery controls", () => {
     ).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "再試行" })).toHaveLength(1);
     act(() => {
-      useBackendObservationStore.getState().observeEffects(
-        createTimerEffectsForTest({
-          revision: "2",
+      useBackendObservationStore.setState({
+        effects: createTimerEffectsForTest({
           last_timer_save: "succeeded",
         }),
-      );
+      });
     });
     expect(screen.getByRole("alert")).toHaveTextContent("直前の復旧操作");
     expect(
@@ -123,16 +120,15 @@ describe("application recovery controls", () => {
     });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     act(() => {
-      useBackendObservationStore.getState().observeEffects(
-        createTimerEffectsForTest({
-          revision: "3",
+      useBackendObservationStore.setState({
+        effects: createTimerEffectsForTest({
           break_lock: {
             target: "locked",
             last_attempt: { action: "enter", status: "failed" },
           },
           last_timer_save: "succeeded",
         }),
-      );
+      });
     });
     expect(screen.getByRole("alert")).toHaveTextContent(
       "画面のロックに失敗しました",
@@ -172,15 +168,24 @@ describe("application recovery controls", () => {
       await Promise.resolve();
     });
     expect(invoke).toHaveBeenCalledWith("get_full_state");
-    const notifyEffects = callbacks.get("timer_effects_changed");
+    const notifyEffects = callbacks.get("timer_snapshot_changed");
     expect(notifyEffects).toBeDefined();
     act(() => {
-      notifyEffects?.({ payload: lockedEffects });
+      notifyEffects?.({
+        payload: createTimerSnapshotForTest(
+          { revision: "1", effects: lockedEffects },
+          {
+            status: "on_break",
+            session_type: "short_break",
+            remaining_seconds: 300,
+          },
+        ),
+      });
     });
     expect(screen.getByText(/緊急解除/u)).toHaveTextContent(
       "Ctrl + Alt + Shift + E",
     );
-    expect(screen.getByTestId("timer-display")).toHaveTextContent("--:--");
+    expect(screen.getByTestId("timer-display")).toHaveTextContent("05:00");
     await act(async () => {
       rejectSnapshot(new Error("response lost"));
       await Promise.resolve();
@@ -189,7 +194,10 @@ describe("application recovery controls", () => {
       await vi.advanceTimersByTimeAsync(7000);
     });
     expect(screen.getByTestId("connection-banner-retry")).toBeEnabled();
-    const recovered = createTimerSnapshotForTest({ effects: lockedEffects });
+    const recovered = createTimerSnapshotForTest({
+      revision: "2",
+      effects: lockedEffects,
+    });
     recovered.timer.session_type = "short_break";
     recovered.timer.status = "on_break";
     recovered.timer.remaining_seconds = 300;

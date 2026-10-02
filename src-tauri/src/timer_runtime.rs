@@ -1,8 +1,8 @@
 pub(crate) mod observation;
 
 // The shell around `TimerCore`: the only place that applies events and runs
-// their effects. One permit serializes apply and effects together, so the
-// order the core returns is the order the outside world observes.
+// their effects. One permit keeps each published snapshot consistent with
+// the completed effects before the next transition starts.
 
 use std::sync::{Arc, Mutex as StdMutex};
 
@@ -20,22 +20,17 @@ use crate::timer_runtime::observation::BreakLockOutcome;
 use crate::timer_runtime::observation::BreakLockState;
 use crate::timer_runtime::observation::EffectStatus;
 use crate::timer_runtime::observation::TimerEffectsState;
-use crate::timer_runtime::observation::TimerSnapshot;
+use crate::timer_runtime::observation::{FullStatePayload, SnapshotRevision, TimerSnapshot};
 use pomolice_core::settings::input::{SettingsChanges, SettingsInput};
 use pomolice_core::settings::UserSettings;
-use pomolice_core::timer_core::observation::TimerTickPayload;
 use pomolice_core::timer_core::{BreakLockTarget, Effect, Event, TimerCore};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TimerNotification {
-    TimerTick(TimerTickPayload),
+    SnapshotChanged(Box<TimerSnapshot>),
     SessionCompleted(pomolice_core::timer_core::observation::SessionCompletedPayload),
     AutoRunStopPending,
     AutoRunStopped,
-    ActiveWindowChanged(pomolice_core::timer_core::observation::ActiveWindowChangedPayload),
-    SettingsChanged(Box<crate::timer_runtime::observation::SettingsChangedPayload>),
-    BootAutoStartOfferClosed,
-    TimerEffectsChanged(TimerEffectsState),
 }
 
 /// Where effects go. The application handle is the only production sink.
@@ -53,7 +48,7 @@ pub(crate) struct TimerRuntime {
     /// Locked only inside synchronous critical sections; never held across an await.
     core: StdMutex<TimerCore<Local>>,
     settings_file_status: StdMutex<crate::storage::SettingsFileStatus>,
-    effects: StdMutex<TimerEffectsState>,
+    published: StdMutex<TimerSnapshot>,
     /// Serializes every dispatch (apply plus effect execution). Held across awaits.
     dispatch_permit: Semaphore,
     clock: Arc<dyn Clock + Send + Sync>,
@@ -69,10 +64,18 @@ impl TimerRuntime {
         settings_persistence: PersistenceManager<PersistedSettings>,
         settings_file_status: crate::storage::SettingsFileStatus,
     ) -> Self {
+        let published = TimerSnapshot {
+            revision: SnapshotRevision::default(),
+            timer: FullStatePayload {
+                state: core.snapshot(clock.now_utc()),
+                settings_file_status,
+            },
+            effects: TimerEffectsState::default(),
+        };
         Self {
             core: StdMutex::new(core),
             settings_file_status: StdMutex::new(settings_file_status),
-            effects: StdMutex::new(TimerEffectsState::default()),
+            published: StdMutex::new(published),
             dispatch_permit: Semaphore::new(1),
             clock,
             timer_state_persistence,
@@ -82,7 +85,12 @@ impl TimerRuntime {
 
     pub(crate) async fn run_initial_effects(&self, sink: &impl EffectSink, effects: Vec<Effect>) {
         let _permit = self.acquire_dispatch_permit().await;
+        let revision = self.snapshot().revision;
         self.run_effects(sink, effects, self.clock.now_utc()).await;
+        let snapshot = self.snapshot();
+        if snapshot.revision == revision {
+            sink.notify(TimerNotification::SnapshotChanged(Box::new(snapshot)));
+        }
     }
 
     pub(crate) async fn dispatch(
@@ -94,7 +102,8 @@ impl TimerRuntime {
         self.apply_and_run_effects(sink, event).await
     }
 
-    /// Waits for in-flight effects so the snapshot includes their outcomes.
+    /// Returns the last published observation, including completed effects.
+    /// Reading does not advance the countdown or the revision.
     pub(crate) async fn read_full_state(&self) -> TimerSnapshot {
         let _permit = self.acquire_dispatch_permit().await;
         self.snapshot()
@@ -173,10 +182,10 @@ impl TimerRuntime {
     }
 
     fn effect_state(&self) -> TimerEffectsState {
-        *self
-            .effects
+        self.published
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .effects
     }
 
     fn settings_file_status(&self) -> crate::storage::SettingsFileStatus {
@@ -187,13 +196,38 @@ impl TimerRuntime {
     }
 
     fn snapshot(&self) -> TimerSnapshot {
-        TimerSnapshot {
-            timer: crate::timer_runtime::observation::FullStatePayload {
-                state: self.read(|core| core.snapshot(self.clock.now_utc())),
-                settings_file_status: self.settings_file_status(),
-            },
-            effects: self.effect_state(),
-        }
+        self.published
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    fn publish_snapshot(
+        &self,
+        sink: &impl EffectSink,
+        effects: TimerEffectsState,
+        now: DateTime<chrono::Utc>,
+    ) {
+        let timer = FullStatePayload {
+            state: self.read(|core| core.snapshot(now)),
+            settings_file_status: self.settings_file_status(),
+        };
+        let snapshot = {
+            let mut published = self
+                .published
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if published.timer == timer && published.effects == effects {
+                return;
+            }
+            *published = TimerSnapshot {
+                revision: SnapshotRevision(published.revision.0 + 1),
+                timer,
+                effects,
+            };
+            published.clone()
+        };
+        sink.notify(TimerNotification::SnapshotChanged(Box::new(snapshot)));
     }
 
     /// Synchronous save for `RunEvent::Exit`, called on the main thread.
@@ -237,36 +271,19 @@ impl TimerRuntime {
         effects: Vec<Effect>,
         now: DateTime<chrono::Utc>,
     ) {
-        let previous = self.effect_state();
-        let mut outcomes = previous;
+        let mut outcomes = self.effect_state();
+        let mut notifications = Vec::new();
 
         for effect in effects {
             match effect {
-                Effect::PublishTimerState(payload) => {
-                    sink.notify(TimerNotification::TimerTick(payload));
-                }
                 Effect::EmitSessionCompleted(payload) => {
-                    sink.notify(TimerNotification::SessionCompleted(payload));
+                    notifications.push(TimerNotification::SessionCompleted(payload));
                 }
                 Effect::EmitAutoRunStopPending => {
-                    sink.notify(TimerNotification::AutoRunStopPending);
+                    notifications.push(TimerNotification::AutoRunStopPending);
                 }
                 Effect::EmitAutoRunStopped => {
-                    sink.notify(TimerNotification::AutoRunStopped);
-                }
-                Effect::EmitActiveWindowChanged(payload) => {
-                    sink.notify(TimerNotification::ActiveWindowChanged(payload));
-                }
-                Effect::EmitSettingsChanged(payload) => {
-                    sink.notify(TimerNotification::SettingsChanged(Box::new(
-                        crate::timer_runtime::observation::SettingsChangedPayload {
-                            settings: payload.settings,
-                            settings_file_status: self.settings_file_status(),
-                        },
-                    )));
-                }
-                Effect::EmitBootAutoStartOfferClosed => {
-                    sink.notify(TimerNotification::BootAutoStartOfferClosed);
+                    notifications.push(TimerNotification::AutoRunStopped);
                 }
                 Effect::Persist => {
                     outcomes.last_timer_save = Some(if self.persist(now).await.is_ok() {
@@ -282,13 +299,9 @@ impl TimerRuntime {
             }
         }
 
-        if outcomes != previous {
-            outcomes.revision.0 += 1;
-            *self
-                .effects
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = outcomes;
-            sink.notify(TimerNotification::TimerEffectsChanged(outcomes));
+        self.publish_snapshot(sink, outcomes, now);
+        for notification in notifications {
+            sink.notify(notification);
         }
     }
 
@@ -409,13 +422,18 @@ mod tests {
             self
         }
 
-        fn timer_tick_statuses(&self) -> Vec<String> {
+        fn snapshot_statuses(&self) -> Vec<String> {
             self.emitted
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .iter()
-                .filter(|(name, _)| name == "timer_tick")
-                .map(|(_, payload)| payload["status"].as_str().unwrap_or("").to_string())
+                .filter(|(name, _)| name == "timer_snapshot_changed")
+                .map(|(_, payload)| {
+                    payload["timer"]["status"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_string()
+                })
                 .collect()
         }
 
@@ -438,22 +456,22 @@ mod tests {
                 .collect()
         }
 
-        fn last_timer_tick(&self) -> Option<serde_json::Value> {
+        fn last_snapshot_timer(&self) -> Option<serde_json::Value> {
             self.emitted
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .iter()
                 .rev()
-                .find(|(name, _)| name == "timer_tick")
-                .map(|(_, payload)| payload.clone())
+                .find(|(name, _)| name == "timer_snapshot_changed")
+                .map(|(_, payload)| payload["timer"].clone())
         }
     }
 
     impl EffectSink for RecordingSink {
         fn notify(&self, notification: TimerNotification) {
             let (name, payload) = match notification {
-                TimerNotification::TimerTick(value) => (
-                    "timer_tick",
+                TimerNotification::SnapshotChanged(value) => (
+                    "timer_snapshot_changed",
                     serde_json::to_value(value).expect("notification should serialize"),
                 ),
                 TimerNotification::SessionCompleted(value) => (
@@ -464,21 +482,6 @@ mod tests {
                     ("auto_run_stop_pending", serde_json::Value::Null)
                 }
                 TimerNotification::AutoRunStopped => ("auto_run_stopped", serde_json::Value::Null),
-                TimerNotification::ActiveWindowChanged(value) => (
-                    "active_window_changed",
-                    serde_json::to_value(value).expect("notification should serialize"),
-                ),
-                TimerNotification::SettingsChanged(value) => (
-                    "settings_changed",
-                    serde_json::to_value(value).expect("notification should serialize"),
-                ),
-                TimerNotification::BootAutoStartOfferClosed => {
-                    ("boot_auto_start_offer_closed", serde_json::Value::Null)
-                }
-                TimerNotification::TimerEffectsChanged(value) => (
-                    "timer_effects_changed",
-                    serde_json::to_value(value).expect("notification should serialize"),
-                ),
             };
             self.emitted
                 .lock()
@@ -624,7 +627,9 @@ mod tests {
 
         let outcome = result.expect("the input was accepted");
         assert_eq!(outcome.effects.last_timer_save, Some(EffectStatus::Failed));
-        let last_tick = sink.last_timer_tick().expect("a tick should be emitted");
+        let last_tick = sink
+            .last_snapshot_timer()
+            .expect("a tick should be emitted");
         assert_eq!(last_tick["status"], "working");
     }
 
@@ -674,7 +679,9 @@ mod tests {
         assert!(sink
             .emitted_names()
             .contains(&"session_completed".to_string()));
-        let last_tick = sink.last_timer_tick().expect("a tick should be emitted");
+        let last_tick = sink
+            .last_snapshot_timer()
+            .expect("a tick should be emitted");
         assert_eq!(last_tick["status"], "on_break");
         assert_eq!(
             runtime
@@ -745,11 +752,11 @@ mod tests {
             .expect("settings save should succeed");
 
         assert_eq!(
-            sink.emitted_payloads("settings_changed"),
-            vec![serde_json::json!({
-                "settings": serde_json::to_value(&settings).expect("settings should serialize"),
-                "settings_file_status": "ok",
-            })]
+            sink.emitted_payloads("timer_snapshot_changed")
+                .iter()
+                .map(|snapshot| snapshot["timer"]["settings"].clone())
+                .collect::<Vec<_>>(),
+            vec![serde_json::to_value(&settings).expect("settings should serialize")]
         );
         assert_eq!(saved_settings(&runtime), Some(settings));
     }
@@ -1005,7 +1012,7 @@ mod tests {
 
         tick.expect("tick should succeed");
         stop.expect("stop should succeed");
-        let statuses = sink.timer_tick_statuses();
+        let statuses = sink.snapshot_statuses();
         let break_reported = statuses
             .iter()
             .rposition(|status| status == "on_break")

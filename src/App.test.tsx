@@ -1,3 +1,4 @@
+import { createTimerSnapshotForTest } from "@/test/timerEffectsFixture";
 import { useBackendSync } from "@/app/sync/useBackendSync";
 import { useBackendObservationStore } from "@/backend/observationStore";
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -20,6 +21,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 const IDLE_FULL_STATE = vi.hoisted(() => ({
+  revision: "0",
   timer: {
     status: "idle",
     remaining_seconds: 1500,
@@ -54,7 +56,6 @@ const IDLE_FULL_STATE = vi.hoisted(() => ({
     settings_file_status: "ok",
   },
   effects: {
-    revision: "0",
     break_lock: { target: "unlocked", last_attempt: null },
     last_timer_save: null,
   },
@@ -171,14 +172,22 @@ describe("App", () => {
       "MANUAL",
     );
     await waitFor(() => {
-      expect(backendEventHandlers.has("active_window_changed")).toBe(true);
+      expect(backendEventHandlers.has("timer_snapshot_changed")).toBe(true);
     });
     const emitActiveWindowChanged = (
       activeWindowSummary: typeof MONDAY_DAYTIME_WINDOW | null,
     ): void => {
       act(() => {
-        backendEventHandlers.get("active_window_changed")?.({
-          payload: { active_window_summary: activeWindowSummary },
+        backendEventHandlers.get("timer_snapshot_changed")?.({
+          payload: createTimerSnapshotForTest(
+            {
+              revision: String(
+                BigInt(useBackendObservationStore.getState().revision ?? "0") +
+                  1n,
+              ),
+            },
+            { active_window_summary: activeWindowSummary },
+          ),
         });
       });
     };
@@ -323,12 +332,13 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "設定" })).toBeInTheDocument();
 
     act(() => {
-      useBackendObservationStore.getState().observeEffects({
-        revision: "1",
-        last_timer_save: null,
-        break_lock: {
-          target: "locked",
-          last_attempt: { action: "enter", status: "succeeded" },
+      useBackendObservationStore.setState({
+        effects: {
+          last_timer_save: null,
+          break_lock: {
+            target: "locked",
+            last_attempt: { action: "enter", status: "succeeded" },
+          },
         },
       });
     });
@@ -337,12 +347,13 @@ describe("App", () => {
     });
 
     act(() => {
-      useBackendObservationStore.getState().observeEffects({
-        revision: "2",
-        last_timer_save: null,
-        break_lock: {
-          target: "unlocked",
-          last_attempt: { action: "release", status: "succeeded" },
+      useBackendObservationStore.setState({
+        effects: {
+          last_timer_save: null,
+          break_lock: {
+            target: "unlocked",
+            last_attempt: { action: "release", status: "succeeded" },
+          },
         },
       });
     });

@@ -5,7 +5,6 @@ import type {
   TimerEffectsState,
   FullStatePayload,
   SessionCompletedPayload,
-  TimerTickPayload,
 } from "@/ipc/generated";
 
 /**
@@ -93,6 +92,7 @@ function createFullStatePayload(
 ): TimerSnapshot {
   const snapshot = createTimerSnapshotForTest();
   return {
+    revision: "0",
     timer: { ...snapshot.timer, ...overrides },
     effects: effects ?? snapshot.effects,
   };
@@ -133,22 +133,20 @@ async function renderAndGetTimerEventHandler(
   return getRequiredTimerEventHandler(capturedHandler, `${eventName} handler`);
 }
 
-function emitTimerTick(
+function emitSnapshot(
   handler: TimerEventHandler,
-  overrides: Partial<TimerTickPayload> = {},
+  overrides: Partial<FullStatePayload> = {},
 ): void {
   handler({
-    payload: {
-      status: "working",
-      remaining_seconds: 1499,
-      session_duration_secs: 1500,
-      session_type: "work",
-      current_cycle: 1,
-      completed_pomodoros: 0,
-      break_interaction_count: 0,
-      away_during_break: false,
-      ...overrides,
-    },
+    payload: createTimerSnapshotForTest(
+      { revision: "1" },
+      {
+        status: "working",
+        remaining_seconds: 1499,
+        current_cycle: 1,
+        ...overrides,
+      },
+    ),
   });
 }
 
@@ -181,9 +179,10 @@ function getCommandInvokeCount(commandName: string): number {
     .length;
 }
 
-function getTimerTickListenCount(): number {
-  return mockListen.mock.calls.filter(([event]) => event === "timer_tick")
-    .length;
+function getSnapshotListenCount(): number {
+  return mockListen.mock.calls.filter(
+    ([event]) => event === "timer_snapshot_changed",
+  ).length;
 }
 
 function invokedCommandNames(): string[] {
@@ -246,11 +245,7 @@ describe("useBackendSync", () => {
     const offer = createBootAutoStartOfferForTest();
     mockInvoke.mockImplementation(() => {
       expect(mockListen.mock.calls.map(([event]) => event)).toEqual(
-        expect.arrayContaining([
-          "timer_tick",
-          "session_completed",
-          "boot_auto_start_offer_closed",
-        ]),
+        expect.arrayContaining(["timer_snapshot_changed", "session_completed"]),
       );
       return Promise.resolve(
         acceptedCommand(
@@ -278,16 +273,16 @@ describe("useBackendSync", () => {
     });
     mockInvoke.mockReturnValue(pending.then(acceptedCommand));
     const effectsChanged = await renderAndGetTimerEventHandler(
-      "timer_effects_changed",
+      "timer_snapshot_changed",
     );
     await waitFor(() => {
       expect(getCommandInvokeCount("get_full_state")).toBe(1);
     });
     act(() => {
       effectsChanged({
-        payload: createTimerEffectsForTest({
+        payload: createTimerSnapshotForTest({
           revision: "2",
-          last_timer_save: "succeeded",
+          effects: createTimerEffectsForTest({ last_timer_save: "succeeded" }),
         }),
       });
     });
@@ -296,7 +291,6 @@ describe("useBackendSync", () => {
         createFullStatePayload(
           {},
           createTimerEffectsForTest({
-            revision: "1",
             last_timer_save: "failed",
           }),
         ),
@@ -315,7 +309,7 @@ describe("useBackendSync", () => {
       value: createFullStatePayload({ boot_auto_start_offer: offer }),
     });
     const closeOffer = await renderAndGetTimerEventHandler(
-      "boot_auto_start_offer_closed",
+      "timer_snapshot_changed",
     );
     await waitFor(() => {
       expect(useBackendObservationStore.getState().bootAutoStartOffer).toEqual(
@@ -324,7 +318,7 @@ describe("useBackendSync", () => {
     });
 
     act(() => {
-      closeOffer({ payload: {} });
+      closeOffer({ payload: createTimerSnapshotForTest({ revision: "1" }) });
     });
 
     expect(useBackendObservationStore.getState().bootAutoStartOffer).toBeNull();
@@ -340,13 +334,13 @@ describe("useBackendSync", () => {
     });
     mockInvoke.mockReturnValue(pendingFullState.then(acceptedCommand));
     const closeOffer = await renderAndGetTimerEventHandler(
-      "boot_auto_start_offer_closed",
+      "timer_snapshot_changed",
     );
     await waitFor(() => {
       expect(getCommandInvokeCount("get_full_state")).toBe(1);
     });
     act(() => {
-      closeOffer({ payload: {} });
+      closeOffer({ payload: createTimerSnapshotForTest({ revision: "1" }) });
     });
 
     await act(async () => {
@@ -362,7 +356,7 @@ describe("useBackendSync", () => {
     expect(useBackendSyncStore.getState().connection.status).toBe("ready");
   });
 
-  it("receives session completion events while the initial full state is pending", async () => {
+  it("keeps the newer complete state when the initial full state arrives late", async () => {
     let resolveFullState: (payload: TimerSnapshot) => void = () => {
       throw new Error("Expected the full-state request to be pending");
     };
@@ -375,12 +369,18 @@ describe("useBackendSync", () => {
         : Promise.resolve(undefined),
     );
 
-    const sessionHandler =
-      await renderAndGetTimerEventHandler("session_completed");
+    const snapshotHandler = await renderAndGetTimerEventHandler(
+      "timer_snapshot_changed",
+    );
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith("get_full_state", undefined);
     });
-    emitSessionCompleted(sessionHandler);
+    emitSnapshot(snapshotHandler, {
+      post_break_decision_pending: true,
+      settings: settingsPayloadForTest(
+        createSettingsForTest({ notificationSoundMuted: true }),
+      ),
+    });
 
     expect(
       useBackendObservationStore.getState().requiresManualContinueDecision,
@@ -390,6 +390,12 @@ describe("useBackendSync", () => {
       resolveFullState(createFullStatePayload());
       await pendingFullState;
     });
+    expect(
+      useBackendObservationStore.getState().requiresManualContinueDecision,
+    ).toBe(true);
+    expect(
+      useBackendObservationStore.getState().settings?.notificationSoundMuted,
+    ).toBe(true);
   });
 
   it("reports get_full_state command failures through code-derived connection presentation", async () => {
@@ -485,7 +491,7 @@ describe("useBackendSync", () => {
     const unlistenTick = vi.fn();
 
     mockListen.mockImplementation((event: string) => {
-      if (event === "timer_tick") {
+      if (event === "timer_snapshot_changed") {
         return Promise.resolve(unlistenTick);
       }
 
@@ -510,23 +516,23 @@ describe("useBackendSync", () => {
     renderTimerSync();
 
     await flushTimerSyncSetup();
-    expect(getTimerTickListenCount()).toBe(1);
+    expect(getSnapshotListenCount()).toBe(1);
 
     await vi.advanceTimersByTimeAsync(999);
-    expect(getTimerTickListenCount()).toBe(1);
+    expect(getSnapshotListenCount()).toBe(1);
     await vi.advanceTimersByTimeAsync(1);
-    expect(getTimerTickListenCount()).toBe(2);
+    expect(getSnapshotListenCount()).toBe(2);
 
     await vi.advanceTimersByTimeAsync(1999);
-    expect(getTimerTickListenCount()).toBe(2);
+    expect(getSnapshotListenCount()).toBe(2);
     await vi.advanceTimersByTimeAsync(1);
-    expect(getTimerTickListenCount()).toBe(3);
+    expect(getSnapshotListenCount()).toBe(3);
 
     await vi.advanceTimersByTimeAsync(3999);
-    expect(getTimerTickListenCount()).toBe(3);
+    expect(getSnapshotListenCount()).toBe(3);
     expect(useBackendSyncStore.getState().connection.status).toBe("retry_wait");
     await vi.advanceTimersByTimeAsync(1);
-    expect(getTimerTickListenCount()).toBe(4);
+    expect(getSnapshotListenCount()).toBe(4);
 
     const connection = useBackendSyncStore.getState().connection;
     expect(connection).toMatchObject({
@@ -541,7 +547,7 @@ describe("useBackendSync", () => {
     );
 
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(getTimerTickListenCount()).toBe(4);
+    expect(getSnapshotListenCount()).toBe(4);
   });
 
   it("manual retry clears the error and grants three new retries", async () => {
@@ -551,7 +557,7 @@ describe("useBackendSync", () => {
     renderTimerSync();
 
     await flushTimerSyncSetup();
-    expect(getTimerTickListenCount()).toBe(1);
+    expect(getSnapshotListenCount()).toBe(1);
 
     await advanceThroughTimerSyncConnectionRetries();
 
@@ -564,10 +570,10 @@ describe("useBackendSync", () => {
     await flushTimerSyncSetup();
 
     expect(useBackendSyncStore.getState().connection.status).toBe("retry_wait");
-    expect(getTimerTickListenCount()).toBe(1);
+    expect(getSnapshotListenCount()).toBe(1);
 
     await advanceThroughTimerSyncConnectionRetries();
-    expect(getTimerTickListenCount()).toBe(4);
+    expect(getSnapshotListenCount()).toBe(4);
     expect(useBackendSyncStore.getState().connection.status).toBe("failed");
   });
 
@@ -593,7 +599,7 @@ describe("useBackendSync", () => {
     expect(useBackendSyncStore.getState().connection.status).toBe("ready");
     expect(mockInvoke.mock.calls).toContainEqual(["get_full_state", undefined]);
     expect(mockListen.mock.calls.map(([event]) => event)).toContain(
-      "timer_tick",
+      "timer_snapshot_changed",
     );
   });
 
@@ -617,22 +623,26 @@ describe("useBackendSync", () => {
     });
   });
 
-  it("should handle timer_tick events", async () => {
-    const tickHandler = await renderAndGetTimerEventHandler("timer_tick");
-    emitTimerTick(tickHandler);
+  it("should handle timer_snapshot_changed events", async () => {
+    const tickHandler = await renderAndGetTimerEventHandler(
+      "timer_snapshot_changed",
+    );
+    emitSnapshot(tickHandler);
 
     expect(useBackendObservationStore.getState().status).toBe("working");
     expect(useBackendObservationStore.getState().remainingSeconds).toBe(1499);
   });
 
-  it("should handle session_completed events", async () => {
+  it("does not use a session occurrence to overwrite the observed state", async () => {
     const sessionHandler =
       await renderAndGetTimerEventHandler("session_completed");
+    await waitFor(() => {
+      expect(useBackendSyncStore.getState().connection.status).toBe("ready");
+    });
+    const before = useBackendObservationStore.getState();
     emitSessionCompleted(sessionHandler);
 
-    expect(
-      useBackendObservationStore.getState().requiresManualContinueDecision,
-    ).toBe(true);
+    expect(useBackendObservationStore.getState()).toBe(before);
   });
 
   it("notifies the user with the long-break sound when work ends before a long break", async () => {
@@ -709,6 +719,39 @@ describe("useBackendSync", () => {
     await vi.runOnlyPendingTimersAsync();
 
     expect(sendNotification).not.toHaveBeenCalled();
+  });
+
+  it("delivers an occurrence after its state was observed and never replays it on reconnect", async () => {
+    vi.mocked(isPermissionGranted).mockResolvedValue(true);
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Linux");
+    const snapshot = createTimerSnapshotForTest(
+      { revision: "2" },
+      {
+        post_break_decision_pending: true,
+      },
+    );
+    useBackendObservationStore.getState().observeSnapshot(snapshot);
+    mockInvoke.mockResolvedValue(acceptedCommand(snapshot));
+    const session = await renderAndGetTimerEventHandler("session_completed");
+    await waitFor(() => {
+      expect(useBackendSyncStore.getState().connection.status).toBe("ready");
+    });
+    expect(sendNotification).not.toHaveBeenCalled();
+    emitSessionCompleted(session);
+    await waitFor(() => {
+      expect(sendNotification).toHaveBeenCalledTimes(1);
+    });
+    act(() => {
+      useBackendSyncStore.getState().reconnect();
+    });
+    await waitFor(() => {
+      expect(getCommandInvokeCount("get_full_state")).toBe(2);
+      expect(useBackendSyncStore.getState().connection.status).toBe("ready");
+    });
+    expect(sendNotification).toHaveBeenCalledTimes(1);
+    expect(
+      useBackendObservationStore.getState().requiresManualContinueDecision,
+    ).toBe(true);
   });
 
   it("releases a listener registered after unmount without continuing setup", async () => {
@@ -826,18 +869,22 @@ describe("useBackendSync", () => {
     );
   });
 
-  it("takes the settings announced by settings_changed events", async () => {
-    const settingsListener =
-      await renderAndGetTimerEventHandler("settings_changed");
+  it("takes the settings announced by timer_snapshot_changed events", async () => {
+    const settingsListener = await renderAndGetTimerEventHandler(
+      "timer_snapshot_changed",
+    );
     const savedSettings = createSettingsForTest({
       notificationSoundMuted: true,
     });
 
     settingsListener({
-      payload: {
-        settings: settingsPayloadForTest(savedSettings),
-        settings_file_status: "ok",
-      },
+      payload: createTimerSnapshotForTest(
+        { revision: "1" },
+        {
+          settings: settingsPayloadForTest(savedSettings),
+          settings_file_status: "ok",
+        },
+      ),
     });
 
     expect(useBackendObservationStore.getState().settings).toEqual(

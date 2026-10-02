@@ -88,7 +88,7 @@ fn a_restored_session_keeps_the_duration_it_started_with_under_changed_settings(
 
     let (core, _) = TimerCore::restore(Some(saved), shorter_work, saved_at, chrono_tz::UTC);
 
-    let restored = core.tick_payload(saved_at);
+    let restored = core.snapshot(saved_at);
     assert_eq!(restored.remaining_seconds, 1_200);
     assert_eq!(restored.session_duration_secs, default_work_secs());
 }
@@ -117,7 +117,7 @@ fn a_restored_pending_decision_still_requires_a_decision() {
         chrono_tz::UTC,
     );
 
-    assert!(!starts_work(&on_start));
+    assert!(!on_start.contains(&Effect::Persist));
     assert_eq!(core.status(), TimerStatus::Idle);
     assert!(core.post_break_decision_pending());
     assert_eq!(remaining(&core, restarted_at), default_work_secs());
@@ -144,7 +144,7 @@ fn a_saved_break_without_a_break_kind_restarts_idle() {
         chrono_tz::UTC,
     );
 
-    assert!(!starts_work(&on_start));
+    assert!(!on_start.contains(&Effect::Persist));
     assert_eq!(core.status(), TimerStatus::Idle);
     assert!(!core.post_break_decision_pending());
     assert_eq!(remaining(&core, saved_at), default_work_secs());
@@ -190,7 +190,7 @@ fn a_restored_break_longer_than_any_break_setting_takes_the_configured_length() 
 
     let core = restore_with_default_settings(Some(saved), saved_at);
 
-    let restored = core.tick_payload(saved_at);
+    let restored = core.snapshot(saved_at);
     assert_eq!(restored.session_duration_secs, default_short_break_secs());
     assert_eq!(restored.remaining_seconds, default_short_break_secs());
 }

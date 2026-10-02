@@ -45,14 +45,14 @@ fn startup_inside_a_window_offers_it_without_a_frontend_command() {
 #[test]
 fn startup_before_a_window_allows_its_start_without_a_frontend_connection() {
     let mut core = startup_with_schedule(monday(8, 30, 0), workday());
-    let effects = apply(
+    apply(
         &mut core,
         Event::TimeObserved {
             credited_break_seconds: 1,
         },
         workday_start(),
     );
-    assert!(starts_work(&effects));
+    assert_eq!(core.status(), TimerStatus::Working);
     assert!(!boot_prompt_is_offered(&core, workday_start()));
 }
 
@@ -62,26 +62,25 @@ fn an_unanswered_monday_offer_expires_and_tuesday_starts_automatically() {
     assert!(boot_prompt_is_offered(&core, monday(10, 0, 0)));
     assert_eq!(core.status(), TimerStatus::Idle);
 
-    let expired = apply(
+    apply(
         &mut core,
         Event::TimeObserved {
             credited_break_seconds: 1,
         },
         workday_end(),
     );
-    assert!(expired.contains(&Effect::EmitBootAutoStartOfferClosed));
     assert!(!boot_prompt_is_offered(&core, workday_end()));
     assert_eq!(core.status(), TimerStatus::Idle);
 
     let tuesday_start = workday_start() + ChronoDuration::days(1);
-    let started = apply(
+    apply(
         &mut core,
         Event::TimeObserved {
             credited_break_seconds: 1,
         },
         tuesday_start,
     );
-    assert!(starts_work(&started));
+    assert_eq!(core.status(), TimerStatus::Working);
     assert!(!boot_prompt_is_offered(&core, tuesday_start));
 }
 
@@ -89,15 +88,14 @@ fn an_unanswered_monday_offer_expires_and_tuesday_starts_automatically() {
 fn jumping_to_the_next_window_does_not_carry_the_offer_forward() {
     let mut core = startup_with_schedule(monday(10, 0, 0), monday_and_tuesday());
     let tuesday_start = workday_start() + ChronoDuration::days(1);
-    let effects = apply(
+    apply(
         &mut core,
         Event::TimeObserved {
             credited_break_seconds: 1,
         },
         tuesday_start,
     );
-    assert!(starts_work(&effects));
-    assert!(effects.contains(&Effect::EmitBootAutoStartOfferClosed));
+    assert_eq!(core.status(), TimerStatus::Working);
     assert!(!boot_prompt_is_offered(&core, tuesday_start));
 }
 
@@ -107,23 +105,23 @@ fn reading_after_the_deadline_keeps_the_offer_until_an_update_expires_it() {
     assert!(boot_prompt_is_offered(&core, workday_end()));
     assert!(boot_prompt_is_offered(&core, workday_end()));
 
-    let expired = apply(
+    apply(
         &mut core,
         Event::TimeObserved {
             credited_break_seconds: 1,
         },
         workday_end(),
     );
-    assert!(expired.contains(&Effect::EmitBootAutoStartOfferClosed));
     assert!(!boot_prompt_is_offered(&core, workday_end()));
     let next_start = workday_start() + ChronoDuration::days(7);
-    assert!(starts_work(&apply(
+    apply(
         &mut core,
         Event::TimeObserved {
-            credited_break_seconds: 1
+            credited_break_seconds: 1,
         },
-        next_start
-    )));
+        next_start,
+    );
+    assert_eq!(core.status(), TimerStatus::Working);
 }
 
 #[test]
@@ -134,8 +132,7 @@ fn answering_later_consumes_the_offer_without_starting_work() {
         Event::BootPromptResolved { start_now: false },
         monday(10, 1, 0),
     );
-    assert!(effects.contains(&Effect::EmitBootAutoStartOfferClosed));
-    assert!(!starts_work(&effects));
+    assert!(!effects.contains(&Effect::Persist));
     assert_eq!(core.status(), TimerStatus::Idle);
     assert!(!boot_prompt_is_offered(&core, monday(10, 2, 0)));
     apply(
@@ -151,13 +148,12 @@ fn answering_later_consumes_the_offer_without_starting_work() {
 #[test]
 fn accepting_the_offer_starts_work_under_schedule_control() {
     let mut core = startup_with_schedule(seconds_before(workday_end(), 120), workday());
-    let effects = apply(
+    apply(
         &mut core,
         Event::BootPromptResolved { start_now: true },
         seconds_before(workday_end(), 90),
     );
-    assert!(starts_work(&effects));
-    assert!(effects.contains(&Effect::EmitBootAutoStartOfferClosed));
+    assert_eq!(core.status(), TimerStatus::Working);
     assert!(!boot_prompt_is_offered(
         &core,
         seconds_before(workday_end(), 89)
@@ -180,32 +176,30 @@ fn an_answer_after_expiry_does_not_start_work_even_before_the_next_tick() {
         Event::BootPromptResolved { start_now: true },
         workday_end(),
     );
-    assert!(!starts_work(&effects));
+    assert!(!effects.contains(&Effect::Persist));
     assert_eq!(core.status(), TimerStatus::Idle);
-    assert!(effects.contains(&Effect::EmitBootAutoStartOfferClosed));
     assert!(!boot_prompt_is_offered(&core, workday_end()));
 }
 
 #[test]
 fn changing_the_target_window_closes_the_offer_and_allows_the_new_start() {
     let mut core = startup_with_schedule(monday(10, 0, 0), workday());
-    let changed = enable_schedule(&mut core, monday_slot((11, 0), (18, 0)), monday(10, 30, 0));
-    assert!(changed.contains(&Effect::EmitBootAutoStartOfferClosed));
+    enable_schedule(&mut core, monday_slot((11, 0), (18, 0)), monday(10, 30, 0));
     assert!(!boot_prompt_is_offered(&core, monday(10, 30, 0)));
-    assert!(starts_work(&apply(
+    apply(
         &mut core,
         Event::TimeObserved {
-            credited_break_seconds: 1
+            credited_break_seconds: 1,
         },
-        monday(11, 0, 0)
-    )));
+        monday(11, 0, 0),
+    );
+    assert_eq!(core.status(), TimerStatus::Working);
 }
 
 #[test]
 fn disabling_and_reenabling_the_schedule_does_not_recreate_an_offer() {
     let mut core = startup_with_schedule(monday(10, 0, 0), workday());
-    let disabled = disable_schedule(&mut core, monday(10, 1, 0));
-    assert!(disabled.contains(&Effect::EmitBootAutoStartOfferClosed));
+    disable_schedule(&mut core, monday(10, 1, 0));
     enable_schedule(&mut core, workday(), monday(10, 2, 0));
     assert!(!boot_prompt_is_offered(&core, monday(10, 2, 0)));
 }
@@ -248,8 +242,7 @@ fn manually_starting_work_consumes_the_offer_and_late_answers_do_nothing() {
 #[test]
 fn emergency_stop_consumes_the_offer() {
     let mut core = startup_with_schedule(monday(10, 0, 0), workday());
-    let stopped = apply(&mut core, Event::EmergencyStopRequested, monday(10, 1, 0));
-    assert!(stopped.contains(&Effect::EmitBootAutoStartOfferClosed));
+    apply(&mut core, Event::EmergencyStopRequested, monday(10, 1, 0));
     assert!(!boot_prompt_is_offered(&core, monday(10, 1, 0)));
 }
 
@@ -295,9 +288,9 @@ fn restored_session_that_ends_after_the_start_boundary() -> (TimerCore, Vec<Effe
 #[test]
 fn a_start_boundary_that_passed_while_the_app_was_closed_does_not_restart_a_restored_session_once_it_ends(
 ) {
-    let (_, at_break_end) = restored_session_that_ends_after_the_start_boundary();
+    let (core, _) = restored_session_that_ends_after_the_start_boundary();
 
-    assert!(!starts_work(&at_break_end));
+    assert_eq!(core.status(), TimerStatus::Idle);
 }
 
 #[test]
@@ -309,7 +302,7 @@ fn a_later_start_boundary_still_fires_after_a_restored_session_has_ended() {
         monday_slot((9, 2), (18, 0)),
         seconds_after(workday_start(), 60),
     );
-    let at_next_boundary = apply(
+    apply(
         &mut core,
         Event::TimeObserved {
             credited_break_seconds: 1,
@@ -317,5 +310,5 @@ fn a_later_start_boundary_still_fires_after_a_restored_session_has_ended() {
         seconds_after(workday_start(), 2 * 60),
     );
 
-    assert!(starts_work(&at_next_boundary));
+    assert_eq!(core.status(), TimerStatus::Working);
 }

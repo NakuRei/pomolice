@@ -182,9 +182,9 @@ async fn stop_reports_both_unlock_and_save_failures_and_keeps_them_until_recover
         .expect("idle tick");
     assert_eq!(runtime.read_full_state().await.effects, stopped.effects);
     assert_eq!(
-        sink.emitted_payloads("timer_effects_changed")
+        sink.emitted_payloads("timer_snapshot_changed")
             .last()
-            .expect("failure announced")["break_lock"]["last_attempt"]["status"],
+            .expect("failure announced")["effects"]["break_lock"]["last_attempt"]["status"],
         "failed"
     );
 

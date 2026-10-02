@@ -105,10 +105,10 @@ it("continues observing and notifying during a screen failure without reconnecti
   const registrations = vi.mocked(listen).mock.calls.length;
   await act(async () => {
     await Promise.resolve();
-    emit("timer_tick", {
-      ...createTimerSnapshotForTest().timer,
-      remaining_seconds: 123,
-    });
+    emit(
+      "timer_snapshot_changed",
+      createTimerSnapshotForTest({ revision: "1" }, { remaining_seconds: 123 }),
+    );
     emit("session_completed", {
       transition_reason: "break_waiting_decision",
       completed_session_type: "short_break",
@@ -177,10 +177,10 @@ it("keeps timer synchronization available when an independent subscription fails
   ).toBeInTheDocument();
   expect(useBackendSyncStore.getState().connection.status).toBe("ready");
   act(() => {
-    emit("timer_tick", {
-      ...createTimerSnapshotForTest().timer,
-      remaining_seconds: 42,
-    });
+    emit(
+      "timer_snapshot_changed",
+      createTimerSnapshotForTest({ revision: "1" }, { remaining_seconds: 42 }),
+    );
   });
   expect(screen.getByText("Remaining: 42")).toBeInTheDocument();
 });

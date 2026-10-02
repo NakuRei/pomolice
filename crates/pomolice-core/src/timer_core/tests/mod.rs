@@ -255,31 +255,7 @@ fn saved_state(
 // ---- reading the results ----
 
 fn remaining(core: &TimerCore, now: DateTime<Utc>) -> u64 {
-    core.tick_payload(now).remaining_seconds
-}
-
-fn published_states(effects: &[Effect]) -> Vec<&TimerTickPayload> {
-    effects
-        .iter()
-        .filter_map(|effect| match effect {
-            Effect::PublishTimerState(payload) => Some(payload),
-            _ => None,
-        })
-        .collect()
-}
-
-/// The state the frontend is left with after these effects.
-fn last_published(effects: &[Effect]) -> &TimerTickPayload {
-    published_states(effects)
-        .last()
-        .copied()
-        .expect("a state should have been published")
-}
-
-fn starts_work(effects: &[Effect]) -> bool {
-    published_states(effects)
-        .iter()
-        .any(|payload| payload.status == TimerStatus::Working)
+    core.snapshot(now).remaining_seconds
 }
 
 fn completion_reason(effects: &[Effect]) -> Option<SessionTransitionReason> {

@@ -35,28 +35,10 @@ const logger = createLogger("timer_sync");
  *
  */
 export function useBackendSync(): void {
-  const observeEffects = useBackendObservationStore(
-    (state) => state.observeEffects,
-  );
   const generation = useBackendSyncStore((state) => state.generation);
   const setConnection = useBackendSyncStore((state) => state.setConnection);
-  const observeTimerTick = useBackendObservationStore(
-    (s) => s.observeTimerTick,
-  );
-  const observeSessionCompleted = useBackendObservationStore(
-    (s) => s.observeSessionCompleted,
-  );
-  const observeFullState = useBackendObservationStore(
-    (s) => s.observeFullState,
-  );
-  const clearBootAutoStartOffer = useBackendObservationStore(
-    (s) => s.clearBootAutoStartOffer,
-  );
-  const observeActiveWindowChanged = useBackendObservationStore(
-    (s) => s.observeActiveWindowChanged,
-  );
-  const observeSettingsChanged = useBackendObservationStore(
-    (s) => s.observeSettingsChanged,
+  const observeSnapshot = useBackendObservationStore(
+    (state) => state.observeSnapshot,
   );
   const showAutoRunStopPendingInfo = useTimerNoticeStore(
     (s) => s.showAutoRunStopPendingInfo,
@@ -95,22 +77,16 @@ export function useBackendSync(): void {
     }
 
     async function registerBackendListeners(): Promise<boolean> {
-      // Listen for timer tick events
-      const unlistenTick = await events.timerTick.listen((event) => {
-        if (mounted) {
-          observeTimerTick(event.payload);
-        }
-      });
-      if (!registerActiveListener(unlistenTick)) {
-        return false;
-      }
+      const unlistenSnapshot = await events.timerSnapshotChanged.listen(
+        (event) => {
+          if (mounted) observeSnapshot(event.payload);
+        },
+      );
+      if (!registerActiveListener(unlistenSnapshot)) return false;
 
-      // Listen for session completed events
       const unlistenSessionCompleted = await events.sessionCompleted.listen(
         (event) => {
           if (mounted) {
-            observeSessionCompleted(event.payload);
-
             void notifySessionCompleted(event.payload);
           }
         },
@@ -139,40 +115,7 @@ export function useBackendSync(): void {
         return false;
       }
 
-      const unlistenActiveWindowChanged =
-        await events.activeWindowChanged.listen((event) => {
-          if (mounted) {
-            observeActiveWindowChanged(event.payload);
-          }
-        });
-      if (!registerActiveListener(unlistenActiveWindowChanged)) {
-        return false;
-      }
-
-      const unlistenSettingsChanged = await events.settingsChanged.listen(
-        (event) => {
-          if (mounted) {
-            observeSettingsChanged(event.payload);
-          }
-        },
-      );
-      if (!registerActiveListener(unlistenSettingsChanged)) {
-        return false;
-      }
-
-      const unlistenBootOfferClosed =
-        await events.bootAutoStartOfferClosed.listen(() => {
-          if (mounted) {
-            clearBootAutoStartOffer();
-          }
-        });
-      if (!registerActiveListener(unlistenBootOfferClosed)) return false;
-      const unlistenEffects = await events.timerEffectsChanged.listen(
-        (event) => {
-          if (mounted) observeEffects(event.payload);
-        },
-      );
-      return registerActiveListener(unlistenEffects);
+      return true;
     }
 
     async function setup(retryAttempt = 0): Promise<void> {
@@ -216,7 +159,7 @@ export function useBackendSync(): void {
           reportConnectionFailure(response);
           return;
         }
-        observeFullState(response.value);
+        observeSnapshot(response.value);
         setConnection({ status: "ready" });
       } catch (cause) {
         reportConnectionFailure({ status: "setup", cause });
@@ -232,13 +175,7 @@ export function useBackendSync(): void {
       setConnection({ status: "idle" });
     };
   }, [
-    observeTimerTick,
-    observeSessionCompleted,
-    observeFullState,
-    clearBootAutoStartOffer,
-    observeEffects,
-    observeActiveWindowChanged,
-    observeSettingsChanged,
+    observeSnapshot,
     setConnection,
     generation,
     showAutoRunStopPendingInfo,

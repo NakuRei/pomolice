@@ -29,7 +29,7 @@ fn work_completion_announces_the_break_and_asks_for_the_lock() {
         Some(SessionTransitionReason::WorkToBreak)
     );
     assert!(at_work_end.contains(&Effect::SetBreakLockTarget(BreakLockTarget::Locked)));
-    let break_state = core.tick_payload(seconds_after(started_at, 2));
+    let break_state = core.snapshot(seconds_after(started_at, 2));
     assert_eq!(break_state.completed_pomodoros, 1);
     assert_eq!(break_state.session_type, SessionType::ShortBreak);
     assert_eq!(break_state.remaining_seconds, default_short_break_secs());
@@ -71,7 +71,7 @@ fn break_completion_announces_the_decision_and_releases_the_lock() {
     );
     assert!(at_break_end.contains(&Effect::SetBreakLockTarget(BreakLockTarget::Unlocked)));
 
-    let final_state = last_published(&at_break_end);
+    let final_state = core.snapshot(seconds_after(started_at, 3));
     assert_eq!(final_state.status, TimerStatus::Idle);
 }
 
@@ -115,7 +115,7 @@ fn break_completion_starts_the_next_work_when_the_policy_says_so_and_the_user_st
     );
 
     assert_eq!(core.status(), TimerStatus::Working);
-    assert_eq!(core.tick_payload(monday(10, 0, 2)).current_cycle, 2);
+    assert_eq!(core.snapshot(monday(10, 0, 2)).current_cycle, 2);
     assert_eq!(
         completion_reason(&at_break_end),
         Some(SessionTransitionReason::BreakAutoStarted)
@@ -203,11 +203,7 @@ fn a_long_break_resets_the_cycle() {
         },
         seconds_after(started_at, 2),
     ); // short break -> work 2
-    assert_eq!(
-        core.tick_payload(seconds_after(started_at, 2))
-            .current_cycle,
-        2
-    );
+    assert_eq!(core.snapshot(seconds_after(started_at, 2)).current_cycle, 2);
     apply(
         &mut core,
         Event::TimeObserved {
@@ -216,7 +212,7 @@ fn a_long_break_resets_the_cycle() {
         seconds_after(started_at, 3),
     ); // work 2 -> long break
     assert_eq!(
-        core.tick_payload(seconds_after(started_at, 3)).session_type,
+        core.snapshot(seconds_after(started_at, 3)).session_type,
         SessionType::LongBreak
     );
 
@@ -229,9 +225,5 @@ fn a_long_break_resets_the_cycle() {
     ); // long break -> work 1
 
     assert_eq!(core.status(), TimerStatus::Working);
-    assert_eq!(
-        core.tick_payload(seconds_after(started_at, 4))
-            .current_cycle,
-        1
-    );
+    assert_eq!(core.snapshot(seconds_after(started_at, 4)).current_cycle, 1);
 }

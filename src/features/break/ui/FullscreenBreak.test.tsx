@@ -23,7 +23,10 @@ import { useOperationStore } from "@/backend/operationStore";
 
 import { useSkipFlowStore } from "@/features/break/skipFlowStore";
 import { resetAppStateForTest } from "@/test/resetAppState";
-import { createSettingsForTest } from "@/test/settingsFixture";
+import {
+  createSettingsForTest,
+  settingsPayloadForTest,
+} from "@/test/settingsFixture";
 import type { Settings } from "@/backend/settings";
 import {
   LONG_TYPING_PHRASES,
@@ -231,16 +234,27 @@ describe("FullscreenBreak", () => {
     });
 
     it("does not rewrite the reported timer phase when displaying break controls", () => {
-      useBackendObservationStore.getState().observeTimerTick({
-        status: "idle",
-        remaining_seconds: 300,
-        session_duration_secs: 300,
-        session_type: "short_break",
-        current_cycle: 1,
-        completed_pomodoros: 0,
-        break_interaction_count: 0,
-        away_during_break: false,
-      });
+      useBackendObservationStore.getState().observeSnapshot(
+        createTimerSnapshotForTest(
+          {
+            revision: String(
+              BigInt(useBackendObservationStore.getState().revision ?? "0") +
+                1n,
+            ),
+            effects: useBackendObservationStore.getState().effects ?? undefined,
+          },
+          {
+            status: "idle",
+            remaining_seconds: 300,
+            session_duration_secs: 300,
+            session_type: "short_break",
+            current_cycle: 1,
+            completed_pomodoros: 0,
+            break_interaction_count: 0,
+            away_during_break: false,
+          },
+        ),
+      );
 
       render(<FullscreenBreak />);
 
@@ -250,7 +264,7 @@ describe("FullscreenBreak", () => {
       ).toBeInTheDocument();
     });
 
-    it("ends the break with an emergency stop once the whole skip flow is done", () => {
+    it("ends the break with an emergency stop once the whole skip flow is done", async () => {
       vi.useFakeTimers();
       render(<FullscreenBreak />);
 
@@ -276,7 +290,12 @@ describe("FullscreenBreak", () => {
       });
 
       expect(screen.getByText("Final Warning")).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "Yes, Skip Anyway" }));
+      await act(async () => {
+        fireEvent.click(
+          screen.getByRole("button", { name: "Yes, Skip Anyway" }),
+        );
+        await Promise.resolve();
+      });
 
       expect(mockInvoke).toHaveBeenCalledTimes(1);
       expect(mockInvoke).toHaveBeenCalledWith("emergency_stop", undefined);
@@ -341,17 +360,32 @@ describe("FullscreenBreak", () => {
       });
     }
 
-    function receiveBreakTick(awayDuringBreak: boolean): void {
-      useBackendObservationStore.getState().observeTimerTick({
-        status: "on_break",
-        remaining_seconds: 300,
-        session_duration_secs: 300,
-        session_type: "short_break",
-        current_cycle: 1,
-        completed_pomodoros: 1,
-        break_interaction_count: 0,
-        away_during_break: awayDuringBreak,
-      });
+    function receiveBreakSnapshot(awayDuringBreak: boolean): void {
+      useBackendObservationStore.getState().observeSnapshot(
+        createTimerSnapshotForTest(
+          {
+            revision: String(
+              BigInt(useBackendObservationStore.getState().revision ?? "0") +
+                1n,
+            ),
+            effects: useBackendObservationStore.getState().effects ?? undefined,
+          },
+          {
+            status: "on_break",
+            remaining_seconds: 300,
+            session_duration_secs: 300,
+            session_type: "short_break",
+            current_cycle: 1,
+            completed_pomodoros: 1,
+            break_interaction_count: 0,
+            away_during_break: awayDuringBreak,
+            settings: settingsPayloadForTest(
+              useBackendObservationStore.getState().settings ??
+                createSettingsForTest(),
+            ),
+          },
+        ),
+      );
     }
 
     it("offers the away action only when the next work would start automatically", () => {
@@ -386,7 +420,7 @@ describe("FullscreenBreak", () => {
 
     it("shows the away notice with a return action while away", async () => {
       enableAutomaticPostBreakPolicy();
-      receiveBreakTick(true);
+      receiveBreakSnapshot(true);
       const user = userEvent.setup();
       render(<FullscreenBreak />);
 
@@ -397,6 +431,22 @@ describe("FullscreenBreak", () => {
         screen.queryByRole("button", { name: "離席する" }),
       ).not.toBeInTheDocument();
 
+      mockInvoke.mockResolvedValueOnce({
+        status: "accepted",
+        value: createTimerSnapshotForTest(
+          { revision: "2" },
+          {
+            status: "on_break",
+            session_type: "short_break",
+            away_during_break: false,
+            settings: settingsPayloadForTest(
+              createSettingsForTest({
+                postBreakTransitionPolicy: "start_next_work_automatically",
+              }),
+            ),
+          },
+        ),
+      });
       await user.click(screen.getByRole("button", { name: "戻りました" }));
 
       expect(mockInvoke).toHaveBeenCalledWith("set_away_during_break", {
@@ -404,7 +454,7 @@ describe("FullscreenBreak", () => {
       });
 
       act(() => {
-        receiveBreakTick(false);
+        receiveBreakSnapshot(false);
       });
 
       expect(screen.queryByRole("status")).not.toBeInTheDocument();
@@ -415,7 +465,7 @@ describe("FullscreenBreak", () => {
 
     it("keeps the skip flow reachable while away", async () => {
       enableAutomaticPostBreakPolicy();
-      receiveBreakTick(true);
+      receiveBreakSnapshot(true);
 
       await renderFullscreenBreakWithSkipFlowOpen();
 

@@ -8,7 +8,7 @@ import {
   type TimerSnapshot,
 } from "./generated";
 import { describe, expect, expectTypeOf, it } from "vitest";
-import { createTimerEffectsForTest } from "@/test/timerEffectsFixture";
+import { createTimerSnapshotForTest } from "@/test/timerEffectsFixture";
 
 describe("IPC contract", () => {
   it("keeps omitted settings distinct from null and infers command responses", () => {
@@ -31,16 +31,21 @@ describe("IPC contract", () => {
     ["9007199254740992", "9007199254740993"],
     ["18446744073709551614", "18446744073709551615"],
   ])("orders revisions %s and %s without losing precision", (older, newer) => {
-    useBackendObservationStore.setState({ effects: null });
-    const previous = createTimerEffectsForTest({ revision: older });
-    const latest = createTimerEffectsForTest({
+    useBackendObservationStore.setState({ revision: null });
+    const previous = createTimerSnapshotForTest({ revision: older });
+    const latest = createTimerSnapshotForTest({
       revision: newer,
-      last_timer_save: "failed",
+      effects: {
+        last_timer_save: "failed",
+        break_lock: { target: "unlocked", last_attempt: null },
+      },
     });
-    const { observeEffects } = useBackendObservationStore.getState();
-    observeEffects(previous);
-    observeEffects(latest);
-    observeEffects(previous);
-    expect(useBackendObservationStore.getState().effects).toEqual(latest);
+    const { observeSnapshot } = useBackendObservationStore.getState();
+    observeSnapshot(previous);
+    observeSnapshot(latest);
+    observeSnapshot(previous);
+    expect(useBackendObservationStore.getState().effects).toEqual(
+      latest.effects,
+    );
   });
 });

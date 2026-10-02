@@ -38,12 +38,7 @@ async function recordOperation(request: Operation): Promise<OperationResult> {
   const id = useOperationStore.getState().begin(request);
   const result = await receiveCommandResponse(sendOperation(request));
   if (result.status === "accepted") {
-    const observations = useBackendObservationStore.getState();
-    observations.observeEffects(result.value.effects);
-    if (request.kind === "resolve_post_break_decision")
-      observations.closePostBreakDecision();
-    if (request.kind === "resolve_boot_auto_start_prompt")
-      observations.clearBootAutoStartOffer();
+    useBackendObservationStore.getState().observeSnapshot(result.value);
   }
   useOperationStore
     .getState()

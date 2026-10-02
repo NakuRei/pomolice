@@ -39,8 +39,14 @@ function createFullStatePayload(
 ): TimerSnapshot {
   const snapshot = createTimerSnapshotForTest();
   return {
+    revision: String(
+      BigInt(useBackendObservationStore.getState().revision ?? "0") + 1n,
+    ),
     timer: { ...snapshot.timer, ...overrides },
-    effects: effects ?? snapshot.effects,
+    effects:
+      effects ??
+      useBackendObservationStore.getState().effects ??
+      snapshot.effects,
   };
 }
 
@@ -101,20 +107,22 @@ describe("./observationStore", () => {
   });
 
   describe("Event Handlers", () => {
-    describe("observeTimerTick()", () => {
+    describe("observeSnapshot()", () => {
       it("should update state from tick payload", () => {
-        const { observeTimerTick } = useBackendObservationStore.getState();
+        const { observeSnapshot } = useBackendObservationStore.getState();
 
-        observeTimerTick({
-          status: "working",
-          remaining_seconds: 1234,
-          session_duration_secs: 1500,
-          session_type: "work",
-          current_cycle: 2,
-          completed_pomodoros: 1,
-          break_interaction_count: 0,
-          away_during_break: false,
-        });
+        observeSnapshot(
+          createFullStatePayload({
+            status: "working",
+            remaining_seconds: 1234,
+            session_duration_secs: 1500,
+            session_type: "work",
+            current_cycle: 2,
+            completed_pomodoros: 1,
+            break_interaction_count: 0,
+            away_during_break: false,
+          }),
+        );
 
         const state = useBackendObservationStore.getState();
         expect(state.status).toBe("working");
@@ -126,18 +134,20 @@ describe("./observationStore", () => {
       });
 
       it("should update break state", () => {
-        const { observeTimerTick } = useBackendObservationStore.getState();
+        const { observeSnapshot } = useBackendObservationStore.getState();
 
-        observeTimerTick({
-          status: "on_break",
-          remaining_seconds: 300,
-          session_duration_secs: 300,
-          session_type: "short_break",
-          current_cycle: 1,
-          completed_pomodoros: 1,
-          break_interaction_count: 3,
-          away_during_break: false,
-        });
+        observeSnapshot(
+          createFullStatePayload({
+            status: "on_break",
+            remaining_seconds: 300,
+            session_duration_secs: 300,
+            session_type: "short_break",
+            current_cycle: 1,
+            completed_pomodoros: 1,
+            break_interaction_count: 3,
+            away_during_break: false,
+          }),
+        );
 
         const state = useBackendObservationStore.getState();
         expect(state.status).toBe("on_break");
@@ -146,28 +156,31 @@ describe("./observationStore", () => {
       });
 
       it("preserves the reported timer phase independently of a confirmed lock", () => {
-        useBackendObservationStore.getState().observeEffects({
-          revision: "1",
-          last_timer_save: null,
-          break_lock: {
-            target: "locked",
-            last_attempt: { action: "enter", status: "succeeded" },
+        useBackendObservationStore.setState({
+          effects: {
+            last_timer_save: null,
+            break_lock: {
+              target: "locked",
+              last_attempt: { action: "enter", status: "succeeded" },
+            },
           },
         });
         useBackendObservationStore.setState({
           status: "working",
         });
 
-        useBackendObservationStore.getState().observeTimerTick({
-          status: "idle",
-          remaining_seconds: 0,
-          session_duration_secs: 1500,
-          session_type: "work",
-          current_cycle: 1,
-          completed_pomodoros: 1,
-          break_interaction_count: 0,
-          away_during_break: false,
-        });
+        useBackendObservationStore.getState().observeSnapshot(
+          createFullStatePayload({
+            status: "idle",
+            remaining_seconds: 0,
+            session_duration_secs: 1500,
+            session_type: "work",
+            current_cycle: 1,
+            completed_pomodoros: 1,
+            break_interaction_count: 0,
+            away_during_break: false,
+          }),
+        );
 
         const state = useBackendObservationStore.getState();
         expect(state.status).toBe("idle");
@@ -197,83 +210,79 @@ describe("./observationStore", () => {
       });
     });
 
-    describe("observeSessionCompleted()", () => {
+    describe("observeSnapshot()", () => {
       it("should show continue dialog when break completes", () => {
-        const { observeSessionCompleted } =
-          useBackendObservationStore.getState();
+        const { observeSnapshot } = useBackendObservationStore.getState();
 
-        observeSessionCompleted({
-          transition_reason: "break_waiting_decision",
-          completed_session_type: "short_break",
-          next_status: "idle",
-          next_session_type: "work",
-          requires_manual_continue_decision: true,
-        });
+        observeSnapshot(
+          createFullStatePayload({
+            status: "idle",
+            session_type: "work",
+            post_break_decision_pending: true,
+          }),
+        );
 
         const state = useBackendObservationStore.getState();
         expect(state.requiresManualContinueDecision).toBe(true);
       });
 
       it("should not show continue dialog when work completes", () => {
-        const { observeSessionCompleted } =
-          useBackendObservationStore.getState();
+        const { observeSnapshot } = useBackendObservationStore.getState();
 
-        observeSessionCompleted({
-          transition_reason: "work_to_break",
-          completed_session_type: "work",
-          next_status: "on_break",
-          next_session_type: "short_break",
-          requires_manual_continue_decision: false,
-        });
+        observeSnapshot(
+          createFullStatePayload({
+            status: "on_break",
+            session_type: "short_break",
+            post_break_decision_pending: false,
+          }),
+        );
 
         const state = useBackendObservationStore.getState();
         expect(state.requiresManualContinueDecision).toBe(false);
       });
 
       it("should keep continue dialog hidden when break auto-starts next work", () => {
-        const { observeSessionCompleted } =
-          useBackendObservationStore.getState();
+        const { observeSnapshot } = useBackendObservationStore.getState();
         useBackendObservationStore.setState({
           requiresManualContinueDecision: true,
         });
 
-        observeSessionCompleted({
-          transition_reason: "break_auto_started",
-          completed_session_type: "short_break",
-          next_status: "working",
-          next_session_type: "work",
-          requires_manual_continue_decision: false,
-        });
+        observeSnapshot(
+          createFullStatePayload({
+            status: "working",
+            session_type: "work",
+            post_break_decision_pending: false,
+          }),
+        );
 
         const state = useBackendObservationStore.getState();
         expect(state.requiresManualContinueDecision).toBe(false);
       });
 
       it("should keep continue dialog hidden when scheduled stop executes", () => {
-        const { observeSessionCompleted } =
-          useBackendObservationStore.getState();
+        const { observeSnapshot } = useBackendObservationStore.getState();
         useBackendObservationStore.setState({
           requiresManualContinueDecision: true,
         });
 
-        observeSessionCompleted({
-          transition_reason: "scheduled_stop_executed",
-          completed_session_type: "short_break",
-          next_status: "idle",
-          next_session_type: "work",
-          requires_manual_continue_decision: false,
-        });
+        observeSnapshot(
+          createFullStatePayload({
+            status: "idle",
+            session_type: "work",
+            post_break_decision_pending: false,
+          }),
+        );
 
         const state = useBackendObservationStore.getState();
         expect(state.requiresManualContinueDecision).toBe(false);
       });
     });
 
-    describe("observeFullState()", () => {
+    describe("observeSnapshot()", () => {
       it("should update all state from full payload", () => {
         const settings = createSettingsForTest({ workDurationSecs: 50 * 60 });
 
-        useBackendObservationStore.getState().observeFullState(
+        useBackendObservationStore.getState().observeSnapshot(
           createFullStatePayload({
             status: "working",
             remaining_seconds: 1200,
@@ -298,7 +307,7 @@ describe("./observationStore", () => {
       it("exposes that the settings file could not be used", () => {
         useBackendObservationStore
           .getState()
-          .observeFullState(
+          .observeSnapshot(
             createFullStatePayload({ settings_file_status: "unusable" }),
           );
 
@@ -308,11 +317,10 @@ describe("./observationStore", () => {
       });
 
       it("keeps timer phase separate from the lock in a full snapshot", () => {
-        useBackendObservationStore.getState().observeFullState(
+        useBackendObservationStore.getState().observeSnapshot(
           createFullStatePayload(
             {},
             {
-              revision: "1",
               last_timer_save: null,
               break_lock: {
                 target: "locked",
@@ -328,9 +336,9 @@ describe("./observationStore", () => {
       });
 
       it("should keep startup prompt state from backend full payload", () => {
-        const { observeFullState } = useBackendObservationStore.getState();
+        const { observeSnapshot } = useBackendObservationStore.getState();
 
-        observeFullState(
+        observeSnapshot(
           createFullStatePayload({
             current_cycle: 1,
             boot_auto_start_offer: createBootAutoStartOfferForTest(),

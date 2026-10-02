@@ -43,7 +43,7 @@ impl<Tz: chrono::TimeZone> TimerCore<Tz> {
         }
         let effects = if start_now {
             self.start_work(WorkStartOrigin::ManualInsideScheduleWindow, now)?;
-            vec![self.publish(now), Effect::Persist]
+            vec![Effect::Persist]
         } else {
             Vec::new()
         };

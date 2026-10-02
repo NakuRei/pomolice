@@ -2,21 +2,6 @@ use crate::settings::input::SettingsInput;
 use crate::types::{SessionTransitionReason, SessionType, TimerStatus};
 use serde::Serialize;
 
-/// Payload sent to frontend on each timer tick
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
-pub struct TimerTickPayload {
-    pub status: TimerStatus,
-    pub remaining_seconds: u64,
-    /// Total length of the current session; while idle, the length the next
-    /// work session will have.
-    pub session_duration_secs: u64,
-    pub session_type: SessionType,
-    pub current_cycle: u32,
-    pub completed_pomodoros: u32,
-    pub break_interaction_count: u32,
-    pub away_during_break: bool,
-}
-
 /// Payload sent to frontend when a session completes
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
 pub struct SessionCompletedPayload {
@@ -117,15 +102,4 @@ pub struct ActiveWindowSummaryPayload {
     pub start_time: String,
     pub end_time: String,
     pub crosses_midnight: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
-pub struct ActiveWindowChangedPayload {
-    pub active_window_summary: Option<ActiveWindowSummaryPayload>,
-}
-
-/// Payload sent to frontend when the settings in effect change
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
-pub struct SettingsChangedPayload {
-    pub settings: SettingsInput,
 }

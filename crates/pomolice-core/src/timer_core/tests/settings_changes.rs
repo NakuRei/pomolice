@@ -18,7 +18,7 @@ fn saving_durations_while_working_keeps_the_running_session_and_applies_to_the_n
         saved_at,
     );
 
-    let running = core.tick_payload(saved_at);
+    let running = core.snapshot(saved_at);
     assert_eq!(running.status, TimerStatus::Working);
     assert_eq!(running.remaining_seconds, default_work_secs() - 60);
     assert_eq!(running.session_duration_secs, default_work_secs());
@@ -26,7 +26,7 @@ fn saving_durations_while_working_keeps_the_running_session_and_applies_to_the_n
     apply(&mut core, Event::EmergencyStopRequested, saved_at);
     let next_start = seconds_after(saved_at, 1);
     apply(&mut core, Event::StartWorkRequested, next_start);
-    let next = core.tick_payload(next_start);
+    let next = core.snapshot(next_start);
     assert_eq!(next.remaining_seconds, 600);
     assert_eq!(next.session_duration_secs, 600);
 }
@@ -48,7 +48,7 @@ fn a_shorter_break_saved_during_a_break_does_not_shorten_the_penalty_reset() {
 
     apply(&mut core, Event::InputDetected, during_the_break);
 
-    let penalized = core.tick_payload(during_the_break);
+    let penalized = core.snapshot(during_the_break);
     assert_eq!(penalized.remaining_seconds, default_short_break_secs());
     assert_eq!(penalized.session_duration_secs, default_short_break_secs());
 }
@@ -77,7 +77,7 @@ fn lowering_the_interval_below_the_current_cycle_makes_the_next_break_long() {
     );
 
     assert_eq!(
-        core.tick_payload(seconds_after(saved_at, 5)).session_type,
+        core.snapshot(seconds_after(saved_at, 5)).session_type,
         SessionType::LongBreak
     );
 }

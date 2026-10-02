@@ -10,7 +10,6 @@ impl<Tz: chrono::TimeZone> TimerCore<Tz> {
     pub(super) fn set_break_attendance(
         &mut self,
         attendance: BreakAttendance,
-        now: DateTime<Utc>,
     ) -> Result<Vec<Effect>> {
         let Some(current_break) = self.phase.current_break_mut() else {
             log::warn!(
@@ -24,7 +23,7 @@ impl<Tz: chrono::TimeZone> TimerCore<Tz> {
             });
         };
         current_break.attendance = attendance;
-        Ok(vec![self.publish(now)])
+        Ok(Vec::new())
     }
 
     pub(super) fn apply_input_penalty(&mut self, now: DateTime<Utc>) -> Vec<Effect> {
@@ -42,7 +41,7 @@ impl<Tz: chrono::TimeZone> TimerCore<Tz> {
         current_break.last_penalty_at = Some(now);
         current_break.remaining_seconds = current_break.duration_secs.get();
 
-        vec![self.publish(now), Effect::Persist]
+        vec![Effect::Persist]
     }
 
     pub(super) fn escape_combo_pressed(&self) -> Vec<Effect> {

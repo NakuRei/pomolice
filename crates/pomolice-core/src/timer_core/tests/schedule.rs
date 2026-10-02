@@ -16,7 +16,7 @@ fn disabling_the_schedule_right_before_the_start_boundary_prevents_the_auto_star
     );
 
     assert_eq!(core.status(), TimerStatus::Idle);
-    assert!(!starts_work(&at_boundary));
+    assert!(!at_boundary.contains(&Effect::Persist));
 }
 
 #[test]
@@ -148,7 +148,10 @@ fn the_end_boundary_lets_the_running_session_finish_and_then_stops() {
         Some(SessionTransitionReason::ScheduledStopExecuted)
     );
     assert!(at_work_end.contains(&Effect::EmitAutoRunStopped));
-    assert_eq!(last_published(&at_work_end).status, TimerStatus::Idle);
+    assert_eq!(
+        core.snapshot(seconds_after(workday_end(), 4)).status,
+        TimerStatus::Idle
+    );
 }
 
 #[test]
@@ -165,14 +168,14 @@ fn enabling_the_schedule_after_the_start_boundary_does_not_replay_it() {
     );
 
     assert_eq!(core.status(), TimerStatus::Idle);
-    assert!(!starts_work(&next_tick));
+    assert!(!next_tick.contains(&Effect::Persist));
 }
 
 #[test]
 fn enabling_the_schedule_before_the_start_boundary_starts_work_at_the_boundary() {
     let mut core = idle_with_schedule(seconds_before(workday_start(), 1), workday());
 
-    let at_start = apply(
+    apply(
         &mut core,
         Event::TimeObserved {
             credited_break_seconds: 1,
@@ -180,7 +183,7 @@ fn enabling_the_schedule_before_the_start_boundary_starts_work_at_the_boundary()
         workday_start(),
     );
 
-    assert!(starts_work(&at_start));
+    assert_eq!(core.status(), TimerStatus::Working);
 }
 
 #[test]
@@ -216,7 +219,7 @@ fn a_clock_rollback_does_not_refire_a_boundary_already_crossed() {
     );
 
     assert_eq!(core.status(), TimerStatus::Idle);
-    assert!(!starts_work(&at_start_again));
+    assert!(!at_start_again.contains(&Effect::Persist));
 }
 
 #[test]
@@ -447,7 +450,7 @@ fn saving_settings_between_ticks_does_not_skip_a_boundary_crossed_in_that_gap() 
         },
         millis_after(workday_start(), 200),
     );
-    let next_tick = apply(
+    apply(
         &mut core,
         Event::TimeObserved {
             credited_break_seconds: 1,
@@ -455,5 +458,5 @@ fn saving_settings_between_ticks_does_not_skip_a_boundary_crossed_in_that_gap() 
         millis_after(workday_start(), 500),
     );
 
-    assert!(starts_work(&next_tick));
+    assert_eq!(core.status(), TimerStatus::Working);
 }

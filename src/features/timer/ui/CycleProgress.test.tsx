@@ -12,7 +12,7 @@ describe("CycleProgress", () => {
     resetAppStateForTest();
     useBackendObservationStore
       .getState()
-      .observeFullState(createTimerSnapshotForTest());
+      .observeSnapshot(createTimerSnapshotForTest());
   });
 
   it("shows nothing until the settings have arrived", () => {

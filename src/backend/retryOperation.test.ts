@@ -90,13 +90,8 @@ describe("rejected operation retry", () => {
       });
       await retryRejectedOperation(record);
       const state = useBackendObservationStore.getState();
-      if (request.kind === "resolve_boot_auto_start_prompt") {
-        expect(state.bootAutoStartOffer).toBeNull();
-        expect(state.requiresManualContinueDecision).toBe(true);
-      } else {
-        expect(state.requiresManualContinueDecision).toBe(false);
-        expect(state.bootAutoStartOffer).toEqual(offer);
-      }
+      expect(state.bootAutoStartOffer).toBeNull();
+      expect(state.requiresManualContinueDecision).toBe(false);
     },
   );
 });

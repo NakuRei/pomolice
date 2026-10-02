@@ -1,12 +1,8 @@
 use chrono::{DateTime, Utc};
 
 use super::{Effect, TimerCore};
-use crate::schedule_boundary::{
-    collect_crossed_end_boundaries, collect_crossed_start_boundaries, ActiveWindow,
-};
+use crate::schedule_boundary::{collect_crossed_end_boundaries, collect_crossed_start_boundaries};
 use crate::settings::UserSettings;
-use crate::timer_core::observation::ActiveWindowChangedPayload;
-use crate::timer_core::observation::SettingsChangedPayload;
 use crate::types::{BoundaryOccurrenceId, ScheduleStopState, TimerStatus, WorkStartOrigin};
 
 /// What the weekly schedule tracks between ticks. Whether it is enabled
@@ -18,7 +14,6 @@ pub(super) struct ScheduleState {
     /// Set when a running session was restored, so start boundaries crossed
     /// while the app was closed do not fire once that session ends.
     pub(super) starts_blocked_until_idle: bool,
-    pub(super) last_published_active_window: Option<ActiveWindow>,
 }
 
 impl<Tz: chrono::TimeZone> TimerCore<Tz> {
@@ -30,27 +25,14 @@ impl<Tz: chrono::TimeZone> TimerCore<Tz> {
         }
     }
 
-    pub(super) fn change_settings(
-        &mut self,
-        settings: UserSettings,
-        now: DateTime<Utc>,
-    ) -> Vec<Effect> {
+    pub(super) fn change_settings(&mut self, settings: UserSettings) -> Vec<Effect> {
         self.settings = settings;
 
         log::info!(
             "event_id=settings.update.applied timer_status={:?}",
             self.status(),
         );
-        let mut effects = vec![
-            Effect::EmitSettingsChanged(Box::new(SettingsChangedPayload {
-                settings: self.settings.clone().into(),
-            })),
-            self.publish(now),
-        ];
-        // The schedule decides which window is active, so a new schedule is
-        // announced right away rather than on the next tick.
-        effects.extend(self.publish_active_window_if_changed(now));
-        effects
+        Vec::new()
     }
 
     /// Whether the session in progress ends at this boundary because the
@@ -130,7 +112,6 @@ impl<Tz: chrono::TimeZone> TimerCore<Tz> {
                 start_boundary.as_str(),
             );
             if self.start_work_from_boundary(&start_boundary, now) {
-                effects.push(self.publish(now));
                 effects.push(Effect::Persist);
             }
         }
@@ -161,17 +142,5 @@ impl<Tz: chrono::TimeZone> TimerCore<Tz> {
             start_boundary.as_str(),
         );
         true
-    }
-
-    pub(super) fn publish_active_window_if_changed(&mut self, now: DateTime<Utc>) -> Vec<Effect> {
-        let active_window = self.active_window_at(now);
-        if active_window == self.schedule.last_published_active_window {
-            return Vec::new();
-        }
-        let payload = ActiveWindowChangedPayload {
-            active_window_summary: active_window.as_ref().map(ActiveWindow::to_summary_payload),
-        };
-        self.schedule.last_published_active_window = active_window;
-        vec![Effect::EmitActiveWindowChanged(payload)]
     }
 }

@@ -1,15 +1,12 @@
 use crate::external_adapters::emergency_shortcut::EmergencyShortcutStatus;
-use crate::timer_runtime::observation::SettingsChangedPayload;
-use crate::timer_runtime::observation::TimerEffectsState;
-use pomolice_core::timer_core::observation::ActiveWindowChangedPayload;
+use crate::timer_runtime::observation::TimerSnapshot;
 use pomolice_core::timer_core::observation::SessionCompletedPayload;
-use pomolice_core::timer_core::observation::TimerTickPayload;
 
 #[derive(Clone, serde::Serialize, specta::Type)]
 #[serde(transparent)]
-pub(crate) struct TimerTick(pub TimerTickPayload);
-impl tauri_specta::Event for TimerTick {
-    const NAME: &'static str = "timer_tick";
+pub(crate) struct TimerSnapshotChanged(pub TimerSnapshot);
+impl tauri_specta::Event for TimerSnapshotChanged {
+    const NAME: &'static str = "timer_snapshot_changed";
 }
 
 #[derive(Clone, serde::Serialize, specta::Type)]
@@ -17,27 +14,6 @@ impl tauri_specta::Event for TimerTick {
 pub(crate) struct SessionCompleted(pub SessionCompletedPayload);
 impl tauri_specta::Event for SessionCompleted {
     const NAME: &'static str = "session_completed";
-}
-
-#[derive(Clone, serde::Serialize, specta::Type)]
-#[serde(transparent)]
-pub(crate) struct ActiveWindowChanged(pub ActiveWindowChangedPayload);
-impl tauri_specta::Event for ActiveWindowChanged {
-    const NAME: &'static str = "active_window_changed";
-}
-
-#[derive(Clone, serde::Serialize, specta::Type)]
-#[serde(transparent)]
-pub(crate) struct SettingsChanged(pub SettingsChangedPayload);
-impl tauri_specta::Event for SettingsChanged {
-    const NAME: &'static str = "settings_changed";
-}
-
-#[derive(Clone, serde::Serialize, specta::Type)]
-#[serde(transparent)]
-pub(crate) struct TimerEffectsChanged(pub TimerEffectsState);
-impl tauri_specta::Event for TimerEffectsChanged {
-    const NAME: &'static str = "timer_effects_changed";
 }
 
 #[derive(Clone, serde::Serialize, specta::Type)]
@@ -57,12 +33,6 @@ impl tauri_specta::Event for AutoRunStopPending {
 pub(crate) struct AutoRunStopped;
 impl tauri_specta::Event for AutoRunStopped {
     const NAME: &'static str = "auto_run_stopped";
-}
-
-#[derive(Clone, serde::Serialize, specta::Type)]
-pub(crate) struct BootAutoStartOfferClosed;
-impl tauri_specta::Event for BootAutoStartOfferClosed {
-    const NAME: &'static str = "boot_auto_start_offer_closed";
 }
 
 #[derive(Clone, serde::Serialize, specta::Type)]

@@ -38,11 +38,9 @@ function renderBreakView(): HTMLDivElement {
 
 function observeSaveFailure(): void {
   act(() => {
-    useBackendObservationStore
-      .getState()
-      .observeEffects(
-        createTimerEffectsForTest({ revision: "1", last_timer_save: "failed" }),
-      );
+    useBackendObservationStore.setState({
+      effects: createTimerEffectsForTest({ last_timer_save: "failed" }),
+    });
   });
 }
 
@@ -50,8 +48,8 @@ function replyWithRecoveredSave(): void {
   vi.mocked(invoke).mockResolvedValue({
     status: "accepted",
     value: createTimerSnapshotForTest({
+      revision: "2",
       effects: createTimerEffectsForTest({
-        revision: "2",
         last_timer_save: "succeeded",
       }),
     }),
@@ -128,7 +126,6 @@ describe("effect recovery during the skip flow", () => {
       status: "accepted",
       value: createTimerSnapshotForTest({
         effects: createTimerEffectsForTest({
-          revision: "1",
           last_timer_save: "failed",
         }),
       }),

@@ -44,6 +44,10 @@ function getAutoStartConfirmDialog(): HTMLElement {
 describe("AutoStartConfirmDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useBackendObservationStore.setState(
+      useBackendObservationStore.getInitialState(),
+      true,
+    );
     useBackendObservationStore.setState({
       status: "idle",
       remainingSeconds: 25 * 60,
@@ -76,7 +80,7 @@ describe("AutoStartConfirmDialog", () => {
     render(<AutoStartConfirmDialog />);
 
     act(() => {
-      useBackendObservationStore.getState().clearBootAutoStartOffer();
+      useBackendObservationStore.setState({ bootAutoStartOffer: null });
     });
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -88,9 +92,7 @@ describe("AutoStartConfirmDialog", () => {
     render(<AutoStartConfirmDialog />);
 
     act(() => {
-      useBackendObservationStore
-        .getState()
-        .observeActiveWindowChanged({ active_window_summary: null });
+      useBackendObservationStore.setState({ activeWindowSummary: null });
     });
 
     expect(getAutoStartConfirmDialog()).toBeInTheDocument();

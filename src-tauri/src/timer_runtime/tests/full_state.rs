@@ -1,6 +1,165 @@
 use super::*;
 
 #[tokio::test]
+async fn restored_work_is_published_at_startup_without_waiting_for_a_tick() {
+    let clock = fixed_clock();
+    let (mut original, _) =
+        TimerCore::restore(None, UserSettings::default(), clock.now_utc(), Local);
+    original
+        .apply(Event::StartWorkRequested, clock.now_utc())
+        .expect("start");
+    let (restored, effects) = TimerCore::restore(
+        Some(original.checkpoint(clock.now_utc())),
+        UserSettings::default(),
+        clock.now_utc(),
+        Local,
+    );
+    let clock_trait: Arc<dyn Clock + Send + Sync> = Arc::<FixedClock>::clone(&clock);
+    let runtime = TimerRuntime::new(
+        restored,
+        clock_trait,
+        PersistenceManager::new(None),
+        PersistenceManager::new(None),
+        SettingsFileStatus::Ok,
+    );
+    let sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded);
+    runtime.run_initial_effects(&sink, effects).await;
+    let published = runtime.read_full_state().await;
+    assert_eq!(published.timer.state.status, TimerStatus::Working);
+    assert_eq!(
+        sink.emitted_payloads("timer_snapshot_changed"),
+        [serde_json::to_value(published).expect("snapshot serializes")]
+    );
+    assert_eq!(sink.emitted_names(), ["timer_snapshot_changed"]);
+}
+
+#[tokio::test]
+async fn reads_return_the_same_published_observation_until_a_dispatch() {
+    let clock = fixed_clock();
+    let runtime = idle_runtime(&create_temp_dir("snapshot-read"), &clock);
+    let sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded);
+    start_one_second_work(&runtime, &sink).await;
+    let before = runtime.read_full_state().await;
+    let notifications = sink.emitted_names();
+    clock.set_now_local(clock.now_local() + chrono::Duration::seconds(1));
+    assert_eq!(runtime.read_full_state().await, before);
+    assert_eq!(sink.emitted_names(), notifications);
+    let after = runtime
+        .dispatch(
+            &sink,
+            Event::TimeObserved {
+                credited_break_seconds: 1,
+            },
+        )
+        .await
+        .expect("tick succeeds");
+    assert!(after.revision.0 > before.revision.0);
+    assert_eq!(after.timer.state.status, TimerStatus::OnBreak);
+    assert_eq!(runtime.read_full_state().await, after);
+    assert_eq!(
+        sink.emitted_payloads("timer_snapshot_changed").last(),
+        Some(&serde_json::to_value(&after).expect("snapshot serializes"))
+    );
+}
+
+#[tokio::test]
+async fn settings_and_countdown_advance_the_snapshot_without_changed_effect_outcomes() {
+    let clock = fixed_clock();
+    let runtime = idle_runtime(&create_temp_dir("snapshot-order"), &clock);
+    let sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded);
+    let before = runtime.read_full_state().await;
+    let settings = runtime
+        .update_settings(&sink, one_second_work())
+        .await
+        .expect("settings saved");
+    assert!(settings.revision.0 > before.revision.0);
+    assert_eq!(settings.effects, before.effects);
+    let started = runtime
+        .dispatch(&sink, Event::StartWorkRequested)
+        .await
+        .expect("started");
+    clock.set_now_local(clock.now_local() + chrono::Duration::milliseconds(500));
+    let unchanged = runtime
+        .dispatch(
+            &sink,
+            Event::TimeObserved {
+                credited_break_seconds: 0,
+            },
+        )
+        .await
+        .expect("tick succeeds");
+    assert_eq!(unchanged, started);
+}
+
+#[tokio::test]
+async fn a_countdown_change_is_versioned_even_when_no_effect_result_changes() {
+    let clock = fixed_clock();
+    let runtime = idle_runtime(&create_temp_dir("countdown-revision"), &clock);
+    let sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded);
+    let started = runtime
+        .dispatch(&sink, Event::StartWorkRequested)
+        .await
+        .expect("started");
+    clock.set_now_local(clock.now_local() + chrono::Duration::seconds(1));
+    let tick = runtime
+        .dispatch(
+            &sink,
+            Event::TimeObserved {
+                credited_break_seconds: 1,
+            },
+        )
+        .await
+        .expect("tick");
+    assert_eq!(
+        tick.timer.state.remaining_seconds,
+        started.timer.state.remaining_seconds - 1
+    );
+    assert_eq!(tick.effects, started.effects);
+    assert!(tick.revision.0 > started.revision.0);
+    assert_eq!(sink.emitted_payloads("timer_snapshot_changed").len(), 2);
+}
+
+#[tokio::test]
+async fn a_transition_publishes_one_complete_snapshot_with_failed_effects_before_its_occurrence() {
+    let clock = fixed_clock();
+    let runtime = idle_runtime(&create_temp_dir("coherent-transition"), &clock);
+    let setup = RecordingSink::with_lock_outcome(EffectStatus::Succeeded);
+    start_one_second_work(&runtime, &setup).await;
+    let sink = RecordingSink::with_lock_outcome(EffectStatus::Failed);
+    clock.set_now_local(clock.now_local() + chrono::Duration::seconds(1));
+    let after = runtime
+        .dispatch(
+            &sink,
+            Event::TimeObserved {
+                credited_break_seconds: 1,
+            },
+        )
+        .await
+        .expect("transition accepted");
+    assert_eq!(
+        sink.emitted_names(),
+        ["timer_snapshot_changed", "session_completed"]
+    );
+    assert_eq!(
+        sink.emitted_payloads("timer_snapshot_changed"),
+        [serde_json::to_value(&after).expect("snapshot serializes")]
+    );
+    assert_eq!(after.timer.state.status, TimerStatus::OnBreak);
+    assert_eq!(
+        after
+            .effects
+            .break_lock
+            .last_attempt
+            .expect("attempt")
+            .status,
+        EffectStatus::Failed
+    );
+    let before_read = sink.emitted_names();
+    assert_eq!(runtime.read_full_state().await, after);
+    assert_eq!(sink.emitted_names(), before_read);
+}
+
+#[tokio::test]
 async fn an_unusable_settings_file_is_reported_until_a_successful_save() {
     let clock = fixed_clock();
     let fail = Arc::new(std::sync::atomic::AtomicBool::new(true));
@@ -48,9 +207,9 @@ async fn an_unusable_settings_file_is_reported_until_a_successful_save() {
         .expect("settings saved");
     assert_eq!(saved.timer.settings_file_status, SettingsFileStatus::Ok);
     assert_eq!(saved.timer.state.settings.work_duration_secs, 1);
-    let notifications = sink.emitted_payloads("settings_changed");
+    let notifications = sink.emitted_payloads("timer_snapshot_changed");
     assert_eq!(notifications.len(), 1);
-    assert_eq!(notifications[0]["settings_file_status"], "ok");
+    assert_eq!(notifications[0]["timer"]["settings_file_status"], "ok");
 }
 
 #[tokio::test]
@@ -91,7 +250,7 @@ async fn reading_full_state_does_not_create_a_boot_offer_or_write_files() {
     for _ in 0..2 {
         let state = runtime.read_full_state().await.timer.state;
         assert_eq!(state.status, TimerStatus::Idle);
-        assert!(state.active_window_summary.is_some());
+        assert!(state.active_window_summary.is_none());
         assert!(state.boot_auto_start_offer.is_none());
     }
     assert!(saved_state(&runtime).is_none());
@@ -180,7 +339,10 @@ async fn a_tick_closes_the_startup_offer_and_announces_it_once() {
         .boot_auto_start_offer
         .is_none());
     assert_eq!(
-        sink.emitted_payloads("boot_auto_start_offer_closed"),
+        sink.emitted_payloads("timer_snapshot_changed")
+            .iter()
+            .map(|snapshot| snapshot["timer"]["boot_auto_start_offer"].clone())
+            .collect::<Vec<_>>(),
         vec![serde_json::Value::Null]
     );
 }
@@ -198,7 +360,7 @@ async fn reading_full_state_does_not_complete_an_expired_work_session() {
     for _ in 0..2 {
         let state = runtime.read_full_state().await.timer.state;
         assert_eq!(state.status, TimerStatus::Working);
-        assert_eq!(state.remaining_seconds, 0);
+        assert_eq!(state.remaining_seconds, 1);
         assert_eq!(state.completed_pomodoros, 0);
     }
     let saved_after_reads = saved_state(&runtime).expect("saved work should remain");

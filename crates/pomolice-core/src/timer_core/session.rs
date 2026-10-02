@@ -20,7 +20,7 @@ enum FinishedSession {
 impl<Tz: chrono::TimeZone> TimerCore<Tz> {
     pub(super) fn start_work_requested(&mut self, now: DateTime<Utc>) -> Result<Vec<Effect>> {
         self.start_work(self.manual_start_origin(now), now)?;
-        Ok(vec![self.publish(now), Effect::Persist])
+        Ok(vec![Effect::Persist])
     }
 
     pub(super) fn start_work(&mut self, origin: WorkStartOrigin, now: DateTime<Utc>) -> Result<()> {
@@ -125,7 +125,7 @@ impl<Tz: chrono::TimeZone> TimerCore<Tz> {
             self.post_break_decision_pending(),
             self.schedule.stop_state,
         );
-        Ok(vec![self.publish(now), Effect::Persist])
+        Ok(vec![Effect::Persist])
     }
 
     fn enter_idle(&mut self, post_break_decision_pending: bool, now: DateTime<Utc>) {
@@ -142,7 +142,6 @@ impl<Tz: chrono::TimeZone> TimerCore<Tz> {
 
         vec![
             Effect::SetBreakLockTarget(BreakLockTarget::Unlocked),
-            self.publish(now),
             Effect::Persist,
         ]
     }
@@ -167,7 +166,7 @@ impl<Tz: chrono::TimeZone> TimerCore<Tz> {
             }
         };
 
-        let mut effects = vec![self.publish(now)];
+        let mut effects = Vec::new();
         match finished {
             Some(FinishedSession::Work) => effects.extend(self.complete_work_session(now)),
             Some(FinishedSession::Break) => effects.extend(self.complete_break_session(now)),
@@ -182,7 +181,6 @@ impl<Tz: chrono::TimeZone> TimerCore<Tz> {
             return vec![
                 Effect::EmitSessionCompleted(payload),
                 Effect::EmitAutoRunStopped,
-                self.publish(now),
                 Effect::Persist,
             ];
         }
@@ -203,7 +201,6 @@ impl<Tz: chrono::TimeZone> TimerCore<Tz> {
         vec![
             Effect::EmitSessionCompleted(payload),
             Effect::SetBreakLockTarget(BreakLockTarget::Locked),
-            self.publish(now),
             Effect::Persist,
         ]
     }
@@ -220,7 +217,6 @@ impl<Tz: chrono::TimeZone> TimerCore<Tz> {
                 Effect::EmitSessionCompleted(payload),
                 Effect::EmitAutoRunStopped,
                 Effect::SetBreakLockTarget(BreakLockTarget::Unlocked),
-                self.publish(now),
                 Effect::Persist,
             ];
         }
@@ -236,7 +232,6 @@ impl<Tz: chrono::TimeZone> TimerCore<Tz> {
         vec![
             Effect::EmitSessionCompleted(payload),
             Effect::SetBreakLockTarget(BreakLockTarget::Unlocked),
-            self.publish(now),
             Effect::Persist,
         ]
     }

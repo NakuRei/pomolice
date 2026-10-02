@@ -24,7 +24,6 @@ describe("timer effect recovery commands", () => {
 
   it("keeps acceptance separate from failed effects and retries only effects", async () => {
     const effects = createTimerEffectsForTest({
-      revision: "1",
       last_timer_save: "failed",
     });
     vi.mocked(invoke).mockResolvedValue({
@@ -44,16 +43,13 @@ describe("timer effect recovery commands", () => {
   });
 
   it("retries the failed effects without resending the accepted timer command", async () => {
-    useBackendObservationStore
-      .getState()
-      .observeEffects(
-        createTimerEffectsForTest({ revision: "1", last_timer_save: "failed" }),
-      );
+    useBackendObservationStore.setState({
+      effects: createTimerEffectsForTest({ last_timer_save: "failed" }),
+    });
     vi.mocked(invoke).mockResolvedValue({
       status: "accepted",
       value: createTimerSnapshotForTest({
         effects: createTimerEffectsForTest({
-          revision: "2",
           last_timer_save: "succeeded",
         }),
       }),

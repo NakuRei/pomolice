@@ -1,4 +1,8 @@
-import type { TimerEffectsState, TimerSnapshot } from "@/ipc/generated";
+import type {
+  TimerEffectsState,
+  TimerSnapshot,
+  FullStatePayload,
+} from "@/ipc/generated";
 import {
   settingsPayloadForTest,
   createSettingsForTest,
@@ -8,7 +12,6 @@ export function createTimerEffectsForTest(
   overrides: Partial<TimerEffectsState> = {},
 ): TimerEffectsState {
   return {
-    revision: "0",
     break_lock: { target: "unlocked", last_attempt: null },
     last_timer_save: null,
     ...overrides,
@@ -17,8 +20,10 @@ export function createTimerEffectsForTest(
 
 export function createTimerSnapshotForTest(
   overrides: Partial<TimerSnapshot> = {},
+  timer: Partial<FullStatePayload> = {},
 ): TimerSnapshot {
   return {
+    revision: "0",
     timer: {
       status: "idle",
       remaining_seconds: 1500,
@@ -33,8 +38,9 @@ export function createTimerSnapshotForTest(
       post_break_decision_pending: false,
       boot_auto_start_offer: null,
       active_window_summary: null,
+      ...timer,
     },
-    effects: createTimerEffectsForTest(),
     ...overrides,
+    effects: overrides.effects ?? createTimerEffectsForTest(),
   };
 }

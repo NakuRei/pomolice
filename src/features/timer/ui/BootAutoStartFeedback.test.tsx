@@ -58,7 +58,7 @@ describe("startup confirmation feedback", () => {
     });
   });
 
-  it.each(["close first", "failure first"])(
+  it.each(["event first", "reply first"])(
     "keeps a save failure visible when the backend sends %s",
     async (order) => {
       let resolveCommand: (result: TimerSnapshot) => void = () => {
@@ -74,26 +74,21 @@ describe("startup confirmation feedback", () => {
       const user = userEvent.setup();
       await user.click(screen.getByRole("button", { name: "開始する" }));
       const effects = createTimerEffectsForTest({
-        revision: "1",
         last_timer_save: "failed",
       });
+      const snapshot = createTimerSnapshotForTest(
+        { revision: "1", effects },
+        { status: "working" },
+      );
       act(() => {
-        useBackendObservationStore.setState({ status: "working" });
-        if (order === "close first")
-          useBackendObservationStore.getState().clearBootAutoStartOffer();
-        useBackendObservationStore.getState().observeEffects(effects);
+        if (order === "event first")
+          useBackendObservationStore.getState().observeSnapshot(snapshot);
       });
-      if (order === "failure first") {
-        const dialog = screen.getByRole("dialog", {
-          name: "作業を開始しますか？",
-        });
-        expect(within(dialog).getByRole("alert")).toHaveTextContent(
-          "タイマーの状態の保存に失敗しました",
-        );
-      }
       await act(async () => {
-        resolveCommand(createTimerSnapshotForTest({ effects }));
+        resolveCommand(snapshot);
         await pendingCommand;
+        if (order === "reply first")
+          useBackendObservationStore.getState().observeSnapshot(snapshot);
       });
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
       expect(screen.getByRole("alert")).toHaveTextContent(
@@ -104,8 +99,8 @@ describe("startup confirmation feedback", () => {
       vi.mocked(invoke).mockResolvedValueOnce({
         status: "accepted",
         value: createTimerSnapshotForTest({
+          revision: "2",
           effects: createTimerEffectsForTest({
-            revision: "2",
             last_timer_save: "succeeded",
           }),
         }),
@@ -173,7 +168,7 @@ describe("startup confirmation feedback", () => {
     expect(screen.getByRole("button", { name: "再試行" })).toBeInTheDocument();
 
     act(() => {
-      useBackendObservationStore.getState().clearBootAutoStartOffer();
+      useBackendObservationStore.setState({ bootAutoStartOffer: null });
     });
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

@@ -31,7 +31,6 @@ use crate::schedule_boundary::{is_now_inside_schedule_window, ActiveWindow};
 use crate::settings::UserSettings;
 use crate::timer_core::observation::BootAutoStartOfferPayload;
 use crate::timer_core::observation::TimerState;
-use crate::timer_core::observation::TimerTickPayload;
 use crate::types::{SessionDurationSecs, SessionType, TimerCheckpoint, TimerStatus};
 
 pub struct TimerCore<Tz: chrono::TimeZone> {
@@ -51,8 +50,7 @@ impl<Tz: chrono::TimeZone> TimerCore<Tz> {
     /// # Errors
     /// Rejects invalid transitions or rate-limited starts without changing state.
     pub fn apply(&mut self, event: Event, now: DateTime<Utc>) -> Result<Vec<Effect>> {
-        let had_boot_offer = self.boot_auto_start_offer.is_some();
-        let mut effects = match event {
+        let effects = match event {
             Event::TimeObserved {
                 credited_break_seconds,
             } => Ok(self.advance_time(now, credited_break_seconds)),
@@ -61,16 +59,14 @@ impl<Tz: chrono::TimeZone> TimerCore<Tz> {
             Event::PostBreakDecisionResolved { action } => {
                 self.resolve_post_break_decision(action, now)
             }
-            Event::BreakAttendanceSet { attendance } => self.set_break_attendance(attendance, now),
+            Event::BreakAttendanceSet { attendance } => self.set_break_attendance(attendance),
             Event::EmergencyStopRequested => Ok(self.emergency_stop(now)),
-            Event::SettingsChanged { settings } => Ok(self.change_settings(settings, now)),
+            Event::SettingsChanged { settings } => Ok(self.change_settings(settings)),
             Event::InputDetected => Ok(self.apply_input_penalty(now)),
             Event::EscapeComboPressed => Ok(self.escape_combo_pressed()),
         }?;
         self.clear_invalid_boot_auto_start_offer(now);
-        if had_boot_offer && self.boot_auto_start_offer.is_none() {
-            effects.push(Effect::EmitBootAutoStartOfferClosed);
-        }
+
         Ok(effects)
     }
 
@@ -86,7 +82,6 @@ impl<Tz: chrono::TimeZone> TimerCore<Tz> {
         let mut effects = self.count_down(now, credited_break_seconds);
         effects.extend(self.cross_end_boundaries(previous_at, now));
         effects.extend(self.cross_start_boundaries(previous_at, now));
-        effects.extend(self.publish_active_window_if_changed(now));
         effects
     }
 
@@ -120,25 +115,6 @@ impl<Tz: chrono::TimeZone> TimerCore<Tz> {
     }
 
     #[must_use]
-    pub(crate) fn tick_payload(&self, now: DateTime<Utc>) -> TimerTickPayload {
-        let current_break = self.current_break();
-        TimerTickPayload {
-            status: self.status(),
-            remaining_seconds: self.remaining_seconds_at(now),
-            session_duration_secs: self.session_duration_secs().get(),
-            session_type: self.session_type(),
-            current_cycle: self.current_cycle,
-            completed_pomodoros: self.completed_pomodoros,
-            break_interaction_count: current_break.map_or(0, |b| b.interaction_count),
-            away_during_break: current_break.is_some_and(|b| b.attendance.is_away()),
-        }
-    }
-
-    fn publish(&self, now: DateTime<Utc>) -> Effect {
-        Effect::PublishTimerState(self.tick_payload(now))
-    }
-
-    #[must_use]
     pub fn snapshot(&self, now: DateTime<Utc>) -> TimerState {
         let active_window_summary = self
             .active_window_at(now)
@@ -151,17 +127,17 @@ impl<Tz: chrono::TimeZone> TimerCore<Tz> {
                     anchor_local_date: window.anchor_local_date,
                     window: window.to_summary_payload(),
                 });
-        let tick = self.tick_payload(now);
+        let current_break = self.current_break();
 
         TimerState {
-            status: tick.status,
-            remaining_seconds: tick.remaining_seconds,
-            session_duration_secs: tick.session_duration_secs,
-            session_type: tick.session_type,
-            current_cycle: tick.current_cycle,
-            completed_pomodoros: tick.completed_pomodoros,
-            break_interaction_count: tick.break_interaction_count,
-            away_during_break: tick.away_during_break,
+            status: self.status(),
+            remaining_seconds: self.remaining_seconds_at(now),
+            session_duration_secs: self.session_duration_secs().get(),
+            session_type: self.session_type(),
+            current_cycle: self.current_cycle,
+            completed_pomodoros: self.completed_pomodoros,
+            break_interaction_count: current_break.map_or(0, |b| b.interaction_count),
+            away_during_break: current_break.is_some_and(|b| b.attendance.is_away()),
             post_break_decision_pending: self.post_break_decision_pending(),
             settings: self.settings.clone().into(),
             boot_auto_start_offer,

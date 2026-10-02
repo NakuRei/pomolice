@@ -18,15 +18,11 @@ pub(crate) fn builder<R: tauri::Runtime>() -> tauri_specta::Builder<R> {
     tauri_specta::Builder::new()
         .commands(registration::with_commands!(collect_runtime_commands))
         .events(tauri_specta::collect_events![
-            events::TimerTick,
+            events::TimerSnapshotChanged,
             events::SessionCompleted,
-            events::ActiveWindowChanged,
-            events::SettingsChanged,
-            events::TimerEffectsChanged,
             events::EmergencyShortcutChanged,
             events::AutoRunStopPending,
             events::AutoRunStopped,
-            events::BootAutoStartOfferClosed,
             events::InputMonitorFailed
         ])
 }

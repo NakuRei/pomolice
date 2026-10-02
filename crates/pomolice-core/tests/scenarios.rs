@@ -222,7 +222,7 @@ fn a_checkpoint_resumes_work_using_the_supplied_timezone_and_instant() {
         restart_at,
         Tokyo,
     );
-    assert!(startup_effects.iter().any(|effect| matches!(effect, Effect::PublishTimerState(state) if state.remaining_seconds == 18 * 60)));
+    assert!(startup_effects.is_empty());
     assert_eq!(restored.snapshot(restart_at).status, TimerStatus::Working);
     assert_eq!(restored.snapshot(restart_at).remaining_seconds, 18 * 60);
     assert!(restored

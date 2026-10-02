@@ -48,7 +48,7 @@ fn a_gap_without_ticks_does_not_consume_break_time_unlike_work_time() {
 #[test]
 fn idle_ticks_change_nothing() {
     let mut core = idle_without_schedule(monday(10, 0, 0));
-    let before = core.tick_payload(monday(10, 0, 1));
+    let before = core.snapshot(monday(10, 0, 1));
 
     let idle_tick = apply(
         &mut core,
@@ -58,6 +58,6 @@ fn idle_ticks_change_nothing() {
         monday(10, 0, 1),
     );
 
-    assert!(!starts_work(&idle_tick));
-    assert_eq!(core.tick_payload(monday(10, 0, 1)), before);
+    assert!(!idle_tick.contains(&Effect::Persist));
+    assert_eq!(core.snapshot(monday(10, 0, 1)), before);
 }

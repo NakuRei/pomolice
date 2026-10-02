@@ -87,7 +87,7 @@ fn main_can_retry_through_ipc_without_changing_a_healthy_timer() {
     let response = &response["value"];
     assert_eq!(*response, before);
     assert_eq!(response["timer"]["status"], "idle");
-    assert_eq!(response["effects"]["revision"], "0");
+    assert_eq!(response["revision"], "0");
     assert!(response["effects"]["last_timer_save"].is_null());
     assert!(response["effects"]["break_lock"]["last_attempt"].is_null());
 }
@@ -200,17 +200,20 @@ fn typed_events_deliver_the_wire_payload_without_a_wrapper_or_precision_loss() {
     use tauri::Listener;
     let (app, _, _) = app_with_window("main");
     let (sender, receiver) = std::sync::mpsc::channel();
-    app.listen("timer_effects_changed", move |event| {
+    app.listen("timer_snapshot_changed", move |event| {
         sender
             .send(event.payload().to_string())
             .expect("receiver should exist");
     });
-    super::events::TimerEffectsChanged(crate::timer_runtime::observation::TimerEffectsState {
-        revision: crate::timer_runtime::observation::EffectRevision(u64::MAX),
-        ..Default::default()
-    })
-    .emit(&app)
-    .expect("event should emit");
+    let mut snapshot = tauri::async_runtime::block_on(
+        tauri::Manager::state::<AppState>(&app)
+            .timer
+            .read_full_state(),
+    );
+    snapshot.revision = crate::timer_runtime::observation::SnapshotRevision(u64::MAX);
+    super::events::TimerSnapshotChanged(snapshot)
+        .emit(&app)
+        .expect("event should emit");
     let payload: Value = serde_json::from_str(
         &receiver
             .recv_timeout(std::time::Duration::from_secs(1))
@@ -218,8 +221,8 @@ fn typed_events_deliver_the_wire_payload_without_a_wrapper_or_precision_loss() {
     )
     .unwrap();
     assert_eq!(payload["revision"], "18446744073709551615");
-    assert_eq!(payload["break_lock"]["target"], "unlocked");
-    assert!(payload["last_timer_save"].is_null());
+    assert_eq!(payload["effects"]["break_lock"]["target"], "unlocked");
+    assert!(payload["effects"]["last_timer_save"].is_null());
 }
 
 #[test]

@@ -66,7 +66,6 @@ describe("timer command execution", () => {
     "keeps $name accepted when an effect failed",
     async ({ name, run }) => {
       const effects = createTimerEffectsForTest({
-        revision: "1",
         last_timer_save: "failed",
       });
       vi.mocked(invoke).mockResolvedValue({
@@ -129,7 +128,7 @@ describe("timer command execution", () => {
     useOperationStore.getState().dismiss("start_work", record.id);
     useBackendObservationStore
       .getState()
-      .observeFullState(createTimerSnapshotForTest());
+      .observeSnapshot(createTimerSnapshotForTest());
     expect(useOperationStore.getState().operations.start_work).toMatchObject({
       outcome: { status: "unavailable" },
       dismissed: true,

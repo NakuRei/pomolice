@@ -25,21 +25,19 @@ describe("timer effect failures", () => {
   });
 
   it("shows save and unlock failures together and clears them only after recovery", async () => {
-    useBackendObservationStore.getState().observeEffects(
-      createTimerEffectsForTest({
-        revision: "1",
+    useBackendObservationStore.setState({
+      effects: createTimerEffectsForTest({
         break_lock: {
           target: "unlocked",
           last_attempt: { action: "release", status: "failed" },
         },
         last_timer_save: "failed",
       }),
-    );
+    });
     vi.mocked(invoke).mockResolvedValue({
       status: "accepted",
       value: createTimerSnapshotForTest({
         effects: createTimerEffectsForTest({
-          revision: "2",
           break_lock: {
             target: "unlocked",
             last_attempt: { action: "release", status: "succeeded" },
@@ -67,12 +65,11 @@ describe("timer effect failures", () => {
   it("keeps a failure visible until a successful effect is observed", () => {
     vi.useFakeTimers();
     try {
-      useBackendObservationStore.getState().observeEffects(
-        createTimerEffectsForTest({
-          revision: "1",
+      useBackendObservationStore.setState({
+        effects: createTimerEffectsForTest({
           last_timer_save: "failed",
         }),
-      );
+      });
       render(<TimerEffectsNotice />);
       act(() => {
         vi.advanceTimersByTime(60_000);
@@ -87,10 +84,9 @@ describe("timer effect failures", () => {
 
   it("disables duplicate recovery while pending and keeps failures after acceptance", async () => {
     const effects = createTimerEffectsForTest({
-      revision: "1",
       last_timer_save: "failed",
     });
-    useBackendObservationStore.getState().observeEffects(effects);
+    useBackendObservationStore.setState({ effects: effects });
     let finishRetry: (response: unknown) => void = () => {
       throw new Error("Expected a pending recovery request");
     };
@@ -129,7 +125,6 @@ describe("timer effect failures", () => {
         status: "accepted",
         value: createTimerSnapshotForTest({
           effects: createTimerEffectsForTest({
-            revision: "1",
             last_timer_save: "failed",
           }),
         }),

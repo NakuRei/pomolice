@@ -49,20 +49,22 @@ describe("settings commands", () => {
       });
     });
 
-    it("leaves every piece of state to the events, so a late reply cannot roll it back", async () => {
+    it("ignores every field of a reply older than the observed snapshot", async () => {
       const settings = createSettingsForTest();
       useBackendObservationStore.setState({
+        revision: "2",
         settings,
         status: "on_break",
         sessionType: "short_break",
         remainingSeconds: 299,
       });
-      useBackendObservationStore.getState().observeEffects({
-        revision: "2",
-        last_timer_save: null,
-        break_lock: {
-          target: "locked",
-          last_attempt: { action: "enter", status: "succeeded" },
+      useBackendObservationStore.setState({
+        effects: {
+          last_timer_save: null,
+          break_lock: {
+            target: "locked",
+            last_attempt: { action: "enter", status: "succeeded" },
+          },
         },
       });
       const stateBeforeTheReply = useBackendObservationStore.getState();

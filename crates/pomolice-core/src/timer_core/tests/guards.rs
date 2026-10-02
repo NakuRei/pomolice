@@ -33,7 +33,7 @@ fn a_scheduled_start_is_not_rate_limited() {
         stopped_just_before_the_boundary,
     );
 
-    let at_start = apply(
+    apply(
         &mut core,
         Event::TimeObserved {
             credited_break_seconds: 1,
@@ -41,7 +41,7 @@ fn a_scheduled_start_is_not_rate_limited() {
         workday_start(),
     );
 
-    assert!(starts_work(&at_start));
+    assert_eq!(core.status(), TimerStatus::Working);
 }
 
 #[test]
@@ -73,7 +73,7 @@ fn an_input_penalty_resets_the_break_and_is_reported() {
         default_short_break_secs() - SECONDS_PER_TICK
     );
 
-    let penalized = apply(
+    apply(
         &mut core,
         Event::InputDetected,
         seconds_after(started_at, 2),
@@ -83,7 +83,11 @@ fn an_input_penalty_resets_the_break_and_is_reported() {
         remaining(&core, seconds_after(started_at, 2)),
         default_short_break_secs()
     );
-    assert_eq!(last_published(&penalized).break_interaction_count, 1);
+    assert_eq!(
+        core.snapshot(seconds_after(started_at, 2))
+            .break_interaction_count,
+        1
+    );
 }
 
 #[test]
@@ -96,11 +100,11 @@ fn a_burst_of_input_counts_as_one_penalty() {
     apply(&mut core, Event::InputDetected, burst_at);
     apply(&mut core, Event::InputDetected, burst_at);
     apply(&mut core, Event::InputDetected, millis_after(burst_at, 1));
-    assert_eq!(core.tick_payload(burst_at).break_interaction_count, 1);
+    assert_eq!(core.snapshot(burst_at).break_interaction_count, 1);
 
     apply(&mut core, Event::InputDetected, seconds_after(burst_at, 1));
     assert_eq!(
-        core.tick_payload(seconds_after(burst_at, 1))
+        core.snapshot(seconds_after(burst_at, 1))
             .break_interaction_count,
         2
     );
@@ -110,14 +114,14 @@ fn a_burst_of_input_counts_as_one_penalty() {
 fn input_outside_a_break_changes_nothing() {
     let mut core = idle_without_schedule(monday(10, 0, 0));
 
-    let while_idle = core.tick_payload(monday(10, 0, 1));
+    let while_idle = core.snapshot(monday(10, 0, 1));
     apply(&mut core, Event::InputDetected, monday(10, 0, 1));
-    assert_eq!(core.tick_payload(monday(10, 0, 1)), while_idle);
+    assert_eq!(core.snapshot(monday(10, 0, 1)), while_idle);
 
     start_work(&mut core, monday(10, 0, 1), Durations::default());
-    let while_working = core.tick_payload(monday(10, 0, 2));
+    let while_working = core.snapshot(monday(10, 0, 2));
     apply(&mut core, Event::InputDetected, monday(10, 0, 2));
-    assert_eq!(core.tick_payload(monday(10, 0, 2)), while_working);
+    assert_eq!(core.snapshot(monday(10, 0, 2)), while_working);
 }
 
 #[test]
@@ -171,7 +175,7 @@ fn a_new_start_is_rejected_while_working() {
 fn duration_changes_while_idle_update_the_work_preview() {
     let mut core = idle_without_schedule(monday(10, 0, 0));
 
-    let changed = change_durations(
+    change_durations(
         &mut core,
         Durations {
             work: 600,
@@ -180,6 +184,6 @@ fn duration_changes_while_idle_update_the_work_preview() {
         monday(10, 0, 0),
     );
 
-    assert_eq!(last_published(&changed).remaining_seconds, 600);
-    assert_eq!(last_published(&changed).session_duration_secs, 600);
+    assert_eq!(core.snapshot(monday(10, 0, 0)).remaining_seconds, 600);
+    assert_eq!(core.snapshot(monday(10, 0, 0)).session_duration_secs, 600);
 }

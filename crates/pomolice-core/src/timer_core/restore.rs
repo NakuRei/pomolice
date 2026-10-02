@@ -75,16 +75,14 @@ impl<Tz: chrono::TimeZone> TimerCore<Tz> {
                 stop_state: schedule_stop_state,
                 last_boundary_check_at,
                 starts_blocked_until_idle: is_running,
-                last_published_active_window: None,
             },
         };
         let effects = match core.phase {
             TimerPhase::Working { ends_at, .. } if ends_at <= now => {
                 core.complete_work_session(now)
             }
-            TimerPhase::Working { .. } => vec![core.publish(now)],
             TimerPhase::OnBreak(_) => vec![Effect::SetBreakLockTarget(BreakLockTarget::Locked)],
-            TimerPhase::Idle { .. } => Vec::new(),
+            TimerPhase::Working { .. } | TimerPhase::Idle { .. } => Vec::new(),
         };
         (core, effects)
     }
@@ -108,7 +106,6 @@ impl<Tz: chrono::TimeZone> TimerCore<Tz> {
                 stop_state: ScheduleStopState::NotControlledBySchedule,
                 last_boundary_check_at: now,
                 starts_blocked_until_idle: false,
-                last_published_active_window: None,
             },
         }
     }

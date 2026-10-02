@@ -150,7 +150,6 @@ describe("timer command failures", () => {
 
   it("keeps a failed save separate from an accepted startup answer", async () => {
     const effects = createTimerEffectsForTest({
-      revision: "1",
       last_timer_save: "failed",
     });
     vi.mocked(invoke).mockResolvedValueOnce({
@@ -173,7 +172,7 @@ describe("timer command failures", () => {
       error: { code: "rate_limited" },
     });
     const pending = resolveBootAutoStartPrompt(true);
-    useBackendObservationStore.getState().clearBootAutoStartOffer();
+    useBackendObservationStore.setState({ bootAutoStartOffer: null });
     await pending;
     const record =
       useOperationStore.getState().operations.resolve_boot_auto_start_prompt;
@@ -194,7 +193,6 @@ describe("timer command failures", () => {
       });
       const snapshot = createTimerSnapshotForTest({
         effects: createTimerEffectsForTest({
-          revision: "1",
           last_timer_save: "failed",
         }),
       });

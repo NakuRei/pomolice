@@ -17,7 +17,10 @@ fn emergency_stop_from_a_fullscreen_break_releases_the_lock_and_reports_idle() {
     assert_eq!(core.status(), TimerStatus::Idle);
     assert!(stopped.contains(&Effect::SetBreakLockTarget(BreakLockTarget::Unlocked)));
 
-    assert_eq!(last_published(&stopped).status, TimerStatus::Idle);
+    assert_eq!(
+        core.snapshot(seconds_after(started_at, 2)).status,
+        TimerStatus::Idle
+    );
 }
 
 #[test]
