@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { deriveCycleSegments, type CycleSegmentsInput } from "./cycleSegments";
+import {
+  deriveCycleSegments,
+  type CycleSegment,
+  type CycleSegmentsInput,
+} from "./cycleSegments";
 
 const BASE_INPUT: CycleSegmentsInput = {
   currentCycle: 0,
@@ -9,13 +13,16 @@ const BASE_INPUT: CycleSegmentsInput = {
   longBreakInterval: 4,
 };
 
-function segmentByKey(
+function sessionSegment(
   input: CycleSegmentsInput,
-  key: string,
-): ReturnType<typeof deriveCycleSegments>[number] {
-  const segment = deriveCycleSegments(input).find((each) => each.key === key);
+  kind: CycleSegment["kind"],
+  cycleNumber: number,
+): CycleSegment {
+  const segment = deriveCycleSegments(input).find(
+    (each) => each.kind === kind && each.cycleNumber === cycleNumber,
+  );
   if (!segment) {
-    throw new Error(`segment ${key} not found`);
+    throw new Error(`Missing ${kind} session in cycle ${String(cycleNumber)}`);
   }
 
   return segment;
@@ -25,25 +32,30 @@ describe("deriveCycleSegments", () => {
   it("pairs every cycle with a break and ends on the long break", () => {
     const segments = deriveCycleSegments(BASE_INPUT);
 
-    expect(segments.map((segment) => segment.key)).toEqual([
-      "work-1",
-      "break-1",
-      "work-2",
-      "break-2",
-      "work-3",
-      "break-3",
-      "work-4",
-      "break-4",
+    expect(
+      segments.map(({ kind, cycleNumber }) => ({ kind, cycleNumber })),
+    ).toEqual([
+      { kind: "work", cycleNumber: 1 },
+      { kind: "break", cycleNumber: 1 },
+      { kind: "work", cycleNumber: 2 },
+      { kind: "break", cycleNumber: 2 },
+      { kind: "work", cycleNumber: 3 },
+      { kind: "break", cycleNumber: 3 },
+      { kind: "work", cycleNumber: 4 },
+      { kind: "longBreak", cycleNumber: 4 },
     ]);
-    expect(segmentByKey(BASE_INPUT, "break-4").kind).toBe("longBreak");
   });
 
   it("gives the long break more room than a short break, and work the most", () => {
     const segments = deriveCycleSegments(BASE_INPUT);
 
-    const workFlexGrow = segmentByKey(BASE_INPUT, "work-1").flexGrow;
-    const shortBreakFlexGrow = segmentByKey(BASE_INPUT, "break-1").flexGrow;
-    const longBreakFlexGrow = segmentByKey(BASE_INPUT, "break-4").flexGrow;
+    const workFlexGrow = sessionSegment(BASE_INPUT, "work", 1).flexGrow;
+    const shortBreakFlexGrow = sessionSegment(BASE_INPUT, "break", 1).flexGrow;
+    const longBreakFlexGrow = sessionSegment(
+      BASE_INPUT,
+      "longBreak",
+      4,
+    ).flexGrow;
 
     expect(shortBreakFlexGrow).toBeLessThan(longBreakFlexGrow);
     expect(longBreakFlexGrow).toBeLessThan(workFlexGrow);
@@ -68,12 +80,12 @@ describe("deriveCycleSegments", () => {
       remainingSeconds: 1125,
     };
 
-    const workSegment = segmentByKey(input, "work-1");
+    const workSegment = sessionSegment(input, "work", 1);
     expect(workSegment.state).toBe("active");
     expect(workSegment.fillRatio).toBeCloseTo(0.25);
 
-    expect(segmentByKey(input, "break-1").state).toBe("upcoming");
-    expect(segmentByKey(input, "work-2").state).toBe("upcoming");
+    expect(sessionSegment(input, "break", 1).state).toBe("upcoming");
+    expect(sessionSegment(input, "work", 2).state).toBe("upcoming");
   });
 
   it("completes the work segment once its break has started", () => {
@@ -85,11 +97,11 @@ describe("deriveCycleSegments", () => {
       sessionDurationSeconds: 300,
     };
 
-    const workSegment = segmentByKey(input, "work-1");
+    const workSegment = sessionSegment(input, "work", 1);
     expect(workSegment.state).toBe("completed");
     expect(workSegment.fillRatio).toBe(1);
 
-    const breakSegment = segmentByKey(input, "break-1");
+    const breakSegment = sessionSegment(input, "break", 1);
     expect(breakSegment.state).toBe("active");
     expect(breakSegment.fillRatio).toBeCloseTo(0.5);
   });
@@ -102,14 +114,13 @@ describe("deriveCycleSegments", () => {
       remainingSeconds: 1500,
     };
 
-    for (const key of ["work-1", "break-1", "work-2", "break-2"]) {
-      const segment = segmentByKey(input, key);
+    for (const segment of deriveCycleSegments(input).slice(0, 4)) {
       expect(segment.state).toBe("completed");
       expect(segment.fillRatio).toBe(1);
     }
 
-    expect(segmentByKey(input, "work-3").state).toBe("active");
-    expect(segmentByKey(input, "break-3").state).toBe("upcoming");
+    expect(sessionSegment(input, "work", 3).state).toBe("active");
+    expect(sessionSegment(input, "break", 3).state).toBe("upcoming");
   });
 
   it("measures the running session against the duration it started with", () => {
@@ -121,7 +132,7 @@ describe("deriveCycleSegments", () => {
       sessionDurationSeconds: 1200,
     };
 
-    const longBreakSegment = segmentByKey(input, "break-4");
+    const longBreakSegment = sessionSegment(input, "longBreak", 4);
     expect(longBreakSegment.state).toBe("active");
     expect(longBreakSegment.fillRatio).toBeCloseTo(0.75);
   });
@@ -135,61 +146,65 @@ describe("deriveCycleSegments", () => {
       longBreakInterval: 3,
     };
 
-    for (const key of ["work-1", "break-1", "work-2", "break-2"]) {
-      expect(segmentByKey(input, key).state).toBe("completed");
+    for (const segment of deriveCycleSegments(input).slice(0, 4)) {
+      expect(segment.state).toBe("completed");
     }
-    const lastWork = segmentByKey(input, "work-3");
+    const lastWork = sessionSegment(input, "work", 3);
     expect(lastWork.state).toBe("active");
     expect(lastWork.fillRatio).toBeCloseTo(0.5);
-    expect(segmentByKey(input, "break-3")).toMatchObject({
-      kind: "longBreak",
-      state: "upcoming",
-    });
+    expect(sessionSegment(input, "longBreak", 3).state).toBe("upcoming");
   });
 
   it("follows the configured cycle count", () => {
     const input: CycleSegmentsInput = { ...BASE_INPUT, longBreakInterval: 2 };
 
-    expect(deriveCycleSegments(input).map((segment) => segment.key)).toEqual([
-      "work-1",
-      "break-1",
-      "work-2",
-      "break-2",
+    expect(
+      deriveCycleSegments(input).map(({ kind, cycleNumber }) => ({
+        kind,
+        cycleNumber,
+      })),
+    ).toEqual([
+      { kind: "work", cycleNumber: 1 },
+      { kind: "break", cycleNumber: 1 },
+      { kind: "work", cycleNumber: 2 },
+      { kind: "longBreak", cycleNumber: 2 },
     ]);
-    expect(segmentByKey(input, "break-2").kind).toBe("longBreak");
   });
 
   it("keeps the fill within bounds for out-of-range remaining time", () => {
-    const overrun = segmentByKey(
+    const overrun = sessionSegment(
       {
         ...BASE_INPUT,
         currentCycle: 1,
         remainingSeconds: -60,
       },
-      "work-1",
+      "work",
+      1,
     );
     expect(overrun.fillRatio).toBe(1);
 
-    const beforeStart = segmentByKey(
+    const beforeStart = sessionSegment(
       {
         ...BASE_INPUT,
         currentCycle: 1,
         remainingSeconds: 9999,
       },
-      "work-1",
+      "work",
+      1,
     );
     expect(beforeStart.fillRatio).toBe(0);
   });
 
   it("stays empty when the session duration is zero", () => {
-    const segment = segmentByKey(
+    const segment = sessionSegment(
       {
         ...BASE_INPUT,
         currentCycle: 1,
         remainingSeconds: 0,
         sessionDurationSeconds: 0,
       },
-      "work-1",
+      "work",
+      1,
     );
 
     expect(segment.fillRatio).toBe(0);

@@ -1,168 +1,73 @@
 import { useBackendObservationStore } from "@/backend/observationStore";
 import { createTimerSnapshotForTest } from "@/test/timerEffectsFixture";
+import { resetAppStateForTest } from "@/test/resetAppState";
+import { invoke } from "@tauri-apps/api/core";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TimerControls } from "./TimerControls";
 
-type InvokeCommand = (
-  command: string,
-  args?: Record<string, unknown>,
-) => Promise<unknown>;
-
-const mockInvoke = vi.fn<InvokeCommand>();
-
-// Mock Tauri invoke
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: (command: string, args?: Record<string, unknown>): Promise<unknown> =>
-    mockInvoke(command, args),
-}));
-
-function getInvokeCall(callIndex: number): {
-  command: string;
-  payload: Record<string, unknown> | undefined;
-} {
-  const invokeCall: (typeof mockInvoke.mock.calls)[number] | undefined =
-    mockInvoke.mock.calls[callIndex];
-  expect(invokeCall).toBeDefined();
-  if (invokeCall === undefined) {
-    throw new Error(`Expected invoke call at index ${String(callIndex)}`);
-  }
-
-  const [command, payload] = invokeCall;
-  return { command, payload };
-}
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
 describe("TimerControls", () => {
   beforeEach(() => {
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue({
+    resetAppStateForTest();
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockResolvedValue({
       status: "accepted",
-      value: createTimerSnapshotForTest(),
+      value: createTimerSnapshotForTest({}, { status: "working" }),
     });
-    // Reset store to initial state before each test
-    useBackendObservationStore.setState({
-      status: "idle",
-      remainingSeconds: 25 * 60,
-      sessionType: "work",
-      currentCycle: 0,
-      completedPomodoros: 0,
-      breakInteractionCount: 0,
-      requiresManualContinueDecision: false,
-    });
+    useBackendObservationStore.setState({ status: "idle" });
   });
 
-  describe("Initial State (IDLE)", () => {
-    it("should render a named start button when timer is idle", () => {
-      render(<TimerControls />);
-      const startButton = screen.getByRole("button", {
-        name: "タイマーを開始",
-      });
-      expect(startButton).toHaveTextContent("開始");
-      expect(startButton).toBeInTheDocument();
-    });
+  it("starts work using backend settings and replaces start with emergency stop", async () => {
+    const user = userEvent.setup();
+    render(<TimerControls />);
 
-    it("should not render stop button when timer is idle", () => {
-      render(<TimerControls />);
-      const stopButton = screen.queryByRole("button", { name: "緊急停止" });
-      expect(stopButton).not.toBeInTheDocument();
-    });
+    expect(
+      screen.queryByRole("button", { name: "緊急停止" }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "タイマーを開始" }));
 
-    it("should call startWork when start button is clicked", async () => {
-      const user = userEvent.setup();
-      render(<TimerControls />);
-
-      const startButton = screen.getByRole("button", {
-        name: "タイマーを開始",
-      });
-      await user.click(startButton);
-
-      const { command, payload } = getInvokeCall(0);
-      expect(command).toBe("start_work");
-      // The backend starts the session with the settings it owns.
-      expect(payload).toBeUndefined();
-    });
+    expect(invoke).toHaveBeenCalledExactlyOnceWith("start_work");
+    expect(
+      await screen.findByRole("button", { name: "緊急停止" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "タイマーを開始" }),
+    ).not.toBeInTheDocument();
   });
 
-  describe("Working State", () => {
-    beforeEach(() => {
-      useBackendObservationStore.setState({ status: "working" });
-    });
+  it("opens the emergency stop confirmation while working", async () => {
+    useBackendObservationStore.setState({ status: "working" });
+    const user = userEvent.setup();
+    render(<TimerControls />);
 
-    it("should not render start button when timer is working", () => {
-      render(<TimerControls />);
-      const startButton = screen.queryByRole("button", {
-        name: "タイマーを開始",
-      });
-      expect(startButton).not.toBeInTheDocument();
-    });
+    await user.click(screen.getByRole("button", { name: "緊急停止" }));
 
-    it("should render emergency stop button when timer is working", () => {
-      render(<TimerControls />);
-      const emergencyStopButton = screen.getByRole("button", {
-        name: "緊急停止",
-      });
-      expect(emergencyStopButton).toHaveTextContent("緊急停止");
-      expect(emergencyStopButton).toBeInTheDocument();
-    });
-
-    it("should open emergency stop dialog when button is clicked", async () => {
-      const user = userEvent.setup();
-      render(<TimerControls />);
-
-      await user.click(screen.getByRole("button", { name: "緊急停止" }));
-
-      expect(
-        screen.getByRole("dialog", { name: "緊急停止しますか？" }),
-      ).toBeInTheDocument();
-    });
+    expect(
+      screen.getByRole("dialog", { name: "緊急停止しますか？" }),
+    ).toBeInTheDocument();
   });
 
-  describe("State Transitions", () => {
-    it("should hide start button after starting (backend updates state)", () => {
-      const { rerender } = render(<TimerControls />);
+  it("offers start again when the backend reports idle", () => {
+    useBackendObservationStore.setState({ status: "working" });
+    render(<TimerControls />);
+    expect(
+      screen.queryByRole("button", { name: "タイマーを開始" }),
+    ).not.toBeInTheDocument();
 
-      // Initially shows start button
-      expect(
-        screen.getByRole("button", { name: "タイマーを開始" }),
-      ).toBeInTheDocument();
-
-      // Simulate backend response updating state
-      act(() => {
-        useBackendObservationStore.setState({ status: "working" });
-      });
-
-      // Rerender to reflect state change
-      rerender(<TimerControls />);
-
-      // Start button is hidden (no buttons shown during working)
-      expect(
-        screen.queryByRole("button", { name: "タイマーを開始" }),
-      ).not.toBeInTheDocument();
+    act(() => {
+      useBackendObservationStore
+        .getState()
+        .observeSnapshot(createTimerSnapshotForTest());
     });
 
-    it("should show start button again after emergency stop (backend updates state)", () => {
-      const { rerender } = render(<TimerControls />);
-
-      // Simulate working state from backend
-      act(() => {
-        useBackendObservationStore.setState({ status: "working" });
-      });
-      rerender(<TimerControls />);
-      expect(
-        screen.queryByRole("button", { name: "タイマーを開始" }),
-      ).not.toBeInTheDocument();
-
-      // Simulate emergency stop response from backend
-      act(() => {
-        useBackendObservationStore.setState({ status: "idle" });
-      });
-      rerender(<TimerControls />);
-
-      // Start button is visible again
-      expect(
-        screen.getByRole("button", { name: "タイマーを開始" }),
-      ).toBeInTheDocument();
-    });
+    expect(
+      screen.getByRole("button", { name: "タイマーを開始" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "緊急停止" }),
+    ).not.toBeInTheDocument();
   });
 });

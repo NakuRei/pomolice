@@ -45,16 +45,6 @@ function solveDisplayedProblem(): number {
   }
 }
 
-function formElementOf(input: HTMLElement): HTMLFormElement {
-  const form = input.closest("form");
-
-  if (form === null) {
-    throw new Error("answer input is not inside a form");
-  }
-
-  return form;
-}
-
 describe("MathChallenge", () => {
   const mockOnComplete = vi.fn();
   const mockOnCancel = vi.fn();
@@ -73,61 +63,23 @@ describe("MathChallenge", () => {
     vi.useRealTimers();
   });
 
-  describe("Rendering", () => {
-    it("should render with title and instructions", () => {
-      render(
-        <MathChallenge
-          difficulty="easy"
-          onComplete={mockOnComplete}
-          onCancel={mockOnCancel}
-        />,
-      );
+  it("shows the problem and a numeric answer field, with submit disabled until input", () => {
+    render(
+      <MathChallenge
+        difficulty="easy"
+        onComplete={mockOnComplete}
+        onCancel={mockOnCancel}
+      />,
+    );
 
-      expect(screen.getByText("Math Challenge")).toBeInTheDocument();
-      expect(screen.getByText(/Solve the following/iu)).toBeInTheDocument();
-    });
-
-    it("should display math problem", () => {
-      render(
-        <MathChallenge
-          difficulty="easy"
-          onComplete={mockOnComplete}
-          onCancel={mockOnCancel}
-        />,
-      );
-
-      // Should display a question mark
-      expect(screen.getByText(/[=] \?/u)).toBeInTheDocument();
-    });
-
-    it("should render input and submit button", () => {
-      render(
-        <MathChallenge
-          difficulty="easy"
-          onComplete={mockOnComplete}
-          onCancel={mockOnCancel}
-        />,
-      );
-
-      expect(screen.getByPlaceholderText("Your answer")).toBeInTheDocument();
-      expect(
-        screen.getByRole("button", { name: /Submit/iu }),
-      ).toBeInTheDocument();
-    });
-
-    it("should render cancel button", () => {
-      render(
-        <MathChallenge
-          difficulty="easy"
-          onComplete={mockOnComplete}
-          onCancel={mockOnCancel}
-        />,
-      );
-
-      expect(
-        screen.getByRole("button", { name: /Cancel and Take Break/iu }),
-      ).toBeInTheDocument();
-    });
+    expect(screen.getByText("Math Challenge")).toBeInTheDocument();
+    expect(screen.getByText(/Solve the following/iu)).toBeInTheDocument();
+    expect(screen.getByText(/[=] \?/u)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Your answer")).toHaveAttribute(
+      "inputMode",
+      "numeric",
+    );
+    expect(screen.getByRole("button", { name: /Submit/iu })).toBeDisabled();
   });
 
   describe("Input handling", () => {
@@ -223,7 +175,7 @@ describe("MathChallenge", () => {
       const input = screen.getByPlaceholderText("Your answer");
       const wrongAnswer = solveDisplayedProblem() + 1;
       fireEvent.change(input, { target: { value: String(wrongAnswer) } });
-      fireEvent.submit(formElementOf(input));
+      fireEvent.click(screen.getByRole("button", { name: /Submit/iu }));
 
       expect(screen.getByText(/Incorrect/iu)).toBeInTheDocument();
       expect(input).toBeDisabled();
@@ -257,21 +209,6 @@ describe("MathChallenge", () => {
       await user.click(cancelButton);
 
       expect(mockOnCancel).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe("Accessibility", () => {
-    it("should have proper input type for numeric input", () => {
-      render(
-        <MathChallenge
-          difficulty="easy"
-          onComplete={mockOnComplete}
-          onCancel={mockOnCancel}
-        />,
-      );
-
-      const input = screen.getByPlaceholderText("Your answer");
-      expect(input).toHaveAttribute("inputMode", "numeric");
     });
   });
 });

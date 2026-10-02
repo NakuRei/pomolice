@@ -92,20 +92,6 @@ describe("./observationStore", () => {
     });
   });
 
-  describe("Constants", () => {
-    it("should export TimerStatus constants", () => {
-      expect("idle").toBe("idle");
-      expect("working").toBe("working");
-      expect("on_break").toBe("on_break");
-    });
-
-    it("should export SessionType constants", () => {
-      expect("work").toBe("work");
-      expect("short_break").toBe("short_break");
-      expect("long_break").toBe("long_break");
-    });
-  });
-
   describe("Event Handlers", () => {
     describe("observeSnapshot()", () => {
       it("should update state from tick payload", () => {

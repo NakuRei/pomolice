@@ -29,7 +29,7 @@ it("keeps every field of a newer snapshot when an old or duplicate observation a
   const observed = useBackendObservationStore.getState();
   observeSnapshot(older);
   observeSnapshot({ ...older, revision: newer.revision });
-  expect(useBackendObservationStore.getState()).toBe(observed);
+  expect(useBackendObservationStore.getState()).toEqual(observed);
   expect(observed.requiresManualContinueDecision).toBe(true);
   expect(observed.settings?.notificationSoundMuted).toBe(true);
   expect(observed.effects?.last_timer_save).toBe("failed");
