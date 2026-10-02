@@ -11,8 +11,8 @@ use crate::break_lock;
 use crate::external_adapters::tray_icon;
 use crate::ipc::events;
 use crate::state::AppState;
-use crate::timer_core::Event;
 use crate::timer_runtime::{EffectSink, TimerNotification};
+use pomolice_core::timer_core::Event;
 use tauri_specta::Event as _;
 
 const TICK_INTERVAL: Duration = Duration::from_secs(1);
@@ -65,7 +65,15 @@ pub(crate) fn spawn_ticker(app: AppHandle) {
         loop {
             interval.tick().await;
             let app_state = app.state::<AppState>();
-            let _ = app_state.timer.dispatch(&app, Event::Tick).await;
+            let _ = app_state
+                .timer
+                .dispatch(
+                    &app,
+                    Event::TimeObserved {
+                        credited_break_seconds: 1,
+                    },
+                )
+                .await;
         }
     });
 }

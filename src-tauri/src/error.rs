@@ -3,8 +3,8 @@
 
 use thiserror::Error;
 
-use crate::settings::SettingsValidationErrors;
-use crate::types::TimerStatus;
+use pomolice_core::settings::SettingsValidationErrors;
+use pomolice_core::types::TimerStatus;
 
 /// Main error type for the Pomolice application
 #[derive(Error, Debug, strum::EnumDiscriminants)]
@@ -68,14 +68,30 @@ impl std::error::Error for PersistenceFailure {
     }
 }
 
+impl From<pomolice_core::error::TimerError> for PomoliceError {
+    fn from(error: pomolice_core::error::TimerError) -> Self {
+        match error {
+            pomolice_core::error::TimerError::InvalidStateTransition {
+                action,
+                current_state,
+            } => Self::InvalidStateTransition {
+                action,
+                current_state,
+            },
+            pomolice_core::error::TimerError::RateLimited { remaining_ms } => {
+                Self::RateLimited { remaining_ms }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
 
-    use crate::settings::input::SettingsValidationIssue;
     use crate::shared_tests::join_error::join_error_from_panic;
-    use crate::types::WeekdayKey;
+    use pomolice_core::settings::{input::SettingsInput, UserSettings};
     use strum::IntoEnumIterator;
 
     fn assert_all_pomolice_error_variants_are_represented(
@@ -98,6 +114,10 @@ mod tests {
     }
 
     fn error_occurrences_with_display_details() -> Vec<(PomoliceError, &'static [&'static str])> {
+        let mut invalid = SettingsInput::from(UserSettings::default());
+        invalid.weekly_auto_run_config.wed.enabled = true;
+        invalid.weekly_auto_run_config.wed.end_time =
+            invalid.weekly_auto_run_config.wed.start_time.clone();
         vec![
             (
                 PomoliceError::Unauthorized("test-window".to_string()),
@@ -112,11 +132,9 @@ mod tests {
             ),
             (PomoliceError::RateLimited { remaining_ms: 500 }, &["500"]),
             (
-                PomoliceError::InvalidSettings(SettingsValidationErrors::from_issues(vec![
-                    SettingsValidationIssue::EmptyTimeRange {
-                        weekday: WeekdayKey::Wed,
-                    },
-                ])),
+                PomoliceError::InvalidSettings(
+                    UserSettings::try_from(invalid).expect_err("empty Wednesday slot"),
+                ),
                 &["Invalid settings", "EmptyTimeRange", "Wed"],
             ),
             (

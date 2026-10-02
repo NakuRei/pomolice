@@ -8,11 +8,12 @@ use crate::external_adapters::persistence::{
 };
 use crate::external_adapters::window_lock::WindowStateManager;
 use crate::logging_event::{log_error_event, log_info_event, log_warn_event, BackendLogEvent};
-use crate::settings::input::SettingsFileStatus;
-use crate::settings::{PersistedSettings, UserSettings};
-use crate::timer_core::TimerCore;
+use crate::storage::PersistedSettings;
+use crate::storage::PersistedState;
+use crate::storage::SettingsFileStatus;
 use crate::timer_runtime::TimerRuntime;
-use crate::types::PersistedState;
+use pomolice_core::settings::UserSettings;
+use pomolice_core::timer_core::{Effect, TimerCore};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AppRestoreStatus {
@@ -33,7 +34,7 @@ impl AppState {
         clock: Arc<dyn Clock + Send + Sync>,
         timer_state_persistence: PersistenceManager<PersistedState>,
         settings_persistence: PersistenceManager<PersistedSettings>,
-    ) -> (Self, AppRestoreStatus) {
+    ) -> (Self, AppRestoreStatus, Vec<Effect>) {
         Self::build_startup_state_with_handlers(
             clock,
             timer_state_persistence,
@@ -52,22 +53,23 @@ impl AppState {
         on_escape_combo: impl Fn() + Send + Sync + 'static,
         on_input_detected: impl Fn() + Send + Sync + 'static,
         on_input_failure: impl Fn() + Send + Sync + 'static,
-    ) -> (Self, AppRestoreStatus) {
+    ) -> (Self, AppRestoreStatus, Vec<Effect>) {
         log_info_event(BackendLogEvent::AppStateInitializationStarted, &[]);
         let (persisted_state, restore_status) = load_document_async(&timer_state_persistence).await;
         let (persisted_settings, settings_restore_status) =
             load_document_async(&settings_persistence).await;
         let settings =
             persisted_settings.map_or_else(UserSettings::default, |persisted| persisted.settings);
-        let core = TimerCore::restore(
-            persisted_state,
+        let settings_file_status = if settings_restore_status == AppRestoreStatus::Discarded {
+            SettingsFileStatus::Unusable
+        } else {
+            SettingsFileStatus::Ok
+        };
+        let (core, initial_effects) = TimerCore::restore(
+            persisted_state.map(|state| state.timer),
             settings,
-            if settings_restore_status == AppRestoreStatus::Discarded {
-                SettingsFileStatus::Unusable
-            } else {
-                SettingsFileStatus::Ok
-            },
-            clock.now_local(),
+            clock.now_utc(),
+            chrono::Local,
         );
         log_info_event(
             BackendLogEvent::AppStateInitializationCompleted,
@@ -75,14 +77,20 @@ impl AppState {
                 ("restore_status", format!("{restore_status:?}")),
                 (
                     "is_running",
-                    (core.status() != crate::types::TimerStatus::Idle).to_string(),
+                    (core.status() != pomolice_core::types::TimerStatus::Idle).to_string(),
                 ),
             ],
         );
         log_info_event(BackendLogEvent::AppStateCreated, &[]);
 
         let app_state = Self {
-            timer: TimerRuntime::new(core, clock, timer_state_persistence, settings_persistence),
+            timer: TimerRuntime::new(
+                core,
+                clock,
+                timer_state_persistence,
+                settings_persistence,
+                settings_file_status,
+            ),
             input_monitor: Mutex::new(InputMonitorManager::new(
                 on_escape_combo,
                 on_input_detected,
@@ -90,7 +98,7 @@ impl AppState {
             )),
             window_manager: Mutex::new(WindowStateManager::new()),
         };
-        (app_state, restore_status)
+        (app_state, restore_status, initial_effects)
     }
 }
 

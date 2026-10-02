@@ -12,19 +12,16 @@ mod external_adapters;
 mod ipc;
 mod log_redaction;
 mod logging_event;
-mod schedule_boundary;
-mod settings;
 mod state;
-mod timer_core;
+mod storage;
 mod timer_runtime;
 mod tray_icon_renderer;
-mod types;
 
 pub use crate::logging_event::{log_error_event, log_info_event, log_warn_event, BackendLogEvent};
 use crate::logging_event::{
     log_persistence_write_failure, PERSISTENCE_WRITE_TRIGGER_RUN_EVENT_EXIT,
 };
-use crate::timer_core::Event;
+use pomolice_core::timer_core::Event;
 
 fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -69,7 +66,7 @@ fn setup_app(app: &tauri::App) {
         external_adapters::persistence::PersistenceManager::new(app_data_dir.clone());
     let settings_persistence =
         external_adapters::persistence::PersistenceManager::new(app_data_dir);
-    let (app_state, restore_status) =
+    let (app_state, restore_status, initial_effects) =
         async_runtime::block_on(state::AppState::build_startup_state_with_handlers(
             clock,
             timer_state_persistence,
@@ -83,7 +80,6 @@ fn setup_app(app: &tauri::App) {
     let has_persisted_state = restore_status == state::AppRestoreStatus::Restored;
 
     app.manage(app_state);
-    external_adapters::emergency_shortcut::setup(app.handle());
 
     if let Err(e) = external_adapters::tray_icon::setup_tray(app.handle()) {
         log_error_event(
@@ -96,9 +92,12 @@ fn setup_app(app: &tauri::App) {
     let app_handle = app.handle().clone();
     async_runtime::block_on(async {
         let app_state = app_handle.state::<state::AppState>();
-        // Startup can only fail on persistence, which is logged where it fails.
-        let _ = app_state.timer.dispatch(&app_handle, Event::Started).await;
+        app_state
+            .timer
+            .run_initial_effects(&app_handle, initial_effects)
+            .await;
     });
+    external_adapters::emergency_shortcut::setup(app.handle());
     app_effects::spawn_ticker(app.handle().clone());
 
     log_info_event(
@@ -167,14 +166,15 @@ mod run_event_tests {
     use crate::logging_event::{
         render_persistence_write_failure_message, PERSISTENCE_WRITE_TRIGGER_RUN_EVENT_EXIT,
     };
-    use crate::settings::input::SettingsFileStatus;
-    use crate::settings::{PersistedSettings, UserSettings, SETTINGS_SCHEMA_VERSION};
     use crate::state;
-    use crate::types::{
-        PersistedState, ScheduleStopState, SessionDurationSecs, SessionType, TimerStatus,
-        WorkDurationSecs, PERSISTED_STATE_SCHEMA_VERSION,
-    };
+    use crate::storage::SettingsFileStatus;
+    use crate::storage::{PersistedSettings, SETTINGS_SCHEMA_VERSION};
+    use crate::storage::{PersistedState, PERSISTED_STATE_SCHEMA_VERSION};
     use chrono::{Local, TimeZone, Utc};
+    use pomolice_core::settings::UserSettings;
+    use pomolice_core::types::{
+        ScheduleStopState, SessionDurationSecs, SessionType, TimerStatus, WorkDurationSecs,
+    };
     use std::io;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
@@ -215,16 +215,18 @@ mod run_event_tests {
         PersistenceManager::new(Some(dir.to_path_buf()))
             .save_sync(&PersistedState {
                 schema_version: PERSISTED_STATE_SCHEMA_VERSION,
-                status: TimerStatus::Working,
-                remaining_seconds: 321,
-                session_duration_secs: SessionDurationSecs::try_new(25 * 60)
-                    .expect("valid session duration"),
-                session_type: SessionType::Work,
-                current_cycle: 1,
-                completed_pomodoros: 0,
-                post_break_decision_pending: false,
-                saved_at: clock.now_utc(),
-                schedule_stop_state: ScheduleStopState::NotControlledBySchedule,
+                timer: pomolice_core::types::TimerCheckpoint {
+                    status: TimerStatus::Working,
+                    remaining_seconds: 321,
+                    session_duration_secs: SessionDurationSecs::try_new(25 * 60)
+                        .expect("valid session duration"),
+                    session_type: SessionType::Work,
+                    current_cycle: 1,
+                    completed_pomodoros: 0,
+                    post_break_decision_pending: false,
+                    saved_at: clock.now_utc(),
+                    schedule_stop_state: ScheduleStopState::NotControlledBySchedule,
+                },
             })
             .expect("seed state should be saved");
 
@@ -234,7 +236,7 @@ mod run_event_tests {
     fn start_app_state(dir: &Path) -> state::AppState {
         let clock = fixed_clock();
         let runtime = tokio::runtime::Runtime::new().expect("test runtime should be created");
-        let (app_state, _) = runtime.block_on(state::AppState::build_startup_state_for_tests(
+        let (app_state, _, _) = runtime.block_on(state::AppState::build_startup_state_for_tests(
             as_clock_trait(&clock),
             PersistenceManager::new(Some(dir.to_path_buf())),
             PersistenceManager::new(Some(dir.to_path_buf())),
@@ -243,7 +245,7 @@ mod run_event_tests {
         app_state
     }
 
-    fn full_state_at_startup(dir: &Path) -> crate::timer_core::observation::FullStatePayload {
+    fn full_state_at_startup(dir: &Path) -> crate::timer_runtime::observation::FullStatePayload {
         let app_state = start_app_state(dir);
         tauri::async_runtime::block_on(app_state.timer.read_full_state()).timer
     }
@@ -277,8 +279,8 @@ mod run_event_tests {
             PersistenceManager::new(Some(temp_dir.clone()));
         match persistence.load_sync() {
             PersistenceLoadOutcome::Restored(persisted_state) => {
-                assert_eq!(persisted_state.status, TimerStatus::Working);
-                assert_eq!(persisted_state.remaining_seconds, 321);
+                assert_eq!(persisted_state.timer.status, TimerStatus::Working);
+                assert_eq!(persisted_state.timer.remaining_seconds, 321);
             }
             PersistenceLoadOutcome::NoState | PersistenceLoadOutcome::Discarded => {
                 panic!("expected restored state")
@@ -304,8 +306,8 @@ mod run_event_tests {
 
         let full_state = full_state_at_startup(&temp_dir);
 
-        assert_eq!(full_state.settings, settings.into());
-        assert_eq!(full_state.remaining_seconds, 50 * 60);
+        assert_eq!(full_state.state.settings, settings.into());
+        assert_eq!(full_state.state.remaining_seconds, 50 * 60);
         assert_eq!(full_state.settings_file_status, SettingsFileStatus::Ok);
 
         cleanup_temp_dir(&temp_dir);
@@ -317,7 +319,7 @@ mod run_event_tests {
 
         let full_state = full_state_at_startup(&temp_dir);
 
-        assert_eq!(full_state.settings, UserSettings::default().into());
+        assert_eq!(full_state.state.settings, UserSettings::default().into());
         assert_eq!(full_state.settings_file_status, SettingsFileStatus::Ok);
 
         cleanup_temp_dir(&temp_dir);
@@ -331,7 +333,7 @@ mod run_event_tests {
 
         let full_state = full_state_at_startup(&temp_dir);
 
-        assert_eq!(full_state.settings, UserSettings::default().into());
+        assert_eq!(full_state.state.settings, UserSettings::default().into());
         assert_eq!(
             full_state.settings_file_status,
             SettingsFileStatus::Unusable

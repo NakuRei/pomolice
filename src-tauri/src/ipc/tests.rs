@@ -24,7 +24,7 @@ fn app_with_window(label: &str) -> (App<MockRuntime>, WebviewWindow<MockRuntime>
         .single()
         .expect("valid test time")
         .with_timezone(&Local);
-    let (state, _) = tauri::async_runtime::block_on(AppState::build_startup_state_for_tests(
+    let (state, _, _) = tauri::async_runtime::block_on(AppState::build_startup_state_for_tests(
         Arc::new(FixedClock::new(now)),
         PersistenceManager::new(None),
         PersistenceManager::new(None),

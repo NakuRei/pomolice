@@ -1,9 +1,9 @@
 use crate::external_adapters::emergency_shortcut::EmergencyShortcutStatus;
-use crate::timer_core::observation::ActiveWindowChangedPayload;
-use crate::timer_core::observation::SessionCompletedPayload;
-use crate::timer_core::observation::SettingsChangedPayload;
-use crate::timer_core::observation::TimerTickPayload;
+use crate::timer_runtime::observation::SettingsChangedPayload;
 use crate::timer_runtime::observation::TimerEffectsState;
+use pomolice_core::timer_core::observation::ActiveWindowChangedPayload;
+use pomolice_core::timer_core::observation::SessionCompletedPayload;
+use pomolice_core::timer_core::observation::TimerTickPayload;
 
 #[derive(Clone, serde::Serialize, specta::Type)]
 #[serde(transparent)]

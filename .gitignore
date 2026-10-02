@@ -31,3 +31,5 @@ dist-ssr
 *.code-workspace
 /coverage/
 .playwright-cli/
+
+/target/

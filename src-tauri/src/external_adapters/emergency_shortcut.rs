@@ -49,7 +49,7 @@ pub(crate) fn setup(app: &tauri::AppHandle) {
                     || {
                         crate::app_effects::dispatch_from_callback(
                             app.clone(),
-                            crate::timer_core::Event::EscapeComboPressed,
+                            pomolice_core::timer_core::Event::EscapeComboPressed,
                         );
                     },
                 )

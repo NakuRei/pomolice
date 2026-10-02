@@ -79,10 +79,7 @@ export type EmergencyShortcutStatus =
   | { kind: "registered"; trigger: string }
   | { kind: "unavailable" };
 
-/**
- * Full timer state sent on initial sync
- */
-export interface FullStatePayload {
+export type FullStatePayload = {
   status: TimerStatus;
   remaining_seconds: number;
   session_duration_secs: number;
@@ -93,13 +90,12 @@ export interface FullStatePayload {
   away_during_break: boolean;
   post_break_decision_pending: boolean;
   settings: SettingsInput;
-  settings_file_status: SettingsFileStatus;
   /**
    * Present while the boot auto-start prompt is still waiting for a decision.
    */
   boot_auto_start_offer: BootAutoStartOfferPayload | null;
   active_window_summary: ActiveWindowSummaryPayload | null;
-}
+} & { settings_file_status: SettingsFileStatus };
 
 export type InputMonitorFailed = null;
 
@@ -156,9 +152,6 @@ export type SettingChange<T> = T;
 
 export type SettingsChanged = SettingsChangedPayload;
 
-/**
- * Payload sent to frontend when the settings in effect change
- */
 export interface SettingsChangedPayload {
   settings: SettingsInput;
   settings_file_status: SettingsFileStatus;

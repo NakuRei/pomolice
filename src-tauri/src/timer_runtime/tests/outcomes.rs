@@ -4,6 +4,70 @@ use crate::timer_runtime::observation::BreakLockOutcome;
 use crate::timer_runtime::observation::EffectStatus;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[tokio::test]
+async fn restored_expired_work_reports_startup_failures_and_retries_without_restarting_the_break() {
+    let clock = fixed_clock();
+    let fail = Arc::new(AtomicBool::new(false));
+    let persistence = switchable_persistence("restore-failures", &fail);
+    let (mut core, _) = TimerCore::restore(None, UserSettings::default(), clock.now_utc(), Local);
+    core.apply(Event::StartWorkRequested, clock.now_utc())
+        .expect("start work");
+    persistence
+        .save_sync(&PersistedState::from(core.checkpoint(clock.now_utc())))
+        .expect("seed work");
+    clock.set_now_local(clock.now_local() + chrono::Duration::minutes(30));
+    fail.store(true, Ordering::SeqCst);
+    let clock_trait: Arc<dyn Clock + Send + Sync> = Arc::<FixedClock>::clone(&clock);
+    let (state, restore_status, initial_effects) =
+        crate::state::AppState::build_startup_state_for_tests(
+            clock_trait,
+            persistence,
+            PersistenceManager::new(Some(create_temp_dir("restore-failure-settings"))),
+        )
+        .await;
+    assert_eq!(restore_status, crate::state::AppRestoreStatus::Restored);
+    let sink = RecordingSink::with_lock_outcome(EffectStatus::Failed);
+    state
+        .timer
+        .run_initial_effects(&sink, initial_effects)
+        .await;
+    let failed = state.timer.read_full_state().await;
+    assert_eq!(failed.timer.state.status, TimerStatus::OnBreak);
+    assert_eq!(failed.timer.state.completed_pomodoros, 1);
+    assert_eq!(failed.effects.last_timer_save, Some(EffectStatus::Failed));
+    assert_eq!(failed.effects.break_lock.target, BreakLockTarget::Locked);
+    assert_eq!(
+        failed.effects.break_lock.last_attempt,
+        Some(BreakLockOutcome {
+            action: BreakLockAction::Enter,
+            status: EffectStatus::Failed,
+        })
+    );
+    fail.store(false, Ordering::SeqCst);
+    let recovered = state
+        .timer
+        .retry_failed_effects(&RecordingSink::with_lock_outcome(EffectStatus::Succeeded))
+        .await;
+    assert_eq!(recovered.timer, failed.timer);
+    assert_eq!(
+        recovered.effects.last_timer_save,
+        Some(EffectStatus::Succeeded)
+    );
+    assert_eq!(
+        recovered.effects.break_lock.last_attempt,
+        Some(BreakLockOutcome {
+            action: BreakLockAction::Enter,
+            status: EffectStatus::Succeeded,
+        })
+    );
+    let saved = saved_state(&state.timer).expect("restored break saved");
+    assert_eq!(saved.timer.status, TimerStatus::OnBreak);
+    assert_eq!(
+        saved.timer.remaining_seconds,
+        recovered.timer.state.remaining_seconds
+    );
+}
+
 fn switchable_persistence(
     test_name: &str,
     fail: &Arc<AtomicBool>,
@@ -34,7 +98,7 @@ async fn failed_save_is_an_accepted_start_and_retry_saves_the_current_session() 
         .dispatch(&sink, Event::StartWorkRequested)
         .await
         .expect("start accepted");
-    assert_eq!(outcome.timer.status, TimerStatus::Working);
+    assert_eq!(outcome.timer.state.status, TimerStatus::Working);
     assert_eq!(outcome.effects.last_timer_save, Some(EffectStatus::Failed));
     assert_eq!(outcome.effects.break_lock.last_attempt, None);
     let encoded = serde_json::to_string(&outcome).expect("serializable outcome");
@@ -48,19 +112,25 @@ async fn failed_save_is_an_accepted_start_and_retry_saves_the_current_session() 
     clock.set_now_local(clock.now_local() + chrono::Duration::seconds(10));
 
     let retried = runtime.retry_failed_effects(&sink).await;
-    assert_eq!(retried.timer.status, TimerStatus::Working);
+    assert_eq!(retried.timer.state.status, TimerStatus::Working);
     assert_eq!(
-        retried.timer.remaining_seconds,
-        outcome.timer.remaining_seconds - 10
+        retried.timer.state.remaining_seconds,
+        outcome.timer.state.remaining_seconds - 10
     );
-    assert_eq!(retried.timer.current_cycle, outcome.timer.current_cycle);
+    assert_eq!(
+        retried.timer.state.current_cycle,
+        outcome.timer.state.current_cycle
+    );
     assert_eq!(
         retried.effects.last_timer_save,
         Some(EffectStatus::Succeeded)
     );
     assert_eq!(
-        saved_state(&runtime).expect("saved").remaining_seconds,
-        retried.timer.remaining_seconds
+        saved_state(&runtime)
+            .expect("saved")
+            .timer
+            .remaining_seconds,
+        retried.timer.state.remaining_seconds
     );
 }
 
@@ -77,7 +147,12 @@ async fn stop_reports_both_unlock_and_save_failures_and_keeps_them_until_recover
     start_one_second_work(&runtime, &sink).await;
     clock.set_now_local(clock.now_local() + chrono::Duration::seconds(1));
     runtime
-        .dispatch(&sink, Event::Tick)
+        .dispatch(
+            &sink,
+            Event::TimeObserved {
+                credited_break_seconds: 1,
+            },
+        )
         .await
         .expect("break starts");
     sink.release_fails = true;
@@ -87,7 +162,7 @@ async fn stop_reports_both_unlock_and_save_failures_and_keeps_them_until_recover
         .dispatch(&sink, Event::EmergencyStopRequested)
         .await
         .expect("stop accepted");
-    assert_eq!(stopped.timer.status, TimerStatus::Idle);
+    assert_eq!(stopped.timer.state.status, TimerStatus::Idle);
     assert_eq!(
         stopped.effects.break_lock.last_attempt,
         Some(BreakLockOutcome {
@@ -97,7 +172,12 @@ async fn stop_reports_both_unlock_and_save_failures_and_keeps_them_until_recover
     );
     assert_eq!(stopped.effects.last_timer_save, Some(EffectStatus::Failed));
     runtime
-        .dispatch(&sink, Event::Tick)
+        .dispatch(
+            &sink,
+            Event::TimeObserved {
+                credited_break_seconds: 1,
+            },
+        )
         .await
         .expect("idle tick");
     assert_eq!(runtime.read_full_state().await.effects, stopped.effects);
@@ -111,7 +191,7 @@ async fn stop_reports_both_unlock_and_save_failures_and_keeps_them_until_recover
     sink.release_fails = false;
     fail.store(false, Ordering::SeqCst);
     let recovered = runtime.retry_failed_effects(&sink).await;
-    assert_eq!(recovered.timer.status, TimerStatus::Idle);
+    assert_eq!(recovered.timer.state.status, TimerStatus::Idle);
     assert_eq!(
         recovered.effects.break_lock.last_attempt,
         Some(BreakLockOutcome {
@@ -124,7 +204,7 @@ async fn stop_reports_both_unlock_and_save_failures_and_keeps_them_until_recover
         Some(EffectStatus::Succeeded)
     );
     assert_eq!(
-        saved_state(&runtime).expect("saved stop").status,
+        saved_state(&runtime).expect("saved stop").timer.status,
         TimerStatus::Idle
     );
 }
@@ -138,10 +218,15 @@ async fn failed_break_entry_is_observable_even_without_a_frontend_command() {
     clock.set_now_local(clock.now_local() + chrono::Duration::seconds(1));
 
     let outcome = runtime
-        .dispatch(&failed_sink, Event::Tick)
+        .dispatch(
+            &failed_sink,
+            Event::TimeObserved {
+                credited_break_seconds: 1,
+            },
+        )
         .await
         .expect("break accepted");
-    assert_eq!(outcome.timer.status, TimerStatus::OnBreak);
+    assert_eq!(outcome.timer.state.status, TimerStatus::OnBreak);
     assert_eq!(outcome.effects.break_lock.target, BreakLockTarget::Locked);
     assert_eq!(
         outcome.effects.break_lock.last_attempt,
@@ -159,8 +244,8 @@ async fn failed_break_entry_is_observable_even_without_a_frontend_command() {
         .retry_failed_effects(&RecordingSink::with_lock_outcome(EffectStatus::Succeeded))
         .await;
     assert_eq!(
-        recovered.timer.remaining_seconds,
-        outcome.timer.remaining_seconds
+        recovered.timer.state.remaining_seconds,
+        outcome.timer.state.remaining_seconds
     );
     assert_eq!(recovered.effects.break_lock.target, BreakLockTarget::Locked);
     assert_eq!(
@@ -182,7 +267,12 @@ async fn recovery_never_relocks_a_break_that_has_already_ended() {
     start_one_second_work(&runtime, &sink).await;
     clock.set_now_local(clock.now_local() + chrono::Duration::seconds(1));
     runtime
-        .dispatch(&sink, Event::Tick)
+        .dispatch(
+            &sink,
+            Event::TimeObserved {
+                credited_break_seconds: 1,
+            },
+        )
         .await
         .expect("break starts");
     runtime
@@ -191,7 +281,7 @@ async fn recovery_never_relocks_a_break_that_has_already_ended() {
         .expect("stop accepted");
 
     let recovered = runtime.retry_failed_effects(&sink).await;
-    assert_eq!(recovered.timer.status, TimerStatus::Idle);
+    assert_eq!(recovered.timer.state.status, TimerStatus::Idle);
     assert_eq!(
         recovered.effects.break_lock.last_attempt,
         Some(BreakLockOutcome {
@@ -221,7 +311,12 @@ async fn retrying_entry_cleans_up_partial_windows_before_trying_to_lock_again() 
     start_one_second_work(&runtime, &failed_entry).await;
     clock.set_now_local(clock.now_local() + chrono::Duration::seconds(1));
     runtime
-        .dispatch(&failed_entry, Event::Tick)
+        .dispatch(
+            &failed_entry,
+            Event::TimeObserved {
+                credited_break_seconds: 1,
+            },
+        )
         .await
         .expect("break starts");
     let mut recovery = RecordingSink::with_lock_outcome(EffectStatus::Succeeded);
@@ -267,11 +362,14 @@ async fn unavailable_persistence_never_reports_a_successful_save() {
         .dispatch(&sink, Event::StartWorkRequested)
         .await
         .expect("accepted");
-    assert_eq!(started.timer.status, TimerStatus::Working);
+    assert_eq!(started.timer.state.status, TimerStatus::Working);
     assert_eq!(started.effects.last_timer_save, Some(EffectStatus::Failed));
     let retried = runtime.retry_failed_effects(&sink).await;
     assert_eq!(retried.effects.last_timer_save, Some(EffectStatus::Failed));
-    assert_eq!(retried.timer.current_cycle, started.timer.current_cycle);
+    assert_eq!(
+        retried.timer.state.current_cycle,
+        started.timer.state.current_cycle
+    );
 }
 
 #[tokio::test]
@@ -298,13 +396,21 @@ async fn stopping_after_failed_entry_and_cleanup_retries_only_the_release() {
     let mut sink = RecordingSink::with_lock_outcome(EffectStatus::Failed);
     start_one_second_work(&runtime, &sink).await;
     clock.set_now_local(clock.now_local() + chrono::Duration::seconds(1));
-    runtime.dispatch(&sink, Event::Tick).await.expect("break");
+    runtime
+        .dispatch(
+            &sink,
+            Event::TimeObserved {
+                credited_break_seconds: 1,
+            },
+        )
+        .await
+        .expect("break");
     sink.release_fails = true;
     let stopped = runtime
         .dispatch(&sink, Event::EmergencyStopRequested)
         .await
         .expect("stop");
-    assert_eq!(stopped.timer.status, TimerStatus::Idle);
+    assert_eq!(stopped.timer.state.status, TimerStatus::Idle);
     assert_eq!(stopped.effects.break_lock.target, BreakLockTarget::Unlocked);
     assert_eq!(
         stopped.effects.break_lock.last_attempt,
@@ -320,7 +426,7 @@ async fn stopping_after_failed_entry_and_cleanup_retries_only_the_release() {
         *sink.lock_actions.lock().expect("actions"),
         vec![BreakLockAction::Release]
     );
-    assert_eq!(recovered.timer.status, TimerStatus::Idle);
+    assert_eq!(recovered.timer.state.status, TimerStatus::Idle);
     assert_eq!(
         recovered
             .effects
@@ -344,7 +450,15 @@ async fn escape_changes_the_lock_target_without_changing_the_break_or_saving_it_
     let mut sink = RecordingSink::with_lock_outcome(EffectStatus::Succeeded);
     start_one_second_work(&runtime, &sink).await;
     clock.set_now_local(clock.now_local() + chrono::Duration::seconds(1));
-    let before = runtime.dispatch(&sink, Event::Tick).await.expect("break");
+    let before = runtime
+        .dispatch(
+            &sink,
+            Event::TimeObserved {
+                credited_break_seconds: 1,
+            },
+        )
+        .await
+        .expect("break");
     fail.store(true, Ordering::SeqCst);
     sink.release_fails = true;
     let escaped = runtime

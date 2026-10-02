@@ -1,4 +1,6 @@
-use crate::timer_core::{observation::FullStatePayload, BreakLockTarget};
+use crate::storage::SettingsFileStatus;
+use pomolice_core::settings::input::SettingsInput;
+use pomolice_core::timer_core::{observation::TimerState, BreakLockTarget};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
@@ -52,4 +54,17 @@ impl Serialize for EffectRevision {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.collect_str(&self.0)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
+pub(crate) struct FullStatePayload {
+    #[serde(flatten)]
+    pub state: TimerState,
+    pub settings_file_status: SettingsFileStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
+pub(crate) struct SettingsChangedPayload {
+    pub settings: SettingsInput,
+    pub settings_file_status: SettingsFileStatus,
 }

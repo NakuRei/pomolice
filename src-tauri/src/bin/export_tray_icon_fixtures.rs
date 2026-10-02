@@ -8,17 +8,8 @@ use pomolice_lib::{log_info_event, BackendLogEvent};
 #[path = "../tray_icon_renderer.rs"]
 mod tray_icon_renderer;
 
-mod types {
-    #[derive(Debug, Clone, Copy, PartialEq)]
-    pub(crate) enum TimerStatus {
-        Idle,
-        Working,
-        OnBreak,
-    }
-}
-
+use pomolice_core::types::TimerStatus;
 use tray_icon_renderer::{IdleGlyphVariant, IDLE_GLYPH_VARIANTS};
-use types::TimerStatus;
 
 /// Explicit export instruction for one tray icon fixture.
 ///

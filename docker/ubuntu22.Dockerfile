@@ -22,10 +22,10 @@ RUN --mount=type=cache,target=/root/.npm HUSKY=0 npm ci
 COPY . .
 RUN --mount=type=cache,target=/opt/cargo/registry,sharing=locked \
     --mount=type=cache,target=/opt/cargo/git,sharing=locked \
-    --mount=type=cache,target=/workspace/src-tauri/target,sharing=locked \
+    --mount=type=cache,target=/workspace/target,sharing=locked \
     npm run tauri -- build --bundles deb -- --locked \
     && mkdir /packages \
-    && cp src-tauri/target/release/bundle/deb/*.deb /packages/
+    && cp target/release/bundle/deb/*.deb /packages/
 
 FROM ubuntu:22.04 AS verify
 ENV DEBIAN_FRONTEND=noninteractive

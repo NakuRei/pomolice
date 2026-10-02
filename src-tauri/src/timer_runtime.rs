@@ -13,26 +13,27 @@ use crate::error::{PersistenceFailure, PomoliceError, Result};
 use crate::external_adapters::clock::Clock;
 use crate::external_adapters::persistence::{PersistedDocument, PersistenceManager, SaveError};
 use crate::logging_event::{log_error_event, log_warn_event, BackendLogEvent};
-use crate::settings::input::{SettingsChanges, SettingsInput};
-use crate::settings::{PersistedSettings, UserSettings, SETTINGS_SCHEMA_VERSION};
-use crate::timer_core::observation::TimerTickPayload;
-use crate::timer_core::{BreakLockTarget, Effect, Event, TimerCore};
+use crate::storage::PersistedState;
+use crate::storage::{PersistedSettings, SETTINGS_SCHEMA_VERSION};
 use crate::timer_runtime::observation::BreakLockAction;
 use crate::timer_runtime::observation::BreakLockOutcome;
 use crate::timer_runtime::observation::BreakLockState;
 use crate::timer_runtime::observation::EffectStatus;
 use crate::timer_runtime::observation::TimerEffectsState;
 use crate::timer_runtime::observation::TimerSnapshot;
-use crate::types::PersistedState;
+use pomolice_core::settings::input::{SettingsChanges, SettingsInput};
+use pomolice_core::settings::UserSettings;
+use pomolice_core::timer_core::observation::TimerTickPayload;
+use pomolice_core::timer_core::{BreakLockTarget, Effect, Event, TimerCore};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TimerNotification {
     TimerTick(TimerTickPayload),
-    SessionCompleted(crate::timer_core::observation::SessionCompletedPayload),
+    SessionCompleted(pomolice_core::timer_core::observation::SessionCompletedPayload),
     AutoRunStopPending,
     AutoRunStopped,
-    ActiveWindowChanged(crate::timer_core::observation::ActiveWindowChangedPayload),
-    SettingsChanged(Box<crate::timer_core::observation::SettingsChangedPayload>),
+    ActiveWindowChanged(pomolice_core::timer_core::observation::ActiveWindowChangedPayload),
+    SettingsChanged(Box<crate::timer_runtime::observation::SettingsChangedPayload>),
     BootAutoStartOfferClosed,
     TimerEffectsChanged(TimerEffectsState),
 }
@@ -50,7 +51,8 @@ pub(crate) trait EffectSink {
 /// run before the next one starts.
 pub(crate) struct TimerRuntime {
     /// Locked only inside synchronous critical sections; never held across an await.
-    core: StdMutex<TimerCore>,
+    core: StdMutex<TimerCore<Local>>,
+    settings_file_status: StdMutex<crate::storage::SettingsFileStatus>,
     effects: StdMutex<TimerEffectsState>,
     /// Serializes every dispatch (apply plus effect execution). Held across awaits.
     dispatch_permit: Semaphore,
@@ -61,19 +63,26 @@ pub(crate) struct TimerRuntime {
 
 impl TimerRuntime {
     pub(crate) fn new(
-        core: TimerCore,
+        core: TimerCore<Local>,
         clock: Arc<dyn Clock + Send + Sync>,
         timer_state_persistence: PersistenceManager<PersistedState>,
         settings_persistence: PersistenceManager<PersistedSettings>,
+        settings_file_status: crate::storage::SettingsFileStatus,
     ) -> Self {
         Self {
             core: StdMutex::new(core),
+            settings_file_status: StdMutex::new(settings_file_status),
             effects: StdMutex::new(TimerEffectsState::default()),
             dispatch_permit: Semaphore::new(1),
             clock,
             timer_state_persistence,
             settings_persistence,
         }
+    }
+
+    pub(crate) async fn run_initial_effects(&self, sink: &impl EffectSink, effects: Vec<Effect>) {
+        let _permit = self.acquire_dispatch_permit().await;
+        self.run_effects(sink, effects, self.clock.now_utc()).await;
     }
 
     pub(crate) async fn dispatch(
@@ -124,6 +133,11 @@ impl TimerRuntime {
             },
         )
         .await?;
+        *self
+            .settings_file_status
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            crate::storage::SettingsFileStatus::Ok;
         self.apply_and_run_effects(sink, Event::SettingsChanged { settings })
             .await
     }
@@ -134,7 +148,7 @@ impl TimerRuntime {
         sink: &impl EffectSink,
         event: Event,
     ) -> Result<TimerSnapshot> {
-        let now = self.clock.now_local();
+        let now = self.clock.now_utc();
         let effects = self.apply(event, now)?;
         self.run_effects(sink, effects, now).await;
         Ok(self.snapshot())
@@ -154,8 +168,7 @@ impl TimerRuntime {
         if failed.last_timer_save == Some(EffectStatus::Failed) {
             effects.push(Effect::Persist);
         }
-        self.run_effects(sink, effects, self.clock.now_local())
-            .await;
+        self.run_effects(sink, effects, self.clock.now_utc()).await;
         self.snapshot()
     }
 
@@ -166,9 +179,19 @@ impl TimerRuntime {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    fn settings_file_status(&self) -> crate::storage::SettingsFileStatus {
+        *self
+            .settings_file_status
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     fn snapshot(&self) -> TimerSnapshot {
         TimerSnapshot {
-            timer: self.read(|core| core.full_state_payload(self.clock.now_local())),
+            timer: crate::timer_runtime::observation::FullStatePayload {
+                state: self.read(|core| core.snapshot(self.clock.now_utc())),
+                settings_file_status: self.settings_file_status(),
+            },
             effects: self.effect_state(),
         }
     }
@@ -182,21 +205,20 @@ impl TimerRuntime {
     /// waits for its own save to finish before the state moves on, so no save
     /// older than the snapshot read here can land after it.
     pub(crate) fn flush_sync_on_exit(&self) -> std::result::Result<(), SaveError> {
-        let saved_at = self.clock.now_utc();
-        let now = self.clock.now_local();
-        let persisted_state = self.read(|core| core.persisted_state(now, saved_at));
+        let now = self.clock.now_utc();
+        let persisted_state = self.read(|core| PersistedState::from(core.checkpoint(now)));
         self.timer_state_persistence.save_sync(&persisted_state)
     }
 
-    fn apply(&self, event: Event, now: DateTime<Local>) -> Result<Vec<Effect>> {
-        self.lock_core().apply(event, now)
+    fn apply(&self, event: Event, now: DateTime<chrono::Utc>) -> Result<Vec<Effect>> {
+        self.lock_core().apply(event, now).map_err(Into::into)
     }
 
-    fn read<T>(&self, read: impl FnOnce(&TimerCore) -> T) -> T {
+    fn read<T>(&self, read: impl FnOnce(&TimerCore<Local>) -> T) -> T {
         read(&self.lock_core())
     }
 
-    fn lock_core(&self) -> std::sync::MutexGuard<'_, TimerCore> {
+    fn lock_core(&self) -> std::sync::MutexGuard<'_, TimerCore<Local>> {
         self.core
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -213,7 +235,7 @@ impl TimerRuntime {
         &self,
         sink: &impl EffectSink,
         effects: Vec<Effect>,
-        now: DateTime<Local>,
+        now: DateTime<chrono::Utc>,
     ) {
         let previous = self.effect_state();
         let mut outcomes = previous;
@@ -236,7 +258,12 @@ impl TimerRuntime {
                     sink.notify(TimerNotification::ActiveWindowChanged(payload));
                 }
                 Effect::EmitSettingsChanged(payload) => {
-                    sink.notify(TimerNotification::SettingsChanged(payload));
+                    sink.notify(TimerNotification::SettingsChanged(Box::new(
+                        crate::timer_runtime::observation::SettingsChangedPayload {
+                            settings: payload.settings,
+                            settings_file_status: self.settings_file_status(),
+                        },
+                    )));
                 }
                 Effect::EmitBootAutoStartOfferClosed => {
                     sink.notify(TimerNotification::BootAutoStartOfferClosed);
@@ -265,9 +292,8 @@ impl TimerRuntime {
         }
     }
 
-    async fn persist(&self, now: DateTime<Local>) -> Result<()> {
-        let saved_at = self.clock.now_utc();
-        let persisted_state = self.read(|core| core.persisted_state(now, saved_at));
+    async fn persist(&self, now: DateTime<chrono::Utc>) -> Result<()> {
+        let persisted_state = self.read(|core| PersistedState::from(core.checkpoint(now)));
         save_in_background(&self.timer_state_persistence, persisted_state).await
     }
 }
@@ -341,16 +367,16 @@ async fn attempt_break_lock(sink: &impl EffectSink, action: BreakLockAction) -> 
 
 #[cfg(test)]
 mod tests {
-    use crate::settings::input::SettingChange;
+    use pomolice_core::settings::input::SettingChange;
     mod full_state;
     mod outcomes;
 
     use super::*;
     use crate::external_adapters::clock::testing::FixedClock;
     use crate::external_adapters::persistence::{PersistenceLoadOutcome, SaveError};
-    use crate::settings::input::SettingsFileStatus;
-    use crate::types::{PostBreakDecisionAction, PostBreakTransitionPolicy, TimerStatus};
+    use crate::storage::SettingsFileStatus;
     use chrono::{Local, TimeZone, Utc};
+    use pomolice_core::types::{PostBreakDecisionAction, PostBreakTransitionPolicy, TimerStatus};
     use std::path::PathBuf;
     use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -520,15 +546,11 @@ mod tests {
     ) -> TimerRuntime {
         let clock_trait: Arc<dyn Clock + Send + Sync> = Arc::<FixedClock>::clone(clock);
         TimerRuntime::new(
-            TimerCore::restore(
-                None,
-                UserSettings::default(),
-                SettingsFileStatus::Ok,
-                clock.now_local(),
-            ),
+            TimerCore::restore(None, UserSettings::default(), clock.now_utc(), Local).0,
             clock_trait,
             timer_state_persistence,
             settings_persistence,
+            SettingsFileStatus::Ok,
         )
     }
 
@@ -548,8 +570,8 @@ mod tests {
         }
     }
 
-    fn daytime_slot(enabled: bool) -> crate::settings::input::DaySlotInput {
-        crate::settings::input::DaySlotInput {
+    fn daytime_slot(enabled: bool) -> pomolice_core::settings::input::DaySlotInput {
+        pomolice_core::settings::input::DaySlotInput {
             enabled,
             start_time: "09:00".to_string(),
             end_time: "18:00".to_string(),
@@ -640,7 +662,12 @@ mod tests {
         clock.set_now_local(clock.now_local() + chrono::Duration::seconds(1));
 
         runtime
-            .dispatch(&sink, Event::Tick)
+            .dispatch(
+                &sink,
+                Event::TimeObserved {
+                    credited_break_seconds: 1,
+                },
+            )
             .await
             .expect("tick should succeed");
 
@@ -663,7 +690,7 @@ mod tests {
         );
         let saved = saved_state(&runtime)
             .expect("the break should have been saved by the time the tick returned");
-        assert_eq!(saved.status, TimerStatus::OnBreak);
+        assert_eq!(saved.timer.status, TimerStatus::OnBreak);
     }
 
     #[tokio::test]
@@ -675,7 +702,7 @@ mod tests {
         start_default_work(&runtime, &sink).await;
 
         let saved = saved_state(&runtime).expect("the started session should be saved");
-        assert_eq!(saved.status, TimerStatus::Working);
+        assert_eq!(saved.timer.status, TimerStatus::Working);
     }
 
     #[tokio::test]
@@ -691,7 +718,7 @@ mod tests {
             .expect("stop should succeed");
 
         let saved = saved_state(&runtime).expect("the stop should be saved");
-        assert_eq!(saved.status, TimerStatus::Idle);
+        assert_eq!(saved.timer.status, TimerStatus::Idle);
     }
 
     #[tokio::test]
@@ -761,7 +788,7 @@ mod tests {
             .expect("settings save should not touch the timer state file");
 
         assert_eq!(
-            runtime.read_full_state().await.timer.settings,
+            runtime.read_full_state().await.timer.state.settings,
             settings.clone().into()
         );
         assert_eq!(saved_settings(&runtime), Some(settings));
@@ -786,7 +813,7 @@ mod tests {
         assert!(matches!(result, Err(PomoliceError::PersistenceSave(_))));
         assert!(sink.emitted_names().is_empty());
         assert_eq!(
-            runtime.read_full_state().await.timer.settings,
+            runtime.read_full_state().await.timer.state.settings,
             UserSettings::default().into()
         );
     }
@@ -824,7 +851,7 @@ mod tests {
             ..UserSettings::default()
         };
         assert_eq!(
-            runtime.read_full_state().await.timer.settings,
+            runtime.read_full_state().await.timer.state.settings,
             expected.clone().into()
         );
         assert_eq!(saved_settings(&runtime), Some(expected));
@@ -854,6 +881,7 @@ mod tests {
                 .read_full_state()
                 .await
                 .timer
+                .state
                 .settings
                 .notification_sound_muted
         );
@@ -881,7 +909,7 @@ mod tests {
             .await
             .expect("tuesday save should succeed");
         let mut monday_overnight = tuesday_only;
-        monday_overnight.mon = crate::settings::input::DaySlotInput {
+        monday_overnight.mon = pomolice_core::settings::input::DaySlotInput {
             enabled: true,
             start_time: "23:00".to_string(),
             end_time: "10:00".to_string(),
@@ -901,9 +929,9 @@ mod tests {
             Err(PomoliceError::InvalidSettings(errors)) => assert_eq!(
                 errors.issues(),
                 [
-                    crate::settings::input::SettingsValidationIssue::OverlappingTimeRanges {
-                        primary_weekday: crate::types::WeekdayKey::Mon,
-                        secondary_weekday: crate::types::WeekdayKey::Tue,
+                    pomolice_core::settings::input::SettingsValidationIssue::OverlappingTimeRanges {
+                        primary_weekday: pomolice_core::types::WeekdayKey::Mon,
+                        secondary_weekday: pomolice_core::types::WeekdayKey::Tue,
                     }
                 ]
             ),
@@ -923,7 +951,7 @@ mod tests {
             .expect("an empty save should succeed");
 
         assert_eq!(
-            runtime.read_full_state().await.timer.settings,
+            runtime.read_full_state().await.timer.state.settings,
             UserSettings::default().into()
         );
         assert_eq!(saved_settings(&runtime), None);
@@ -939,7 +967,12 @@ mod tests {
         for _ in 0..3 {
             clock.set_now_local(clock.now_local() + chrono::Duration::seconds(1));
             runtime
-                .dispatch(&sink, Event::Tick)
+                .dispatch(
+                    &sink,
+                    Event::TimeObserved {
+                        credited_break_seconds: 1,
+                    },
+                )
                 .await
                 .expect("idle tick should succeed");
         }
@@ -961,7 +994,12 @@ mod tests {
         // lock outcome is applied, and the frontend would never be told about
         // the break, or would hear about it after the stop.
         let (tick, stop) = tokio::join!(
-            runtime.dispatch(&sink, Event::Tick),
+            runtime.dispatch(
+                &sink,
+                Event::TimeObserved {
+                    credited_break_seconds: 1
+                }
+            ),
             runtime.dispatch(&sink, Event::EmergencyStopRequested),
         );
 
@@ -993,13 +1031,19 @@ mod tests {
 
         // The tick is polled first and parks inside the slow break lock, so the
         // flush runs while that dispatch still holds the permit.
-        let (tick, flushed) = tokio::join!(runtime.dispatch(&sink, Event::Tick), async {
-            runtime.flush_sync_on_exit()
-        });
+        let (tick, flushed) = tokio::join!(
+            runtime.dispatch(
+                &sink,
+                Event::TimeObserved {
+                    credited_break_seconds: 1
+                }
+            ),
+            async { runtime.flush_sync_on_exit() }
+        );
 
         flushed.expect("exit flush should not wait for the running dispatch");
         tick.expect("tick should succeed");
         let saved = saved_state(&runtime).expect("state should be saved");
-        assert_eq!(saved.status, TimerStatus::OnBreak);
+        assert_eq!(saved.timer.status, TimerStatus::OnBreak);
     }
 }

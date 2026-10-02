@@ -5,11 +5,11 @@ use crate::error::PomoliceError;
 use crate::ipc::errors::BackendErrorResponse;
 use crate::ipc::input::ObservedCommandArg;
 use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
-use crate::settings::input::SettingsChanges;
 use crate::state::AppState;
-use crate::timer_core::Event;
 use crate::timer_runtime::observation::TimerSnapshot;
-use crate::types::{BreakAttendance, PostBreakDecisionAction};
+use pomolice_core::settings::input::SettingsChanges;
+use pomolice_core::timer_core::Event;
+use pomolice_core::types::{BreakAttendance, PostBreakDecisionAction};
 
 /// Start a work session with the saved settings.
 #[tauri::command]

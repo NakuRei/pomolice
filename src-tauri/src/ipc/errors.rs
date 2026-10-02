@@ -1,7 +1,7 @@
 use tauri::ipc::InvokeError;
 
 use crate::error::PomoliceError;
-use crate::settings::input::SettingsValidationIssue;
+use pomolice_core::settings::input::SettingsValidationIssue;
 
 #[derive(serde::Serialize, specta::Type)]
 #[serde(tag = "code", rename_all = "snake_case")]
@@ -46,10 +46,10 @@ mod tests {
     use serde_json::json;
 
     use crate::error::PersistenceFailure;
-    use crate::settings::input::RangedSettingField;
-    use crate::settings::SettingsValidationErrors;
     use crate::shared_tests::join_error::join_error_from_panic;
-    use crate::types::{TimerStatus, WeekdayKey};
+    use pomolice_core::settings::input::{DaySlotInput, SettingsInput};
+    use pomolice_core::settings::UserSettings;
+    use pomolice_core::types::TimerStatus;
 
     fn persistence_failure(detail: &'static str) -> PersistenceFailure {
         PersistenceFailure::from_error(std::io::Error::other(detail))
@@ -150,17 +150,23 @@ mod tests {
 
     #[test]
     fn rejected_settings_expose_every_issue_alongside_the_public_envelope() {
-        let error = PomoliceError::InvalidSettings(SettingsValidationErrors::from_issues(vec![
-            SettingsValidationIssue::OutOfRange {
-                field: RangedSettingField::WorkDurationSecs,
-                min: 1,
-                max: 7_200,
-            },
-            SettingsValidationIssue::OverlappingTimeRanges {
-                primary_weekday: WeekdayKey::Mon,
-                secondary_weekday: WeekdayKey::Tue,
-            },
-        ]));
+        let mut invalid = SettingsInput {
+            work_duration_secs: 0,
+            ..UserSettings::default().into()
+        };
+        invalid.weekly_auto_run_config.mon = DaySlotInput {
+            enabled: true,
+            start_time: "22:00".into(),
+            end_time: "02:00".into(),
+        };
+        invalid.weekly_auto_run_config.tue = DaySlotInput {
+            enabled: true,
+            start_time: "01:00".into(),
+            end_time: "03:00".into(),
+        };
+        let error = PomoliceError::InvalidSettings(
+            UserSettings::try_from(invalid).expect_err("invalid duration and overlapping schedule"),
+        );
 
         assert_eq!(
             serde_json::to_value(BackendErrorResponse::from(&error))

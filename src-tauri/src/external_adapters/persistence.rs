@@ -12,8 +12,9 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
 use crate::logging_event::{log_error_event, log_info_event, log_warn_event, BackendLogEvent};
-use crate::settings::{PersistedSettings, SETTINGS_SCHEMA_VERSION};
-use crate::types::{PersistedState, PERSISTED_STATE_SCHEMA_VERSION};
+use crate::storage::{PersistedSettings, SETTINGS_SCHEMA_VERSION};
+
+use crate::storage::{PersistedState, PERSISTED_STATE_SCHEMA_VERSION};
 
 #[cfg(test)]
 type InjectedSaveErrorHook = Arc<dyn Fn() -> Option<SaveError> + Send + Sync>;
@@ -337,9 +338,9 @@ impl<T: PersistedDocument> PersistenceManager<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::UserSettings;
-    use crate::types::{ScheduleStopState, SessionDurationSecs, SessionType, TimerStatus};
     use chrono::{DateTime, TimeZone, Utc};
+    use pomolice_core::settings::UserSettings;
+    use pomolice_core::types::{ScheduleStopState, SessionDurationSecs, SessionType, TimerStatus};
     use serde_json::json;
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
@@ -388,30 +389,34 @@ mod tests {
     fn contract_persisted_state(saved_at: DateTime<Utc>) -> PersistedState {
         PersistedState {
             schema_version: PERSISTED_STATE_SCHEMA_VERSION,
-            status: TimerStatus::Working,
-            remaining_seconds: 1234,
-            session_duration_secs: session_duration_secs(2700),
-            session_type: SessionType::Work,
-            current_cycle: 3,
-            completed_pomodoros: 2,
-            post_break_decision_pending: false,
-            saved_at,
-            schedule_stop_state: ScheduleStopState::StopAtNextSessionBoundary,
+            timer: pomolice_core::types::TimerCheckpoint {
+                status: TimerStatus::Working,
+                remaining_seconds: 1234,
+                session_duration_secs: session_duration_secs(2700),
+                session_type: SessionType::Work,
+                current_cycle: 3,
+                completed_pomodoros: 2,
+                post_break_decision_pending: false,
+                saved_at,
+                schedule_stop_state: ScheduleStopState::StopAtNextSessionBoundary,
+            },
         }
     }
 
     fn alternate_persisted_state(saved_at: DateTime<Utc>) -> PersistedState {
         PersistedState {
             schema_version: PERSISTED_STATE_SCHEMA_VERSION,
-            status: TimerStatus::Working,
-            remaining_seconds: 678,
-            session_duration_secs: session_duration_secs(1800),
-            session_type: SessionType::Work,
-            current_cycle: 9,
-            completed_pomodoros: 5,
-            post_break_decision_pending: false,
-            saved_at,
-            schedule_stop_state: ScheduleStopState::NotControlledBySchedule,
+            timer: pomolice_core::types::TimerCheckpoint {
+                status: TimerStatus::Working,
+                remaining_seconds: 678,
+                session_duration_secs: session_duration_secs(1800),
+                session_type: SessionType::Work,
+                current_cycle: 9,
+                completed_pomodoros: 5,
+                post_break_decision_pending: false,
+                saved_at,
+                schedule_stop_state: ScheduleStopState::NotControlledBySchedule,
+            },
         }
     }
 
@@ -524,14 +529,14 @@ mod tests {
         write_timer_state_json(&temp_dir, &contract_persisted_state_json(saved_at_utc));
 
         let restored = load_restored(&persistence);
-        assert_eq!(restored.saved_at, saved_at_utc);
-        assert_eq!(restored.status, TimerStatus::Working);
-        assert_eq!(restored.remaining_seconds, 1234);
-        assert_eq!(restored.current_cycle, 3);
-        assert_eq!(restored.completed_pomodoros, 2);
-        assert_eq!(restored.session_duration_secs.get(), 2700);
+        assert_eq!(restored.timer.saved_at, saved_at_utc);
+        assert_eq!(restored.timer.status, TimerStatus::Working);
+        assert_eq!(restored.timer.remaining_seconds, 1234);
+        assert_eq!(restored.timer.current_cycle, 3);
+        assert_eq!(restored.timer.completed_pomodoros, 2);
+        assert_eq!(restored.timer.session_duration_secs.get(), 2700);
         assert_eq!(
-            restored.schedule_stop_state,
+            restored.timer.schedule_stop_state,
             ScheduleStopState::StopAtNextSessionBoundary
         );
 
@@ -571,8 +576,8 @@ mod tests {
 
         assert!(save_result.is_err());
         let restored = load_restored(&persistence);
-        assert_eq!(restored.saved_at, saved_at_utc);
-        assert_eq!(restored.remaining_seconds, 1234);
+        assert_eq!(restored.timer.saved_at, saved_at_utc);
+        assert_eq!(restored.timer.remaining_seconds, 1234);
 
         cleanup_temp_dir(&temp_dir);
     }
@@ -608,16 +613,16 @@ mod tests {
         let first_save_result =
             persistence.save_sync(&alternate_persisted_state(successful_saved_at_utc));
         assert!(first_save_result.is_err());
-        assert_eq!(load_restored(&persistence).saved_at, saved_at_utc);
+        assert_eq!(load_restored(&persistence).timer.saved_at, saved_at_utc);
 
         persistence
             .save_sync(&alternate_persisted_state(successful_saved_at_utc))
             .expect("sync save should succeed after a failed save attempt");
 
         let restored = load_restored(&persistence);
-        assert_eq!(restored.saved_at, successful_saved_at_utc);
-        assert_eq!(restored.remaining_seconds, 678);
-        assert_eq!(restored.current_cycle, 9);
+        assert_eq!(restored.timer.saved_at, successful_saved_at_utc);
+        assert_eq!(restored.timer.remaining_seconds, 678);
+        assert_eq!(restored.timer.current_cycle, 9);
 
         cleanup_temp_dir(&temp_dir);
     }
@@ -638,11 +643,9 @@ mod tests {
 
                 thread::spawn(move || {
                     start_barrier.wait();
-                    let persisted_state = PersistedState {
-                        remaining_seconds,
-                        current_cycle,
-                        ..alternate_persisted_state(saved_at_utc)
-                    };
+                    let mut persisted_state = alternate_persisted_state(saved_at_utc);
+                    persisted_state.timer.remaining_seconds = remaining_seconds;
+                    persisted_state.timer.current_cycle = current_cycle;
                     persistence.save_sync(&persisted_state)
                 })
             })
@@ -664,12 +667,12 @@ mod tests {
 
         assert!(
             matches!(
-                (persisted_state.remaining_seconds, persisted_state.current_cycle),
+                (persisted_state.timer.remaining_seconds, persisted_state.timer.current_cycle),
                 (301, 1) | (907, 2)
             ),
             "expected one complete state to win the race, got remaining_seconds={} current_cycle={}",
-            persisted_state.remaining_seconds,
-            persisted_state.current_cycle
+            persisted_state.timer.remaining_seconds,
+            persisted_state.timer.current_cycle
         );
 
         cleanup_temp_dir(&temp_dir);
