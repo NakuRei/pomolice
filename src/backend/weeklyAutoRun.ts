@@ -4,13 +4,7 @@ import type { WeekdayKey } from "@/ipc/generated";
  * Rust `chrono::Weekday` tokens used in serialized payloads.
  */
 export type ChronoWeekdayToken =
-  | "Mon"
-  | "Tue"
-  | "Wed"
-  | "Thu"
-  | "Fri"
-  | "Sat"
-  | "Sun";
+  "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
 
 type LowercaseChronoWeekdayToken = Lowercase<ChronoWeekdayToken>;
 
@@ -63,9 +57,7 @@ export type WeeklyAutoRunConfig = Record<WeekdayKey, DayAutoRunSlot>;
  * ```
  */
 export type TimerStartSource =
-  | "manual_outside_window"
-  | "manual_inside_window"
-  | "scheduled_auto_start";
+  "manual_outside_window" | "manual_inside_window" | "scheduled_auto_start";
 
 /**
  * Normalized weekday list used for deterministic iteration order.

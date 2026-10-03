@@ -278,7 +278,10 @@ fn decode_idle_app_icon(
         return Err("embedded idle app icon PNG must decode to RGBA".into());
     }
 
-    let mut rgba = Vec::with_capacity(reader.output_buffer_size());
+    let buffer_size = reader
+        .output_buffer_size()
+        .ok_or("embedded idle app icon PNG is too large")?;
+    let mut rgba = Vec::with_capacity(buffer_size);
     while let Ok(Some(row)) = reader.next_row() {
         rgba.extend(row.data());
     }

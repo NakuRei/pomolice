@@ -10,10 +10,7 @@ export type RedactionClassification = "public" | "sensitive";
 export type ErrorBoundaryScope = "fullscreen_break" | "settings" | "app";
 
 export type FrontendScope =
-  | "bootstrap"
-  | "error_boundary"
-  | "notifications"
-  | "timer_sync";
+  "bootstrap" | "error_boundary" | "notifications" | "timer_sync";
 
 type NoFields = Record<string, never>;
 type FrontendEventFields = Record<string, LogFieldValue>;

@@ -18,9 +18,7 @@ export type Operation =
 export type OperationKind = Operation["kind"];
 export type OperationResult = CommandResponse<TimerSnapshot> | CommandFailure;
 export type OperationOutcome =
-  | { status: "pending" }
-  | { status: "accepted" }
-  | CommandFailure;
+  { status: "pending" } | { status: "accepted" } | CommandFailure;
 
 export interface OperationRecord {
   id: number;

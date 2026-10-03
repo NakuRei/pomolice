@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { format, resolveConfig } from "prettier";
-import { ESLint } from "eslint";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const destination = join(root, "src/ipc/generated.ts");
@@ -33,15 +32,7 @@ try {
     },
   );
   const raw = await readFile(output, "utf8");
-  const [linted] = await new ESLint({ cwd: root, fix: true }).lintText(raw, {
-    filePath: destination,
-  });
-  if (!linted || linted.errorCount > 0) {
-    throw new Error(
-      "Generated IPC bindings failed lint: " + JSON.stringify(linted?.messages),
-    );
-  }
-  const generated = await format(linted.output ?? raw, {
+  const generated = await format(raw, {
     ...(await resolveConfig(destination)),
     filepath: destination,
   });

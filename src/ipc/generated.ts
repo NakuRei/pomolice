@@ -11,12 +11,12 @@ import {
 /**
  * Summary of the currently active schedule window.
  */
-export interface ActiveWindowSummaryPayload {
+export type ActiveWindowSummaryPayload = {
   weekday_key: WeekdayKey;
   start_time: string;
   end_time: string;
   crosses_midnight: boolean;
-}
+};
 
 export type AutoRunStopPending = null;
 
@@ -30,22 +30,22 @@ export type BackendErrorResponse =
   | { code: "window_control_error" }
   | { code: "persistence_error" };
 
-export interface BootAutoStartOfferPayload {
+export type BootAutoStartOfferPayload = {
   anchor_local_date: string;
   window: ActiveWindowSummaryPayload;
-}
+};
 
 export type BreakLockAction = "enter" | "release";
 
-export interface BreakLockOutcome {
+export type BreakLockOutcome = {
   action: BreakLockAction;
   status: EffectStatus;
-}
+};
 
-export interface BreakLockState {
+export type BreakLockState = {
   target: BreakLockTarget;
   last_attempt: BreakLockOutcome | null;
-}
+};
 
 export type BreakLockTarget = "locked" | "unlocked";
 
@@ -53,11 +53,11 @@ export type CommandResponse<T> =
   | { status: "accepted"; value: T }
   | { status: "rejected"; error: BackendErrorResponse };
 
-export interface DaySlotInput {
+export type DaySlotInput = {
   enabled: boolean;
   start_time: string;
   end_time: string;
-}
+};
 
 export type EffectStatus = "succeeded" | "failed";
 
@@ -98,8 +98,7 @@ export type PostBreakDecisionAction = "continue" | "stop_cycle";
  * Policy for deciding what happens when a break session finishes.
  */
 export type PostBreakTransitionPolicy =
-  | "require_manual_continue"
-  | "start_next_work_automatically";
+  "require_manual_continue" | "start_next_work_automatically";
 
 /**
  * Settings fields that are limited to a numeric range.
@@ -116,13 +115,13 @@ export type SessionCompleted = SessionCompletedPayload;
 /**
  * Payload sent to frontend when a session completes
  */
-export interface SessionCompletedPayload {
+export type SessionCompletedPayload = {
   transition_reason: SessionTransitionReason;
   completed_session_type: SessionType;
   next_status: TimerStatus;
   next_session_type: SessionType;
   requires_manual_continue_decision: boolean;
-}
+};
 
 /**
  * Reason emitted for a session-boundary transition.
@@ -146,7 +145,7 @@ export type SettingChange<T> = T;
  * judged across weekdays. An unknown field or an explicit `null` is
  * rejected, so a misspelled or empty value never passes for "unchanged".
  */
-export interface SettingsChanges {
+export type SettingsChanges = {
   work_duration_secs?: SettingChange<number>;
   short_break_duration_secs?: SettingChange<number>;
   long_break_duration_secs?: SettingChange<number>;
@@ -156,7 +155,7 @@ export interface SettingsChanges {
   weekly_auto_run_config?: SettingChange<WeeklyScheduleInput>;
   notification_sound_volume_percent?: SettingChange<number>;
   notification_sound_muted?: SettingChange<boolean>;
-}
+};
 
 /**
  * Whether the settings file could be used at startup.
@@ -178,7 +177,7 @@ export type SettingsFileStatus =
  * become validation issues that name the input; only a value of the wrong
  * kind, such as text where a number belongs, fails as malformed input.
  */
-export interface SettingsInput {
+export type SettingsInput = {
   work_duration_secs: number;
   short_break_duration_secs: number;
   long_break_duration_secs: number;
@@ -188,7 +187,7 @@ export interface SettingsInput {
   weekly_auto_run_config: WeeklyScheduleInput;
   notification_sound_volume_percent: number;
   notification_sound_muted: boolean;
-}
+};
 
 /**
  * One reason a settings save was rejected. Part of the public command
@@ -217,20 +216,20 @@ export type TimeBoundary = "start" | "end";
  * Latest attempts in this application run. None means not attempted;
  * a failed lock operation leaves the physical window state uncertain.
  */
-export interface TimerEffectsState {
+export type TimerEffectsState = {
   break_lock: BreakLockState;
   last_timer_save: EffectStatus | null;
-}
+};
 
 /**
  * Reads and accepted commands return the same observation contract.
  * A rejected command changes no timer state.
  */
-export interface TimerSnapshot {
+export type TimerSnapshot = {
   revision: SnapshotRevision;
   timer: FullStatePayload;
   effects: TimerEffectsState;
-}
+};
 
 export type TimerSnapshotChanged = TimerSnapshot;
 
@@ -244,7 +243,7 @@ export type TimerStatus = "idle" | "working" | "on_break";
  */
 export type WeekdayKey = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 
-export interface WeeklyScheduleInput {
+export type WeeklyScheduleInput = {
   mon: DaySlotInput;
   tue: DaySlotInput;
   wed: DaySlotInput;
@@ -252,7 +251,7 @@ export interface WeeklyScheduleInput {
   fri: DaySlotInput;
   sat: DaySlotInput;
   sun: DaySlotInput;
-}
+};
 
 export const commands = {
   isTrayAvailable: (): Promise<CommandResponse<boolean>> =>

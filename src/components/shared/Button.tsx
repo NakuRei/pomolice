@@ -1,11 +1,7 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 
 export type ButtonAppearance =
-  | "primary"
-  | "secondary"
-  | "outline"
-  | "danger"
-  | "subtle";
+  "primary" | "secondary" | "outline" | "danger" | "subtle";
 export type ButtonSize = "sm" | "md";
 
 const BUTTON_BASE_CLASS_NAME =

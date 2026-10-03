@@ -1,6 +1,5 @@
-/// <reference types="vitest" />
 import path from "node:path";
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -17,7 +16,7 @@ const hmrConfig = hasTauriDevHost
   : undefined;
 
 // https://vite.dev/config/
-export default defineConfig(() => ({
+export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
@@ -28,7 +27,7 @@ export default defineConfig(() => ({
   // The break overlay is its own window, so it is a second entry rather than a
   // public/ file — that way it shares the app's processed font assets.
   build: {
-    rollupOptions: {
+    rolldownOptions: {
       input: {
         main: path.resolve(import.meta.dirname, "index.html"),
         breakOverlay: path.resolve(import.meta.dirname, "break-overlay.html"),
@@ -69,4 +68,4 @@ export default defineConfig(() => ({
       ],
     },
   },
-}));
+});

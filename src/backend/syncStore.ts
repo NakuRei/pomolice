@@ -1,8 +1,7 @@
 import { create } from "zustand";
 import type { CommandFailure } from "@/ipc/receiveCommandResponse";
 export type BackendSyncFailure =
-  | CommandFailure
-  | { status: "setup"; cause: unknown };
+  CommandFailure | { status: "setup"; cause: unknown };
 export type BackendConnection =
   | { status: "idle" }
   | { status: "connecting"; attempt: number }

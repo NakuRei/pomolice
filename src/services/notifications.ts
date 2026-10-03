@@ -52,10 +52,7 @@ export interface NotificationSoundPreviewOptions {
 }
 
 export type NotificationSoundPreviewStatus =
-  | "played"
-  | "muted"
-  | "unavailable"
-  | "error";
+  "played" | "muted" | "unavailable" | "error";
 
 export interface NotificationSoundPreviewResult {
   status: NotificationSoundPreviewStatus;
