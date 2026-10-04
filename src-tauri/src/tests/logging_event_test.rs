@@ -24,7 +24,7 @@ macro_rules! with_backend_log_event_variants {
             AppTrayTooltipUpdateFailed,
             AppTrayIdleAppIconMissing,
             TimerCommandInvoked,
-            TimerCommandUnauthorized,
+            IpcCommandUnauthorized,
             TimerCommandInputRejected,
             ToolingTrayIconFixtureExported,
             ToolingTrayIconFixtureExportCompleted,
@@ -106,9 +106,9 @@ const ERROR_OBJECT_BEARER_TOKEN: &str = "error-bearer-token";
 const ERROR_OBJECT_HOME_USERNAME: &str = "ErrorUser";
 
 #[test]
-fn test_render_event_message_preserves_timer_command_unauthorized_log_contract() {
+fn test_render_event_message_preserves_ipc_command_unauthorized_log_contract() {
     let rendered = render_event_message(
-        BackendLogEvent::TimerCommandUnauthorized,
+        BackendLogEvent::IpcCommandUnauthorized,
         &[
             ("authorization_token", "super-secret-token".to_string()),
             ("window_label", "main_window".to_string()),
@@ -117,7 +117,7 @@ fn test_render_event_message_preserves_timer_command_unauthorized_log_contract()
         None,
     );
 
-    assert_rendered_event_identity(&rendered, "timer.command.unauthorized");
+    assert_rendered_event_identity(&rendered, "ipc.command.unauthorized");
     assert_rendered_field_names(
         &rendered,
         &["command_name", "window_label", "authorization_token"],
@@ -130,7 +130,7 @@ fn test_render_event_message_preserves_timer_command_unauthorized_log_contract()
 #[test]
 fn test_render_event_message_neutralizes_log_line_injection_without_losing_public_context() {
     let rendered = render_event_message(
-        BackendLogEvent::TimerCommandUnauthorized,
+        BackendLogEvent::IpcCommandUnauthorized,
         &[
             ("authorization_token", "super-secret-token".to_string()),
             ("window_label", "main\r\nwindow".to_string()),
@@ -139,7 +139,7 @@ fn test_render_event_message_neutralizes_log_line_injection_without_losing_publi
         None,
     );
 
-    assert_rendered_event_identity(&rendered, "timer.command.unauthorized");
+    assert_rendered_event_identity(&rendered, "ipc.command.unauthorized");
     assert_rendered_field_names(&rendered, &["command_name", "window_label"]);
     assert!(rendered.contains("sync"));
     assert!(rendered.contains("settings"));
@@ -351,7 +351,7 @@ fn test_render_event_message_prevents_error_object_structure_injection() {
 #[test]
 fn test_render_event_message_redacts_secret_fields_before_structure_encoding() {
     let rendered = render_event_message(
-        BackendLogEvent::TimerCommandUnauthorized,
+        BackendLogEvent::IpcCommandUnauthorized,
         &[
             (
                 "authorization_token",

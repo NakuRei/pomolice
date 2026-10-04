@@ -108,10 +108,10 @@ macro_rules! backend_log_event_spec_match {
                     "window_label" => Public,
                 ]
             ),
-            BackendLogEvent::TimerCommandUnauthorized => spec!(
-                "timer.command.unauthorized",
+            BackendLogEvent::IpcCommandUnauthorized => spec!(
+                "ipc.command.unauthorized",
                 Warn,
-                "Timer command unauthorized",
+                "IPC command unauthorized",
                 [
                     "command_name" => Public,
                     "window_label" => Public,

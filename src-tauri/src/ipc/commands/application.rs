@@ -1,3 +1,4 @@
+use super::authorize_main_window;
 use crate::ipc::result::CommandResponse;
 use tauri::{Manager, Runtime, WebviewWindow};
 
@@ -11,9 +12,9 @@ use crate::ipc::errors::BackendErrorResponse;
 pub(crate) async fn get_emergency_shortcut_status<R: Runtime>(
     window: WebviewWindow<R>,
 ) -> CommandResponse<EmergencyShortcutStatus> {
-    if window.label() != "main" {
+    if let Err(error) = authorize_main_window(&window, "get_emergency_shortcut_status") {
         return CommandResponse::Rejected {
-            error: BackendErrorResponse::UnauthorizedWindow,
+            error: BackendErrorResponse::from(&error),
         };
     }
     CommandResponse::Accepted {
@@ -26,9 +27,9 @@ pub(crate) async fn get_emergency_shortcut_status<R: Runtime>(
 pub(crate) async fn has_input_monitor_failed<R: Runtime>(
     window: WebviewWindow<R>,
 ) -> CommandResponse<bool> {
-    if window.label() != "main" {
+    if let Err(error) = authorize_main_window(&window, "has_input_monitor_failed") {
         return CommandResponse::Rejected {
-            error: BackendErrorResponse::UnauthorizedWindow,
+            error: BackendErrorResponse::from(&error),
         };
     }
     let state = window.state::<crate::state::AppState>();
@@ -43,9 +44,9 @@ pub(crate) async fn has_input_monitor_failed<R: Runtime>(
 pub(crate) async fn is_tray_available<R: Runtime>(
     window: WebviewWindow<R>,
 ) -> CommandResponse<bool> {
-    if window.label() != "main" {
+    if let Err(error) = authorize_main_window(&window, "is_tray_available") {
         return CommandResponse::Rejected {
-            error: BackendErrorResponse::UnauthorizedWindow,
+            error: BackendErrorResponse::from(&error),
         };
     }
     CommandResponse::Accepted {
@@ -56,9 +57,9 @@ pub(crate) async fn is_tray_available<R: Runtime>(
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn exit_without_tray<R: Runtime>(window: WebviewWindow<R>) -> CommandResponse<()> {
-    if window.label() != "main" {
+    if let Err(error) = authorize_main_window(&window, "exit_without_tray") {
         return CommandResponse::Rejected {
-            error: BackendErrorResponse::UnauthorizedWindow,
+            error: BackendErrorResponse::from(&error),
         };
     }
     let app = window.app_handle();
