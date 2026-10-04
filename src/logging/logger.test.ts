@@ -58,12 +58,15 @@ describe("createLogger()", () => {
   it("writes registered info events via @tauri-apps/plugin-log", async () => {
     const { createLogger } = await import("./logger");
 
-    createLogger("bootstrap").info("app.startup.completed");
+    createLogger("error_boundary").info("error_boundary.render_error_reset", {
+      boundary_scope: "app",
+    });
 
     expect(infoLog).toHaveBeenCalledTimes(1);
-    expect(infoLog).toHaveBeenCalledWith("app.startup.completed", {
+    expect(infoLog).toHaveBeenCalledWith("error_boundary.render_error_reset", {
       keyValues: {
-        logger_scope: "bootstrap",
+        boundary_scope: "app",
+        logger_scope: "error_boundary",
       },
     });
   });
@@ -440,7 +443,9 @@ describe("createLogger()", () => {
     const { createLogger } = await import("./logger");
 
     expect(() => {
-      createLogger("bootstrap").warn("app.startup.completed" as never);
+      createLogger("error_boundary").warn("error_boundary.render_error_reset", {
+        boundary_scope: "app",
+      });
     }).toThrow(/must be logged at info/u);
 
     expect(warnLog).not.toHaveBeenCalled();
@@ -450,8 +455,10 @@ describe("createLogger()", () => {
     const { createLogger } = await import("./logger");
 
     expect(() => {
-      createLogger("bootstrap").info("missing.event" as never);
+      createLogger("error_boundary").info("app.startup.completed" as never);
     }).toThrow(/Unknown frontend log event/u);
+
+    expect(infoLog).not.toHaveBeenCalled();
   });
 
   it("does not write logs outside the tauri environment", async () => {
@@ -461,7 +468,9 @@ describe("createLogger()", () => {
     try {
       const { createLogger } = await import("./logger");
 
-      createLogger("bootstrap").info("app.startup.completed");
+      createLogger("error_boundary").info("error_boundary.render_error_reset", {
+        boundary_scope: "app",
+      });
 
       expect(traceLog).not.toHaveBeenCalled();
       expect(debugLog).not.toHaveBeenCalled();
@@ -476,10 +485,13 @@ describe("createLogger()", () => {
   it("normalizes blank scopes to unknown_scope", async () => {
     const { createLogger } = await import("./logger");
 
-    createLogger("   " as never).info("app.startup.completed");
+    createLogger("   " as never).info("error_boundary.render_error_reset", {
+      boundary_scope: "app",
+    });
 
-    expect(infoLog).toHaveBeenCalledWith("app.startup.completed", {
+    expect(infoLog).toHaveBeenCalledWith("error_boundary.render_error_reset", {
       keyValues: {
+        boundary_scope: "app",
         logger_scope: "unknown_scope",
       },
     });

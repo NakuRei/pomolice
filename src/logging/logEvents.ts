@@ -9,10 +9,8 @@ export type RedactionClassification = "public" | "sensitive";
 
 export type ErrorBoundaryScope = "fullscreen_break" | "settings" | "app";
 
-export type FrontendScope =
-  "bootstrap" | "error_boundary" | "notifications" | "timer_sync";
+export type FrontendScope = "error_boundary" | "notifications" | "timer_sync";
 
-type NoFields = Record<string, never>;
 type FrontendEventFields = Record<string, LogFieldValue>;
 
 export interface FrontendLogEventDefinition<
@@ -28,7 +26,6 @@ export interface FrontendLogEventDefinition<
 }
 
 export interface FrontendFieldsByEvent {
-  "app.startup.completed": NoFields;
   "error_boundary.boundary_render_error_caught": {
     boundary_scope: ErrorBoundaryScope;
     component_stack?: string;
@@ -82,13 +79,6 @@ type FrontendLogEventCatalog = {
 };
 
 export const frontendLogEventCatalog = {
-  "app.startup.completed": {
-    eventId: "app.startup.completed",
-    severity: "info",
-    messageTemplate: "application startup completed",
-    allowedFields: [],
-    redactionClassification: {},
-  },
   "error_boundary.boundary_render_error_caught": {
     eventId: "error_boundary.boundary_render_error_caught",
     severity: "error",
@@ -207,7 +197,6 @@ export const frontendLogEventCatalog = {
 } satisfies FrontendLogEventCatalog;
 
 export const FRONTEND_LOG_EVENT_IDS = {
-  appStartupCompleted: "app.startup.completed",
   errorBoundaryBoundaryRenderErrorCaught:
     "error_boundary.boundary_render_error_caught",
   errorBoundaryRecoverableRenderError:
