@@ -1,4 +1,4 @@
-npx lint-staged --max-arg-length 4000
+npx lint-staged
 npm run format:rust:check
 npm run lint:rust
 npm run test
