@@ -1,0 +1,19 @@
+{
+  "identifier": "io.github.NakuRei.pomolice.e2e",
+  "productName": "Pomolice E2E",
+  "build": { "beforeBuildCommand": "npm run build -- --mode e2e" },
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "capabilities": [
+        "default",
+        {
+          "identifier": "e2e-webdriver",
+          "windows": ["main", "break-overlay-*"],
+          "permissions": ["wdio:default"]
+        }
+      ]
+    }
+  },
+  "bundle": { "active": false }
+}

@@ -18,7 +18,11 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2.7.1", features = [] }
 
+[features]
+e2e = ["dep:tauri-plugin-wdio"]
+
 [dependencies]
+tauri-plugin-wdio = { version = "1.4.0", optional = true }
 pomolice-core = { path = "../crates/pomolice-core" }
 tauri = { version = "2.12.1", features = ["protocol-asset", "tray-icon", "image-png"] }
 tauri-plugin-notification = "2.5.1"

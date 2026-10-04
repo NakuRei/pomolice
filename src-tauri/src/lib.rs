@@ -129,10 +129,12 @@ pub fn run() -> RunResult {
 
     let ipc = ipc::builder();
     let invoke_handler = ipc.invoke_handler();
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default().plugin(external_adapters::logging::build_log_plugin());
+    #[cfg(feature = "e2e")]
+    let builder = builder.plugin(tauri_plugin_wdio::init());
+    let app = builder
         // Raw Input registration interferes with rdev keyboard hooks on Windows while focused.
         .device_event_filter(tauri::DeviceEventFilter::Always)
-        .plugin(external_adapters::logging::build_log_plugin())
         .plugin(tauri_plugin_notification::init())
         .setup(move |app| {
             ipc.mount_events(app);

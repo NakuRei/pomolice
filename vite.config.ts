@@ -1,5 +1,5 @@
 import path from "node:path";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -16,8 +16,27 @@ const hmrConfig = hasTauriDevHost
   : undefined;
 
 // https://vite.dev/config/
-export default defineConfig({
-  plugins: [react(), tailwindcss()],
+export default defineConfig(({ mode }) => ({
+  plugins: [
+    react(),
+    tailwindcss(),
+    {
+      name: "e2e-webdriver",
+      transformIndexHtml: {
+        order: "pre",
+        handler: () =>
+          mode === "e2e"
+            ? [
+                {
+                  tag: "script",
+                  attrs: { type: "module", src: "/e2e/frontend.ts" },
+                  injectTo: "head-prepend",
+                },
+              ]
+            : [],
+      },
+    },
+  ],
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "src"),
@@ -53,6 +72,7 @@ export default defineConfig({
 
   // Vitest configuration
   test: {
+    exclude: [...configDefaults.exclude, "e2e/**"],
     globals: true,
     environment: "jsdom",
     setupFiles: "./src/test/setup.ts",
@@ -68,4 +88,4 @@ export default defineConfig({
       ],
     },
   },
-});
+}));
