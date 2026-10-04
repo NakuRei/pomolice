@@ -49,7 +49,7 @@ mod tests {
     use crate::shared_tests::join_error::join_error_from_panic;
     use pomolice_core::settings::input::{DaySlotInput, SettingsInput};
     use pomolice_core::settings::UserSettings;
-    use pomolice_core::types::TimerStatus;
+    use pomolice_core::timer_core::TimerStatus;
 
     fn persistence_failure(detail: &'static str) -> PersistenceFailure {
         PersistenceFailure::from_error(std::io::Error::other(detail))

@@ -16,7 +16,7 @@ fn the_active_window_tracks_schedule_boundaries() {
         .snapshot(workday_start())
         .active_window_summary
         .expect("active window");
-    assert_eq!(window.weekday_key, crate::types::WeekdayKey::Mon);
+    assert_eq!(window.weekday_key, crate::schedule::WeekdayKey::Mon);
     assert_eq!(
         core.snapshot(seconds_after(workday_start(), 1))
             .active_window_summary,
@@ -51,7 +51,7 @@ fn enabling_an_open_schedule_immediately_exposes_the_active_window() {
             .active_window_summary
             .expect("active window")
             .weekday_key,
-        crate::types::WeekdayKey::Mon
+        crate::schedule::WeekdayKey::Mon
     );
 }
 

@@ -341,3 +341,30 @@ fn changes_reject_an_unknown_field_inside_the_weekly_schedule() {
 
     assert!(result.is_err());
 }
+
+#[test]
+fn test_bounded_newtypes_accept_their_bounds_and_reject_values_outside() {
+    assert!(WorkDurationSecs::try_new(1).is_ok());
+    assert!(WorkDurationSecs::try_new(7_200).is_ok());
+    assert!(WorkDurationSecs::try_new(0).is_err());
+    assert!(WorkDurationSecs::try_new(7_201).is_err());
+    assert!(ShortBreakDurationSecs::try_new(3_600).is_ok());
+    assert!(ShortBreakDurationSecs::try_new(3_601).is_err());
+    assert!(LongBreakDurationSecs::try_new(3_600).is_ok());
+    assert!(LongBreakDurationSecs::try_new(3_601).is_err());
+    assert!(LongBreakIntervalCount::try_new(2).is_ok());
+    assert!(LongBreakIntervalCount::try_new(10).is_ok());
+    assert!(LongBreakIntervalCount::try_new(1).is_err());
+    assert!(LongBreakIntervalCount::try_new(11).is_err());
+    assert!(NotificationSoundVolumePercent::try_new(0).is_ok());
+    assert!(NotificationSoundVolumePercent::try_new(100).is_ok());
+    assert!(NotificationSoundVolumePercent::try_new(101).is_err());
+}
+
+#[test]
+fn test_post_break_transition_policy_default() {
+    assert_eq!(
+        PostBreakTransitionPolicy::default(),
+        PostBreakTransitionPolicy::RequireManualContinue
+    );
+}

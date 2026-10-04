@@ -9,11 +9,12 @@
 mod boot_auto_start;
 mod break_session;
 mod effect;
+mod error;
 mod event;
 pub mod observation;
 mod phase;
 mod restore;
-mod schedule;
+mod schedule_control;
 mod session;
 #[cfg(test)]
 mod tests;
@@ -21,17 +22,20 @@ mod tests;
 use chrono::{DateTime, Utc};
 
 pub use effect::{BreakLockTarget, Effect};
-pub use event::Event;
+pub use error::TimerError;
+pub use event::{Event, PostBreakDecisionAction};
+pub use phase::{BreakAttendance, SessionDurationSecs, SessionType, TimerStatus};
+pub use restore::TimerCheckpoint;
+pub use schedule_control::ScheduleStopState;
 
 use phase::{BreakSessionState, TimerPhase};
-use schedule::ScheduleState;
+use schedule_control::ScheduleState;
 
-use crate::error::Result;
-use crate::schedule_boundary::{is_now_inside_schedule_window, ActiveWindow};
+use self::error::Result;
+use crate::schedule::boundary::{is_now_inside_schedule_window, ActiveWindow};
 use crate::settings::UserSettings;
-use crate::timer_core::observation::BootAutoStartOfferPayload;
 use crate::timer_core::observation::TimerState;
-use crate::types::{SessionDurationSecs, SessionType, TimerCheckpoint, TimerStatus};
+use crate::timer_core::observation::{ActiveWindowSummaryPayload, BootAutoStartOfferPayload};
 
 pub struct TimerCore<Tz: chrono::TimeZone> {
     timezone: Tz,
@@ -119,13 +123,13 @@ impl<Tz: chrono::TimeZone> TimerCore<Tz> {
         let active_window_summary = self
             .active_window_at(now)
             .as_ref()
-            .map(ActiveWindow::to_summary_payload);
+            .map(ActiveWindowSummaryPayload::from);
         let boot_auto_start_offer =
             self.boot_auto_start_offer
                 .as_ref()
                 .map(|window| BootAutoStartOfferPayload {
                     anchor_local_date: window.anchor_local_date,
-                    window: window.to_summary_payload(),
+                    window: window.into(),
                 });
         let current_break = self.current_break();
 

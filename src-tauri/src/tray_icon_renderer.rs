@@ -1,7 +1,7 @@
 // Renders 16x16 RGBA tray icons showing remaining minutes with status-colored backgrounds.
 // Uses a hand-coded 5x7 bitmap font for digits 0-9.
 
-use pomolice_core::types::TimerStatus;
+use pomolice_core::timer_core::TimerStatus;
 
 const ICON_SIZE: u32 = 16;
 const DIGIT_WIDTH: u32 = 5;
@@ -289,7 +289,7 @@ mod tests {
         icon_size, render_idle_icon, render_idle_icon_for_variant, render_tray_icon,
         IdleGlyphVariant, IDLE_GLYPH_VARIANTS,
     };
-    use pomolice_core::types::TimerStatus;
+    use pomolice_core::timer_core::TimerStatus;
 
     #[test]
     fn rendered_icons_match_the_reported_rgba_dimensions() {

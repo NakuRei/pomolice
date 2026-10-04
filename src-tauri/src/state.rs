@@ -77,7 +77,7 @@ impl AppState {
                 ("restore_status", format!("{restore_status:?}")),
                 (
                     "is_running",
-                    (core.status() != pomolice_core::types::TimerStatus::Idle).to_string(),
+                    (core.status() != pomolice_core::timer_core::TimerStatus::Idle).to_string(),
                 ),
             ],
         );

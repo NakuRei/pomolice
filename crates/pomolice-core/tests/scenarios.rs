@@ -1,9 +1,9 @@
 use chrono::{TimeZone, Utc};
 use chrono_tz::{America::New_York, Asia::Tokyo};
-use pomolice_core::error::TimerError;
 use pomolice_core::settings::{input::SettingsInput, UserSettings};
+use pomolice_core::timer_core::TimerError;
+use pomolice_core::timer_core::TimerStatus;
 use pomolice_core::timer_core::{BreakLockTarget, Effect, Event, TimerCore};
-use pomolice_core::types::TimerStatus;
 
 #[test]
 fn restoring_expired_work_returns_a_ready_break_and_its_initial_effects() {

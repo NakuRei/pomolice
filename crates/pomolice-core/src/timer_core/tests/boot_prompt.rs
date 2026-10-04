@@ -37,7 +37,7 @@ fn startup_inside_a_window_offers_it_without_a_frontend_command() {
             .boot_auto_start_offer
             .expect("startup offer");
         assert_eq!(offer.anchor_local_date, monday(10, 0, 0).date_naive());
-        assert_eq!(offer.window.weekday_key, crate::types::WeekdayKey::Mon);
+        assert_eq!(offer.window.weekday_key, crate::schedule::WeekdayKey::Mon);
         assert_eq!(core.status(), TimerStatus::Idle);
     }
 }

@@ -1,13 +1,15 @@
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 
+use super::error::{Result, TimerError};
 use super::phase::{BreakKind, BreakSessionState, TimerPhase};
+use super::schedule_control::WorkStartOrigin;
 use super::{BreakLockTarget, Effect, TimerCore};
-use crate::error::{Result, TimerError};
+use crate::settings::PostBreakTransitionPolicy;
 use crate::settings::UserSettings;
 use crate::timer_core::observation::SessionCompletedPayload;
-use crate::types::{
-    PostBreakDecisionAction, PostBreakTransitionPolicy, ScheduleStopState, SessionDurationSecs,
-    SessionTransitionReason, SessionType, TimerStatus, WorkStartOrigin,
+use crate::timer_core::observation::SessionTransitionReason;
+use crate::timer_core::{
+    PostBreakDecisionAction, ScheduleStopState, SessionDurationSecs, SessionType, TimerStatus,
 };
 
 const MANUAL_START_RATE_LIMIT: ChronoDuration = ChronoDuration::milliseconds(300);

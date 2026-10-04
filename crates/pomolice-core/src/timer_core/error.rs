@@ -1,4 +1,4 @@
-use crate::types::TimerStatus;
+use super::phase::TimerStatus;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum TimerError {
@@ -11,4 +11,4 @@ pub enum TimerError {
     RateLimited { remaining_ms: u64 },
 }
 
-pub(crate) type Result<T> = std::result::Result<T, TimerError>;
+pub(super) type Result<T> = std::result::Result<T, TimerError>;

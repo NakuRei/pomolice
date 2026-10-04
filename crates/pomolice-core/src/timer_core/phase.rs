@@ -1,6 +1,91 @@
 use chrono::{DateTime, Utc};
 
-use crate::types::{BreakAttendance, SessionDurationSecs, SessionType, TimerStatus};
+use crate::settings::ranges::bounded_u64_newtype;
+use crate::settings::{LongBreakDurationSecs, ShortBreakDurationSecs, WorkDurationSecs};
+use serde::{Deserialize, Serialize};
+
+/// Timer status representing the current phase
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum TimerStatus {
+    Idle,
+    Working,
+    OnBreak,
+}
+
+/// Session type representing work or break sessions
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionType {
+    Work,
+    ShortBreak,
+    LongBreak,
+}
+
+// Covers every session kind, so it is bounded by the longest one.
+bounded_u64_newtype!(
+    SessionDurationSecs,
+    "session_duration_secs",
+    1,
+    WorkDurationSecs::MAX
+);
+
+// The conversions below are infallible only while every session kind fits
+// inside the session range.
+const _: () = assert!(
+    SessionDurationSecs::MIN <= WorkDurationSecs::MIN
+        && WorkDurationSecs::MAX <= SessionDurationSecs::MAX
+        && SessionDurationSecs::MIN <= ShortBreakDurationSecs::MIN
+        && ShortBreakDurationSecs::MAX <= SessionDurationSecs::MAX
+        && SessionDurationSecs::MIN <= LongBreakDurationSecs::MIN
+        && LongBreakDurationSecs::MAX <= SessionDurationSecs::MAX
+);
+
+impl From<WorkDurationSecs> for SessionDurationSecs {
+    fn from(value: WorkDurationSecs) -> Self {
+        Self(value.get())
+    }
+}
+
+impl From<ShortBreakDurationSecs> for SessionDurationSecs {
+    fn from(value: ShortBreakDurationSecs) -> Self {
+        Self(value.get())
+    }
+}
+
+impl From<LongBreakDurationSecs> for SessionDurationSecs {
+    fn from(value: LongBreakDurationSecs) -> Self {
+        Self(value.get())
+    }
+}
+
+/// Whether the user is at the desk during the current break.
+///
+/// `Away` keeps the break running but makes its end wait for a manual
+/// decision even under the automatic post-break policy, so an unattended
+/// machine does not run through work sessions nobody is doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BreakAttendance {
+    #[default]
+    AtDesk,
+    Away,
+}
+
+impl BreakAttendance {
+    #[must_use]
+    pub fn from_away_flag(away: bool) -> Self {
+        if away {
+            Self::Away
+        } else {
+            Self::AtDesk
+        }
+    }
+
+    #[must_use]
+    pub fn is_away(self) -> bool {
+        self == Self::Away
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum BreakKind {
@@ -93,5 +178,17 @@ impl TimerPhase {
             Self::OnBreak(current_break) => Some(current_break),
             Self::Idle { .. } | Self::Working { .. } => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn session_duration_rejects_out_of_range_persisted_values() {
+        assert!(serde_json::from_value::<SessionDurationSecs>(json!(0)).is_err());
+        assert!(serde_json::from_value::<SessionDurationSecs>(json!(7_201)).is_err());
     }
 }

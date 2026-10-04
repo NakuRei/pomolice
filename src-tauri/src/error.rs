@@ -4,7 +4,7 @@
 use thiserror::Error;
 
 use pomolice_core::settings::SettingsValidationErrors;
-use pomolice_core::types::TimerStatus;
+use pomolice_core::timer_core::TimerStatus;
 
 /// Main error type for the Pomolice application
 #[derive(Error, Debug, strum::EnumDiscriminants)]
@@ -68,17 +68,17 @@ impl std::error::Error for PersistenceFailure {
     }
 }
 
-impl From<pomolice_core::error::TimerError> for PomoliceError {
-    fn from(error: pomolice_core::error::TimerError) -> Self {
+impl From<pomolice_core::timer_core::TimerError> for PomoliceError {
+    fn from(error: pomolice_core::timer_core::TimerError) -> Self {
         match error {
-            pomolice_core::error::TimerError::InvalidStateTransition {
+            pomolice_core::timer_core::TimerError::InvalidStateTransition {
                 action,
                 current_state,
             } => Self::InvalidStateTransition {
                 action,
                 current_state,
             },
-            pomolice_core::error::TimerError::RateLimited { remaining_ms } => {
+            pomolice_core::timer_core::TimerError::RateLimited { remaining_ms } => {
                 Self::RateLimited { remaining_ms }
             }
         }

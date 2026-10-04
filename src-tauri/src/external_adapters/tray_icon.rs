@@ -15,7 +15,7 @@ use tauri::{AppHandle, Manager, Runtime};
 use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
 use crate::tray_icon_renderer;
 use pomolice_core::timer_core::observation::TimerState;
-use pomolice_core::types::TimerStatus;
+use pomolice_core::timer_core::TimerStatus;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TrayGlyphMode {

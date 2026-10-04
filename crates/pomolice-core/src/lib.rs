@@ -19,8 +19,6 @@
 //! # }
 //! ```
 
-pub mod error;
-mod schedule_boundary;
+pub mod schedule;
 pub mod settings;
 pub mod timer_core;
-pub mod types;

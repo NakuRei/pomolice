@@ -25,12 +25,16 @@ mod settings_changes;
 
 use super::*;
 type TimerCore = super::TimerCore<chrono_tz::Tz>;
-use crate::error::TimerError;
+use crate::schedule::{DayAutoRunSlot, HhMm, WeeklyAutoRunConfig};
 use crate::settings::UserSettings;
-use crate::types::{
-    BreakAttendance, DayAutoRunSlot, HhMm, LongBreakDurationSecs, LongBreakIntervalCount,
-    PostBreakDecisionAction, PostBreakTransitionPolicy, ScheduleStopState, SessionDurationSecs,
-    SessionTransitionReason, ShortBreakDurationSecs, WeeklyAutoRunConfig, WorkDurationSecs,
+use crate::settings::{
+    LongBreakDurationSecs, LongBreakIntervalCount, PostBreakTransitionPolicy,
+    ShortBreakDurationSecs, WorkDurationSecs,
+};
+use crate::timer_core::observation::SessionTransitionReason;
+use crate::timer_core::TimerError;
+use crate::timer_core::{
+    BreakAttendance, PostBreakDecisionAction, ScheduleStopState, SessionDurationSecs,
 };
 use chrono::{Duration as ChronoDuration, TimeZone};
 

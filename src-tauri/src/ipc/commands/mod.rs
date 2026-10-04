@@ -40,7 +40,7 @@ mod tests {
         observe_command_arg_result, CommandInputRejectionContext, ObservedCommandArg,
     };
     use pomolice_core::settings::input::SettingsChanges;
-    use pomolice_core::types::PostBreakDecisionAction;
+    use pomolice_core::timer_core::PostBreakDecisionAction;
     use serde_json::json;
     use tauri::test::mock_builder;
     use tauri::{WebviewUrl, WebviewWindowBuilder};

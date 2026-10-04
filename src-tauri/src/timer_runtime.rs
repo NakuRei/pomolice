@@ -389,7 +389,8 @@ mod tests {
     use crate::external_adapters::persistence::{PersistenceLoadOutcome, SaveError};
     use crate::storage::SettingsFileStatus;
     use chrono::{Local, TimeZone, Utc};
-    use pomolice_core::types::{PostBreakDecisionAction, PostBreakTransitionPolicy, TimerStatus};
+    use pomolice_core::settings::PostBreakTransitionPolicy;
+    use pomolice_core::timer_core::{PostBreakDecisionAction, TimerStatus};
     use std::path::PathBuf;
     use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -937,8 +938,8 @@ mod tests {
                 errors.issues(),
                 [
                     pomolice_core::settings::input::SettingsValidationIssue::OverlappingTimeRanges {
-                        primary_weekday: pomolice_core::types::WeekdayKey::Mon,
-                        secondary_weekday: pomolice_core::types::WeekdayKey::Tue,
+                        primary_weekday: pomolice_core::schedule::WeekdayKey::Mon,
+                        secondary_weekday: pomolice_core::schedule::WeekdayKey::Tue,
                     }
                 ]
             ),

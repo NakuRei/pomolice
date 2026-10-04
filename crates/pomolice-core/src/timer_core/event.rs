@@ -1,5 +1,14 @@
 use crate::settings::UserSettings;
-use crate::types::{BreakAttendance, PostBreakDecisionAction};
+use crate::timer_core::BreakAttendance;
+use serde::{Deserialize, Serialize};
+
+/// Action selected while a post-break manual decision is pending.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum PostBreakDecisionAction {
+    Continue,
+    StopCycle,
+}
 
 /// Every input that can change timer state. The shell turns commands, the
 /// ticker and input-monitor callbacks into one of these.

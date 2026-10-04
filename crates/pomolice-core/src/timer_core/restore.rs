@@ -1,14 +1,31 @@
+use serde::{Deserialize, Serialize};
+
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 
 use super::boot_auto_start::initial_boot_auto_start_offer;
 use super::phase::{BreakKind, BreakSessionState, TimerPhase};
-use super::schedule::ScheduleState;
+use super::schedule_control::ScheduleState;
 use super::{BreakLockTarget, Effect, TimerCore};
 use crate::settings::UserSettings;
-use crate::types::{
-    LongBreakDurationSecs, ScheduleStopState, SessionDurationSecs, SessionType,
-    ShortBreakDurationSecs, TimerCheckpoint, TimerStatus, WorkDurationSecs,
-};
+use crate::settings::{LongBreakDurationSecs, ShortBreakDurationSecs, WorkDurationSecs};
+use crate::timer_core::{ScheduleStopState, SessionDurationSecs, SessionType, TimerStatus};
+
+/// State needed to resume a timer after shutdown. Transient break interaction
+/// counters and input throttling are reset on restoration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimerCheckpoint {
+    pub status: TimerStatus,
+    pub remaining_seconds: u64,
+    /// Length the running session started with; settings saved later do not
+    /// change it.
+    pub session_duration_secs: SessionDurationSecs,
+    pub session_type: SessionType,
+    pub current_cycle: u32,
+    pub completed_pomodoros: u32,
+    pub post_break_decision_pending: bool,
+    pub saved_at: DateTime<Utc>,
+    pub schedule_stop_state: ScheduleStopState,
+}
 
 const RESTORE_BOUNDARY_LOOKBACK_DAYS: i64 = 7;
 

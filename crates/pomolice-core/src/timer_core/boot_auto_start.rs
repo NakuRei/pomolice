@@ -1,10 +1,11 @@
 use chrono::{DateTime, Utc};
 
+use super::error::Result;
+use super::schedule_control::WorkStartOrigin;
 use super::{Effect, TimerCore};
-use crate::error::Result;
-use crate::schedule_boundary::{is_now_inside_schedule_window, ActiveWindow};
+use crate::schedule::boundary::{is_now_inside_schedule_window, ActiveWindow};
 use crate::settings::UserSettings;
-use crate::types::{TimerStatus, WorkStartOrigin};
+use crate::timer_core::TimerStatus;
 
 pub(super) fn initial_boot_auto_start_offer<Tz: chrono::TimeZone>(
     status: TimerStatus,

@@ -1,8 +1,8 @@
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 
+use super::error::{Result, TimerError};
 use super::{BreakLockTarget, Effect, TimerCore};
-use crate::error::{Result, TimerError};
-use crate::types::{BreakAttendance, TimerStatus};
+use crate::timer_core::{BreakAttendance, TimerStatus};
 
 const INPUT_PENALTY_DEBOUNCE: ChronoDuration = ChronoDuration::milliseconds(100);
 

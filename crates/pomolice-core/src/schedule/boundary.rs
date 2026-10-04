@@ -5,8 +5,33 @@ use chrono::{
     Weekday,
 };
 
-use crate::timer_core::observation::ActiveWindowSummaryPayload;
-use crate::types::{BoundaryOccurrenceId, DayAutoRunSlot, WeeklyAutoRunConfig};
+use crate::schedule::{DayAutoRunSlot, WeeklyAutoRunConfig};
+
+/// Identifies one occurrence of a schedule boundary in logs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BoundaryOccurrenceId(String);
+
+impl BoundaryOccurrenceId {
+    #[must_use]
+    pub(crate) fn for_schedule_boundary(
+        slot_key: &str,
+        boundary_kind: &str,
+        epoch_seconds: i64,
+    ) -> Self {
+        Self(format!("{slot_key}|{boundary_kind}|{epoch_seconds}"))
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn epoch_seconds(&self) -> Option<i64> {
+        self.0.rsplit('|').next()?.parse::<i64>().ok()
+    }
+
+    #[must_use]
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 
 const MAX_BOUNDARY_LOOKBACK_DAYS: i64 = 7;
 const MAX_BOUNDARY_OCCURRENCES_PER_TICK: usize = 128;
@@ -30,25 +55,6 @@ pub(crate) struct ActiveWindow {
     pub start_time: String,
     pub end_time: String,
     pub crosses_midnight: bool,
-}
-
-impl ActiveWindow {
-    pub(crate) fn to_summary_payload(&self) -> ActiveWindowSummaryPayload {
-        ActiveWindowSummaryPayload {
-            weekday_key: match self.anchor_local_date.weekday() {
-                Weekday::Mon => crate::types::WeekdayKey::Mon,
-                Weekday::Tue => crate::types::WeekdayKey::Tue,
-                Weekday::Wed => crate::types::WeekdayKey::Wed,
-                Weekday::Thu => crate::types::WeekdayKey::Thu,
-                Weekday::Fri => crate::types::WeekdayKey::Fri,
-                Weekday::Sat => crate::types::WeekdayKey::Sat,
-                Weekday::Sun => crate::types::WeekdayKey::Sun,
-            },
-            start_time: self.start_time.clone(),
-            end_time: self.end_time.clone(),
-            crosses_midnight: self.crosses_midnight,
-        }
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -398,10 +404,28 @@ fn find_latest_epoch_on_or_before<Tz: TimeZone>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::HhMm;
+    use crate::schedule::HhMm;
     use chrono::Utc;
     use chrono::{NaiveDate, Timelike};
     use chrono_tz::Tz;
+
+    #[test]
+    fn test_boundary_occurrence_id_exposes_schedule_boundary_epoch() {
+        let boundary_id =
+            BoundaryOccurrenceId::for_schedule_boundary("mon", "start", 1_738_707_600);
+
+        assert_eq!(boundary_id.epoch_seconds(), Some(1_738_707_600));
+    }
+
+    #[test]
+    fn test_boundary_occurrence_id_matches_same_schedule_boundary() {
+        let first = BoundaryOccurrenceId::for_schedule_boundary("mon", "start", 1_738_707_600);
+        let same = BoundaryOccurrenceId::for_schedule_boundary("mon", "start", 1_738_707_600);
+        let different = BoundaryOccurrenceId::for_schedule_boundary("mon", "end", 1_738_707_600);
+
+        assert_eq!(first, same);
+        assert_ne!(first, different);
+    }
 
     fn local_datetime(
         year: i32,

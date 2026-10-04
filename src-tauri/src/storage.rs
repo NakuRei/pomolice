@@ -1,4 +1,4 @@
-use pomolice_core::{settings::UserSettings, types::TimerCheckpoint};
+use pomolice_core::{settings::UserSettings, timer_core::TimerCheckpoint};
 use serde::{Deserialize, Serialize};
 
 /// Settings file schema version currently supported by this binary.

@@ -1,4 +1,5 @@
-use crate::types::{PostBreakTransitionPolicy, WeekdayKey};
+use crate::schedule::WeekdayKey;
+use crate::settings::PostBreakTransitionPolicy;
 use serde::{Deserialize, Serialize};
 
 /// Settings as they arrive, before any rule is applied. Numbers are signed

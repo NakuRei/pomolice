@@ -4,6 +4,11 @@
 // so a single set of rules decides what is valid.
 
 pub mod input;
+pub(crate) mod ranges;
+pub use ranges::{
+    IntegerRangeValidationError, LongBreakDurationSecs, LongBreakIntervalCount,
+    NotificationSoundVolumePercent, ShortBreakDurationSecs, WorkDurationSecs,
+};
 
 use input::{
     DaySlotInput, RangedSettingField, SettingsInput, SettingsValidationIssue, TimeBoundary,
@@ -12,11 +17,18 @@ use input::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::types::{
-    DayAutoRunSlot, HhMm, LongBreakDurationSecs, LongBreakIntervalCount,
-    NotificationSoundVolumePercent, OverlappingSlotsError, PostBreakTransitionPolicy,
-    ShortBreakDurationSecs, WeekdayKey, WeeklyAutoRunConfig, WorkDurationSecs,
+use crate::schedule::{
+    DayAutoRunSlot, HhMm, OverlappingSlotsError, WeekdayKey, WeeklyAutoRunConfig,
 };
+
+/// Policy for deciding what happens when a break session finishes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum PostBreakTransitionPolicy {
+    #[default]
+    RequireManualContinue,
+    StartNextWorkAutomatically,
+}
 
 /// Validated user settings. Each field carries its own range, and the weekly
 /// schedule is free of overlaps.

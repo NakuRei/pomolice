@@ -172,8 +172,9 @@ mod run_event_tests {
     use crate::storage::{PersistedState, PERSISTED_STATE_SCHEMA_VERSION};
     use chrono::{Local, TimeZone, Utc};
     use pomolice_core::settings::UserSettings;
-    use pomolice_core::types::{
-        ScheduleStopState, SessionDurationSecs, SessionType, TimerStatus, WorkDurationSecs,
+    use pomolice_core::settings::WorkDurationSecs;
+    use pomolice_core::timer_core::{
+        ScheduleStopState, SessionDurationSecs, SessionType, TimerStatus,
     };
     use std::io;
     use std::path::{Path, PathBuf};
@@ -215,7 +216,7 @@ mod run_event_tests {
         PersistenceManager::new(Some(dir.to_path_buf()))
             .save_sync(&PersistedState {
                 schema_version: PERSISTED_STATE_SCHEMA_VERSION,
-                timer: pomolice_core::types::TimerCheckpoint {
+                timer: pomolice_core::timer_core::TimerCheckpoint {
                     status: TimerStatus::Working,
                     remaining_seconds: 321,
                     session_duration_secs: SessionDurationSecs::try_new(25 * 60)

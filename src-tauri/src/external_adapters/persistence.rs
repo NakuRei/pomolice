@@ -340,7 +340,9 @@ mod tests {
     use super::*;
     use chrono::{DateTime, TimeZone, Utc};
     use pomolice_core::settings::UserSettings;
-    use pomolice_core::types::{ScheduleStopState, SessionDurationSecs, SessionType, TimerStatus};
+    use pomolice_core::timer_core::{
+        ScheduleStopState, SessionDurationSecs, SessionType, TimerStatus,
+    };
     use serde_json::json;
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
@@ -389,7 +391,7 @@ mod tests {
     fn contract_persisted_state(saved_at: DateTime<Utc>) -> PersistedState {
         PersistedState {
             schema_version: PERSISTED_STATE_SCHEMA_VERSION,
-            timer: pomolice_core::types::TimerCheckpoint {
+            timer: pomolice_core::timer_core::TimerCheckpoint {
                 status: TimerStatus::Working,
                 remaining_seconds: 1234,
                 session_duration_secs: session_duration_secs(2700),
@@ -406,7 +408,7 @@ mod tests {
     fn alternate_persisted_state(saved_at: DateTime<Utc>) -> PersistedState {
         PersistedState {
             schema_version: PERSISTED_STATE_SCHEMA_VERSION,
-            timer: pomolice_core::types::TimerCheckpoint {
+            timer: pomolice_core::timer_core::TimerCheckpoint {
                 status: TimerStatus::Working,
                 remaining_seconds: 678,
                 session_duration_secs: session_duration_secs(1800),

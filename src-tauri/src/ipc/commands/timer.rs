@@ -9,7 +9,7 @@ use crate::state::AppState;
 use crate::timer_runtime::observation::TimerSnapshot;
 use pomolice_core::settings::input::SettingsChanges;
 use pomolice_core::timer_core::Event;
-use pomolice_core::types::{BreakAttendance, PostBreakDecisionAction};
+use pomolice_core::timer_core::{BreakAttendance, PostBreakDecisionAction};
 
 /// Start a work session with the saved settings.
 #[tauri::command]

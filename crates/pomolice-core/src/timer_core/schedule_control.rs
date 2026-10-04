@@ -1,9 +1,32 @@
+use serde::{Deserialize, Serialize};
+
 use chrono::{DateTime, Utc};
 
 use super::{Effect, TimerCore};
-use crate::schedule_boundary::{collect_crossed_end_boundaries, collect_crossed_start_boundaries};
+use crate::schedule::boundary::BoundaryOccurrenceId;
+use crate::schedule::boundary::{collect_crossed_end_boundaries, collect_crossed_start_boundaries};
 use crate::settings::UserSettings;
-use crate::types::{BoundaryOccurrenceId, ScheduleStopState, TimerStatus, WorkStartOrigin};
+use crate::timer_core::TimerStatus;
+
+/// Origin of a work-session start request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum WorkStartOrigin {
+    #[default]
+    ManualOutsideScheduleWindow,
+    ManualInsideScheduleWindow,
+    ScheduleStartBoundary,
+}
+
+/// Current stop behavior for schedule-controlled sessions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ScheduleStopState {
+    #[default]
+    NotControlledBySchedule,
+    WaitingForScheduleEnd,
+    StopAtNextSessionBoundary,
+}
 
 /// What the weekly schedule tracks between ticks. Whether it is enabled
 /// and its slots are part of the user settings.
@@ -142,5 +165,25 @@ impl<Tz: chrono::TimeZone> TimerCore<Tz> {
             start_boundary.as_str(),
         );
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_work_start_origin_default() {
+        assert_eq!(
+            WorkStartOrigin::default(),
+            WorkStartOrigin::ManualOutsideScheduleWindow
+        );
+    }
+
+    #[test]
+    fn test_schedule_stop_state_default() {
+        assert_eq!(
+            ScheduleStopState::default(),
+            ScheduleStopState::NotControlledBySchedule
+        );
     }
 }

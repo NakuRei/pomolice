@@ -1,6 +1,19 @@
+use crate::schedule::boundary::ActiveWindow;
+use crate::schedule::WeekdayKey;
 use crate::settings::input::SettingsInput;
-use crate::types::{SessionTransitionReason, SessionType, TimerStatus};
-use serde::Serialize;
+use crate::timer_core::{SessionType, TimerStatus};
+use chrono::{Datelike, Weekday};
+use serde::{Deserialize, Serialize};
+
+/// Reason emitted for a session-boundary transition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionTransitionReason {
+    WorkToBreak,
+    BreakWaitingDecision,
+    BreakAutoStarted,
+    ScheduledStopExecuted,
+}
 
 /// Payload sent to frontend when a session completes
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
@@ -98,8 +111,54 @@ pub struct BootAutoStartOfferPayload {
 /// Summary of the currently active schedule window.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
 pub struct ActiveWindowSummaryPayload {
-    pub weekday_key: crate::types::WeekdayKey,
+    pub weekday_key: WeekdayKey,
     pub start_time: String,
     pub end_time: String,
     pub crosses_midnight: bool,
+}
+
+impl From<&ActiveWindow> for ActiveWindowSummaryPayload {
+    fn from(window: &ActiveWindow) -> Self {
+        ActiveWindowSummaryPayload {
+            weekday_key: match window.anchor_local_date.weekday() {
+                Weekday::Mon => WeekdayKey::Mon,
+                Weekday::Tue => WeekdayKey::Tue,
+                Weekday::Wed => WeekdayKey::Wed,
+                Weekday::Thu => WeekdayKey::Thu,
+                Weekday::Fri => WeekdayKey::Fri,
+                Weekday::Sat => WeekdayKey::Sat,
+                Weekday::Sun => WeekdayKey::Sun,
+            },
+            start_time: window.start_time.clone(),
+            end_time: window.end_time.clone(),
+            crosses_midnight: window.crosses_midnight,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn session_completed_payloads_carry_the_transition_contract() {
+        let work_to_break = SessionCompletedPayload::work_to_break(SessionType::LongBreak);
+        assert_eq!(
+            work_to_break.transition_reason,
+            SessionTransitionReason::WorkToBreak
+        );
+        assert_eq!(work_to_break.completed_session_type, SessionType::Work);
+        assert_eq!(work_to_break.next_status, TimerStatus::OnBreak);
+        assert_eq!(work_to_break.next_session_type, SessionType::LongBreak);
+        assert!(!work_to_break.requires_manual_continue_decision);
+
+        let waiting = SessionCompletedPayload::break_waiting_decision(SessionType::ShortBreak);
+        assert_eq!(
+            waiting.transition_reason,
+            SessionTransitionReason::BreakWaitingDecision
+        );
+        assert_eq!(waiting.completed_session_type, SessionType::ShortBreak);
+        assert_eq!(waiting.next_status, TimerStatus::Idle);
+        assert_eq!(waiting.next_session_type, SessionType::Work);
+        assert!(waiting.requires_manual_continue_decision);
+    }
 }
