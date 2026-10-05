@@ -1,37 +1,24 @@
 import { $, browser, expect } from "@wdio/globals";
-import { beforeEach, describe, it } from "mocha";
+import { describe, it } from "mocha";
 import {
   openTimerSettings,
-  requireIdleStart,
   saveTimerSettings,
+  startWork,
   waitForBreakDecision,
 } from "../support/screens";
 
 describe("Pomodoro user journeys", () => {
-  beforeEach(async () => {
-    await requireIdleStart();
-  });
-
   it("uses configured durations, completes a break, continues working, then ends the cycle", async () => {
-    await $('[data-testid="settings-button"]').click();
-    const policy = $('[data-testid="settings-top-post-break-policy-toggle"]');
-    await expect(policy).toBeEnabled();
-    if ((await policy.getAttribute("aria-pressed")) === "true") {
-      await policy.click();
-    }
-    await expect(policy).toHaveAttribute("aria-pressed", "false");
-    await $('[data-testid="settings-top-row-timer"]').click();
-    await expect($('[data-testid="settings-timer-page"]')).toBeDisplayed();
+    await openTimerSettings();
     await $('[data-testid="settings-work-duration-input"]').setValue("0.1");
     await $('[data-testid="settings-short-break-input"]').setValue("0.1");
     await $('[data-testid="settings-long-break-input"]').setValue("0.1");
     await saveTimerSettings();
     await expect($('[data-testid="timer-display"]')).toHaveText("00:06");
 
-    await $('[data-testid="start-button"]').click();
-    await expect($('[data-testid="emergency-stop-button"]')).toBeDisplayed({
-      message: "Starting the configured timer did not begin a work session.",
-    });
+    await startWork(
+      "Starting the configured timer did not begin a work session.",
+    );
     await waitForBreakDecision();
 
     await $('[data-testid="continue-dialog-continue"]').click();
@@ -58,10 +45,7 @@ describe("Pomodoro user journeys", () => {
 
     for (let session = 0; session < 2; session += 1) {
       await expect($('[data-testid="timer-display"]')).toHaveText("10:00");
-      await $('[data-testid="start-button"]').click();
-      await expect($('[data-testid="emergency-stop-button"]')).toBeDisplayed({
-        message: `Work session ${session + 1} did not start.`,
-      });
+      await startWork(`Work session ${session + 1} did not start.`);
       const initialTime = await $('[data-testid="timer-display"]').getText();
       const initialSeconds = initialTime
         .split(":")

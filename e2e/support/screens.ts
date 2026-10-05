@@ -1,36 +1,17 @@
 import { $, browser, expect } from "@wdio/globals";
 
-export async function requireIdleStart(): Promise<void> {
-  let state = "unknown";
+// The timer rejects a manual start made right after the previous transition,
+// and WebDriver clicks faster than a person can, so a rejected click is retried.
+export async function startWork(failureMessage: string): Promise<void> {
+  const startButton = $('[data-testid="start-button"]');
+  const emergencyStopButton = $('[data-testid="emergency-stop-button"]');
   await browser.waitUntil(
     async () => {
-      state = await browser.execute(() => {
-        const visible = (selector: string): boolean =>
-          document.querySelector(selector)?.checkVisibility() ?? false;
-        if (visible('[data-testid="continue-dialog-end"]'))
-          return "continuation decision";
-        if (visible('[data-testid="auto-start-confirm-dialog"]'))
-          return "scheduled start confirmation";
-        if (visible('[data-testid="emergency-stop-dialog"]'))
-          return "emergency stop confirmation";
-        if (visible('[data-testid="emergency-stop-button"]')) return "working";
-        if (visible('[aria-label="短い休憩"], [aria-label="長い休憩"]'))
-          return "break";
-        if (visible('[data-testid="start-button"]')) return "idle";
-        return "unknown";
-      });
-      return state !== "unknown";
+      if (await startButton.isDisplayed()) await startButton.click();
+      return emergencyStopButton.isDisplayed();
     },
-    {
-      timeoutMsg:
-        "E2E setup: could not identify the timer screen. Inspect the screenshot and return the E2E app to its idle home screen before retrying.",
-    },
+    { interval: 500, timeoutMsg: failureMessage },
   );
-  if (state !== "idle") {
-    throw new Error(
-      `E2E setup: expected idle, found ${state}. Return the E2E app to idle manually (end work or finish the break and choose End; dismiss any confirmation), exit it, then rerun. Test data was not reset.`,
-    );
-  }
 }
 
 export async function openTimerSettings(): Promise<void> {

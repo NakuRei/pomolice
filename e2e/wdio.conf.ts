@@ -1,4 +1,4 @@
-import { access, mkdir } from "node:fs/promises";
+import { access, mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { browser } from "@wdio/globals";
 import "@wdio/tauri-service";
@@ -11,6 +11,27 @@ let results = path.join(
   `${new Date().toISOString().replaceAll(":", "-")}-${process.pid}`,
 );
 const appBinaryPath = path.join(root, "target", "e2e", "debug", "pomolice.exe");
+
+// The E2E build persists timer state and settings across launches, so each run
+// starts from an empty data directory to make the initial screen deterministic.
+async function clearAppData(): Promise<void> {
+  const config = JSON.parse(
+    await readFile(path.join(root, "src-tauri", "tauri.e2e.conf.json"), "utf8"),
+  ) as { identifier: string };
+  if (!config.identifier.endsWith(".e2e")) {
+    throw new Error(
+      `Refusing to delete app data for a non-E2E identifier: ${config.identifier}`,
+    );
+  }
+  const appData = process.env["APPDATA"];
+  if (appData === undefined) {
+    throw new Error("APPDATA is not set; cannot locate the E2E app data.");
+  }
+  await rm(path.join(appData, config.identifier), {
+    recursive: true,
+    force: true,
+  });
+}
 
 async function saveFailureScreenshot(title: string): Promise<void> {
   try {
@@ -63,6 +84,7 @@ export const config: WebdriverIO.Config = {
       );
     }
     await access(appBinaryPath);
+    await clearAppData();
     await mkdir(results, { recursive: true });
   },
   onWorkerStart: (_cid, _capabilities, _specs, args) => {
@@ -73,6 +95,12 @@ export const config: WebdriverIO.Config = {
       throw new Error("E2E requires an outputDir for logs and screenshots.");
     }
     results = workerConfig.outputDir;
+  },
+  // An explicit switch stops the service from following the active window.
+  // Break overlays take focus and then close, which would otherwise leave the
+  // session attached to a dead window. Only the main window exists at startup.
+  before: async () => {
+    await browser.switchToWindow(await browser.getWindowHandle());
   },
   afterTest: async (test, _context, { passed }) => {
     if (!passed) {
