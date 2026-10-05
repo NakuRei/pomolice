@@ -76,4 +76,27 @@ describe("Pomodoro user journeys", () => {
       await expect($('[data-testid="timer-display"]')).toHaveText("10:00");
     }
   });
+
+  it("plays every bundled notification sound from the settings preview", async () => {
+    await $('[data-testid="settings-button"]').click();
+    for (const soundType of ["work", "short_break", "long_break"]) {
+      // Reopening the page clears the previous preview's status message.
+      await $('[data-testid="settings-top-row-notification"]').click();
+      await $(
+        '[data-testid="settings-notification-sound-preview-type"]',
+      ).selectByAttribute("value", soundType);
+      await $(
+        '[data-testid="settings-notification-sound-preview-button"]',
+      ).click();
+      await expect(
+        $('[data-testid="settings-notification-sound-preview-status"]'),
+      ).toHaveText("通知音を再生しました。", {
+        message: `The ${soundType} notification sound preview did not play.`,
+      });
+      await $('[data-testid="settings-cancel"]').click();
+      await expect($('[data-testid="settings-top-page"]')).toBeDisplayed();
+    }
+    await $('[data-testid="settings-top-back-home"]').click();
+    await expect($('[data-testid="start-button"]')).toBeDisplayed();
+  });
 });

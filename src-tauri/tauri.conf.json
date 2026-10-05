@@ -33,6 +33,7 @@
         "style-src": ["'self'"],
         "img-src": ["'self'", "asset:", "data:"],
         "font-src": ["'self'", "asset:", "data:"],
+        "media-src": ["'self'", "asset:", "http://asset.localhost"],
         "connect-src": ["'self'", "ipc:", "http://ipc.localhost"]
       },
       "devCsp": {
@@ -46,6 +47,12 @@
         "style-src": ["'self'", "'unsafe-inline'", "http://localhost:1420"],
         "img-src": ["'self'", "asset:", "data:", "http://localhost:1420"],
         "font-src": ["'self'", "asset:", "data:", "http://localhost:1420"],
+        "media-src": [
+          "'self'",
+          "asset:",
+          "http://asset.localhost",
+          "http://localhost:1420"
+        ],
         "connect-src": [
           "'self'",
           "ws://localhost:1420",
