@@ -2,6 +2,7 @@ import { access, mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { browser } from "@wdio/globals";
 import "@wdio/tauri-service";
+import { appBinaryPath } from "./support/app-binary";
 
 const root = path.resolve(import.meta.dirname, "..");
 let results = path.join(
@@ -10,7 +11,6 @@ let results = path.join(
   "e2e",
   `${new Date().toISOString().replaceAll(":", "-")}-${process.pid}`,
 );
-const appBinaryPath = path.join(root, "target", "e2e", "debug", "pomolice.exe");
 
 // The E2E build persists timer state and settings across launches, so each run
 // starts from an empty data directory to make the initial screen deterministic.

@@ -5,7 +5,7 @@
 ### Development server
 
 ```bash
-npm run tauri dev
+npm run tauri:dev
 ```
 
 ### Build

@@ -129,7 +129,13 @@ pub fn run() -> RunResult {
 
     let ipc = ipc::builder();
     let invoke_handler = ipc.invoke_handler();
-    let builder = tauri::Builder::default().plugin(external_adapters::logging::build_log_plugin());
+    // Registered first so a second launch exits before any other plugin or the app state starts.
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            log_info_event(BackendLogEvent::AppSecondLaunchRedirected, &[]);
+            external_adapters::main_window::reveal(app);
+        }))
+        .plugin(external_adapters::logging::build_log_plugin());
     #[cfg(feature = "e2e")]
     let builder = builder.plugin(tauri_plugin_wdio::init());
     let app = builder

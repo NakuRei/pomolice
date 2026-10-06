@@ -14,6 +14,7 @@ pub enum BackendLogEvent {
     AppStateInitializationStarted,
     AppStateInitializationCompleted,
     AppWindowHiddenToTray,
+    AppSecondLaunchRedirected,
     AppTrayInitialized,
     AppTraySetupFailed,
     AppTrayMenuExitSelected,

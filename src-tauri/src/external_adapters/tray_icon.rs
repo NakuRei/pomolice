@@ -93,11 +93,7 @@ pub(crate) fn setup_tray(
         .on_menu_event(move |app, event| {
             // Tauri broadcasts menu events from every window and tray to this callback.
             if event.id() == show_clock_item.id() {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.unminimize();
-                    let _ = window.set_focus();
-                }
+                super::main_window::reveal(app);
             } else if event.id() == exit_item.id() {
                 log_info_event(BackendLogEvent::AppTrayMenuExitSelected, &[]);
                 app.exit(0);

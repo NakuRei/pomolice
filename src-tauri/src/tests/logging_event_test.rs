@@ -17,6 +17,7 @@ macro_rules! with_backend_log_event_variants {
             AppStateInitializationStarted,
             AppStateInitializationCompleted,
             AppWindowHiddenToTray,
+            AppSecondLaunchRedirected,
             AppTrayInitialized,
             AppTraySetupFailed,
             AppTrayMenuExitSelected,

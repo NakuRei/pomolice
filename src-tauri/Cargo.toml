@@ -27,6 +27,7 @@ pomolice-core = { path = "../crates/pomolice-core" }
 tauri = { version = "2.12.1", features = ["protocol-asset", "tray-icon", "image-png"] }
 tauri-plugin-notification = "2.5.1"
 tauri-plugin-log = "2.10.0"
+tauri-plugin-single-instance = "2.5.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 specta = { version = "=2.0.0-rc.22", features = ["derive", "function", "chrono"] }

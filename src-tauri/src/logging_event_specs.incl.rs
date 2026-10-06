@@ -60,6 +60,12 @@ macro_rules! backend_log_event_spec_match {
                     "first_notification" => Public,
                 ]
             ),
+            BackendLogEvent::AppSecondLaunchRedirected => spec!(
+                "app.second_launch.redirected",
+                Info,
+                "Second launch redirected to the running instance",
+                []
+            ),
             BackendLogEvent::AppTrayInitialized => {
                 spec!("tray.initialized", Info, "System tray icon initialized", [])
             }
