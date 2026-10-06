@@ -10,7 +10,11 @@
         {
           "identifier": "e2e-webdriver",
           "windows": ["main", "break-overlay-*"],
-          "permissions": ["wdio:default", "core:window:allow-hide"]
+          "permissions": [
+            "wdio:default",
+            "core:window:allow-hide",
+            "core:window:allow-minimize"
+          ]
         }
       ]
     }

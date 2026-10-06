@@ -10,7 +10,7 @@ use std::sync::{
 use tauri::image::Image;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Runtime};
 
 use crate::logging_event::{log_info_event, log_warn_event, BackendLogEvent};
 use crate::tray_icon_renderer;
@@ -99,6 +99,8 @@ pub(crate) fn setup_tray(
                 app.exit(0);
             }
         })
+        // Linux never delivers tray click events, so the menu item above is the tray's only way
+        // to reveal the window there.
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
@@ -106,7 +108,7 @@ pub(crate) fn setup_tray(
                 ..
             } = event
             {
-                toggle_main_window_visibility(tray.app_handle());
+                super::main_window::reveal(tray.app_handle());
             }
         })
         .build(app)?;
@@ -133,18 +135,6 @@ pub(crate) fn update_tray_icon<R: Runtime>(app: &AppHandle<R>, payload: &TimerSt
                 BackendLogEvent::AppTrayTooltipUpdateFailed,
                 &[("error_message", e.to_string())],
             );
-        }
-    }
-}
-
-/// Toggle the main window between visible and hidden.
-fn toggle_main_window_visibility(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        if window.is_visible().unwrap_or(false) {
-            let _ = window.hide();
-        } else {
-            let _ = window.show();
-            let _ = window.set_focus();
         }
     }
 }

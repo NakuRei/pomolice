@@ -9,7 +9,9 @@ type TauriWindowGlobal = {
     window: {
       getCurrentWindow(): {
         hide(): Promise<void>;
+        minimize(): Promise<void>;
         isVisible(): Promise<boolean>;
+        isMinimized(): Promise<boolean>;
       };
     };
   };
@@ -23,6 +25,27 @@ async function isMainWindowVisible(): Promise<boolean> {
   );
 }
 
+async function isMainWindowMinimized(): Promise<boolean> {
+  return browser.execute(() =>
+    (window as unknown as TauriWindowGlobal).__TAURI__.window
+      .getCurrentWindow()
+      .isMinimized(),
+  );
+}
+
+async function launchAppAgain(): Promise<void> {
+  const secondLaunch = spawn(appBinaryPath, { stdio: "ignore" });
+  const exitTimeout = setTimeout(() => secondLaunch.kill(), 15_000);
+  const [exitCode] = (await once(secondLaunch, "exit")) as [number | null];
+  clearTimeout(exitTimeout);
+
+  if (exitCode !== 0) {
+    throw new Error(
+      `The second launch kept running or failed (exit code ${exitCode}) instead of handing off to the running app.`,
+    );
+  }
+}
+
 describe("Single instance", () => {
   it("brings the hidden window back when the app is launched again", async () => {
     await expect($('[data-testid="start-button"]')).toBeDisplayed();
@@ -33,20 +56,29 @@ describe("Single instance", () => {
     );
     expect(await isMainWindowVisible()).toBe(false);
 
-    const secondLaunch = spawn(appBinaryPath, { stdio: "ignore" });
-    const exitTimeout = setTimeout(() => secondLaunch.kill(), 15_000);
-    const [exitCode] = (await once(secondLaunch, "exit")) as [number | null];
-    clearTimeout(exitTimeout);
+    await launchAppAgain();
 
-    if (exitCode !== 0) {
-      throw new Error(
-        `The second launch kept running or failed (exit code ${exitCode}) instead of handing off to the running app.`,
-      );
-    }
     await browser.waitUntil(isMainWindowVisible, {
       timeout: 10_000,
       timeoutMsg: "Launching the app again did not reveal the hidden window.",
     });
     await expect($('[data-testid="start-button"]')).toBeDisplayed();
+  });
+
+  it("restores the minimized window when the app is launched again", async () => {
+    await expect($('[data-testid="start-button"]')).toBeDisplayed();
+    await browser.execute(() =>
+      (window as unknown as TauriWindowGlobal).__TAURI__.window
+        .getCurrentWindow()
+        .minimize(),
+    );
+    expect(await isMainWindowMinimized()).toBe(true);
+
+    await launchAppAgain();
+
+    await browser.waitUntil(async () => !(await isMainWindowMinimized()), {
+      timeout: 10_000,
+      timeoutMsg: "Launching the app again left the window minimized.",
+    });
   });
 });
