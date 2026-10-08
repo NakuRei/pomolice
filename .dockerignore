@@ -17,3 +17,5 @@ src-tauri/gen
 !crates/**
 target
 !clippy.toml
+!LICENSE
+!THIRD-PARTY-NOTICES.md

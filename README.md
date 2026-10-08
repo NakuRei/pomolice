@@ -20,4 +20,8 @@ npm run tauri build
 
 ## License
 
-© 2025 NakuRei
+[MIT](LICENSE) © 2025 NakuRei
+
+The bundled font and sound effects are not covered by the MIT license. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for their terms.
+
+Sound effects: Springin’ Sound Stock
