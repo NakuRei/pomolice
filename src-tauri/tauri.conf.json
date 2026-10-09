@@ -66,6 +66,8 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "category": "Utility",
+    "publisher": "NakuRei",
     "copyright": "Copyright (c) 2025 NakuRei",
     "licenseFile": "../LICENSE",
     "resources": {

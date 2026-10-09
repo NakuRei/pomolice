@@ -1,8 +1,8 @@
 [package]
 name = "pomolice"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "Pomodoro timer that forces you to take breaks"
+authors = ["NakuRei <nakurei7901@gmail.com>"]
 license = "MIT"
 edition = "2021"
 default-run = "pomolice"

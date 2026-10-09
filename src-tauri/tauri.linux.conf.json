@@ -2,8 +2,11 @@
   "bundle": {
     "linux": {
       "deb": {
+        "section": "utils",
+        "changelog": "linux/changelog",
         "files": {
-          "/usr/share/applications/io.github.NakuRei.pomolice.desktop": "linux/io.github.NakuRei.pomolice.desktop"
+          "/usr/share/applications/io.github.NakuRei.pomolice.desktop": "linux/io.github.NakuRei.pomolice.desktop",
+          "/usr/share/doc/pomolice/copyright": "linux/copyright"
         },
         "depends": ["libx11-6", "libxi6", "libxtst6"]
       }
