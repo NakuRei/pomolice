@@ -21,6 +21,12 @@ tauri-build = { version = "2.7.1", features = [] }
 
 [features]
 e2e = ["dep:tauri-plugin-wdio"]
+tray-icon-fixtures = []
+
+[[bin]]
+name = "export_tray_icon_fixtures"
+path = "src/bin/export_tray_icon_fixtures.rs"
+required-features = ["tray-icon-fixtures"]
 
 [dependencies]
 tauri-plugin-wdio = { version = "1.4.0", optional = true }

@@ -25,3 +25,6 @@ allow_attributes = "deny"
 clone_on_ref_ptr = "deny"
 exit = "deny"
 unused_result_ok = "deny"
+
+[profile.release]
+strip = true

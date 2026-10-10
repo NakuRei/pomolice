@@ -20,6 +20,9 @@ WORKDIR /workspace
 COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm HUSKY=0 npm ci
 COPY . .
+# Files copied from a Windows checkout arrive with the executable bit set,
+# and the bundler keeps those modes for resources and deb files.
+RUN find . -path ./node_modules -prune -o -type f -exec chmod 644 {} +
 RUN --mount=type=cache,target=/opt/cargo/registry,sharing=locked \
     --mount=type=cache,target=/opt/cargo/git,sharing=locked \
     --mount=type=cache,target=/workspace/target,sharing=locked \
