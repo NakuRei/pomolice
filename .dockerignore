@@ -9,6 +9,11 @@
 !src/**
 !src-tauri/**
 !docker/**
+!scripts/**
+!e2e/**
+!.prettierrc.json
+!.prettierignore
+!.oxlintrc.json
 src-tauri/target
 src-tauri/gen
 
