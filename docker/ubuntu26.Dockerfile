@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 FROM node:24.21.0-bookworm-slim AS node
 
-FROM ubuntu:26.04 AS build
+FROM ubuntu:26.04 AS check
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential ca-certificates curl file pkg-config xz-utils \
@@ -29,6 +29,8 @@ RUN --mount=type=cache,target=/opt/cargo/registry,sharing=locked \
     --mount=type=cache,id=pomolice-ubuntu26-target,target=/workspace/target,sharing=locked \
     if [ -n "$RELEASE_TAG" ]; then npm run release:check -- "$RELEASE_TAG"; fi \
     && npm run verify
+
+FROM check AS build
 RUN --mount=type=cache,target=/opt/cargo/registry,sharing=locked \
     --mount=type=cache,target=/opt/cargo/git,sharing=locked \
     --mount=type=cache,id=pomolice-ubuntu26-target,target=/workspace/target,sharing=locked \

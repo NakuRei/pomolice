@@ -1,27 +1,22 @@
-name: Verify and build installers
+name: CI
 
 on:
   pull_request:
   push:
     branches:
       - "**"
-    tags:
-      - "v*"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: installers-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   windows:
     runs-on: windows-2025
-    env:
-      CARGO_TARGET_DIR: ${{ github.workspace }}/target/distribution
-      RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -36,29 +31,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           rustup override set 1.92.0
       - run: npm ci
-      - name: Verify release tag
-        if: github.ref_type == 'tag'
-        run: npm run release:check -- "$env:RELEASE_TAG"
       - run: npm run verify
       - run: npm run test:e2e
-      - run: npm run build:windows
-      - name: Verify installer contents
-        run: |
-          $version = node scripts/check-release-version.mjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $installers = @(Get-ChildItem target/distribution/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe)
-          if ($installers.Count -ne 1) { throw 'Expected exactly one NSIS installer.' }
-          ./scripts/verify-windows-bundle.ps1 -Installer $installers[0].FullName -ExpectedVersion $version
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          New-Item -ItemType Directory -Path artifacts/windows -Force | Out-Null
-          Copy-Item -LiteralPath $installers[0].FullName -Destination artifacts/windows
-          $hash = (Get-FileHash -LiteralPath $installers[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $($installers[0].Name)" | Set-Content -Encoding utf8 artifacts/windows/SHA256SUMS
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: pomolice-windows-x64
-          path: artifacts/windows/
-          if-no-files-found: error
       - name: Upload E2E diagnostics
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -69,20 +43,12 @@ jobs:
 
   ubuntu:
     runs-on: ubuntu-24.04
-    env:
-      RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Verify and build Ubuntu package
+      - name: Verify on Ubuntu 26.04
         run: >-
           docker build --platform linux/amd64
           --file docker/ubuntu26.Dockerfile
-          --build-arg RELEASE_TAG="$RELEASE_TAG"
-          --output type=local,dest=artifacts/ubuntu26 .
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: pomolice-ubuntu26-amd64
-          path: artifacts/ubuntu26/
-          if-no-files-found: error
+          --target check .
