@@ -110,12 +110,36 @@ fn setup_app(app: &tauri::App) {
     );
 }
 
+#[cfg(all(feature = "e2e", target_os = "windows"))]
+fn e2e_browser_arguments() -> Option<String> {
+    std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS")
+        .ok()
+        .map(|arguments| {
+            // Explicit API arguments replace Wry's defaults, so preserve them.
+            format!(
+                "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection \
+                 --autoplay-policy=no-user-gesture-required {arguments}"
+            )
+        })
+}
+
 fn app_context<R: tauri::Runtime>() -> tauri::Context<R> {
     #[expect(
         clippy::exit,
         reason = "Tauri's generate_context!() codegen calls process::exit() if generated context creation panics"
     )]
     let context = tauri::generate_context!();
+    #[cfg(all(feature = "e2e", target_os = "windows"))]
+    let context = {
+        let mut context = context;
+        // Elevated WebView2 hosts ignore environment flags; use the API instead.
+        if let Some(arguments) = e2e_browser_arguments() {
+            for window in &mut context.config_mut().app.windows {
+                window.additional_browser_args = Some(arguments.clone());
+            }
+        }
+        context
+    };
     context
 }
 

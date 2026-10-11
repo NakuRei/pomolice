@@ -302,7 +302,7 @@ impl WindowStateManager {
         app: &AppHandle<R>,
         overlay_window_plan: &BreakOverlayWindowPlan,
     ) -> Result<()> {
-        WebviewWindowBuilder::new(
+        let builder = WebviewWindowBuilder::new(
             app,
             &overlay_window_plan.label,
             WebviewUrl::App("break-overlay.html".into()),
@@ -321,9 +321,17 @@ impl WindowStateManager {
         .visible_on_all_workspaces(true)
         .decorations(false)
         .resizable(false)
-        .skip_taskbar(true)
-        .build()
-        .map_err(|e| PomoliceError::WindowControl(format!("Failed to create overlay: {e}")))?;
+        .skip_taskbar(true);
+        #[cfg(all(feature = "e2e", target_os = "windows"))]
+        let builder = if let Some(arguments) = crate::e2e_browser_arguments() {
+            // Webviews sharing a data directory must use the same browser arguments.
+            builder.additional_browser_args(&arguments)
+        } else {
+            builder
+        };
+        builder
+            .build()
+            .map_err(|e| PomoliceError::WindowControl(format!("Failed to create overlay: {e}")))?;
 
         Ok(())
     }
