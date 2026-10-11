@@ -1,13 +1,10 @@
 import { access, mkdir, readFile, rm } from "node:fs/promises";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import path from "node:path";
 import { browser } from "@wdio/globals";
 import "@wdio/tauri-service";
 import { appBinaryPath } from "./support/app-binary";
 
 const root = path.resolve(import.meta.dirname, "..");
-const execFileAsync = promisify(execFile);
 let results = path.join(
   root,
   "artifacts",
@@ -48,32 +45,12 @@ async function saveFailureScreenshot(title: string): Promise<void> {
   }
 }
 
-async function captureStartupDiagnostics(stage: string): Promise<void> {
-  try {
-    await execFileAsync(
-      "powershell.exe",
-      [
-        "-NoProfile",
-        "-File",
-        path.join(import.meta.dirname, "support", "capture-startup.ps1"),
-        "-OutputDirectory",
-        results,
-        "-Stage",
-        stage,
-      ],
-      { windowsHide: true, timeout: 15_000 },
-    );
-  } catch (error) {
-    console.warn("Could not capture startup diagnostics:", error);
-  }
-}
-
 export const config: WebdriverIO.Config = {
   runner: "local",
   specs: [path.join(import.meta.dirname, "specs", "*.spec.ts")],
   maxInstances: 1,
   injectGlobals: false,
-  logLevel: "debug",
+  logLevel: "info",
   outputDir: results,
   framework: "mocha",
   reporters: ["spec"],
@@ -89,11 +66,6 @@ export const config: WebdriverIO.Config = {
         driverProvider: "external",
         autoInstallTauriDriver: true,
         autoDownloadEdgeDriver: true,
-        nativeDriverPath: path.join(
-          import.meta.dirname,
-          "support",
-          "edge-driver.cmd",
-        ),
         captureBackendLogs: true,
         backendLogLevel: "info",
       },
@@ -114,20 +86,15 @@ export const config: WebdriverIO.Config = {
     await access(appBinaryPath);
     await clearAppData();
     await mkdir(results, { recursive: true });
-    process.env["POMOLICE_E2E_RESULTS"] = results;
   },
   onWorkerStart: (_cid, _capabilities, _specs, args) => {
     args.outputDir = results;
   },
-  beforeSession: async (workerConfig, _capabilities, _specs, cid) => {
+  beforeSession: (workerConfig) => {
     if (workerConfig.outputDir === undefined) {
       throw new Error("E2E requires an outputDir for logs and screenshots.");
     }
     results = workerConfig.outputDir;
-    await captureStartupDiagnostics(`${cid}-before-session`);
-  },
-  onWorkerEnd: async (cid, exitCode) => {
-    await captureStartupDiagnostics(`${cid}-exit-${exitCode}`);
   },
   // An explicit switch stops the service from following the active window.
   // Break overlays take focus and then close, which would otherwise leave the
